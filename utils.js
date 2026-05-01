@@ -121,6 +121,28 @@ export const Utils = {
     if (s) return raw.trim().charAt(0).toUpperCase()+raw.trim().slice(1);
     return '';
   },
+  /**
+   * V18 P6 — централизованный redact для текстов которые могут содержать
+   * echo'enные токены (некоторые корп-proxy возвращают `Authorization`
+   * header в response body; LLM-провайдеры могут ECHO'нуть Bearer).
+   *
+   * Применять ВЕЗДЕ где error-text от внешнего сервиса всплывает в UI / logs:
+   *   - integrations/employeePerformance.js fetchModel error path
+   *   - integrationsSync.js syncJiraRow / syncBitbucketRow / syncConfluenceRow
+   *   - app/llmAssistant.js streaming error path
+   *
+   * Mirror серверной функции `_ppRedactSecretsInText` в server.js.
+   *
+   * @param {*} text  raw external text
+   * @param {number} [maxLen=200]
+   * @returns {string} безопасный для логов / toast'ов
+   */
+  redactSecretsInText(text, maxLen = 200) {
+    return String(text == null ? '' : text).slice(0, maxLen)
+      .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
+      .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
+      .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
+  },
   escapeCSV(v) {
     if (v==null) return '';
     let s = String(v);

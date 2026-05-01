@@ -769,6 +769,30 @@ function _ppKeyForAuthor(name, email) {
 }
 
 /**
+ * V18 P6 — централизованный redact для текстов которые могут содержать
+ * echo'enные токены (некоторые корп-proxy возвращают `Authorization` header
+ * в response body; эти echoes не должны попадать в ErrorsLog или toast'ы).
+ *
+ * Применять ВЕЗДЕ где error-text от внешнего сервера всплывает в UI или logs:
+ *   - integrations error paths (employeePerformance, sync, etc)
+ *   - server.js outgoing-fetch error responses
+ *   - LLM streaming error paths
+ *
+ * Ограничение: первые 200 символов оригинала, чтобы не шить туда всю выдачу
+ * сервера (это часто HTML-страница или огромный stack trace).
+ *
+ * @param {string|unknown} text
+ * @param {number} [maxLen=200]
+ * @returns {string} безопасная для логов / toast'ов строка
+ */
+function _ppRedactSecretsInText(text, maxLen = 200) {
+  return String(text == null ? '' : text).slice(0, maxLen)
+    .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
+    .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
+    .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
+}
+
+/**
  * V18 P5 — единый helper для path-cascade pattern, который раньше дублировался
  * в 4 endpoint'ах (confluence-search, verify-confluence, confluence-audit-logins,
  * a также внутри ppFetchConfluenceActivity для каждой CQL).
@@ -1652,13 +1676,8 @@ async function handleIntegrationsApi(req, res, pathname) {
 
     // ── helpers ──────────────────────────────────────────────
     const tls = !!cfg.allowInsecureTls;
-    // Smart auth: if token contains ':', use Basic base64(token); otherwise Bearer
-    function makeAuthHeader(token) {
-      if (!token) return '';
-      return token.includes(':')
-        ? 'Basic ' + Buffer.from(token).toString('base64')
-        : 'Bearer ' + token;
-    }
+    // V18 P6 — унифицировал на top-level _ppMakeAuthHeader (был локальный дубль).
+    const makeAuthHeader = _ppMakeAuthHeader;
 
     // ── /api/integrations/jira-issue ─────────────────────────
     if (pathname === '/api/integrations/jira-issue') {

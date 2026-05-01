@@ -20,6 +20,7 @@
    ============================================================ */
 
 import { state } from '../state.js';
+import { Utils } from '../utils.js';
 
 // Per-tab cached fetch result. Cleared on manual refresh button click.
 let _model = null;
@@ -69,15 +70,9 @@ async function fetchModel() {
       body: JSON.stringify({}),
     });
     if (!res.ok) {
+      // V17.2 I4 → V18 P6: redact через централизованный Utils.redactSecretsInText.
       const txt = await res.text();
-      // V17.2 I4 — redact token-shaped substrings before bubbling error up
-      //   to UI / ErrorsLog (some echo-proxies return Authorization header
-      //   in body verbatim).
-      const safe = String(txt).slice(0, 200)
-        .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
-        .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
-        .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
-      throw new Error(`HTTP ${res.status}: ${safe}`);
+      throw new Error(`HTTP ${res.status}: ${Utils.redactSecretsInText(txt)}`);
     }
     _model = await res.json();
   } catch (e) {

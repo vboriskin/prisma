@@ -8,6 +8,7 @@
    ============================================================ */
 
 import { loadSettingsRaw, saveSettings, isConfigured } from './integrationsStore.js';
+import { Utils } from '../utils.js';
 
 /* ── proxy call helper ────────────────────────────────────── */
 // V17.2 I4 — клиентский timeout раньше был 15с, серверный per-PK budget —
@@ -22,8 +23,18 @@ async function proxyPost(endpoint, body) {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    // V18 P6 — централизованный redact на error path. Сервер обычно отдаёт
+    //   `{error: ...}` без token-leak (token-redact уже на сервере), но если
+    //   proxy вернул что-то ещё — пробуем парсить как text + redact.
+    let errMsg;
+    const text = await res.text().catch(() => '');
+    try {
+      const parsed = JSON.parse(text);
+      errMsg = parsed.error || `HTTP ${res.status}: ${Utils.redactSecretsInText(text)}`;
+    } catch (_) {
+      errMsg = `HTTP ${res.status}: ${Utils.redactSecretsInText(text)}`;
+    }
+    throw new Error(errMsg);
   }
   return res.json();
 }
