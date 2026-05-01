@@ -3313,14 +3313,17 @@ body.theme-dark .gar-row-offtrack:hover {
 @keyframes modal-box-out {
   to { opacity: 0; transform: scale(.97) translateY(-6px); }
 }
-/* V17.1 A1+A2 — FAB переехала в bottom-LEFT (поверх sidebar при collapsed,
-   sidebar занимает только 56px по ширине → 18px от лево даёт чистое
-   расположение). Spine-pill: solid accent surface (без 135° градиента),
-   no infinite pulse animation, stroke-2 SVG glyph. */
+/* V18.1 — FAB переехала в bottom-RIGHT (по запросу пользователя). Это
+   также консистентно с chat-panel, который открывается с правого края
+   (right: 18px) — клик по кнопке → панель «вырастает» из того же угла.
+   Раньше (V17.1 A1+A2) FAB жил в bottom-LEFT поверх collapsed-sidebar,
+   но после V18.1 sidebar получил собственный footer-chevron, конфликта
+   за «нижний-левый» больше нет. Spine-pill: solid accent, без 135°
+   градиента, без infinite pulse, stroke-2 SVG glyph. */
 .assistant-fab {
   position: fixed;
   bottom: 18px;
-  left: 18px;
+  right: 18px;
   width: 48px;
   height: 48px;
   border-radius: 999px;
@@ -3745,7 +3748,7 @@ body.theme-dark .assistant-msg .msg-body h4.md-h { color: #d4ddf6; }
     top: 0;
     height: 100vh;
   }
-  .assistant-fab { left: 12px; right: auto; bottom: 12px; }
+  .assistant-fab { right: 12px; left: auto; bottom: 12px; }
   .llm-settings-grid { grid-template-columns: 1fr; }
 }
 
