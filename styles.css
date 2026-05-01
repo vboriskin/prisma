@@ -2892,14 +2892,30 @@ body.theme-dark .metrics-hero { background: #121a2f; border-color: #25304d; bord
   position: relative; z-index: 1; margin-top: 14px;
   display: grid; grid-template-columns: repeat(auto-fit,minmax(132px,1fr)); gap: 9px;
 }
+/* V18.1 — KPI tiles inside .metrics-hero. Default = light theme tokens
+   (hero became neutral white in V17 P8 when we killed the gradient, but
+   these tiles kept hardcoded dark slate colors → on white they rendered
+   as muddy dark-translucent panels with washed-out white numerals — the
+   "горят серым" bug). Now: semantic tokens in light, override in dark. */
 .metrics-kpi {
-  border: 1px solid rgba(148,163,184,.3);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(15,23,42,.58);
+  background: var(--bg-2, #f1f5f9);
   padding: 10px 12px;
 }
-.metrics-kpi span { display: block; font-size: 11px; color: #94a3b8; }
-.metrics-kpi strong { display: block; margin-top: 4px; font-size: 24px; line-height: 1.05; color: #fff; }
+.metrics-kpi span { display: block; font-size: 11px; color: var(--text-3); letter-spacing: .3px; }
+.metrics-kpi strong {
+  display: block; margin-top: 4px; font-size: 24px; line-height: 1.05;
+  color: var(--text-1);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+body.theme-dark .metrics-kpi {
+  border-color: rgba(148,163,184,.3);
+  background: rgba(15,23,42,.58);
+}
+body.theme-dark .metrics-kpi span { color: #94a3b8; }
+body.theme-dark .metrics-kpi strong { color: #fff; }
 
 .metrics-grid { display: grid; gap: 12px; }
 .metrics-grid-2 { grid-template-columns: 1.4fr 1fr; }

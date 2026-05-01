@@ -181,7 +181,7 @@ export const SummaryView = {
     wrap.innerHTML=`
       <div class="summary-beautiful">
         <div class="summary-hero">
-          <div class="summary-hero-title">CEO Control Room</div>
+          <div class="summary-hero-title">Кабинет CEO</div>
           <div class="summary-hero-sub">Ключевая картина релизов, рисков и выполнения в одном экране</div>
           <div class="summary-hero-grid">
             <div class="summary-hero-kpi"><div class="k">Всего задач</div><div class="v">${rows.length}</div></div>
@@ -265,7 +265,7 @@ export const SummaryView = {
         <div class="summary-super-hero">
           <div class="summary-super-glow summary-super-glow-a"></div>
           <div class="summary-super-glow summary-super-glow-b"></div>
-          <div class="summary-super-title">СБОФ Executive Pulse</div>
+          <div class="summary-super-title">СБОФ Пульс руководства</div>
           <div class="summary-super-sub">Моментальный снимок статуса релизов, рисков и загрузки команд</div>
           <div class="summary-super-kpis">
             <div class="summary-super-kpi"><span>Всего задач</span><strong>${total}</strong></div>
@@ -519,7 +519,7 @@ export const MetricsView = {
         <div class="metrics-hero">
           <div class="summary-super-glow summary-super-glow-a"></div>
           <div class="summary-super-glow summary-super-glow-b"></div>
-          <div class="metrics-hero-title">Metrics Command Center</div>
+          <div class="metrics-hero-title">Сводка метрик</div>
           <div class="metrics-hero-sub">Комплексная панель исполнения, рисков, прогресса и нагрузки</div>
           <div class="metrics-kpis">
             <div class="metrics-kpi"><span>Всего задач</span><strong>${rows.length}</strong></div>
@@ -544,7 +544,7 @@ export const MetricsView = {
           </div>
 
           <div class="metrics-card">
-            <div class="metrics-card-title">SLA сроков: done вовремя</div>
+            <div class="metrics-card-title">SLA сроков: сделано вовремя</div>
             <div class="metrics-sla">
               <div class="metrics-sla-main">${slaPct}%</div>
               <div class="mini-progress"><span style="width:${slaPct}%"></span></div>
@@ -589,7 +589,7 @@ export const MetricsView = {
 
         <div class="metrics-grid metrics-grid-3">
           <div class="metrics-card">
-            <div class="metrics-card-title">Scope mix</div>
+            <div class="metrics-card-title">Распределение по scope</div>
             <div class="metrics-stack">
               <div class="metrics-stack-track">
                 ${scopeMix.map(s=>`<span class="metrics-stack-seg" style="width:${Math.round(s.n/scopeTotal*100)}%;background:${s.c}" title="${Utils.escapeHtml(s.k)}: ${s.n}"></span>`).join('')}
@@ -612,7 +612,7 @@ export const MetricsView = {
           </div>
 
           <div class="metrics-card">
-            <div class="metrics-card-title">Dependency pressure по командам</div>
+            <div class="metrics-card-title">Давление зависимостей по командам</div>
             <div class="metrics-rows">
               ${depByTeam.length?depByTeam.map((t,i)=>`<div class="metrics-row">
                 <div class="metrics-row-label">${Utils.escapeHtml(Utils.truncate(t.team||'—',18))}</div>
@@ -625,7 +625,7 @@ export const MetricsView = {
 
         <div class="metrics-grid metrics-grid-2">
           <div class="metrics-card">
-            <div class="metrics-card-title">Исполнители: загрузка / done / overtime</div>
+            <div class="metrics-card-title">Исполнители: загрузка / сделано / овертайм</div>
             <div class="metrics-people">
               ${assignees.length?assignees.map((a,i)=>`<div class="metrics-person" style="--d:${i*35}ms">
                 <div class="metrics-person-name">${Utils.escapeHtml(Utils.truncate(a.name,24))}</div>
@@ -666,7 +666,7 @@ export const MetricsView = {
           </div>
 
           <div class="metrics-card">
-            <div class="metrics-card-title">Control ring</div>
+            <div class="metrics-card-title">Контрольный круг</div>
             <div class="metrics-control-ring-wrap">
               <div class="metrics-control-ring" style="background:conic-gradient(#6366f1 0 ${progress}%, #ef4444 ${progress}% ${Math.min(100,progress+riskLoad)}%, #f59e0b ${Math.min(100,progress+riskLoad)}% ${Math.min(100,progress+riskLoad+blockerLoad)}%, #1f2a44 ${Math.min(100,progress+riskLoad+blockerLoad)}% 100%)">
                 <div class="metrics-control-ring-inner">
