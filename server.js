@@ -767,6 +767,48 @@ function _ppMakeAuthHeader(token) {
 function _ppKeyForAuthor(name, email) {
   return String(name || email || '').trim().toLowerCase();
 }
+
+/**
+ * V18 P5 — единый helper для path-cascade pattern, который раньше дублировался
+ * в 4 endpoint'ах (confluence-search, verify-confluence, confluence-audit-logins,
+ * a также внутри ppFetchConfluenceActivity для каждой CQL).
+ *
+ * Atlassian Cloud живёт на /wiki/rest/..., DC/Server — на /rest/..., некоторые
+ * legacy installs — на /rest/api/search. Cascade пробует кандидатов один за
+ * другим:
+ *   - 401/403 на любом → bail-out с authError (cascade не помог бы)
+ *   - 2xx → success, return сразу (вызывающий парсит response.text)
+ *   - 404 / другое 4xx / 5xx → пробуем следующий URL
+ *   - все провалились → ok:false с last status
+ *
+ * @param {string[]} urls           — URL'ы в порядке убывания вероятности
+ * @param {object}   opts
+ * @param {object}   opts.headers   — обычно { Authorization, Accept }
+ * @param {boolean}  opts.allowInsecureTls
+ * @param {number}   [opts.timeoutMs=20000]
+ * @param {string}   [opts.method='GET']
+ * @returns {Promise<{ok: boolean, status?: number, text?: string, authError?: number, error?: string, tried: Array<{url:string,status:number,error?:string}>}>}
+ */
+async function _cfPathCascade(urls, opts = {}) {
+  const tried = [];
+  const { headers = {}, allowInsecureTls = false, timeoutMs = 20000, method = 'GET' } = opts;
+  let lastStatus = 0;
+  for (const url of urls) {
+    const r = await jiraForward({
+      targetUrl: url, method, headers, allowInsecureTls, timeoutMs,
+    }).catch((e) => ({ status: 0, text: String(e?.message || e), _err: e?.message }));
+    tried.push({ url: url.replace(/\?.*$/, ''), status: r.status, ...(r._err ? { error: r._err } : {}) });
+    lastStatus = r.status || lastStatus;
+    if (r.status === 401 || r.status === 403) {
+      return { ok: false, authError: r.status, tried };
+    }
+    if (r.status >= 200 && r.status < 300) {
+      return { ok: true, status: r.status, text: r.text, tried };
+    }
+    // 404 / 400 / 5xx → попробуем следующий
+  }
+  return { ok: false, status: lastStatus, error: lastStatus ? `HTTP ${lastStatus}` : 'no response', tried };
+}
 async function ppFetchBitbucketActivity(cfg, tls, cutoffTs, cutoffIso) {
   if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { authors: {}, configured: false };
   const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
@@ -1996,26 +2038,18 @@ async function handleIntegrationsApi(req, res, pathname) {
         Authorization: makeAuthHeader(cfg.confluenceToken),
         Accept: 'application/json',
       };
-      let respOk = null;
-      let lastStatus = 0;
-      const tried = [];
-      for (const url of tryPaths) {
-        const r = await jiraForward({ targetUrl: url, method: 'GET', headers, allowInsecureTls: tls }).catch((e) => ({ status: 0, text: String(e?.message || e) }));
-        tried.push({ url: url.replace(/[?].*$/, ''), status: r.status });
-        lastStatus = r.status || lastStatus;
-        if (r.status === 401 || r.status === 403) {
-          // Bail early: cascading more URLs won't change the auth verdict.
-          writeJson(res, 200, { pages: [], query, sinceDate: since, error: `Confluence: HTTP ${r.status} — токен просрочен или нет прав`, tried });
-          return;
-        }
-        if (r.status >= 200 && r.status < 300) { respOk = r; break; }
+      // V18 P5 — переиспользует _cfPathCascade helper.
+      const cascade = await _cfPathCascade(tryPaths, { headers, allowInsecureTls: tls });
+      if (cascade.authError) {
+        writeJson(res, 200, { pages: [], query, sinceDate: since, error: `Confluence: HTTP ${cascade.authError} — токен просрочен или нет прав`, tried: cascade.tried });
+        return;
       }
       const pages = [];
-      if (respOk) {
-        let data = {};
-        try { data = JSON.parse(respOk.text); }
+      if (cascade.ok) {
+        let data;
+        try { data = JSON.parse(cascade.text); }
         catch (_) {
-          writeJson(res, 200, { pages: [], query, sinceDate: since, error: 'Confluence вернул не-JSON (вероятно SSO/HTML)', tried });
+          writeJson(res, 200, { pages: [], query, sinceDate: since, error: 'Confluence вернул не-JSON (вероятно SSO/HTML)', tried: cascade.tried });
           return;
         }
         const sinceTs = Date.parse(since + 'T00:00:00Z');
@@ -2030,8 +2064,8 @@ async function handleIntegrationsApi(req, res, pathname) {
         });
         if (pages.length > 5) pages.length = 5;
       }
-      const errorMsg = respOk ? '' : (lastStatus ? `Confluence HTTP ${lastStatus}` : 'Confluence недоступен');
-      writeJson(res, 200, { pages, query, sinceDate: since, ...(errorMsg ? { error: errorMsg, tried } : {}) });
+      const errorMsg = cascade.ok ? '' : (cascade.error || 'Confluence недоступен');
+      writeJson(res, 200, { pages, query, sinceDate: since, ...(errorMsg ? { error: errorMsg, tried: cascade.tried } : {}) });
       return;
     }
 
@@ -2162,28 +2196,22 @@ async function handleIntegrationsApi(req, res, pathname) {
       const winHours = Math.min(168, Math.max(1, Number(cfg.activityWindowHours) || 72));
       const startMs = Date.now() - winHours * 3600 * 1000;
       const endMs   = Date.now();
-      const tried = [];
-      const tryUrls = [
+      // V18 P5 — переиспользует _cfPathCascade.
+      const cascade = await _cfPathCascade([
         `${base}/wiki/rest/api/audit?startDate=${startMs}&endDate=${endMs}&limit=1000&start=0`,
         `${base}/rest/api/audit?startDate=${startMs}&endDate=${endMs}&limit=1000&start=0`,
-      ];
-      let raw = null;
-      for (const url of tryUrls) {
-        const r = await jiraForward({ targetUrl: url, method: 'GET', headers, allowInsecureTls: tls, timeoutMs: 25000 }).catch((e) => ({ status: 0, text: String(e?.message || e) }));
-        tried.push({ url: url.replace(/\?.*$/, '...'), status: r.status });
-        if (r.status === 401 || r.status === 403) {
-          writeJson(res, 200, { ok: false, error: `Audit log недоступен (HTTP ${r.status}). Нужен Confluence administrator или audit-viewer.`, tried });
-          return;
-        }
-        if (r.status === 404) continue;     // try next path
-        if (r.status >= 200 && r.status < 300) { raw = r; break; }
-      }
-      if (!raw) {
-        writeJson(res, 200, { ok: false, error: 'Audit log endpoint не найден или недоступен. В админке: Audit log → Configuration.', tried });
+      ], { headers, allowInsecureTls: tls, timeoutMs: 25000 });
+      if (cascade.authError) {
+        writeJson(res, 200, { ok: false, error: `Audit log недоступен (HTTP ${cascade.authError}). Нужен Confluence administrator или audit-viewer.`, tried: cascade.tried });
         return;
       }
+      if (!cascade.ok) {
+        writeJson(res, 200, { ok: false, error: 'Audit log endpoint не найден или недоступен. В админке: Audit log → Configuration.', tried: cascade.tried });
+        return;
+      }
+      const tried = cascade.tried;     // alias чтобы не править все ссылки на tried ниже
       let parsed;
-      try { parsed = JSON.parse(raw.text); } catch (_) { parsed = null; }
+      try { parsed = JSON.parse(cascade.text); } catch (_) { parsed = null; }
       const records = parsed?.results || [];
       // Filter to login/logout entries. Confluence Server / DC summary patterns
       // обычно: «User logged in», «User logged out», «User logged in (single sign-on)».
@@ -2360,27 +2388,25 @@ async function handleIntegrationsApi(req, res, pathname) {
         return;
       }
       // Step 2: fallback на user/current (когда spaceKeys пустые).
-      const tryUrls = [
+      // V18 P5 — переиспользует _cfPathCascade.
+      const fallbackCascade = await _cfPathCascade([
         `${base}/wiki/rest/api/user/current`,
         `${base}/rest/api/user/current`,
         `${base}/wiki/rest/api/space?limit=1`,
         `${base}/rest/api/space?limit=1`,
-      ];
-      for (const url of tryUrls) {
-        const r = await jiraForward({ targetUrl: url, method: 'GET', headers, allowInsecureTls: tls }).catch((e) => ({ status: 0, text: String(e?.message || e) }));
-        tried.push({ url: url.replace(/\?.*$/, ''), status: r.status });
-        if (r.status === 401 || r.status === 403) {
-          writeJson(res, 200, { ok: false, error: `Confluence HTTP ${r.status} — токен просрочен или нет прав`, tried });
-          return;
-        }
-        if (r.status >= 200 && r.status < 300) {
-          let who = '?';
-          try { const d = JSON.parse(r.text); who = d.displayName || d.username || d.name || (Array.isArray(d.results) ? `${d.results.length} space(s)` : '?'); } catch(_) {}
-          writeJson(res, 200, { ok: true, who, tried });
-          return;
-        }
+      ], { headers, allowInsecureTls: tls });
+      const allTried = [...tried, ...fallbackCascade.tried];
+      if (fallbackCascade.authError) {
+        writeJson(res, 200, { ok: false, error: `Confluence HTTP ${fallbackCascade.authError} — токен просрочен или нет прав`, tried: allTried });
+        return;
       }
-      writeJson(res, 200, { ok: false, error: `Confluence недоступен (попробовано ${tried.length} URL)`, tried });
+      if (fallbackCascade.ok) {
+        let who = '?';
+        try { const d = JSON.parse(fallbackCascade.text); who = d.displayName || d.username || d.name || (Array.isArray(d.results) ? `${d.results.length} space(s)` : '?'); } catch(_) {}
+        writeJson(res, 200, { ok: true, who, tried: allTried });
+        return;
+      }
+      writeJson(res, 200, { ok: false, error: `Confluence недоступен (попробовано ${allTried.length} URL)`, tried: allTried });
       return;
     }
 
