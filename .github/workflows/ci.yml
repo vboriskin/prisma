@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    name: typecheck + lint + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci || npm install
+        # `npm ci` если есть package-lock.json; `npm install` — fallback (на момент
+        # V18 lock-файл ещё не создан, см. audit-2026-05-V18/01-git-init.md).
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+        # `eslint . --max-warnings 215` — legacy budget. Не повышать «чтобы прошло».
+        # См. CONTRIBUTING.md § Lint warnings.
+
+      - name: Unit tests
+        run: npm run test:unit
+        # 534 unit tests via node:test
+
+      - name: Contract tests
+        run: npm run test:contract
+        # 11 contract tests — спавн fake-Jira + server.js на 19200/19201
+
+      - name: Legacy testRunner
+        run: node testRunner.js
+        # ~104 legacy tests; будут retired в V18 P12 (см. MASTER_PLAN.md)
+
+      - name: E2E HTTP smoke
+        run: npm run test:e2e
+        # 10 HTTP smoke tests на server.js endpoints. Не браузерные.
+
+      - name: Performance budget
+        run: npm run perf:budget
+        # scripts/perfBudget.js — проверка размеров ключевых файлов
+        # См. docs/running.md § Performance budgets
+
+      - name: Smoke check (server boots)
+        run: |
+          node server.js 19099 &
+          SVR=$!
+          sleep 2
+          STATUS=$(curl -fsS http://127.0.0.1:19099/health || echo "FAIL")
+          kill $SVR 2>/dev/null || true
+          if [[ "$STATUS" == "FAIL" ]]; then
+            echo "Server failed to boot or /health unreachable"
+            exit 1
+          fi
+          echo "Smoke OK: $STATUS"

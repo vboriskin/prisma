@@ -1,0 +1,88 @@
+# GitLab CI mirror of .github/workflows/ci.yml
+# --
+# Если репозиторий хостится в corporate GitLab — используется этот файл.
+# Если в GitHub — `.github/workflows/ci.yml`. Оба покрывают одинаковый pipeline.
+# При появлении lock-файла (`npm install` будет сделан хотя бы раз) — заменить
+# `|| npm install` на чистый `npm ci`.
+
+stages:
+  - validate
+  - test
+  - smoke
+
+default:
+  image: node:22-alpine
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - node_modules/
+
+before_script:
+  - npm ci || npm install
+
+typecheck:
+  stage: validate
+  script:
+    - npm run typecheck
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+lint:
+  stage: validate
+  script:
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+unit-tests:
+  stage: test
+  script:
+    - npm run test:unit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+contract-tests:
+  stage: test
+  script:
+    - npm run test:contract
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+legacy-testrunner:
+  stage: test
+  script:
+    - node testRunner.js
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+e2e:
+  stage: test
+  script:
+    - npm run test:e2e
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+perf-budget:
+  stage: validate
+  script:
+    - npm run perf:budget
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+smoke:
+  stage: smoke
+  script:
+    - apk add --no-cache curl
+    - node server.js 19099 &
+    - sleep 2
+    - 'curl -fsS http://127.0.0.1:19099/health || (echo "Server boot failed" && exit 1)'
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
