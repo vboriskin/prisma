@@ -1,0 +1,1145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>СБОФ Планирование</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ===== FIRST-RUN SPLASH ("Привет → Погнали") =====
+     Shown only when localStorage.welcomeShown !== 'true'.
+     Rendered immediately (before any heavy init) so it appears instantly.
+     The wrapper has a few inline styles so it's visible before styles.css parses. -->
+<div id="welcomeOverlay" class="welcome-overlay" style="position:fixed;inset:0;z-index:11000;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  <!-- Decorative floating gradient blobs (purely visual, GPU-cheap) -->
+  <div class="welcome-blob welcome-blob-1" aria-hidden="true"></div>
+  <div class="welcome-blob welcome-blob-2" aria-hidden="true"></div>
+  <div class="welcome-blob welcome-blob-3" aria-hidden="true"></div>
+  <div class="welcome-content">
+    <h1 class="welcome-title">
+      Привет <span class="welcome-wave" aria-hidden="true">👋</span>
+    </h1>
+    <p class="welcome-subtitle" id="welcomeSubtitle" data-text="Давай разберёмся с твоим планом">
+      <span class="welcome-subtitle-cursor" aria-hidden="true"></span>
+    </p>
+
+    <!-- Default CTA — shown on truly clean first run -->
+    <button class="welcome-btn" id="welcomeCtaBtn" type="button">
+      <span class="welcome-btn-text">Погнали</span>
+      <span class="welcome-btn-arrow" aria-hidden="true">→</span>
+    </button>
+
+    <!-- "Найдены локальные изменения" — shown only if saved data exists.
+         JS swaps the CTA for this block via .welcome-restore-active. -->
+    <div class="welcome-restore" id="welcomeRestore" hidden>
+      <div class="welcome-restore-icon" aria-hidden="true">💾</div>
+      <div class="welcome-restore-title">Найдены локальные изменения</div>
+      <div class="welcome-restore-meta" id="welcomeRestoreMeta"></div>
+      <div class="welcome-restore-actions">
+        <button class="welcome-btn welcome-btn-restore" id="welcomeRestoreYes" type="button">
+          <span class="welcome-btn-text">Восстановить</span>
+          <span class="welcome-btn-arrow" aria-hidden="true">↻</span>
+        </button>
+        <button class="welcome-btn welcome-btn-secondary" id="welcomeRestoreNo" type="button">
+          Начать заново
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  // Inline early-out — if user already saw the splash, drop it before paint.
+  // Prevents a 1-frame flash on every reload.
+  (function () {
+    try {
+      if (localStorage.getItem('welcomeShown') === 'true') {
+        var el = document.getElementById('welcomeOverlay');
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      }
+    } catch (_) {}
+  })();
+</script>
+
+<!-- ================================================================
+     ONBOARDING OVERLAYS (v11)
+     ================================================================ -->
+
+<!-- Welcome screen — shown on first run -->
+<div id="ob-welcome" class="ob-welcome-overlay hidden">
+  <div class="ob-welcome-box">
+    <button class="ob-welcome-close" id="ob-welcome-close" title="Закрыть">✕</button>
+    <div class="ob-welcome-logo">СБОФ</div>
+    <h1 class="ob-welcome-title">Планировщик релизов</h1>
+    <p class="ob-welcome-sub">Аналитика, риски и AI-поддержка для управления Q2-планом</p>
+    <div class="ob-welcome-cards">
+      <button class="ob-welcome-card ob-card-demo" id="ob-btn-demo">
+        <div class="ob-card-icon">🎬</div>
+        <div class="ob-card-title">Посмотреть демо</div>
+        <div class="ob-card-desc">Загрузим 22 демо-задачи и покажем AI CEO — мощный экран управленческих решений</div>
+        <div class="ob-card-cta">Запустить демо →</div>
+      </button>
+      <button class="ob-welcome-card ob-card-tour" id="ob-btn-tour">
+        <div class="ob-card-icon">🎓</div>
+        <div class="ob-card-title">Пройти обучение</div>
+        <div class="ob-card-desc">Полный тур: шапка, настройки, реестр, гант, AI, интеграции — поэтапно с пояснениями</div>
+        <div class="ob-card-cta">Начать тур →</div>
+      </button>
+      <button class="ob-welcome-card ob-card-setup" id="ob-btn-setup">
+        <div class="ob-card-icon">🚀</div>
+        <div class="ob-card-title">Быстро настроить</div>
+        <div class="ob-card-desc">Загрузите свой XLSX или CSV — и сразу работайте с реальными данными</div>
+        <div class="ob-card-cta">Начать работу →</div>
+      </button>
+    </div>
+    <div class="ob-welcome-hint">Нажмите Esc или ✕ чтобы закрыть и разобраться самостоятельно</div>
+  </div>
+</div>
+
+<!-- Demo loading overlay -->
+<div id="ob-loading" class="ob-loading-overlay hidden">
+  <div class="ob-loading-box">
+    <div class="ob-loading-spinner"></div>
+    <div class="ob-loading-text">Загружаем демо-данные…</div>
+  </div>
+</div>
+
+<!-- CTA bar: shown after micro-tour ends -->
+<div id="ob-cta-bar" class="ob-cta-bar hidden">
+  <span class="ob-cta-text">🎉 Демо изучено! Готовы работать со своими данными?</span>
+  <button class="ob-cta-btn" id="ob-cta-upload">📂 Загрузить свои данные</button>
+  <button class="ob-cta-close-btn" id="ob-cta-close">✕</button>
+</div>
+
+<!-- Tour highlight ring (positioned absolutely by JS) -->
+<div id="ob-tour-ring" class="ob-tour-ring hidden"></div>
+
+<!-- "Найдены локальные изменения" — same visual language as the first-run splash -->
+<div id="modal-restore" class="welcome-overlay welcome-overlay-modal hidden" style="position:fixed;inset:0;z-index:10500;display:flex;flex-direction:column;align-items:center;justify-content:center;">
+  <div class="welcome-blob welcome-blob-1" aria-hidden="true"></div>
+  <div class="welcome-blob welcome-blob-2" aria-hidden="true"></div>
+  <div class="welcome-blob welcome-blob-3" aria-hidden="true"></div>
+  <div class="welcome-content">
+    <h1 class="welcome-title">С возвращением <span class="welcome-wave" aria-hidden="true">💾</span></h1>
+    <p class="welcome-subtitle welcome-subtitle-static">Найдены локальные изменения — продолжим?</p>
+    <div class="welcome-restore" style="opacity:1;transform:none;animation:welcome-restore-in .55s cubic-bezier(.2,.85,.35,1.05) 200ms backwards;">
+      <div class="welcome-restore-meta" id="modal-restore-meta"></div>
+      <div class="welcome-restore-actions">
+        <button class="welcome-btn welcome-btn-restore" id="btn-restore-yes" type="button">
+          <span class="welcome-btn-text">Восстановить</span>
+          <span class="welcome-btn-arrow" aria-hidden="true">↻</span>
+        </button>
+        <button class="welcome-btn welcome-btn-secondary" id="btn-restore-no" type="button">
+          Очистить и загрузить заново
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- V12 audit recommendation #25 — aria-live makes toasts audible to screen
+     readers. role=status keeps the alert "polite" (queued, not interruptive)
+     so the user finishes their current action before being notified. -->
+<div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<!-- V17 P8 — `data-owner` помогает Dashboard и AI views избегать конфликтов
+     при шаринге одного DOM-узла; см. dashboard.js openKpiModal. -->
+<div id="modal-kpi" class="modal-overlay hidden" data-owner="">
+  <div class="modal-box modal-box-wide">
+    <div class="modal-header">
+      <h3 id="modal-kpi-title"></h3>
+      <button class="modal-close-btn" id="modal-kpi-close">✕</button>
+    </div>
+    <div id="modal-kpi-body" style="overflow-y:auto;max-height:60vh"></div>
+    <!-- V17 P8 (designer Quick win 1) — KPI-modal перестал быть тупиком.
+         Когда Dashboard открывает модал, эта плашка несёт CTA «Открыть в
+         реестре с фильтром». Скрывается из CSS когда `data-owner !== "dashboard"`. -->
+    <div id="modal-kpi-footer" class="modal-footer" data-modal-owner="dashboard">
+      <button class="btn btn-primary btn-sm" id="modal-kpi-goto-registry">Открыть в реестре с фильтром</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14 (B7): «Завершить» — required actualDoneDate + optional comment -->
+<div id="modal-gantt-complete" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Завершить задачу</h3>
+      <button class="modal-close-btn" id="modal-gantt-complete-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div id="modal-gantt-complete-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата фактического завершения <span style="color:#dc2626">*</span></label>
+      <input type="date" id="modal-gantt-complete-date" class="cell-input" style="margin-bottom:12px;">
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Комментарий (опционально)</label>
+      <textarea id="modal-gantt-complete-comment" class="cell-input" rows="3" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «закрыто за 3 дня раньше срока»"></textarea>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-complete-cancel">Отмена</button>
+      <button class="btn btn-primary btn-sm" id="modal-gantt-complete-ok">Завершить</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14 (B6.2): «Установить даты работ» — start + end -->
+<div id="modal-gantt-dates" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Даты работ по задаче</h3>
+      <button class="modal-close-btn" id="modal-gantt-dates-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div id="modal-gantt-dates-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
+      <div style="display:flex;gap:14px;">
+        <div style="flex:1;">
+          <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата начала</label>
+          <input type="date" id="modal-gantt-dates-start" class="cell-input" style="width:100%;">
+        </div>
+        <div style="flex:1;">
+          <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата завершения</label>
+          <input type="date" id="modal-gantt-dates-end" class="cell-input" style="width:100%;">
+        </div>
+      </div>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-dates-cancel">Отмена</button>
+      <button class="btn btn-primary btn-sm" id="modal-gantt-dates-ok">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14 (B6.1): «Назначить исполнителя» — picker -->
+<div id="modal-gantt-assign" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Назначить исполнителя</h3>
+      <button class="modal-close-btn" id="modal-gantt-assign-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div id="modal-gantt-assign-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
+      <input type="text" id="modal-gantt-assign-search" class="cell-input" placeholder="Поиск по ФИО…" style="width:100%;margin-bottom:8px;">
+      <div id="modal-gantt-assign-hint" class="modal-text-muted" style="font-size:11.5px;color:var(--text-3);margin-bottom:6px;"></div>
+      <div id="modal-gantt-assign-list" style="max-height:320px;overflow:auto;border:1px solid var(--border-light);border-radius:4px;"></div>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-assign-cancel">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14 (B8): bulk-add target-bucket + obligatory comment modal -->
+<div id="modal-gantt-add-target" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>В какой колодец добавить?</h3>
+      <button class="modal-close-btn" id="modal-gantt-add-target-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div id="modal-gantt-add-target-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
+      <div style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap;" id="modal-gantt-add-target-buckets">
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="backlog" checked> Бэклог</label>
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r120">     1.20</label>
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r121">     1.21</label>
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r122">     1.22</label>
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="overtime"> OT</label>
+      </div>
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Комментарий (обязательно)</label>
+      <textarea id="modal-gantt-add-target-comment" class="cell-input" rows="3" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «добавлено по запросу Иванова»"></textarea>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-add-target-cancel">Отмена</button>
+      <button class="btn btn-primary btn-sm" id="modal-gantt-add-target-ok" disabled>Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- V14 (B5): comment-required move modal. Activated when planLocked && !ganttEditMode and the user drags a pill across columns. -->
+<!-- V16 (gantt-roadmap #5) — Cmd+K palette. Raycast-style overlay for
+     jumping to any team or epic. Driven by GanttView.openJumpPalette(). -->
+<div id="gdt-jump-palette" class="gdt-jump-overlay hidden" role="dialog" aria-modal="true" aria-label="Поиск команд и эпиков">
+  <div class="gdt-jump-box">
+    <div class="gdt-jump-input-wrap">
+      <span class="gdt-jump-prompt">⌘K</span>
+      <input id="gdt-jump-input" class="gdt-jump-input" type="text" autocomplete="off" spellcheck="false" placeholder="Поиск команды или эпика…">
+      <span class="gdt-jump-hint">Esc</span>
+    </div>
+    <div id="gdt-jump-results" class="gdt-jump-results"></div>
+    <div class="gdt-jump-footer">
+      <span><kbd>↑</kbd><kbd>↓</kbd> навигация</span>
+      <span><kbd>Enter</kbd> перейти</span>
+      <span><kbd>Esc</kbd> закрыть</span>
+    </div>
+  </div>
+</div>
+
+<!-- V15 Spine 2026-04-30 — lock-plan modal: date + time pickers, replaces
+     the bare `prompt()` flow that looked «убого» on a styled app. -->
+<div id="modal-gantt-lock" class="modal-overlay hidden">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header">
+      <h3>🔒 Зафиксировать план</h3>
+      <button class="modal-close-btn" id="modal-gantt-lock-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div class="modal-text-muted" style="font-size:12.5px;color:var(--text-3);margin-bottom:14px;">
+        После фиксации каждый перенос будет требовать комментарий. Можно зафиксировать задним числом — например, на дату ретро.
+      </div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;">
+        <div>
+          <label for="modal-gantt-lock-date" style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата</label>
+          <input id="modal-gantt-lock-date" type="date" class="cell-input" style="width:100%;font-family:inherit;">
+        </div>
+        <div>
+          <label for="modal-gantt-lock-time" style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Время</label>
+          <input id="modal-gantt-lock-time" type="time" class="cell-input" style="width:100%;font-family:inherit;">
+        </div>
+      </div>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-lock-cancel">Отмена</button>
+      <button class="btn btn-primary btn-sm" id="modal-gantt-lock-ok">Зафиксировать</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-gantt-move" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Перенос задачи требует комментарий</h3>
+      <button class="modal-close-btn" id="modal-gantt-move-close">✕</button>
+    </div>
+    <div style="padding:16px 20px;">
+      <div id="modal-gantt-move-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
+      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Причина переноса (обязательно)</label>
+      <textarea id="modal-gantt-move-comment" class="cell-input" rows="4" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «риск по 1.20, переехало на 1.21 — синхронизировался с командой»"></textarea>
+    </div>
+    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-outline btn-sm" id="modal-gantt-move-cancel">Отмена</button>
+      <button class="btn btn-primary btn-sm" id="modal-gantt-move-ok" disabled>Перенести</button>
+    </div>
+  </div>
+</div>
+
+<header id="topbar">
+  <div class="topbar-left">
+    <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Свернуть / развернуть меню">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="topbar-brand" id="topbar-brand" role="button" tabindex="0" title="На главную (Дашборд)">
+      <span class="topbar-logo">СБОФ</span>
+      <span class="topbar-title">Планировщик</span>
+      <span id="topbar-row-count" class="topbar-badge hidden"></span>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <!-- Demo mode bar (hidden when not in demo mode).
+         V17 P10 (art-director §3 + designer §3) — emoji 🎬/📂 → SVG glyphs to
+         match the rest of the topbar (everything else is stroke-2 SVG). -->
+    <span id="ob-demo-bar" class="ob-demo-badge hidden" aria-label="Демо-режим активен">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+      Демо
+    </span>
+    <button class="btn btn-outline btn-sm hidden" id="ob-btn-load-data" title="Загрузить свои данные" aria-label="Загрузить свои данные">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+      Свои данные
+    </button>
+    <button class="btn btn-outline btn-sm hidden" id="ob-btn-back-demo" title="Вернуться к демо-данным" aria-label="Вернуться к демо-данным">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+      Демо-режим
+    </button>
+    <button class="btn btn-ghost btn-sm" id="btn-toggle-filters" title="Показать / скрыть панель фильтров" aria-expanded="false" aria-controls="global-filters-bar"><span class="filters-chevron">▾</span>Фильтры<span id="topbar-filter-count" class="topbar-filter-count hidden" aria-label="Активных фильтров">0</span></button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-save" data-tb="save" title="Пересчитать и сохранить всё (Ctrl/Cmd+S)" aria-label="Сохранить всё">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+    </button>
+    <!-- Файлы dropdown — единственная точка для импорта / выгрузки.
+         Standalone «Скачать CSV» icon removed; download moved here. -->
+    <div class="topbar-dropdown" id="files-dropdown-wrap" data-tb="files">
+      <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-files-dropdown" title="Файлы — импорт / экспорт / очистка" aria-label="Файлы — импорт, экспорт, очистка">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+      </button>
+      <div class="topbar-dropdown-menu hidden" id="files-dropdown-menu">
+        <!-- V15: JSON — атомарный round-trip-формат (rows + employees + settings).
+             См. dataStore.js JSONExport / JSONImport. Рекомендуемый для save/restore;
+             CSV/XLSX оставлены для просмотра в Excel и обратной совместимости. -->
+        <label class="dropdown-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Импорт JSON
+          <input type="file" id="input-json" accept=".json,application/json" class="input-hidden">
+        </label>
+        <label class="dropdown-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Импорт XLSX
+          <input type="file" id="input-xlsx" accept=".xlsx,.xls" class="input-hidden">
+        </label>
+        <label class="dropdown-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Импорт CSV
+          <input type="file" id="input-csv" accept=".csv" class="input-hidden">
+        </label>
+        <label class="dropdown-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
+          CSV update
+          <input type="file" id="input-csv-update" accept=".csv" class="input-hidden">
+        </label>
+        <label class="dropdown-item">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
+          XLSX update
+          <input type="file" id="input-xlsx-update" accept=".xlsx,.xls" class="input-hidden">
+        </label>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item" id="btn-export-json">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Скачать JSON
+        </button>
+        <button class="dropdown-item" id="btn-export-csv">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Скачать CSV
+        </button>
+        <button class="dropdown-item" id="btn-export-xlsx">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Скачать XLSX
+        </button>
+        <!-- V15: Гант → standalone HTML viewer for sharing. -->
+        <button class="dropdown-item" id="btn-export-gantt-html">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/></svg>
+          Выгрузить Гант (HTML)
+        </button>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item dropdown-item-danger" id="btn-clear-storage">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Очистить данные
+        </button>
+      </div>
+    </div>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-sim-mode" data-tb="sim" title="Режим симуляции — изменения не сохраняются" aria-label="Режим симуляции" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-theme-toggle" data-tb="theme" title="Переключить тему" aria-label="Переключить тему">
+      <svg id="btn-theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-app-settings" data-tb="settings" title="Настройки" aria-label="Настройки приложения">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-onboarding" data-tb="onboarding" title="Обучение / Тур по приложению" aria-label="Обучение и тур по приложению">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="app-layout">
+
+  <nav id="sidebar">
+    <button class="nav-item active" data-section="dashboard">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      <span class="nav-label">Дашборд</span>
+    </button>
+    <button class="nav-item" data-section="registry">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      <span class="nav-label">Реестр</span>
+    </button>
+    <button class="nav-item" data-section="gantt">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/><line x1="14" y1="14" x2="21" y2="14"/></svg>
+      <span class="nav-label">Гант</span>
+    </button>
+    <button class="nav-item" data-section="kanban">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="14"/><rect x="17" y="3" width="5" height="10"/></svg>
+      <span class="nav-label">Канбан</span>
+    </button>
+    <button class="nav-item" data-section="timeline">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span class="nav-label">Таймлайн</span>
+    </button>
+    <button class="nav-item" data-section="podlozhka">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      <span class="nav-label">Подложка</span>
+    </button>
+    <button class="nav-item" data-section="employees">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      <span class="nav-label">Сотрудники</span>
+    </button>
+    <button class="nav-item" data-section="summary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+      <span class="nav-label">Сводная</span>
+    </button>
+    <button class="nav-item" data-section="metrics">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+      <span class="nav-label">Метрики</span>
+    </button>
+    <button class="nav-item" data-section="insights">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7c.6.5 1 1.2 1 2V18h6v-1.3c0-.8.4-1.5 1-2A7 7 0 0012 2z"/></svg>
+      <span class="nav-label">Инсайты</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-section="diagnostics">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="nav-label">Диагностика</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-section="actions">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+      <span class="nav-label">Actions</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-section="ai">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 017 4.5v0A2.5 2.5 0 009.5 7h5A2.5 2.5 0 0017 4.5v0A2.5 2.5 0 0014.5 2h-5z"/><path d="M12 7v4"/><path d="M8 11h8"/><path d="M5 21a7 7 0 0114 0"/><circle cx="12" cy="14" r="3"/></svg>
+      <span class="nav-label">AI Анализ</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-section="integrations">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      <span class="nav-label">Интеграции</span>
+    </button>
+    <button class="nav-item nav-item-ceo" data-section="ai-ceo">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      <span class="nav-label">AI CEO</span>
+    </button>
+    <div class="nav-divider"></div>
+    <button class="nav-item" data-section="history">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>
+      <span class="nav-label">История</span>
+    </button>
+    <button class="nav-item" data-section="errors" title="Журнал ошибок и предупреждений">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="nav-label">Ошибки</span>
+      <span class="nav-badge nav-badge-err hidden" id="nav-errors-badge"></span>
+    </button>
+  </nav>
+
+  <div id="content-area">
+
+    <div id="filters-backdrop" aria-hidden="true"></div>
+    <div id="global-filters-bar" role="region" aria-label="Фильтры">
+      <div class="filters-row">
+        <div class="filter-group">
+          <label class="filter-label">Поиск</label>
+          <input type="text" id="filter-search" class="filter-input" placeholder="Текст, эпик, задача...">
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Команда</label>
+          <select id="filter-team" class="filter-select"><option value="">Все</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Scope</label>
+          <select id="filter-scope" class="filter-select">
+            <option value="">Все</option>
+            <option value="Да">Да</option>
+            <option value="Нет">Нет</option>
+            <option value="Требует подтверждения">Треб. подтв.</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Релиз</label>
+          <select id="filter-release" class="filter-select">
+            <option value="">Все</option>
+            <option value="1.20">1.20</option>
+            <option value="1.21">1.21</option>
+            <option value="1.22">1.22</option>
+            <option value="overtime">Овертайм</option>
+            <option value="none">Без релиза</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Тип работ</label>
+          <select id="filter-worktype" class="filter-select"><option value="">Все</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Роль</label>
+          <select id="filter-role" class="filter-select"><option value="">Все</option></select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label">Исполнитель</label>
+          <select id="filter-assignee" class="filter-select"><option value="">Все</option></select>
+        </div>
+        <div class="filter-toggles">
+          <label class="toggle-chip" id="toggle-blocking"><input type="checkbox" id="filter-blocking"> Блокеры</label>
+          <label class="toggle-chip" id="toggle-risky"><input type="checkbox" id="filter-risky"> С рисками</label>
+          <label class="toggle-chip" id="toggle-done"><input type="checkbox" id="filter-done"> Сделано</label>
+          <button class="btn-reset-filters" id="btn-reset-filters">Сбросить</button>
+        </div>
+      </div>
+      <div class="presets-row" id="presets-row">
+        <div class="presets-headline">
+          <span class="presets-label">Пресеты</span>
+          <button class="btn btn-ghost btn-sm" id="btn-toggle-presets" title="Свернуть / развернуть пресеты">▾</button>
+        </div>
+        <div id="presets-content" class="presets-content">
+          <div class="presets-row-line">
+            <div class="preset-source-group">
+              <div class="preset-source-title">Системные</div>
+              <div class="preset-source-body">
+                <!-- V17 P11 (art-director §3 + designer §3) — emoji 🔴 ✅ ✕
+                     replaced with neutral text labels (Spine-pill: SVG/text only,
+                     no emoji). The active state is signalled via `.active` class. -->
+                <button class="preset-btn" data-preset="critical">Критичное</button>
+                <button class="preset-btn" data-preset="no-release">Без релиза</button>
+                <button class="preset-btn" data-preset="needs-confirm">Треб. подтв.</button>
+                <button class="preset-btn" data-preset="has-blocker">Есть блокер</button>
+                <button class="preset-btn" data-preset="overtime">Овертайм</button>
+                <button class="preset-btn" data-preset="done">Сделанные</button>
+                <button class="preset-btn preset-reset" data-preset="reset" aria-label="Сбросить все фильтры">Сбросить</button>
+              </div>
+            </div>
+          </div>
+          <div class="presets-row-line">
+            <div class="preset-source-group">
+              <div class="preset-source-title">Роль</div>
+              <div id="preset-roles-wrap" class="preset-roles-wrap preset-source-body"></div>
+            </div>
+            <div class="preset-source-group">
+              <div class="preset-source-title">Исполнитель</div>
+              <div id="preset-assignees-wrap" class="preset-roles-wrap preset-source-body"></div>
+            </div>
+            <div class="preset-source-group">
+              <div class="preset-source-title">Теги</div>
+              <div id="preset-tags-wrap" class="preset-roles-wrap preset-source-body"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <section id="section-dashboard" class="app-section active">
+      <div class="section-header">
+        <h2>Сводный дашборд</h2>
+      </div>
+      <div id="dashboard-legend" class="view-legend"></div>
+      <div id="dashboard-kpi" class="kpi-grid"></div>
+      <div id="dashboard-progress" class="progress-grid"></div>
+      <div id="risks-panel" class="risks-panel"></div>
+      <div id="blocking-detail-card"></div>
+      <div id="release-breakdown" class="release-breakdown-grid"></div>
+      <div id="teams-summary-wrap"></div>
+      <div class="dashboard-tables-grid">
+        <div id="no-release-wrap"></div>
+        <div id="needs-confirm-wrap"></div>
+      </div>
+    </section>
+
+    <!-- REGISTRY -->
+    <section id="section-registry" class="app-section hidden">
+      <div class="section-header">
+        <h2>Итоговый реестр <span id="registry-count-badge" class="count-badge"></span></h2>
+        <div class="section-header-actions">
+          <button class="btn btn-primary btn-sm" id="btn-add-row">+ Строка</button>
+          <button class="btn btn-outline btn-sm btn-undo-clone" id="btn-undo" title="Отменить (Ctrl/Cmd+Z)" disabled>↺ Отменить</button>
+          <button class="btn btn-outline btn-sm btn-redo-clone" id="btn-redo" title="Вернуть (Ctrl/Cmd+Shift+Z / Ctrl+Y)" disabled>↻ Вернуть</button>
+          <button class="btn btn-outline btn-sm" id="btn-toggle-cols">Столбцы</button>
+          <button class="btn btn-outline btn-sm" id="btn-registry-settings">⚙ Настройки</button>
+          <button class="btn btn-outline btn-sm" id="btn-fullscreen-registry" title="Полный экран">⛶</button>
+          <button class="btn btn-outline btn-sm" id="btn-reset-col-order" title="Сбросить порядок столбцов">↺ Порядок</button>
+        </div>
+      </div>
+      <div id="registry-legend" class="view-legend"></div>
+      <div id="col-toggle-panel" class="col-toggle-panel hidden"></div>
+      <div id="registry-settings-panel" class="registry-settings-panel hidden"></div>
+      <!-- Bulk edit panel -->
+      <div id="bulk-panel" class="bulk-panel hidden">
+        <span id="bulk-count" class="bulk-count">Выбрано: 0</span>
+        <div class="bulk-actions">
+          <select id="bulk-release-select" class="bulk-select">
+            <option value="120">Релиз 1.20</option>
+            <option value="121">Релиз 1.21</option>
+            <option value="122">Релиз 1.22</option>
+            <option value="ot">Овертайм</option>
+          </select>
+          <button id="bulk-btn-release" class="btn btn-sm btn-primary">Назначить</button>
+          <div class="bulk-divider"></div>
+          <select id="bulk-scope-select" class="bulk-select">
+            <option value="Да">Да</option>
+            <option value="Нет">Нет</option>
+            <option value="Требует подтверждения">Треб. подтв.</option>
+          </select>
+          <button id="bulk-btn-scope" class="btn btn-sm btn-outline">Scope</button>
+          <div class="bulk-divider"></div>
+          <select id="bulk-priority-select" class="bulk-select">
+            <option value="high">Высокий</option>
+            <option value="medium">Средний</option>
+            <option value="low">Низкий</option>
+          </select>
+          <button id="bulk-btn-priority" class="btn btn-sm btn-outline">Приоритет</button>
+          <div class="bulk-divider"></div>
+          <input id="bulk-assignee-input" class="bulk-input" placeholder="Исполнитель…">
+          <button id="bulk-btn-assignee" class="btn btn-sm btn-outline">Назначить исп.</button>
+          <div class="bulk-divider"></div>
+          <button id="bulk-btn-done" class="btn btn-sm btn-outline">✓ Сделано</button>
+          <button id="bulk-btn-clear-release" class="btn btn-sm btn-outline">Убрать из релиза</button>
+          <button id="bulk-btn-clear-blocker" class="btn btn-sm btn-outline">Снять блокер</button>
+        </div>
+        <button id="bulk-btn-deselect" class="btn btn-sm btn-ghost bulk-deselect" title="Снять выделение">✕</button>
+      </div>
+      <div id="registry-table-wrap" class="table-scroll-wrap">
+        <div id="registry-empty" class="empty-state hidden">
+          <div class="empty-icon">📂</div>
+          <div class="empty-title">Нет данных</div>
+          <div class="empty-hint">Загрузите XLSX или CSV через кнопки в шапке</div>
+        </div>
+        <table id="registry-table" class="registry-table hidden">
+          <thead id="registry-thead"></thead>
+          <tbody id="registry-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- GANTT -->
+    <section id="section-gantt" class="app-section hidden">
+      <div class="section-header">
+        <h2>Гант по релизам</h2>
+        <div class="section-header-actions">
+          <!-- V14: removed «Со стрелками» mode toggle (B2).
+               V15: removed solo «Детальный по задачам» button — tab-toggle
+               with one tab is just visual noise. -->
+
+          <!-- V14 (B3 + B4 + B5): plan lock + edit mode controls. Visibility
+               is driven from JS (App.bindGanttPlanLock) to keep state↔DOM
+               in sync. -->
+          <span id="gantt-lock-status" class="gantt-lock-status hidden"></span>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-lock-plan" title="Зафиксировать план — после фиксации каждый перенос требует комментарий">🔒 Зафиксировать план</button>
+          <!-- V17.1 C8 — «Подсказки по визуализации» переехала из отдельной
+               строки под заголовком сюда, в строку с «Зафиксировать план».
+               Сам блок с подсказками остаётся на старом месте (#gantt-pill-legend),
+               эта кнопка переключает только его collapsed/expanded состояние. -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-tips-toggle" title="Подсказки по визуализации">Подсказки</button>
+          <!-- V17.1 C9 — История изменений Ганта: модалка со всей историей
+               операций над колодцами / пилюлями (фильтр по domain=gantt). -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-history" title="История изменений Ганта">История</button>
+          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-edit-mode" title="Включить режим редактирования — переносы временно без комментария (план остаётся зафиксированным)">✏ Режим редактирования</button>
+          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-unlock-plan" title="Снять фиксацию плана">🔓 Снять фиксацию</button>
+          <!-- V16 (gantt-roadmap #5) — Cmd+K команд / эпиков + density-toggle.
+               Cmd+K opens a Raycast-style palette for jumping to any team
+               or epic; density toggles row height between Regular and
+               Compact (Dense was discarded — would break Spine-pill 2-row
+               layout per designer review). -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-jump" title="Поиск команд / эпиков (⌘K / Ctrl+K)" style="padding:5px 9px;font-size:13px;font-family:ui-monospace,Menlo,monospace">⌘K</button>
+          <!-- V16 roadmap-2 (A4) — overview-mode zoom toggle. Default mode
+               renders pills + epics + trails; overview reduces every team
+               to a single stacked-bar row for at-a-glance distribution. -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-mode" title="Режим: Default (детальный) / Overview (одна строка на команду)" style="padding:5px 9px;font-size:13px">▦</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-density" title="Плотность строк (Regular / Compact)" style="padding:5px 9px;font-size:14px">⇕</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-expand-all" title="Свернуть все команды" style="padding:5px 9px;font-size:14px">⊟</button>
+          <button class="btn btn-sm btn-outline btn-undo-clone" id="btn-undo-gantt" title="Отменить (Ctrl+Z)" style="padding:5px 9px;font-size:16px" disabled>↺</button>
+          <button class="btn btn-sm btn-outline btn-redo-clone" id="btn-redo-gantt" title="Повторить (Ctrl+Shift+Z / Ctrl+Y)" style="padding:5px 9px;font-size:16px" disabled>↻</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-fullscreen" title="Полный экран" style="padding:5px 9px;font-size:14px">⛶</button>
+        </div>
+      </div>
+      <!-- V15 Spine 2026-04-30 — collapsible pill-anatomy legend.
+           Default collapsed (just a one-line toggle). Filled by
+           GanttView._renderPillLegend(); state persists to localStorage. -->
+      <div id="gantt-pill-legend" class="gdt-pill-legend"></div>
+      <div id="gantt-filters" class="gantt-filters"></div>
+      <div id="gantt-wrap"></div>
+      <div id="gantt-legend-extra" class="view-legend"></div>
+    </section>
+
+    <!-- V14: section-gantt2 removed (B2) -->
+
+
+    <!-- KANBAN -->
+    <section id="section-kanban" class="app-section hidden">
+      <div class="section-header">
+        <h2>Канбан по релизам</h2>
+        <div class="section-header-actions">
+          <span class="text-muted text-sm">Перетащите карточку для смены релиза</span>
+        </div>
+      </div>
+      <div id="kanban-legend" class="view-legend"></div>
+      <div id="kanban-board" class="kanban-board"></div>
+    </section>
+
+    <!-- TIMELINE -->
+    <section id="section-timeline" class="app-section hidden">
+      <div class="section-header">
+        <h2>Таймлайн релизов</h2>
+        <div class="section-header-actions">
+          <div class="btn-group">
+            <button class="btn btn-sm btn-outline active" id="timeline-mode-summary">Сводный</button>
+            <button class="btn btn-sm btn-outline" id="timeline-mode-detailed">Детальный</button>
+          </div>
+        </div>
+      </div>
+      <div id="timeline-legend-extra" class="view-legend"></div>
+      <div id="timeline-wrap"></div>
+    </section>
+
+    <!-- ПОДЛОЖКА -->
+    <section id="section-podlozhka" class="app-section hidden">
+      <div class="section-header">
+        <h2>Подложка <span class="count-badge" id="podlozhka-badge"></span></h2>
+        <div class="section-header-actions">
+          <div class="btn-group">
+            <button class="btn btn-sm btn-outline active" id="podlozhka-mode-summary">Сводное</button>
+            <button class="btn btn-sm btn-outline" id="podlozhka-mode-detailed">Детализированное</button>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label">Группировать</label>
+            <select id="podlozhka-group" class="filter-select">
+              <option value="team">По команде</option>
+              <option value="epic">По эпику</option>
+              <option value="scope">По scope</option>
+              <option value="none">Без группировки</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="podlozhka-legend" class="view-legend"></div>
+      <div id="podlozhka-wrap"></div>
+    </section>
+
+    <!-- EMPLOYEES -->
+    <section id="section-employees" class="app-section hidden">
+      <div class="section-header">
+        <h2>Сотрудники <span id="employees-count-badge" class="count-badge"></span></h2>
+        <div class="section-header-actions">
+          <button class="btn btn-primary btn-sm" id="btn-add-employee">+ Сотрудник</button>
+          <label class="btn btn-outline btn-sm">XLSX
+            <input type="file" id="input-employees-xlsx" accept=".xlsx,.xls" class="input-hidden">
+          </label>
+          <label class="btn btn-outline btn-sm">CSV
+            <input type="file" id="input-employees-csv" accept=".csv" class="input-hidden">
+          </label>
+          <button class="btn btn-ghost btn-sm" id="btn-employees-template" title="Скачать пустой XLSX-шаблон с нужными колонками">📄 Шаблон</button>
+          <button class="btn btn-danger btn-sm" id="btn-employees-delete-all" title="Удалить всех сотрудников из списка">🗑 Удалить всех</button>
+        </div>
+      </div>
+      <div id="employees-legend" class="view-legend"></div>
+      <div id="employees-summary-cards" class="kpi-grid"></div>
+      <div id="employees-table-wrap" class="data-table-wrap"></div>
+    </section>
+
+    <!-- SUMMARY -->
+    <section id="section-summary" class="app-section hidden">
+      <div class="section-header">
+        <h2>Сводная для CEO</h2>
+        <!-- V17.1 G1 — представление «Совсем красиво» удалено вместе с переключателем
+             представлений по запросу пользователя. Осталось одно представление —
+             «Краткая». В app.js bindSummaryMode также упрощена. -->
+      </div>
+      <div id="summary-legend" class="view-legend"></div>
+      <div id="summary-wrap"></div>
+    </section>
+
+    <!-- METRICS -->
+    <section id="section-metrics" class="app-section hidden">
+      <div class="section-header"><h2>Метрики</h2></div>
+      <div id="metrics-legend" class="view-legend"></div>
+      <div id="metrics-wrap"></div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section id="section-insights" class="app-section hidden">
+      <div class="section-header"><h2>Инсайты</h2></div>
+      <div id="insights-legend" class="view-legend"></div>
+      <div id="insights-wrap"></div>
+    </section>
+
+    <!-- JIRA PULSE -->
+    <!-- ACTION LAYER -->
+    <section id="section-actions" class="app-section hidden">
+      <div class="al-header">
+        <h2>Action Layer</h2>
+        <span class="al-header-sub">Каталог действий над реестром задач</span>
+      </div>
+      <div id="al-main" class="al-layout"></div>
+    </section>
+
+    <!-- ACTION LAYER MODAL -->
+    <div id="al-modal" class="modal-overlay hidden">
+      <div class="modal-dialog" style="max-width:520px">
+        <div class="modal-header">
+          <h3 class="modal-title" id="al-modal-title">Действие</h3>
+          <button class="modal-close" id="al-modal-cancel">×</button>
+        </div>
+        <div class="modal-body">
+          <p id="al-modal-desc" class="al-modal-desc"></p>
+          <div id="al-modal-params"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="al-modal-cancel2">Отмена</button>
+          <button class="btn btn-primary" id="al-modal-apply">Применить</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- DIAGNOSTICS -->
+    <section id="section-diagnostics" class="app-section hidden">
+      <div class="section-header"><h2>Диагностика</h2></div>
+      <div id="diagnostics-legend" class="view-legend"></div>
+      <div id="diagnostics-wrap"></div>
+    </section>
+
+    <!-- AI ANALYTICS CENTER -->
+    <section id="section-ai" class="app-section hidden">
+      <div id="ai-root" class="view-root"></div>
+    </section>
+
+    <!-- INTEGRATIONS -->
+    <section id="section-integrations" class="app-section hidden">
+      <div id="int-root" class="view-root"></div>
+    </section>
+
+    <!-- AI CEO -->
+    <section id="section-ai-ceo" class="app-section hidden">
+      <div id="ceo-root" class="view-root"></div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="section-history" class="app-section hidden"></section>
+
+    <!-- ERRORS -->
+    <section id="section-errors" class="app-section hidden"></section>
+
+  </div>
+</div>
+
+<!-- V17.1 A1+A2 — moved to bottom-LEFT and redesigned in Spine-pill style:
+     stroke-2 outline (sparkles "AI" glyph), neutral surface with 3px accent
+     stripe-left, mono-tabular badge for unread (future). Аria-label на русском. -->
+<button id="assistant-fab" class="assistant-fab" title="Открыть помощника" aria-label="Открыть помощника по планированию">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/>
+    <path d="M19 14l.7 1.9L21.5 17l-1.8.7L19 19.5l-.7-1.8L16.5 17l1.8-1.1L19 14z"/>
+    <path d="M5 14l.7 1.9L7.5 17l-1.8.7L5 19.5l-.7-1.8L2.5 17l1.8-1.1L5 14z"/>
+  </svg>
+</button>
+
+<!-- V17.1 A5 — англицизмы → русский ("Planning Assistant" / "current view"). -->
+<aside id="assistant-panel" class="assistant-panel hidden" aria-label="Помощник по планированию">
+  <div class="assistant-panel-header">
+    <div class="assistant-title-wrap">
+      <div class="assistant-title">Помощник по планированию</div>
+      <div class="assistant-subtitle assistant-subtitle-clickable" id="assistant-context-mode-label" title="Нажмите чтобы сменить режим контекста">Контекст: текущий вид</div>
+    </div>
+    <div class="assistant-header-actions">
+      <!-- Review mode selector -->
+      <select id="chat-review-mode-select" class="chat-review-select" title="Режим обзора">
+        <option value="">👁 Режим</option>
+        <option value="ceo">CEO</option>
+        <option value="dm">Delivery Manager</option>
+        <option value="risk">Risk Officer</option>
+        <option value="lead">Team Lead</option>
+      </select>
+      <button class="btn btn-ghost btn-xs" id="assistant-btn-settings" title="Настройки LLM">⚙</button>
+      <button class="btn btn-ghost btn-xs" id="assistant-btn-clear" title="Новый диалог (очистить историю)">✦ Новый</button>
+      <!-- V17 P3 (CHAT-7) — `payload` button hidden by default (debug-only).
+           Toggle visibility by setting `localStorage.q2_chat_debug = '1'` in
+           DevTools, then reload. Audit 2026-05 (art-director #6). -->
+      <button class="btn btn-outline btn-xs hidden" id="assistant-btn-preview" title="Показать payload (debug)">payload</button>
+      <button class="btn btn-outline btn-xs" id="assistant-btn-minimize" title="Свернуть">—</button>
+      <button class="btn btn-ghost btn-xs" id="assistant-btn-close" title="Закрыть">✕</button>
+    </div>
+  </div>
+  <div class="assistant-quick-wrap" id="assistant-quick-wrap">
+    <button class="assistant-quick-toggle" id="assistant-quick-toggle" title="Свернуть / развернуть">
+      <span class="assistant-quick-title">Быстрые вопросы</span>
+      <span class="assistant-quick-chevron">▾</span>
+    </button>
+    <div id="assistant-quick-prompts" class="assistant-quick-prompts"></div>
+  </div>
+  <!-- V17 P3 (CHAT-10) — role="log" + aria-live="polite" so screen-readers
+       announce new assistant messages. Earlier the conversation was opaque
+       to a11y users. Audit 2026-05 (designer §7). -->
+  <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite" aria-label="История диалога с ассистентом"></div>
+  <div id="assistant-error" class="assistant-error hidden"></div>
+  <div class="assistant-input-wrap">
+    <textarea id="assistant-input" class="assistant-input" rows="2" placeholder="Спроси по данным... (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+    <div class="assistant-input-footer">
+      <span id="assistant-payload-status" class="assistant-payload-status hidden"></span>
+      <div class="assistant-send-actions">
+        <button class="btn btn-outline btn-xs" id="assistant-btn-insert-context" title="Вставить JSON контекст в поле ввода">⊕ контекст</button>
+        <button class="btn btn-outline btn-xs hidden" id="assistant-btn-stop">⏹ Стоп</button>
+        <button class="btn btn-primary btn-xs" id="assistant-btn-send">↑ Отправить</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- APP SETTINGS MODAL -->
+<div id="app-settings-modal" class="modal-overlay hidden">
+  <div class="modal-box modal-box-wide">
+    <div class="modal-header">
+      <h3>Настройки</h3>
+      <button class="modal-close-btn" id="app-settings-close">✕</button>
+    </div>
+    <div class="app-settings-tabs">
+      <button class="app-settings-tab active" data-tab="interface">Интерфейс</button>
+      <button class="app-settings-tab" data-tab="integrations">Интеграции</button>
+      <button class="app-settings-tab" data-tab="llm">LLM</button>
+      <button class="app-settings-tab" data-tab="storage">Хранилище</button>
+      <button class="app-settings-tab" data-tab="debug">Debug</button>
+    </div>
+    <div class="app-settings-body">
+      <div class="app-settings-tab-content active" data-tab-content="interface">
+        <div class="app-settings-section">
+          <div class="app-settings-section-title">Вкладки меню</div>
+          <div id="app-settings-nav-toggles" class="app-settings-toggles"></div>
+        </div>
+        <div class="app-settings-section">
+          <div class="app-settings-section-title">Иконки в шапке <span class="app-settings-section-sub">— перетащите чтобы изменить порядок</span></div>
+          <div id="app-settings-topbar-order" class="app-settings-toggles"></div>
+        </div>
+        <div class="app-settings-section">
+          <div class="app-settings-section-title">Видимость блоков</div>
+          <div id="app-settings-blocks-toggles" class="app-settings-toggles"></div>
+        </div>
+      </div>
+      <div class="app-settings-tab-content hidden" data-tab-content="storage">
+        <div class="app-settings-section">
+          <div class="app-settings-section-title">Хранилище данных <span class="app-settings-tag-exp">V11 · экспериментально</span></div>
+          <div id="app-settings-storage-host"></div>
+        </div>
+      </div>
+      <div class="app-settings-tab-content hidden" data-tab-content="integrations">
+        <div class="app-settings-section" id="app-settings-integrations-host"></div>
+      </div>
+      <div class="app-settings-tab-content hidden" data-tab-content="llm">
+        <div class="app-settings-section" id="app-settings-llm-host"></div>
+      </div>
+      <div class="app-settings-tab-content hidden" data-tab-content="debug">
+        <div class="app-settings-section" id="app-settings-debug-host"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="app-settings-reset">Сбросить настройки</button>
+      <button class="btn btn-primary" id="app-settings-save">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ONBOARDING OVERLAY -->
+<div id="onboarding-overlay" class="onboarding-overlay hidden">
+  <div class="onboarding-backdrop"></div>
+  <div id="onboarding-highlight" class="onboarding-highlight"></div>
+  <div id="onboarding-tooltip" class="onboarding-tooltip">
+    <div class="onboarding-step-badge" id="onboarding-step-badge"></div>
+    <div class="onboarding-title" id="onboarding-title"></div>
+    <div class="onboarding-text" id="onboarding-text"></div>
+    <div class="onboarding-actions">
+      <button class="btn btn-ghost btn-sm" id="onboarding-skip">Завершить</button>
+      <div class="onboarding-nav">
+        <button class="btn btn-outline btn-sm" id="onboarding-prev">← Назад</button>
+        <button class="btn btn-primary btn-sm" id="onboarding-next">Далее →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="llm-settings-modal" class="modal-overlay hidden">
+  <div class="modal-box modal-box-wide llm-settings-box">
+    <div class="modal-header">
+      <h3>Настройки LLM</h3>
+      <button class="modal-close-btn" id="llm-settings-close">✕</button>
+    </div>
+    <div class="llm-settings-grid">
+      <label class="llm-field">
+        <span>API mode</span>
+        <select id="llm-api-mode" class="filter-select">
+          <option value="direct">openai direct (localhost proxy)</option>
+          <option value="proxy">node proxy (/api/llm/chat)</option>
+        </select>
+      </label>
+      <label class="llm-field">
+        <span>OpenAI base URL</span>
+        <input id="llm-api-base" class="filter-input" type="text" placeholder="http://localhost:3000/v1">
+      </label>
+      <label class="llm-field">
+        <span>Node proxy URL</span>
+        <input id="llm-proxy-url" class="filter-input" type="text" placeholder="http://127.0.0.1:8080">
+      </label>
+      <label class="llm-field">
+        <span>Модель</span>
+        <div class="llm-model-row">
+          <select id="llm-model-select" class="filter-select llm-model-select">
+            <optgroup label="GigaChat">
+              <option value="GigaChat-2">GigaChat-2</option>
+              <option value="GigaChat-2-Max">GigaChat-2-Max</option>
+              <option value="GigaChat-2-Pro">GigaChat-2-Pro</option>
+              <option value="GigaChat">GigaChat</option>
+              <option value="GigaChat-Pro">GigaChat-Pro</option>
+              <option value="GigaChat-Max">GigaChat-Max</option>
+            </optgroup>
+            <optgroup label="OpenAI">
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4-turbo">gpt-4-turbo</option>
+              <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+            </optgroup>
+            <optgroup label="Другое">
+              <option value="__custom__">Ввести вручную…</option>
+            </optgroup>
+          </select>
+          <input id="llm-model-custom" class="filter-input llm-model-custom hidden" type="text" placeholder="название модели">
+        </div>
+      </label>
+      <label class="llm-field">
+        <span>API key / Bearer token</span>
+        <input id="llm-token" class="filter-input" type="password" placeholder="Access token">
+      </label>
+      <label class="llm-field">
+        <span>Temperature</span>
+        <input id="llm-temperature" class="filter-input" type="number" min="0" max="2" step="0.1">
+      </label>
+      <label class="llm-field">
+        <span>Max tokens</span>
+        <input id="llm-max-tokens" class="filter-input" type="number" min="64" max="8192" step="1">
+      </label>
+      <label class="llm-field llm-field-wide">
+        <span>System prompt</span>
+        <textarea id="llm-system-prompt" class="assistant-input llm-textarea" rows="4"></textarea>
+      </label>
+      <label class="llm-field">
+        <span>Context mode</span>
+        <select id="llm-context-mode" class="filter-select">
+          <option value="none">none</option>
+          <option value="summary">summary only</option>
+          <option value="currentView">current view</option>
+          <option value="fullRegistry">full registry limited</option>
+          <option value="custom">custom payload</option>
+        </select>
+      </label>
+      <label class="llm-field">
+        <span>Лимит строк</span>
+        <input id="llm-row-limit" class="filter-input" type="number" min="1" max="5000" step="1">
+      </label>
+      <label class="llm-field">
+        <span>Лимит JSON payload (bytes)</span>
+        <input id="llm-payload-limit" class="filter-input" type="number" min="512" max="5000000" step="128">
+      </label>
+      <label class="llm-field llm-field-wide">
+        <span>Custom payload (JSON или текст)</span>
+        <textarea id="llm-custom-payload" class="assistant-input llm-textarea" rows="5" placeholder="{ &quot;focus&quot;: &quot;...&quot; }"></textarea>
+      </label>
+      <label class="llm-check">
+        <input id="llm-save-local" type="checkbox">
+        <span>Сохранять настройки в localStorage</span>
+      </label>
+    </div>
+    <!-- ── Editable intent-based prompts ────────────────────── -->
+    <div class="llm-prompts-section" id="llm-prompts-section">
+      <div class="llm-prompts-header">
+        <h4>🧠 Промпты по типам команд</h4>
+        <p class="llm-prompts-hint">Каждой категории чата соответствует свой <b>system prompt</b> и шаблон <b>user prompt</b>. Доступны плейсхолдеры: <code>{{message}}</code> · <code>{{filters}}</code> · <code>{{context}}</code> · <code>{{structuredSuffix}}</code> · <code>{{antiInject}}</code>.</p>
+      </div>
+      <div id="llm-prompts-list"></div>
+      <div class="llm-prompts-actions">
+        <button class="btn btn-ghost btn-sm" id="llm-prompts-reset-all" title="Вернуть все промпты к defaults">↺ Сбросить все промпты</button>
+      </div>
+    </div>
+    <div class="modal-actions llm-actions">
+      <button class="btn btn-outline" id="llm-clear-saved">Очистить сохранённые LLM settings</button>
+      <button class="btn btn-primary" id="llm-save-settings">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+  </div>
+</div>
+
+<script src="libs/xlsx.full.min.js"></script>
+<script src="modules/history.js"></script>
+<script src="modules/csv-stream-exporter.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

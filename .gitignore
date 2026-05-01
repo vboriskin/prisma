@@ -1,0 +1,61 @@
+# ============================================================
+# .gitignore — СБОФ Планирование
+# ============================================================
+# Цели:
+#   1. Не коммитить токены интеграций (jira_config.json содержит Bearer)
+#   2. Не коммитить локальные dev-артефакты (node_modules, логи)
+#   3. Не коммитить OS-мусор (.DS_Store, Thumbs.db)
+# ============================================================
+
+# ── Secrets — критично ─────────────────────────────────────
+# Содержит Jira/Bitbucket/Confluence/GigaChat tokens.
+jira_config.json
+*.pem
+*.key
+.env
+.env.*
+
+# ── Dependencies ───────────────────────────────────────────
+node_modules/
+package-lock.json.bak
+
+# ── Build / cache ──────────────────────────────────────────
+.cache/
+.parcel-cache/
+.tsbuildinfo
+*.tsbuildinfo
+dist/
+build/
+
+# ── Logs ───────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Test artefacts ─────────────────────────────────────────
+coverage/
+.nyc_output/
+/tmp/
+junit.xml
+
+# ── IDE / editor ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Local SQLite snapshots (when running with SQLite-WASM mode) ──
+*.sqlite
+*.sqlite3
+*.db
+q2_*.dump.json
+
+# ── Personal scratch ───────────────────────────────────────
+scratch/
+TODO.local.md
+NOTES.local.md

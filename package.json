@@ -1,0 +1,27 @@
+{
+  "name": "sbof-planning-v4",
+  "version": "17.0.0",
+  "private": true,
+  "description": "СБОФ Планирование v17.0 — overnight roadmap (technical audit + AI-chat redesign + new «Performance» integrations tab + Portfolio Pulse / Black Dashboard refactor + dashboard / registry / settings / topbar / filters / tour audits). See audit-2026-05-V17/MASTER_PLAN.md for the per-step report index.",
+  "scripts": {
+    "start":       "node launch.js 8080",
+    "start:3000":  "node launch.js 3000",
+    "server":      "node server.js 8080",
+    "test":          "node testRunner.js && npm run test:unit && node contractTest.js",
+    "test:unit":     "node --test --test-reporter=spec 'tests/unit/**/*.test.js'",
+    "test:contract": "node --test --test-reporter=spec 'tests/contract/**/*.test.js'",
+    "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec 'tests/unit/**/*.test.js'",
+    "test:e2e":      "node e2eTest.js",
+    "typecheck":   "tsc --noEmit -p .",
+    "lint":        "eslint . --max-warnings 215",
+    "lint:strict": "eslint .",
+    "lint:fix":    "eslint . --fix",
+    "perf:budget": "node scripts/perfBudget.js",
+    "ci":          "npm run typecheck && npm run lint && npm run test && npm run test:e2e && npm run perf:budget"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "eslint":     "^9.10.0",
+    "@eslint/js": "^9.10.0"
+  }
+}

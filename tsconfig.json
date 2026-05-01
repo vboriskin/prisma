@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    /* TypeScript runs in --checkJs mode against the JS sources. No emit, no
+       transpilation — pure type-checking. JSDoc annotations from types.js
+       are the source of truth for domain types. */
+    "target":   "ES2022",
+    "module":   "ES2022",
+    "moduleResolution": "node",
+    "allowJs":  true,
+    "checkJs":  false,
+    "noEmit":   true,
+    "lib":      ["ES2022", "DOM", "DOM.Iterable"],
+
+    /* Pragmatic settings — we want type-checking signal WITHOUT drowning
+       in violations from a codebase that hasn't been typed yet. */
+    "strict":             false,
+    "noImplicitAny":      false,
+    "strictNullChecks":   false,
+    "noImplicitThis":     false,
+    "alwaysStrict":       false,
+
+    /* Catch the bugs we actually care about: */
+    "noUnusedLocals":           false,
+    "noUnusedParameters":       false,
+    "noImplicitReturns":        true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck":             true,
+    "isolatedModules":          false
+  },
+  "include": [
+    "*.js",
+    "app/**/*.js",
+    "views/**/*.js",
+    "components/**/*.js",
+    "integrations/**/*.js",
+    "chat/**/*.js",
+    "modules/**/*.js",
+    "onboarding/**/*.js",
+    "ai/**/*.js",
+    "types.js",
+    "globals.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "libs/**",
+    "e2eTest.js",
+    "testRunner.js",
+    "contractTest.js"
+  ]
+}
