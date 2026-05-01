@@ -760,37 +760,12 @@ async function jiraBuildAreaReport(cfg, area) {
    "PROJECT/repo" for Server (single-segment entries are skipped — we can't
    infer the workspace/project).
    ─────────────────────────────────────────────────────────── */
-function _ppMakeAuthHeader(token) {
-  if (!token) return '';
-  return token.includes(':') ? 'Basic ' + Buffer.from(token).toString('base64') : 'Bearer ' + token;
-}
-function _ppKeyForAuthor(name, email) {
-  return String(name || email || '').trim().toLowerCase();
-}
-
-/**
- * V18 P6 — централизованный redact для текстов которые могут содержать
- * echo'enные токены (некоторые корп-proxy возвращают `Authorization` header
- * в response body; эти echoes не должны попадать в ErrorsLog или toast'ы).
- *
- * Применять ВЕЗДЕ где error-text от внешнего сервера всплывает в UI или logs:
- *   - integrations error paths (employeePerformance, sync, etc)
- *   - server.js outgoing-fetch error responses
- *   - LLM streaming error paths
- *
- * Ограничение: первые 200 символов оригинала, чтобы не шить туда всю выдачу
- * сервера (это часто HTML-страница или огромный stack trace).
- *
- * @param {string|unknown} text
- * @param {number} [maxLen=200]
- * @returns {string} безопасная для логов / toast'ов строка
- */
-function _ppRedactSecretsInText(text, maxLen = 200) {
-  return String(text == null ? '' : text).slice(0, maxLen)
-    .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
-    .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
-    .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
-}
+// V18.1 P10 — pure auth helpers extracted to server/integrations/authHelpers.js
+// (mirrors the frontend Utils.redactSecretsInText, V18 P6).
+const _authHelpers = require('./server/integrations/authHelpers.js');
+const _ppMakeAuthHeader      = _authHelpers.makeAuthHeader;
+const _ppKeyForAuthor        = _authHelpers.keyForAuthor;
+const _ppRedactSecretsInText = _authHelpers.redactSecretsInText;
 
 /**
  * V18 P5 — единый helper для path-cascade pattern, который раньше дублировался
@@ -1288,115 +1263,30 @@ const { buildBlackDashboard, sigmaCfgView } = createBlackDashboard({
   jiraSearchAll,
 });
 
-// ── Async job store for Чёрный дашборд ──────────────────────
-// V13 (2026-04, 6th pass): a single synchronous fetch can't survive 5+ min
+// ── Async job clusters (Black Dashboard + Portfolio Pulse) ───
+// V13 P12 BD / V18 P7 Pulse: single synchronous fetch can't survive 5+ min
 // of work — corp HTTPS proxies, browser timeouts, and OS connection idle
 // limits all kill long-lived requests. Switched to async-job pattern:
 //   • POST /start  → returns { jobId } instantly, kicks off work in bg.
 //   • GET  /status?jobId=X → returns { status, progress, result?, error? }.
-// Each request is sub-second; client polls. Server can grind for as long
-// as it needs without any single connection holding open.
-const _bdJobs = new Map();
-let _bdJobCounter = 0;
-const BD_JOB_TTL_MS = 30 * 60 * 1000;       // jobs evicted 30 min after finish
-const BD_JOB_MAX    = 50;                   // hard ceiling; oldest evicted
+//
+// V18.1 P10 — обе кластера теперь через единый factory `createJobsCluster`
+// в server/integrations/jobs.js (раньше — два почти идентичных inline-куска).
+const { createJobsCluster } = require('./server/integrations/jobs.js');
 
-function bdGCJobs() {
-  // Drop finished jobs older than TTL, plus enforce max-count cap.
-  const now = Date.now();
-  for (const [id, job] of _bdJobs) {
-    const t = job.finishedAt || job.startedAt;
-    if (now - t > BD_JOB_TTL_MS) _bdJobs.delete(id);
-  }
-  if (_bdJobs.size > BD_JOB_MAX) {
-    const entries = [..._bdJobs.entries()].sort(
-      (a, b) => (a[1].finishedAt || a[1].startedAt) - (b[1].finishedAt || b[1].startedAt)
-    );
-    const overflow = _bdJobs.size - BD_JOB_MAX;
-    for (let i = 0; i < overflow; i++) _bdJobs.delete(entries[i][0]);
-  }
-}
-
-function bdCreateJob() {
-  bdGCJobs();
-  const id = `bd-${++_bdJobCounter}-${Date.now().toString(36)}`;
-  const job = {
-    id,
-    status:     'running',          // 'running' | 'done' | 'error'
-    startedAt:  Date.now(),
-    finishedAt: null,
-    result:     null,
-    error:      null,
-    phase:      'init',             // free-form progress label
-  };
-  _bdJobs.set(id, job);
-  return job;
-}
-
-function bdGetJob(id) { return _bdJobs.get(id) || null; }
-
-/** Run buildBlackDashboard in the background and write result/error onto
- *  the job object. Never awaited from the request handler. */
+const _bdCluster = createJobsCluster({ prefix: 'bd',    ttlMs: 30 * 60 * 1000, maxCount: 50, label: 'bd' });
+function bdCreateJob() { return _bdCluster.create(); }
+function bdGetJob(id)  { return _bdCluster.get(id); }
 function bdRunJob(job, cfg) {
-  Promise.resolve()
-    .then(() => buildBlackDashboard(cfg))
-    .then(
-      (result) => {
-        job.status     = 'done';
-        job.result     = result;
-        job.finishedAt = Date.now();
-        job.phase      = 'done';
-      },
-      (err) => {
-        job.status     = 'error';
-        job.error      = err?.message || String(err);
-        job.finishedAt = Date.now();
-        job.phase      = 'error';
-        console.warn(`[bd:job ${job.id}] failed:`, job.error);
-      }
-    );
+  // BD-runner закреплён за `buildBlackDashboard(cfg)` — это специфический
+  // handler. Pulse делает иначе (передаёт runner inline через `pulseRunJob`).
+  _bdCluster.run(job, () => buildBlackDashboard(cfg));
 }
 
-/* ============================================================
-   V18 P7 — Pulse async-job pattern (mirrors blackDashboard).
-   Sync `/portfolio-pulse` POST остаётся для backward-compat и contract-тестов;
-   новый frontend идёт через POST /start + GET /status.
-   ============================================================ */
-const _pulseJobs = new Map();
-let _pulseJobCounter = 0;
-const PULSE_JOB_TTL_MS = 30 * 60 * 1000;
-const PULSE_JOB_MAX    = 20;
-
-function pulseGCJobs() {
-  const now = Date.now();
-  for (const [id, job] of _pulseJobs) {
-    const t = job.finishedAt || job.startedAt;
-    if (now - t > PULSE_JOB_TTL_MS) _pulseJobs.delete(id);
-  }
-  if (_pulseJobs.size > PULSE_JOB_MAX) {
-    const entries = [..._pulseJobs.entries()].sort(
-      (a, b) => (a[1].finishedAt || a[1].startedAt) - (b[1].finishedAt || b[1].startedAt)
-    );
-    for (let i = 0; i < _pulseJobs.size - PULSE_JOB_MAX; i++) _pulseJobs.delete(entries[i][0]);
-  }
-}
-function pulseCreateJob(payload) {
-  pulseGCJobs();
-  const id = `pulse-${++_pulseJobCounter}-${Date.now().toString(36)}`;
-  const job = { id, status: 'running', startedAt: Date.now(), finishedAt: null, result: null, error: null, phase: 'init', payload: payload || null };
-  _pulseJobs.set(id, job);
-  return job;
-}
-function pulseGetJob(id) { return _pulseJobs.get(id) || null; }
-function pulseRunJob(job, runner) {
-  Promise.resolve()
-    .then(() => runner(job))
-    .then(
-      (result) => { job.status = 'done';  job.result = result; job.finishedAt = Date.now(); job.phase = 'done'; },
-      (err)    => { job.status = 'error'; job.error = err?.message || String(err); job.finishedAt = Date.now(); job.phase = 'error';
-                    console.warn(`[pulse:job ${job.id}] failed:`, job.error); }
-    );
-}
+const _pulseCluster = createJobsCluster({ prefix: 'pulse', ttlMs: 30 * 60 * 1000, maxCount: 20, label: 'pulse' });
+function pulseCreateJob(payload) { return _pulseCluster.create(payload); }
+function pulseGetJob(id)         { return _pulseCluster.get(id); }
+function pulseRunJob(job, runner){ return _pulseCluster.run(job, runner); }
 
 /**
  * V18 P7 — выделено из inline /api/integrations/portfolio-pulse handler'а.
