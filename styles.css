@@ -91,7 +91,13 @@ a { color: var(--accent); text-decoration: none; }
   background: var(--accent);
   color: #fff; font-weight: 700; font-size: 13px; padding: 4px 8px;
   border-radius: var(--radius-sm); letter-spacing: .5px;
+  /* V18.1 — inline gantt-cascade glyph + wordmark in one accent pill.
+     Same geometry as /favicon.svg so the brand reads as a single mark
+     across browser tab + topbar. */
+  display: inline-flex; align-items: center; gap: 6px;
 }
+.topbar-logo-mark { display: block; flex: none; }
+.topbar-logo-text { display: inline-block; line-height: 1; }
 [data-theme="dark"] .topbar-logo {
   background: var(--accent);
   box-shadow: none;
