@@ -487,7 +487,15 @@ export function analysePulse(rawReports, opts = {}) {
   //        мог записать тот же email). Это покрывает ситуацию когда
   //        участник Jira не заведён в state.employees.
   //     5) Никогда не используем токены ФИО.
-  const bbAuthors = (rawReports?.bitbucket?.authors)  || {};
+  // V18 P8 — server теперь отдаёт raw `repoAuthors` + `devStatusAuthors`
+  //   отдельно. Используем merged (`authors`) как fallback для legacy
+  //   ответов, но если есть raw bucket'ы — приоритет за repoAuthors
+  //   (authoritative источник: юзер настроил BB).
+  //   В будущем UI может различать «PR прошёл через настроенный BB» vs
+  //   «PR замечен только через Jira dev-info» (это два разных уровня доверия).
+  const bbAuthors        = (rawReports?.bitbucket?.authors)          || {};
+  const bbRepoAuthors    = (rawReports?.bitbucket?.repoAuthors)      || {};
+  const bbDevStatusAuthors=(rawReports?.bitbucket?.devStatusAuthors) || {};
   const cfAuthors = (rawReports?.confluence?.authors) || {};
   const employees = Array.isArray(opts?.employees) ? opts.employees : [];
   const allowFuzzy = !!opts?.allowFuzzyAuthorMatch;
@@ -513,15 +521,40 @@ export function analysePulse(rawReports, opts = {}) {
   const _buildAuthorLookups = (authorsMap) => {
     const byEmail = new Map();
     const byKey   = new Map();      // raw lookup key (displayName / login lowercase)
-    for (const [k, v] of Object.entries(authorsMap || {})) {
+    if (!authorsMap) return { byEmail, byKey };       // V18 P8 — null/undefined safe
+    for (const [k, v] of Object.entries(authorsMap)) {
       byKey.set(String(k).toLowerCase().trim(), v);
       const em = String(v?.email || '').toLowerCase().trim();
       if (em) byEmail.set(em, v);
     }
     return { byEmail, byKey };
   };
-  const bbLookup = _buildAuthorLookups(bbAuthors);
-  const cfLookup = _buildAuthorLookups(cfAuthors);
+  // V18 P8 — раздельные lookup'ы для repo-authors и dev-status authors.
+  //   Priority: repo-walk authors (authoritative) → dev-status (supplementary)
+  //   Если raw bucket'ов нет (legacy server) — используем merged `authors`.
+  const bbRepoLookup      = _buildAuthorLookups(Object.keys(bbRepoAuthors).length      ? bbRepoAuthors      : null);
+  const bbDevStatusLookup = _buildAuthorLookups(Object.keys(bbDevStatusAuthors).length ? bbDevStatusAuthors : null);
+  const bbLookup          = _buildAuthorLookups(bbAuthors);   // legacy fallback
+  const cfLookup          = _buildAuthorLookups(cfAuthors);
+
+  // Helper: ищет автора через несколько lookup'ов в порядке приоритета.
+  // Возвращает {entry, source: 'repo'|'devStatus'|'merged'} или null.
+  const _resolveBbAuthor = (key, email) => {
+    const k = key ? String(key).toLowerCase().trim() : '';
+    const e = email ? String(email).toLowerCase().trim() : '';
+    if (Object.keys(bbRepoAuthors).length) {
+      // Repo-walk был — используем строго его, без fallback на dev-status и не на merged
+      const v = (k && bbRepoLookup.byKey.get(k)) || (e && bbRepoLookup.byEmail.get(e));
+      if (v) return { entry: v, source: 'repo' };
+      // Если в repoWalk не нашли — пробуем devStatus (как secondary)
+      const d = (k && bbDevStatusLookup.byKey.get(k)) || (e && bbDevStatusLookup.byEmail.get(e));
+      if (d) return { entry: d, source: 'devStatus' };
+      return null;
+    }
+    // Legacy server (нет raw bucket'ов) — используем merged
+    const v = (k && bbLookup.byKey.get(k)) || (e && bbLookup.byEmail.get(e));
+    return v ? { entry: v, source: 'merged' } : null;
+  };
 
   for (const p of userMap.values()) {
     // 1) Find this participant in state.employees by identity.
@@ -534,24 +567,21 @@ export function analysePulse(rawReports, opts = {}) {
     // 2) Bitbucket: prefer employee.bitbucketLogin lookup. If employee
     //    has no BB login, do NOT attribute (this is the user's complaint:
     //    «сотрудник без BB получает чужие PR»).
-    let bb = null;
+    let bbResolved = null;
     if (emp) {
-      if (emp.bitbucketLogin) {
-        bb = bbLookup.byKey.get(String(emp.bitbucketLogin).toLowerCase().trim()) || null;
-      }
-      if (!bb && emp.email) {
-        bb = bbLookup.byEmail.get(String(emp.email).toLowerCase().trim()) || null;
-      }
+      if (emp.bitbucketLogin) bbResolved = _resolveBbAuthor(emp.bitbucketLogin, '');
+      if (!bbResolved && emp.email) bbResolved = _resolveBbAuthor('', emp.email);
     } else if (p.email) {
-      // Participant not in state.employees but BB has author with same email — still safe to attribute.
-      bb = bbLookup.byEmail.get(p.email) || null;
+      bbResolved = _resolveBbAuthor('', p.email);
     }
     // Dev-only fuzzy fallback (off by default).
-    if (!bb && allowFuzzy) {
+    if (!bbResolved && allowFuzzy) {
       const labelLower = String(p.label || '').toLowerCase().trim();
-      bb = _ppFindByPartial(bbAuthors, labelLower, Object.keys(bbAuthors));
+      const bb = _ppFindByPartial(bbAuthors, labelLower, Object.keys(bbAuthors));
+      if (bb) bbResolved = { entry: bb, source: 'fuzzy' };
     }
-    if (bb) {
+    if (bbResolved) {
+      const bb = bbResolved.entry;
       p.badges.commits48h = bb.commits || 0;
       p.badges.pr48h      = bb.prs     || 0;
       p.badges.prReviews48h  = bb.reviews    || 0;
@@ -560,6 +590,9 @@ export function analysePulse(rawReports, opts = {}) {
       p.badges.prDeclined48h = bb.declined   || 0;
       p.bbItems = Array.isArray(bb.items) ? bb.items.slice() : [];
       p.bbItems.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+      // V18 P8 — provenance для UI (можно показать "PR прошёл через настроенный BB"
+      //   vs "PR замечен только через Jira dev-info"). Renderer пока не использует.
+      p.bbSource = bbResolved.source;
     }
 
     // 3) Confluence — same identity-first approach.

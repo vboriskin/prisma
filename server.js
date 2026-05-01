@@ -1490,6 +1490,15 @@ async function _runPortfolioPulse(body, cfg, tls, onPhase) {
   const dsR = await withTimeout('dev-status',
     ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues), PER_PK_TIMEOUT_MS).catch(()=>({ ok:false }));
   const devStatus = dsR && dsR.ok ? dsR.value : { authors: {}, configured: false, tried: [], scanned: 0 };
+  // V18 P8 — раздельные bucket'ы для repo-walk и dev-status authors.
+  //   repoAuthors  = authoritative из Bitbucket repo-walk (юзер настроил BB)
+  //   devStatusAuthors = supplementary из Jira dev-info panel (cross-checked
+  //     for email/login существование). Frontend (analysePulse) теперь сам
+  //     решает что показать пользователю — UI может разделить их (например,
+  //     помечать devStatus-only как "Внешние авторы PR" в карточке).
+  //   `authors` (merged) ОСТАВЛЕН для backward-compat: текущий frontend пока
+  //   читает `authors`. Когда переедет на raw repoAuthors+devStatusAuthors —
+  //   merged можно удалить.
   const _devStatusAuthorsFiltered = {};
   for (const [k, v] of Object.entries(devStatus.authors || {})) {
     const hasEmail = !!String(v?.email || '').trim();
@@ -1498,7 +1507,9 @@ async function _runPortfolioPulse(body, cfg, tls, onPhase) {
   }
   const mergedAuthors = _ppMergeAuthorMaps(bitbucketRepoWalk.authors || {}, _devStatusAuthorsFiltered);
   const bitbucket = {
-    authors:    mergedAuthors,
+    authors:           mergedAuthors,                                 // legacy — будет retired когда frontend перейдёт на raw bucket'ы
+    repoAuthors:       bitbucketRepoWalk.authors || {},               // V18 P8 — pure repo-walk (Bitbucket настроен)
+    devStatusAuthors:  _devStatusAuthorsFiltered,                     // V18 P8 — pure dev-info (через Jira), filtered
     configured: bitbucketRepoWalk.configured,
     tried:      [...(bitbucketRepoWalk.tried || []), ...(devStatus.tried || [])],
     repos:      bitbucketRepoWalk.repos || 0,
