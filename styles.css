@@ -8419,6 +8419,14 @@ body.theme-dark .ceo-scenario-desc   { color: #475569; }
 }
 .int-subtab:hover { color: var(--text-1); }
 .int-subtab-active { color: var(--accent); border-bottom-color: var(--accent); }
+/* V18.1 P1 — preview pill для «Сканнер команд 2.0». */
+.int-subtab-pill {
+  display: inline-block; margin-left: 6px;
+  font-size: 9px; font-weight: 700; letter-spacing: .6px;
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--accent); color: #fff;
+  vertical-align: 1px;
+}
 
 .pp-root { display: flex; flex-direction: column; gap: 14px; }
 
@@ -11175,4 +11183,234 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   background: rgba(255,255,255,.03);
   border-color: rgba(255,255,255,.10);
 }
+
+/* ─────────────────────────────────────────────────────────
+   TEAM SCANNER 2.0  (V18.1 P1, preview)
+   Namespace .ts2-* — НЕ пересекается с .pp-* (v1 живёт рядом).
+   Spine-pill: solid surfaces, без gradients/glow/animations,
+   mono-tabular numerals на счётчиках, 3px stripe-left для blocker.
+   ───────────────────────────────────────────────────────── */
+.ts2-mount { display: block; }
+.ts2-root  { display: flex; flex-direction: column; gap: 14px; }
+
+/* Top bar */
+.ts2-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+.ts2-topbar-title { display: flex; align-items: center; gap: 10px; }
+.ts2-h1 { font-size: 18px; font-weight: 700; color: var(--text-1); letter-spacing: -.2px; }
+.ts2-topbar-meta { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
+.ts2-meta-item { font-feature-settings: "tnum" 1; }
+.ts2-meta-sep  { opacity: .5; }
+
+/* Pills */
+.ts2-pill {
+  display: inline-block;
+  font-size: 9px; font-weight: 700; letter-spacing: .7px;
+  padding: 2px 6px; border-radius: 3px;
+  text-transform: uppercase;
+}
+.ts2-pill-preview { background: var(--accent); color: #fff; }
+.ts2-pill-muted   { background: var(--bg-2, #f1f5f9); color: var(--text-3); border: 1px solid var(--border); letter-spacing: .4px; text-transform: none; }
+
+/* Buttons */
+.ts2-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; border: 1px solid transparent;
+  transition: background .15s, color .15s, border-color .15s;
+  background: transparent; color: var(--text-2);
+}
+.ts2-btn-ghost   { color: var(--text-3); }
+.ts2-btn-ghost:hover { color: var(--text-1); background: var(--bg-2, #f1f5f9); }
+.ts2-btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.ts2-btn-primary:hover { background: var(--accent-dark, var(--accent)); }
+
+/* Team-glance — single-line summary */
+.ts2-glance {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px;
+  padding: 10px 14px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px; color: var(--text-2);
+}
+.ts2-glance-num {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-weight: 700; color: var(--text-1); font-size: 15px;
+}
+.ts2-glance-lab { color: var(--text-3); font-size: 12px; }
+.ts2-glance-sep { color: var(--text-4, #cbd5e1); }
+.ts2-glance-stuck {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px; margin-left: 2px;
+  border-left: 3px solid var(--danger, #dc2626);
+  color: var(--text-1); font-weight: 600;
+}
+
+/* Per-person rows */
+.ts2-rows {
+  display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden;
+}
+.ts2-row {
+  display: grid;
+  grid-template-columns: 16px 200px 1fr 1fr auto 16px;
+  align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .15s;
+}
+.ts2-row:last-child { border-bottom: none; }
+.ts2-row:hover { background: var(--bg-2, #f8fafc); }
+.ts2-row-expanded { background: var(--bg-2, #f8fafc); }
+.ts2-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+
+.ts2-blocker {
+  display: inline-block; width: 3px; height: 22px; border-radius: 2px;
+  background: var(--danger, #dc2626);
+}
+.ts2-blocker-spacer { display: inline-block; width: 3px; height: 22px; }
+
+.ts2-name {
+  font-size: 13px; font-weight: 600; color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.ts2-strip-wrap { display: flex; align-items: center; }
+
+/* 24h dot-density strip — 24 cells, 6×14px each */
+.ts2-strip {
+  display: inline-grid; grid-template-columns: repeat(24, 6px);
+  gap: 1px; align-items: center;
+  height: 14px;
+}
+.ts2-cell {
+  display: flex; align-items: center; justify-content: center;
+  width: 6px; height: 14px;
+}
+.ts2-dot {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--text-2);
+  display: block;
+}
+.ts2-dot-busy { background: var(--accent); }
+
+.ts2-strip-empty {
+  font-size: 11px; color: var(--text-4, #94a3b8);
+  font-style: italic; padding-left: 2px;
+}
+.ts2-strip-empty-y { color: var(--text-4, #cbd5e1); font-style: normal; }
+
+/* Counters (PR / задач / часы) */
+.ts2-counters { display: flex; gap: 12px; }
+.ts2-counter {
+  display: flex; flex-direction: column; align-items: flex-end;
+  min-width: 38px;
+}
+.ts2-counter-num {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-size: 13px; font-weight: 700; color: var(--text-1);
+  line-height: 1.1;
+}
+.ts2-counter-lab {
+  font-size: 9px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--text-4, #94a3b8); margin-top: 1px;
+}
+
+.ts2-chev { color: var(--text-4, #94a3b8); font-size: 14px; text-align: center; }
+
+/* Detail-stub (P5 будет заменено на side-panel) */
+.ts2-detail {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+}
+.ts2-detail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+.ts2-detail-title { display: flex; align-items: baseline; gap: 10px; }
+.ts2-detail-name { font-size: 15px; font-weight: 700; color: var(--text-1); }
+.ts2-detail-stub-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 6px;
+}
+.ts2-detail-stub-text { font-size: 13px; color: var(--text-2); line-height: 1.45; }
+.ts2-recent {
+  list-style: none; padding: 8px 0 0; margin: 6px 0 0; border-top: 1px dashed var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ts2-recent-li {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12px; color: var(--text-2); line-height: 1.4;
+}
+.ts2-recent-at {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  font-size: 11px; color: var(--text-4, #94a3b8); min-width: 84px;
+}
+.ts2-recent-text { color: var(--text-3); }
+
+/* Skeleton */
+.ts2-skeleton {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+}
+.ts2-skel-line {
+  height: 14px; border-radius: 4px;
+  background: linear-gradient(90deg, var(--bg-2, #f1f5f9), var(--border) 40%, var(--bg-2, #f1f5f9));
+  background-size: 200% 100%;
+  animation: ts2-skel-shimmer 1.4s ease-in-out infinite;
+}
+.ts2-skel-line-lg { height: 20px; width: 40%; }
+@keyframes ts2-skel-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.ts2-skel-status {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 4px; font-size: 12px; color: var(--text-3);
+}
+
+/* Empty / error */
+.ts2-empty-state, .ts2-error {
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 24px; text-align: center;
+}
+.ts2-empty-title, .ts2-error-title {
+  font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 6px;
+}
+.ts2-empty-text, .ts2-error-text {
+  font-size: 13px; color: var(--text-3); line-height: 1.5;
+  max-width: 520px; margin: 0 auto;
+}
+.ts2-error { border-left: 3px solid var(--danger, #dc2626); text-align: left; }
+.ts2-error #ts2-retry-btn { margin-top: 10px; }
+
+.ts2-empty {
+  padding: 24px; color: var(--text-3); font-size: 13px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+}
+
+/* Dark-theme overrides — большинство уже через токены, точечно. */
+body.theme-dark .ts2-row:hover,
+body.theme-dark .ts2-row-expanded { background: rgba(99,102,241,.06); }
+body.theme-dark .ts2-pill-muted { background: rgba(255,255,255,.06); }
+
+/* Responsive: на узких экранах прячем yesterday-strip и часы. */
+@media (max-width: 980px) {
+  .ts2-row { grid-template-columns: 16px 160px 1fr auto 16px; }
+  .ts2-strip-wrap-yest { display: none; }
+}
+
 

@@ -16,6 +16,7 @@ import {
   renderSettingsModal,
 } from '../integrations/integrationsRenderer.js';
 import { PortfolioPulse } from '../integrations/portfolioPulse.js';
+import { TeamScanner2 } from '../integrations/teamScanner2.js';
 import { BlackDashboard } from '../integrations/blackDashboard.js';
 // V17 P4 — new sub-tab «Производительность сотрудников».
 import { EmployeePerformance } from '../integrations/employeePerformance.js';
@@ -411,12 +412,14 @@ export const IntegrationsView = {
   _root: null,
 
   // 'pulse' is the default — Portfolio Pulse is now the first sub-tab.
-  _activeSubtab: 'pulse',  // 'pulse' | 'overview' | 'black'
+  _activeSubtab: 'pulse',  // 'pulse' | 'scanner2' | 'black' | 'perf' | 'overview'
 
   // Pulse data is cached after first load. Subsequent tab switches restore
   // the cached UI without refetching. The user explicitly refreshes via the
   // "↻ Обновить данные" button in the Pulse header.
   _pulseLoaded: false,
+  // V18.1 P1 — TeamScanner 2.0 (preview) cache flag, mirror of _pulseLoaded.
+  _scanner2Loaded: false,
   // BlackDashboard caches its model internally — we just track whether the
   // user has explicitly triggered a load yet (vs first-open of the sub-tab).
 
@@ -433,15 +436,19 @@ export const IntegrationsView = {
     // V17 P4 — added «Производительность сотрудников» sub-tab.
     const subtabsHtml = `
       <div class="int-subtabs">
-        <button class="int-subtab ${this._activeSubtab==='pulse'?'int-subtab-active':''}"   data-subtab="pulse">📡 Сканнер команд</button>
-        <button class="int-subtab ${this._activeSubtab==='black'?'int-subtab-active':''}"   data-subtab="black">⚫ Чёрный дашборд</button>
-        <button class="int-subtab ${this._activeSubtab==='perf'?'int-subtab-active':''}"    data-subtab="perf">👥 Производительность сотрудников</button>
+        <button class="int-subtab ${this._activeSubtab==='pulse'?'int-subtab-active':''}"    data-subtab="pulse">📡 Сканнер команд</button>
+        <button class="int-subtab ${this._activeSubtab==='scanner2'?'int-subtab-active':''}" data-subtab="scanner2">Сканнер команд 2.0 <span class="int-subtab-pill">v2</span></button>
+        <button class="int-subtab ${this._activeSubtab==='black'?'int-subtab-active':''}"    data-subtab="black">⚫ Чёрный дашборд</button>
+        <button class="int-subtab ${this._activeSubtab==='perf'?'int-subtab-active':''}"     data-subtab="perf">👥 Производительность сотрудников</button>
         <button class="int-subtab ${this._activeSubtab==='overview'?'int-subtab-active':''}" data-subtab="overview">Сводная</button>
       </div>`;
 
     let bodyHtml;
     if (this._activeSubtab === 'pulse') {
       bodyHtml = `<div id="pp-root" class="pp-root"></div>`;
+    } else if (this._activeSubtab === 'scanner2') {
+      // V18.1 P1 — TeamScanner 2.0 preview tab.
+      bodyHtml = `<div id="ts2-root" class="ts2-mount"></div>`;
     } else if (this._activeSubtab === 'black') {
       bodyHtml = `<div id="bd-root" class="bd-root"></div>`;
     } else if (this._activeSubtab === 'perf') {
@@ -489,6 +496,26 @@ export const IntegrationsView = {
           this._pulseLoaded = true;
         }
       }
+    } else if (this._activeSubtab === 'scanner2') {
+      // V18.1 P1 — TeamScanner 2.0 mount. Mirror of pulse handoff:
+      // orchestrator сам решает какое состояние рисовать (cancelled /
+      // errored / loading / cached / cold) — render() идемпотентен.
+      const ts2Root = document.getElementById('ts2-root');
+      if (ts2Root) {
+        TeamScanner2._container = ts2Root;
+        if (TeamScanner2.isLoading?.()) {
+          TeamScanner2._showLoader?.();
+        } else if (TeamScanner2._cancelled) {
+          TeamScanner2._paintCancelled?.();
+        } else if (TeamScanner2._errorMsg) {
+          TeamScanner2._paintError?.(TeamScanner2._errorMsg);
+        } else if (this._scanner2Loaded && TeamScanner2._model) {
+          TeamScanner2._renderFull();
+        } else {
+          TeamScanner2.render(ts2Root);
+          this._scanner2Loaded = true;
+        }
+      }
     } else if (this._activeSubtab === 'black') {
       // BlackDashboard mirrors the Pulse-style container handoff. The orchestrator
       // chooses the right state itself (not-configured / not-loaded / loading /
@@ -509,6 +536,16 @@ export const IntegrationsView = {
     if (this._activeSubtab === 'pulse') {
       const ppRoot = document.getElementById('pp-root');
       if (ppRoot) PortfolioPulse.refresh();
+    }
+  },
+
+  /* V18.1 P1 — TeamScanner 2.0 refresh, mirror of refreshPulse. Invoked from
+     the «↻ Обновить» кнопки внутри ts2-topbar. */
+  refreshScanner2() {
+    this._scanner2Loaded = true;
+    if (this._activeSubtab === 'scanner2') {
+      const ts2Root = document.getElementById('ts2-root');
+      if (ts2Root) TeamScanner2.refresh();
     }
   },
 
