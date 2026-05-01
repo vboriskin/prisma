@@ -1730,10 +1730,16 @@ async function handleJiraApi(req, res, pathname) {
 // INTEGRATIONS API — Jira issue, Bitbucket PR, Confluence search
 // ============================================================
 async function handleIntegrationsApi(req, res, pathname) {
-  // V13 (6th pass): the black-dashboard /status endpoint is GET-only by
-  // design — it's a poll endpoint, idempotent, with the jobId in the
-  // query string. Everything else stays POST-only as before.
-  const isStatusPoll = pathname === '/api/integrations/black-dashboard/status';
+  // V13 (6th pass): /status endpoints are GET-only by design — они
+  // poll-endpoints, идемпотентные, jobId в query-string. Everything
+  // else stays POST-only as before.
+  // V18.1 fix — добавлен '/portfolio-pulse/status' (V18 P7 ввёл async-job
+  // pattern, но забыл обновить этот guard → клиент получал 405 на GET).
+  const STATUS_POLL_PATHS = new Set([
+    '/api/integrations/black-dashboard/status',
+    '/api/integrations/portfolio-pulse/status',
+  ]);
+  const isStatusPoll = STATUS_POLL_PATHS.has(pathname);
   if (isStatusPoll) {
     if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed (GET required)' }); return; }
   } else {

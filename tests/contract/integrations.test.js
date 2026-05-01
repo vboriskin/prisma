@@ -125,6 +125,27 @@ describe('Contract tests — /api/integrations + Portfolio Pulse', () => {
     assert.ok(data.jira?.serverInfo, 'jira section dropped despite bb/cf failures');
   });
 
+  // V18.1 regression guard — V18 P7 ввёл async-job pattern для Pulse
+  // (POST /start + GET /status), но забыл обновить method-guard в
+  // handleIntegrationsApi: пути не из allow-list получали 405. Этот
+  // тест ловит подобные регрессии впредь — если кто-то добавит новый
+  // /status endpoint, /portfolio-pulse/start + /status должен по-
+  // прежнему работать через GET, а не отбиваться 405-кой.
+  test('portfolio-pulse async: POST /start → GET /status (нет 405)', async () => {
+    const startResp = await req('POST', '/api/integrations/portfolio-pulse/start', { projectKeys: ['TEST'] });
+    assert.equal(startResp.status, 200, '/start expected 200, got ' + startResp.status + ' body=' + startResp.body);
+    const startData = j(startResp.body);
+    assert.ok(startData.jobId, '/start did not return jobId');
+    // Самое важное: GET /status НЕ должен возвращать 405. Может быть 200
+    // (running/done) или 404 (если jobId истёк), но never 405.
+    const statusResp = await req('GET', `/api/integrations/portfolio-pulse/status?jobId=${encodeURIComponent(startData.jobId)}`);
+    assert.notEqual(statusResp.status, 405, 'GET /status вернул 405 — method-guard regression (см. V18.1 fix)');
+    assert.equal(statusResp.status, 200, '/status expected 200, got ' + statusResp.status + ' body=' + statusResp.body);
+    const statusData = j(statusResp.body);
+    assert.equal(statusData.jobId, startData.jobId, 'jobId mismatch');
+    assert.ok(['running','done','error'].includes(statusData.status), 'unknown status: ' + statusData.status);
+  });
+
   test('tech-info: forceRefresh bypasses 10-min cache', async () => {
     // Prime the cache
     await req('POST', '/api/integrations/tech-info', { source: 'all' });
