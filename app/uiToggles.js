@@ -60,7 +60,11 @@ export const SimMode = {
  */
 export const SidebarUI = {
   init() {
-    const btn = document.getElementById('sidebar-toggle');
+    // V18.1 — toggle moved from topbar hamburger (#sidebar-toggle) to
+    // sidebar footer chevron (#sidebar-collapse). Old id kept as fallback
+    // for any cached HTML still in the wild.
+    const btn = document.getElementById('sidebar-collapse')
+             || document.getElementById('sidebar-toggle');
     if (btn) btn.addEventListener('click', () => SidebarUI.toggle());
     if (state.sidebarCollapsed) SidebarUI.apply();
   },

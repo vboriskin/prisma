@@ -109,19 +109,24 @@ a { color: var(--accent); text-decoration: none; }
 }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 
-/* Sidebar toggle (hamburger) */
-.sidebar-toggle-btn {
-  width: 36px; height: 36px; border-radius: var(--radius-sm);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
-  cursor: pointer; background: transparent; border: none; padding: 6px;
-  transition: background .15s;
+/* V18.1 — Sidebar collapse-toggle. Hamburger из topbar убран, эта кнопка
+   живёт в футере #sidebar (margin-top:auto толкает её вниз). Иконка —
+   double-chevron, поворачивается на 180° в .collapsed → один glyph
+   читается как «<<» (свернуть) и как «>>» (развернуть). */
+.sidebar-collapse-btn {
+  margin: auto -8px 0;          /* push to bottom + extend to sidebar edges (negate sidebar padding) */
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: flex-end;
+  background: transparent; border: none;
+  border-top: 1px solid var(--border);
+  color: var(--text-3); cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
 }
-.sidebar-toggle-btn:hover { background: var(--border-light); }
-.sidebar-toggle-btn span {
-  display: block; width: 18px; height: 2px;
-  background: var(--text-3); border-radius: 2px;
-  transition: transform .2s, opacity .2s, width .2s;
-}
+.sidebar-collapse-btn:hover { color: var(--text-1); background: var(--border-light); }
+.sidebar-collapse-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.sidebar-collapse-icon { transition: transform .22s cubic-bezier(.4,0,.2,1); }
+#sidebar.collapsed .sidebar-collapse-btn { justify-content: center; padding-left: 8px; padding-right: 8px; }
+#sidebar.collapsed .sidebar-collapse-icon { transform: rotate(180deg); }
 
 /* ============================================================
    BUTTONS
@@ -11001,7 +11006,7 @@ body.theme-dark .errlog-badge-info  { background: #172554; color: #93c5fd; }
     color: #000 !important;
   }
   /* Hide everything that's not the gantt itself. */
-  #topbar, #app-sidebar, .sidebar-toggle-btn,
+  #topbar, #app-sidebar, .sidebar-collapse-btn,
   #section-header, .section-header-actions,
   #gantt-pill-legend,
   #gantt-filters,

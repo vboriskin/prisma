@@ -324,9 +324,6 @@
 
 <header id="topbar">
   <div class="topbar-left">
-    <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Свернуть / развернуть меню">
-      <span></span><span></span><span></span>
-    </button>
     <div class="topbar-brand" id="topbar-brand" role="button" tabindex="0" title="На главную (Дашборд)">
       <span class="topbar-logo">
         <svg class="topbar-logo-mark" width="14" height="14" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
@@ -511,6 +508,19 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span class="nav-label">Ошибки</span>
       <span class="nav-badge nav-badge-err hidden" id="nav-errors-badge"></span>
+    </button>
+    <!-- V18.1 — sidebar collapse-toggle moved out of topbar (hamburger removed)
+         and into the sidebar footer as a double-chevron. Icon rotates 180°
+         in collapsed state via CSS so the same glyph reads as «<<» when
+         expanded (action: collapse) and «>>» when collapsed (action: expand). -->
+    <button id="sidebar-collapse" class="sidebar-collapse-btn" type="button"
+            title="Свернуть / развернуть меню" aria-label="Свернуть / развернуть меню">
+      <svg class="sidebar-collapse-icon" width="14" height="14" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2.25"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <polyline points="13 6 7 12 13 18"/>
+        <polyline points="19 6 13 12 19 18"/>
+      </svg>
     </button>
   </nav>
 
