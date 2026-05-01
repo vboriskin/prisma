@@ -24,6 +24,7 @@ import { state } from '../state.js';
 import { loadSettingsRaw } from './integrationsStore.js';
 import { fetchPulseData } from './portfolioPulseApi.js';
 import { analysePulse } from './portfolioPulseModel.js';
+import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderDetailStub,
@@ -125,7 +126,12 @@ export const TeamScanner2 = {
         employees: state.employees || [],
       });
       if (reqId !== this._reqId) return;
-      this._model = analysePulse(raw, { staleDays, employees: state.employees || [] });
+      // V18.1 P3 — после стандартного анализа применяем v2.0-специфический
+      // enrichment: heatmap[3][24], contextSwitches, timeline72h, blockers
+      // (с server-local-TZ часами и единым 24h dwell-threshold). v1 НЕ
+      // запускает enrichment — нулевой impact для PortfolioPulse.
+      const baseModel = analysePulse(raw, { staleDays, employees: state.employees || [] });
+      this._model = enrichForScanner2(baseModel, raw, { dwellHours: 24 });
       this._cancelled = false;
       this._errorMsg  = '';
       this._renderFull();

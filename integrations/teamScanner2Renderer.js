@@ -81,13 +81,20 @@ function emptyDayLanguage(p, day) {
   return 'Нет следа в Jira / BB / CF';
 }
 
+/** P3 helper: единый «stuck-list» для участника — blockers (если P3
+    enrichment запущен) ИЛИ stale (P1/P2 fallback). Это позволяет
+    classifier'у работать одинаково для enriched и non-enriched model. */
+function stuckListOf(p) {
+  if (Array.isArray(p?.blockers) && p.blockers.length) return p.blockers;
+  return p?.stale || [];
+}
+
 function statusOfPerson(p) {
   // V18.1 P1 эвристика для row-level blocker-индикатора `▌` слева.
-  // Группа из P2 (см. classifyPerson) даёт КАТЕГОРИЮ, эта функция —
-  // более точечный per-row маркер «есть stale issues + 0 today».
-  const today  = (p.timelineToday || []).length;
-  const stale  = (p.stale || []).length;
-  if (stale > 0 && today === 0) return 'blocked';
+  // P3: вместо stale используем blockers если они посчитаны (точнее).
+  const today = (p?.timelineToday || []).length;
+  const stuck = stuckListOf(p).length;
+  if (stuck > 0 && today === 0) return 'blocked';
   return 'normal';
 }
 
@@ -117,19 +124,21 @@ export function classifyPerson(p) {
   const today = (p?.timelineToday    || []).length;
   const yest  = (p?.timelineYesterday || []).length;
   const wip   = (p?.issuesNow         || []).length;
-  const stale = (p?.stale             || []).length;
+  // V18.1 P3 — stuck-сигнал теперь приходит из blockers (precise dwell-time)
+  // если P3 enrichment запущен. Иначе fallback на stale (P1/P2 broad signal).
+  const stuck = stuckListOf(p).length;
   const prs48 = p?.badges?.pr48h      || 0;
   const com48 = p?.badges?.commits48h || 0;
 
   // Idle: совсем нет signal'ов. Сворачиваемая группа.
-  if (today === 0 && yest === 0 && wip === 0 && stale === 0 && prs48 === 0 && com48 === 0) {
+  if (today === 0 && yest === 0 && wip === 0 && stuck === 0 && prs48 === 0 && com48 === 0) {
     return 'idle';
   }
-  // Stop: blocker без движения.
-  if (stale > 0 && today === 0) return 'stop';
+  // Stop: stuck без движения.
+  if (stuck > 0 && today === 0) return 'stop';
   // Watch: триггеры.
   if (wip >= 3) return 'watch';
-  if (stale > 0 && today > 0) return 'watch';
+  if (stuck > 0 && today > 0) return 'watch';
   if (today === 0 && yest > 0) return 'watch';
   // Moving: остальное (есть today, без флагов).
   return 'moving';
@@ -274,9 +283,25 @@ function renderRow(p, isExpanded) {
     : `<span class="ts2-strip-empty ts2-strip-empty-y">—</span>`;
 
   const prsCount    = (p.badges?.pr48h || 0);
-  const tasksTouchN = new Set([...(p.timelineToday || []), ...(p.timelineYesterday || [])]
-    .map(e => e?.issue?.key).filter(Boolean)).size;
+  // V18.1 P3 — distinct issue keys из enrichment вместо ручного Set'а.
+  // Fallback на P1-логику если enrichment не запущен (defensive).
+  const tasksTouchN = (p.contextSwitches?.distinctIssueKeys ?? new Set([
+    ...(p.timelineToday || []),
+    ...(p.timelineYesterday || []),
+  ].map(e => e?.issue?.key).filter(Boolean)).size);
   const hoursToday  = fmtHours(p.loggedTodaySec || 0);
+  // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
+  const switches = p.contextSwitches?.switchEvents?.length || 0;
+  const maxDwell = (p.blockers && p.blockers[0]?.dwellHours) || 0;
+  const switchBadge = switches >= 3
+    ? `<span class="ts2-badge ts2-badge-switch" title="Переключений между задачами за 72ч (gap < 30 мин)">↻${switches}</span>`
+    : '';
+  const dwellBadge = maxDwell >= 24
+    ? `<span class="ts2-badge ts2-badge-dwell" title="Максимальный dwell-time блокера (часов в текущем статусе)">▌${maxDwell}ч</span>`
+    : '';
+  const badges = (switchBadge || dwellBadge)
+    ? `<span class="ts2-row-badges">${dwellBadge}${switchBadge}</span>`
+    : `<span class="ts2-row-badges-spacer"></span>`;
 
   return `
     <div class="ts2-row ${isExpanded ? 'ts2-row-expanded' : ''}" data-key="${esc(p.key)}" tabindex="0" role="button" aria-expanded="${isExpanded}">
@@ -284,9 +309,10 @@ function renderRow(p, isExpanded) {
       <span class="ts2-name" title="${esc(p.label)}${p.email ? ' · ' + esc(p.email) : ''}">${esc(p.label || '—')}</span>
       <span class="ts2-strip-wrap ts2-strip-wrap-today">${todayBlock}</span>
       <span class="ts2-strip-wrap ts2-strip-wrap-yest">${yestBlock}</span>
+      ${badges}
       <span class="ts2-counters">
         <span class="ts2-counter" title="PR за 48ч"><span class="ts2-counter-num">${prsCount}</span><span class="ts2-counter-lab">PR</span></span>
-        <span class="ts2-counter" title="Задач затронуто за 48ч"><span class="ts2-counter-num">${tasksTouchN}</span><span class="ts2-counter-lab">задач</span></span>
+        <span class="ts2-counter" title="Задач затронуто за 72ч"><span class="ts2-counter-num">${tasksTouchN}</span><span class="ts2-counter-lab">задач</span></span>
         <span class="ts2-counter" title="Залогировано сегодня (часов)"><span class="ts2-counter-num">${hoursToday}</span><span class="ts2-counter-lab">ч</span></span>
       </span>
       <span class="ts2-chev">${isExpanded ? '▾' : '›'}</span>
@@ -302,16 +328,43 @@ export function renderDetailStub(model, key) {
   const tToday = (p.timelineToday || []).length;
   const tYest  = (p.timelineYesterday || []).length;
   const tPrev  = (p.timelinePrev || []).length;
-  // События последних 3 событий — показать как teaser для будущей панели.
-  const recent = (p.timelineToday || [])
-    .concat(p.timelineYesterday || [])
-    .slice(0, 5)
-    .map(e => {
-      const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
-      const issue = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
-      const text  = esc(e.text || e.kind || '');
-      return `<li class="ts2-recent-li"><span class="ts2-recent-at">${esc(at)}</span> ${issue} <span class="ts2-recent-text">${text}</span></li>`;
-    }).join('');
+  // V18.1 P3 — Используем enriched timeline72h если есть, иначе fallback.
+  const tl = (p.timeline72h && p.timeline72h.length) ? p.timeline72h : []
+    .concat(p.timelineToday || [])
+    .concat(p.timelineYesterday || []);
+  const recent = tl.slice(0, 6).map(e => {
+    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+    const issue = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
+    const text  = esc(e.text || e.kind || '');
+    return `<li class="ts2-recent-li"><span class="ts2-recent-at">${esc(at)}</span> ${issue} <span class="ts2-recent-text">${text}</span></li>`;
+  }).join('');
+
+  // V18.1 P3 — surface новые сигналы в текстовом виде (визуальный side-panel
+  // с heatmap/sparkline — P5).
+  const cs = p.contextSwitches || { distinctIssueKeys: 0, switchEvents: [], switchScore: 0 };
+  const blockers = Array.isArray(p.blockers) ? p.blockers : [];
+  const heat = p.heatmap || { peakHour: -1, peakCount: 0, quietHours: [] };
+
+  const blockersHtml = blockers.length
+    ? `<ul class="ts2-blockers-list">
+        ${blockers.slice(0, 5).map(b => `
+          <li class="ts2-blockers-li">
+            <span class="ts2-blockers-stripe"></span>
+            <span class="ts2-blockers-key">${esc(b.key)}</span>
+            <span class="ts2-blockers-status">${esc(b.status)}</span>
+            <span class="ts2-blockers-dwell">${b.dwellHours}ч</span>
+            <span class="ts2-blockers-summary">${esc(b.summary || '').slice(0, 80)}</span>
+          </li>`).join('')}
+       </ul>`
+    : `<div class="ts2-detail-stub-text">Нет blocker'ов с dwell-time ≥ 24ч.</div>`;
+
+  const peakLine = heat.peakHour >= 0 && heat.peakCount > 0
+    ? `пик активности — <strong>${String(heat.peakHour).padStart(2, '0')}:00</strong> (${heat.peakCount} событий за 72ч)`
+    : 'пиковая активность не выявлена';
+  const switchLine = cs.switchEvents.length > 0
+    ? `${cs.switchEvents.length} переключений (gap < 30 мин), ${cs.distinctIssueKeys} разных задач`
+    : `${cs.distinctIssueKeys} разных задач, без частых переключений`;
+
   return `
     <div class="ts2-detail">
       <div class="ts2-detail-head">
@@ -321,14 +374,27 @@ export function renderDetailStub(model, key) {
         </div>
         <button class="ts2-btn ts2-btn-ghost" id="ts2-detail-close" type="button">закрыть</button>
       </div>
-      <div class="ts2-detail-stub">
-        <div class="ts2-detail-stub-title">72-часовая детализация — появится в P5</div>
-        <div class="ts2-detail-stub-text">
-          В будущей фазе здесь будет hourly heatmap 72×4 (Jira / BB / CF / Zephyr),
-          sparkline загрузки в часах, фильтрованная лента событий и blockers-shelf
-          с dwell-time. Пока показываем последние 5 событий как teaser:
-        </div>
-        ${recent ? `<ul class="ts2-recent">${recent}</ul>` : '<div class="ts2-detail-stub-text">Нет событий за окно «сегодня/вчера».</div>'}
+
+      <div class="ts2-detail-grid">
+        <section class="ts2-detail-section">
+          <div class="ts2-detail-section-title">Сигналы 72ч</div>
+          <div class="ts2-detail-stub-text">${peakLine}</div>
+          <div class="ts2-detail-stub-text">${switchLine}</div>
+        </section>
+
+        <section class="ts2-detail-section">
+          <div class="ts2-detail-section-title">Blocker'ы (dwell ≥ 24ч)</div>
+          ${blockersHtml}
+        </section>
+
+        <section class="ts2-detail-section ts2-detail-section-wide">
+          <div class="ts2-detail-section-title">Последние события</div>
+          ${recent ? `<ul class="ts2-recent">${recent}</ul>` : '<div class="ts2-detail-stub-text">Нет событий за окно 72ч.</div>'}
+        </section>
+      </div>
+
+      <div class="ts2-detail-stub-footer">
+        Полный 72-часовой side-panel с heatmap 72×4, sparkline и фильтрами — в P5.
       </div>
     </div>
   `;
