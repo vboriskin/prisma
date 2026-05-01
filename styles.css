@@ -114,7 +114,8 @@ a { color: var(--accent); text-decoration: none; }
    double-chevron, поворачивается на 180° в .collapsed → один glyph
    читается как «<<» (свернуть) и как «>>» (развернуть). */
 .sidebar-collapse-btn {
-  margin: auto -8px 0;          /* push to bottom + extend to sidebar edges (negate sidebar padding) */
+  flex: 0 0 auto;                       /* never shrinks, sits below .sidebar-nav */
+  margin: 8px -8px 0;                   /* extend horizontally to sidebar edges (negate 8px padding) */
   padding: 10px 14px;
   display: flex; align-items: center; justify-content: flex-end;
   background: transparent; border: none;
@@ -172,11 +173,18 @@ a { color: var(--accent); text-decoration: none; }
   width: var(--sidebar-w);
   height: calc(100vh - var(--topbar-h));
   background: var(--card); border-right: 1px solid var(--border);
-  padding: 12px 8px; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 8px; display: flex; flex-direction: column;
   overflow: hidden; z-index: 90;
   transition: width .22s cubic-bezier(.4,0,.2,1);
 }
 #sidebar.collapsed { width: var(--sidebar-w-collapsed); }
+/* V18.1 — inner scrollable nav container takes all remaining space; the
+   collapse-button sits below it as a sibling, no auto-margin needed. */
+.sidebar-nav {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto; overflow-x: hidden;
+}
 
 .nav-item {
   display: flex; align-items: center; gap: 10px;
