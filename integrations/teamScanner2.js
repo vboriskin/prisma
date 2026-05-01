@@ -22,7 +22,7 @@
 
 import { state } from '../state.js';
 import { loadSettingsRaw } from './integrationsStore.js';
-import { fetchPulseData } from './portfolioPulseApi.js';
+import { fetchPulseData, fetchEmployeeDetail } from './portfolioPulseApi.js';
 import { analysePulse } from './portfolioPulseModel.js';
 import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
@@ -45,6 +45,14 @@ export const TeamScanner2 = {
   // P1 detail-panel: которая строка раскрыта (key участника) — заглушка
   // под будущий 72h side-panel из P5.
   _expandedKey: '',
+  // V18.1 P4 — captured jobId (из callback fetchPulseData → onJobId)
+  // используется для lazy server-side drill-down. Истекает через
+  // 30 мин по TTL `_pulseJobs` cluster'а на сервере.
+  _jobId: '',
+  // Per-employee server-fetched detail cache. Ключ — employeeKey.
+  // P4 опциональный: сейчас НЕ заменяет local enrichment, добавлен для
+  // P5+ side-panel (где может потребоваться refresh с другим dwellHours).
+  _detailCache: new Map(),
 
   isLoading() { return this._loading; },
 
@@ -74,7 +82,31 @@ export const TeamScanner2 = {
     this._errorMsg  = '';
     this._model     = null;
     this._expandedKey = '';
+    this._jobId     = '';
+    this._detailCache.clear();
     if (this._container) await this._fetchAndRender();
+  },
+
+  /**
+   * V18.1 P4 — lazy fetch per-employee detail с сервера. Возвращает
+   * server-enriched payload (или throws). Cache hit = no network.
+   * Используется P5+ side-panel'ом, в P4 не вызывается из UI.
+   */
+  async fetchDetail(employeeKey, opts = {}) {
+    if (!employeeKey) throw new Error('employeeKey required');
+    const cacheKey = `${employeeKey}|${opts.dwellHours || 24}`;
+    if (!opts.bypassCache && this._detailCache.has(cacheKey)) {
+      return this._detailCache.get(cacheKey);
+    }
+    if (!this._jobId) throw new Error('No jobId — fresh pulse не запускался в этой сессии');
+    const detail = await fetchEmployeeDetail({
+      jobId:       this._jobId,
+      employeeKey,
+      dwellHours:  opts.dwellHours,
+      timeoutMs:   opts.timeoutMs || 30000,
+    });
+    this._detailCache.set(cacheKey, detail);
+    return detail;
   },
 
   /* ── Sticky-state painters ─────────────────────────── */
@@ -124,6 +156,10 @@ export const TeamScanner2 = {
         signal: this._abort.signal,
         timeoutMs: 600000,
         employees: state.employees || [],
+        // V18.1 P4 — capture jobId для последующего drill-down.
+        // sync-fallback не передаст jobId → drill-down будет недоступен
+        // (graceful: TeamScanner2.fetchDetail() throws «No jobId»).
+        onJobId: (id) => { this._jobId = id; this._detailCache.clear(); },
       });
       if (reqId !== this._reqId) return;
       // V18.1 P3 — после стандартного анализа применяем v2.0-специфический

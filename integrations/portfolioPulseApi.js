@@ -16,10 +16,11 @@
 
 const START_EP   = '/api/integrations/portfolio-pulse/start';
 const STATUS_EP  = '/api/integrations/portfolio-pulse/status';
+const DETAIL_EP  = '/api/integrations/portfolio-pulse/employee-detail';
 const SYNC_EP    = '/api/integrations/portfolio-pulse';
 const POLL_INTERVAL_MS = 2000;     // Black-Dashboard tested with 2s — same here
 
-export async function fetchPulseData({ projectKeys, signal, timeoutMs = 600000, employees, forceSync = false, onPhase } = {}) {
+export async function fetchPulseData({ projectKeys, signal, timeoutMs = 600000, employees, forceSync = false, onPhase, onJobId } = {}) {
   // V17.2 I2c — отправляем сокращённый identity-payload сотрудников чтобы
   //   сервер мог построить per-employee CQL `contributor in (...)`.
   //   Шлём ТОЛЬКО identity-поля (без ot-days/comments) — payload компактный.
@@ -73,6 +74,12 @@ export async function fetchPulseData({ projectKeys, signal, timeoutMs = 600000, 
     if (!startResp.ok) throw new Error(startData.error || `HTTP ${startResp.status}`);
     const jobId = startData.jobId;
     if (!jobId) throw new Error('Server did not return jobId');
+    // V18.1 P4 — notify caller of jobId so v2.0 Сканнер может позже
+    // запросить /employee-detail для drill-down. v1 не передаёт onJobId
+    // → callback no-op, ничего не ломается.
+    if (typeof onJobId === 'function') {
+      try { onJobId(jobId); } catch (_) {}
+    }
     reportPhase('starting');
 
     // Poll loop. Каждый poll - lightweight; общий timeout идёт через inner.signal.
@@ -110,4 +117,46 @@ async function _fetchSync(body, signal) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
   return json;
+}
+
+/**
+ * V18.1 P4 — drill-down per-employee endpoint.
+ * Lazy server-side enrichment: переиспользует cached pulse-job (TTL 30 мин)
+ * и пересчитывает analysePulse + enrichForScanner2 для одного участника.
+ *
+ * @returns {Promise<{employee, enrichment, aggregates, meta}>}
+ *
+ * Throws:
+ *   - 'jobId expired' (404) — клиент должен запустить fresh pulse
+ *   - 'employeeKey not found' (404) — несовпадение, клиент использует local data
+ *   - 'job not done' (409) — pulse ещё running, повторить позже
+ */
+export async function fetchEmployeeDetail({ jobId, employeeKey, dwellHours, signal, timeoutMs = 30000 } = {}) {
+  if (!jobId)       throw new Error('jobId required');
+  if (!employeeKey) throw new Error('employeeKey required');
+  // Compose abort: external + timeout.
+  const inner = new AbortController();
+  let timer = null;
+  if (timeoutMs > 0) timer = setTimeout(() => inner.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
+  if (signal) {
+    if (signal.aborted) inner.abort(signal.reason);
+    else signal.addEventListener('abort', () => inner.abort(signal.reason));
+  }
+  try {
+    const res = await fetch(DETAIL_EP, {
+      method: 'POST',
+      signal: inner.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, employeeKey, ...(dwellHours ? { dwellHours } : {}) }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const e = new Error(json.error || `HTTP ${res.status}`);
+      e.status = res.status;
+      throw e;
+    }
+    return json;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

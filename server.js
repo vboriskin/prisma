@@ -1913,6 +1913,87 @@ async function handleIntegrationsApi(req, res, pathname) {
       return;
     }
 
+    // ── /api/integrations/portfolio-pulse/employee-detail ────
+    // V18.1 P4 — lazy drill-down endpoint для Сканнера 2.0.
+    // Берёт raw reports из cached pulse-job (TTL 30 мин), переиспользует
+    // analysePulse + enrichForScanner2 для одного участника. Это точка
+    // расширения для P5+ side-panel: позволяет (а) пересчитать enrichment
+    // с другим dwellHours-порогом без re-fetch'а Jira, (б) в будущем —
+    // browser-TZ heatmap (передаётся hourTZOffset).
+    //
+    // Cache-hit ≈ 200-500мс. Cache-miss → 404 (клиент должен заново
+    // запустить /start). НЕ делаем re-fetch здесь, чтобы избежать
+    // дублирования heavy логики.
+    if (pathname === '/api/integrations/portfolio-pulse/employee-detail') {
+      const jobId = String(body.jobId || '').trim();
+      const employeeKey = String(body.employeeKey || '').trim();
+      const dwellHours = Number(body.dwellHours) > 0 ? Number(body.dwellHours) : 24;
+      if (!jobId || !employeeKey) {
+        writeJson(res, 400, { error: 'jobId and employeeKey required' });
+        return;
+      }
+      const job = pulseGetJob(jobId);
+      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
+      if (job.status !== 'done') {
+        writeJson(res, 409, { error: `Job not done yet (status=${job.status})` });
+        return;
+      }
+      if (!job.result) {
+        writeJson(res, 404, { error: 'Job has no result (cancelled or errored)' });
+        return;
+      }
+      const t0 = Date.now();
+      try {
+        // ESM modules — Node auto-reparse'ит через dynamic import.
+        const { analysePulse } = await import('./integrations/portfolioPulseModel.js');
+        const { enrichForScanner2 } = await import('./integrations/teamScanner2Enrichment.js');
+        // employees: пустой массив — server не имеет доступа к state.employees,
+        // identity-mapping не нужен для drill-down (key уже известен).
+        const baseModel = analysePulse(job.result, { staleDays: 7, employees: [] });
+        const enriched  = enrichForScanner2(baseModel, job.result, { dwellHours });
+        const p = (enriched.participants || []).find(x => x.key === employeeKey);
+        if (!p) {
+          writeJson(res, 404, { error: 'employeeKey not found in cached participants' });
+          return;
+        }
+        writeJson(res, 200, {
+          employee: {
+            key:           p.key,
+            label:         p.label,
+            email:         p.email,
+            jiraAccountId: p.jiraAccountId,
+            avatar:        p.avatar,
+            projects:      p.projects,
+          },
+          enrichment: {
+            heatmap:         p.heatmap,
+            contextSwitches: p.contextSwitches,
+            timeline72h:     p.timeline72h,
+            blockers:        p.blockers,
+          },
+          aggregates: {
+            loggedTodaySec:     p.loggedTodaySec     || 0,
+            loggedYesterdaySec: p.loggedYesterdaySec || 0,
+            loggedDayBeforeSec: p.loggedDayBeforeSec || 0,
+            badges:             p.badges             || {},
+            issuesNowCount:    (p.issuesNow || []).length,
+            staleCount:        (p.stale     || []).length,
+          },
+          meta: {
+            fromCache: true,
+            jobId,
+            builtMs: Date.now() - t0,
+            dwellThresholdHours: enriched.scannerV2?.dwellThresholdHours ?? dwellHours,
+            serverLocalTZ:       enriched.scannerV2?.serverLocalTZ       ?? true,
+          },
+        });
+      } catch (e) {
+        console.warn('[employee-detail] enrichment failed:', e);
+        writeJson(res, 500, { error: 'enrichment failed: ' + (e?.message || 'unknown') });
+      }
+      return;
+    }
+
     // ── /api/integrations/jira-fetch-all ─────────────────────
     // Bulk-fetch issues from Jira. If areas (projectKeys) are configured — use them.
     // Otherwise fall back to "issues assigned to current user, unresolved, updated last 90 days".

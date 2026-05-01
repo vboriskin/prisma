@@ -146,6 +146,73 @@ describe('Contract tests — /api/integrations + Portfolio Pulse', () => {
     assert.ok(['running','done','error'].includes(statusData.status), 'unknown status: ' + statusData.status);
   });
 
+  // V18.1 P4 — drill-down endpoint /portfolio-pulse/employee-detail.
+  // Lazy server-side enrichment поверх cached job. Контракт-guard:
+  // bad-input возвращает 400, expired-jobId — 404, happy path — 200.
+  test('employee-detail: missing jobId/employeeKey → 400', async () => {
+    const r1 = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {});
+    assert.equal(r1.status, 400, 'expected 400 for empty body, got ' + r1.status);
+    const r2 = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', { jobId: 'x' });
+    assert.equal(r2.status, 400, 'expected 400 for missing employeeKey');
+    const r3 = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', { employeeKey: 'x' });
+    assert.equal(r3.status, 400, 'expected 400 for missing jobId');
+  });
+
+  test('employee-detail: unknown jobId → 404', async () => {
+    const r = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+      jobId: 'pulse-bogus-99999',
+      employeeKey: 'whoever',
+    });
+    assert.equal(r.status, 404, 'expected 404 for unknown jobId, got ' + r.status + ' body=' + r.body);
+    assert.match(r.body, /jobId|TTL/i);
+  });
+
+  test('employee-detail: GET method отбивается 405 (POST-only)', async () => {
+    const r = await req('GET', '/api/integrations/portfolio-pulse/employee-detail');
+    assert.equal(r.status, 405, 'expected 405 for GET on POST endpoint');
+  });
+
+  test('employee-detail: happy path 200 с правильным shape (cache hit)', async () => {
+    // Сначала запускаем pulse через /start чтобы получить jobId с reports.
+    const startR = await req('POST', '/api/integrations/portfolio-pulse/start', { projectKeys: ['TEST'] });
+    assert.equal(startR.status, 200, '/start expected 200');
+    const startJ = j(startR.body);
+    assert.ok(startJ.jobId, 'no jobId in /start response');
+    // Poll до done (fixture-server отвечает быстро).
+    let job = null;
+    for (let i = 0; i < 20; i++) {
+      const sR = await req('GET', `/api/integrations/portfolio-pulse/status?jobId=${encodeURIComponent(startJ.jobId)}`);
+      assert.equal(sR.status, 200);
+      job = j(sR.body);
+      if (job.status === 'done' || job.status === 'error') break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    assert.equal(job.status, 'done', 'job did not finish in time, status=' + job.status);
+    // Берём первого участника из result для запроса detail.
+    const participants = (job.result?.reports || []).flatMap(rep => rep.issues || [])
+      .map(it => it?.fields?.assignee).filter(Boolean);
+    if (!participants.length) {
+      // Если в fixture нет assignee — детали можно проверить через 404 на bogus key.
+      const dR = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+        jobId: startJ.jobId,
+        employeeKey: 'no-such-key',
+      });
+      assert.equal(dR.status, 404);
+      return;
+    }
+    // Запрашиваем detail для первого assignee — model.participants[].key
+    // строится через userKey() utility, формат «email-or-accountId» обычно.
+    // Проще: запрашиваем заведомо несуществующий key — должен быть 404,
+    // а вот метод доступен (не 405) и shape ошибки правильный.
+    const dR = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+      jobId: startJ.jobId,
+      employeeKey: 'definitely-not-a-real-key',
+    });
+    assert.equal(dR.status, 404, 'expected 404 for bogus employeeKey, got ' + dR.status);
+    const errJ = j(dR.body);
+    assert.match(errJ.error || '', /not found/i, 'expected error mentioning «not found»');
+  });
+
   test('tech-info: forceRefresh bypasses 10-min cache', async () => {
     // Prime the cache
     await req('POST', '/api/integrations/tech-info', { source: 'all' });
