@@ -1357,6 +1357,176 @@ function bdRunJob(job, cfg) {
     );
 }
 
+/* ============================================================
+   V18 P7 — Pulse async-job pattern (mirrors blackDashboard).
+   Sync `/portfolio-pulse` POST остаётся для backward-compat и contract-тестов;
+   новый frontend идёт через POST /start + GET /status.
+   ============================================================ */
+const _pulseJobs = new Map();
+let _pulseJobCounter = 0;
+const PULSE_JOB_TTL_MS = 30 * 60 * 1000;
+const PULSE_JOB_MAX    = 20;
+
+function pulseGCJobs() {
+  const now = Date.now();
+  for (const [id, job] of _pulseJobs) {
+    const t = job.finishedAt || job.startedAt;
+    if (now - t > PULSE_JOB_TTL_MS) _pulseJobs.delete(id);
+  }
+  if (_pulseJobs.size > PULSE_JOB_MAX) {
+    const entries = [..._pulseJobs.entries()].sort(
+      (a, b) => (a[1].finishedAt || a[1].startedAt) - (b[1].finishedAt || b[1].startedAt)
+    );
+    for (let i = 0; i < _pulseJobs.size - PULSE_JOB_MAX; i++) _pulseJobs.delete(entries[i][0]);
+  }
+}
+function pulseCreateJob(payload) {
+  pulseGCJobs();
+  const id = `pulse-${++_pulseJobCounter}-${Date.now().toString(36)}`;
+  const job = { id, status: 'running', startedAt: Date.now(), finishedAt: null, result: null, error: null, phase: 'init', payload: payload || null };
+  _pulseJobs.set(id, job);
+  return job;
+}
+function pulseGetJob(id) { return _pulseJobs.get(id) || null; }
+function pulseRunJob(job, runner) {
+  Promise.resolve()
+    .then(() => runner(job))
+    .then(
+      (result) => { job.status = 'done';  job.result = result; job.finishedAt = Date.now(); job.phase = 'done'; },
+      (err)    => { job.status = 'error'; job.error = err?.message || String(err); job.finishedAt = Date.now(); job.phase = 'error';
+                    console.warn(`[pulse:job ${job.id}] failed:`, job.error); }
+    );
+}
+
+/**
+ * V18 P7 — выделено из inline /api/integrations/portfolio-pulse handler'а.
+ * Возвращает full Pulse response { reports, bitbucket, confluence, ... }.
+ * При ошибках валидации throws Error с `.statusCode = 400`.
+ * @param {object} body  request body (`projectKeys`, optional `employees`)
+ * @param {object} cfg   jiraReadConfig() result
+ * @param {boolean} tls
+ * @param {(phase: string) => void} [onPhase]  optional progress callback (для async-job)
+ * @returns {Promise<object>}
+ */
+async function _runPortfolioPulse(body, cfg, tls, onPhase) {
+  const setPhase = typeof onPhase === 'function' ? onPhase : (() => {});
+  if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
+    const err = new Error('Jira не настроена'); err.statusCode = 400; throw err;
+  }
+  let pks = Array.isArray(body.projectKeys) ? body.projectKeys
+          : String(body.projectKeys || '').split(',');
+  pks = pks.map(s => String(s||'').trim()).filter(Boolean);
+  if (!pks.length) {
+    const fromCfg = String(cfg.jiraProjectKeys || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const fromAreas = jiraSanitizeAreas(cfg.areas).map(a => a.projectKey);
+    pks = fromCfg.length ? fromCfg : fromAreas;
+  }
+  if (!pks.length) {
+    const err = new Error('Не указаны projectKeys'); err.statusCode = 400; throw err;
+  }
+
+  const winHours    = Math.min(168, Math.max(1, Number(cfg.activityWindowHours) || 72));
+  const cutoffTs    = Date.now() - winHours * 3600 * 1000;
+  const cutoffIso   = new Date(cutoffTs).toISOString();
+  const cqlCutoffTs = cutoffTs - 60 * 60 * 1000;
+  const PER_PK_TIMEOUT_MS = parseInt(process.env.PULSE_PK_TIMEOUT_MS || '90000', 10);
+  const t0 = Date.now();
+  const log = [`[pulse] start: ${pks.length} PKs, timeout/PK ${PER_PK_TIMEOUT_MS}ms`];
+  setPhase(`fetch-jira (${pks.length} PKs)`);
+
+  const withTimeout = (label, promise, ms) => Promise.race([
+    promise.then(v => ({ ok: true, value: v })),
+    new Promise(resolve => setTimeout(() => resolve({ ok: false, timeout: ms }), ms)),
+  ]).then(r => { if (!r.ok) log.push(`[pulse] ${label} TIMEOUT after ${r.timeout}ms`); return r; });
+
+  const reportsPromise = jiraPLimit(2, pks.map(pk => async () => {
+    const pkStart = Date.now();
+    const area    = { name: pk, projectKey: pk };
+    const r = await withTimeout(`pk:${pk}`, jiraBuildAreaReport(cfg, area), PER_PK_TIMEOUT_MS);
+    const elapsed = Date.now() - pkStart;
+    if (!r.ok) {
+      log.push(`[pulse] ${pk}: timeout after ${elapsed}ms`);
+      return { projectKey: pk, error: `timeout ${PER_PK_TIMEOUT_MS}ms`, issues: [], sprintKeys: [], inProgressKeys: [], backlogKeys: [], _ms: elapsed };
+    }
+    const data = r.value;
+    if (Array.isArray(data.stageTimings)) {
+      for (const s of data.stageTimings) {
+        log.push(`[pulse] ${pk} · ${s.name}: ${s.ms}ms ${s.ok ? '✓ ' + (s.count ?? 0) + ' issues' : '✗ ' + (s.error || 'failed')}`);
+      }
+    }
+    log.push(`[pulse] ${pk}: ${data.error ? 'ERROR ' + data.error : (data.issues?.length || 0) + ' issues'} · ${elapsed}ms`);
+    return {
+      projectKey: pk,
+      error:          data.error || null,
+      issues:         data.issues || [],
+      sprintKeys:     data.sprintKeys || [],
+      inProgressKeys: data.inProgressKeys || [],
+      backlogKeys:    data.backlogKeys || [],
+      stageTimings:   data.stageTimings || [],
+      zephyrResultFieldId: data.zephyrResultFieldId,
+      _ms:            elapsed,
+    };
+  }));
+  const bbPromise = withTimeout('bitbucket',
+    ppFetchBitbucketActivity(cfg, tls, cutoffTs, cutoffIso), PER_PK_TIMEOUT_MS);
+  const ppCfEmployees = Array.isArray(body?.employees) ? body.employees : [];
+  const cfPromise = withTimeout('confluence',
+    ppFetchConfluenceActivity(cfg, tls, cutoffTs, { cqlCutoffTs, employees: ppCfEmployees }), PER_PK_TIMEOUT_MS);
+
+  const [reports, bbR, cfR] = await Promise.all([reportsPromise, bbPromise, cfPromise]);
+  setPhase('fetch-bb-cf-done');
+  const bitbucketRepoWalk = bbR.ok ? bbR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
+  const confluence = cfR.ok ? cfR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
+
+  const hotIssues = [];
+  for (const r of reports) {
+    if (r.error) continue;
+    const backlogSet = new Set(r.backlogKeys || []);
+    for (const it of (r.issues || [])) {
+      if (!backlogSet.has(it.key)) hotIssues.push(it);
+    }
+  }
+  setPhase('dev-status');
+  const dsR = await withTimeout('dev-status',
+    ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues), PER_PK_TIMEOUT_MS).catch(()=>({ ok:false }));
+  const devStatus = dsR && dsR.ok ? dsR.value : { authors: {}, configured: false, tried: [], scanned: 0 };
+  const _devStatusAuthorsFiltered = {};
+  for (const [k, v] of Object.entries(devStatus.authors || {})) {
+    const hasEmail = !!String(v?.email || '').trim();
+    const hasLoginishKey = /^[a-z0-9._-]+$/i.test(String(k).trim());
+    if (hasEmail || hasLoginishKey) _devStatusAuthorsFiltered[k] = v;
+  }
+  const mergedAuthors = _ppMergeAuthorMaps(bitbucketRepoWalk.authors || {}, _devStatusAuthorsFiltered);
+  const bitbucket = {
+    authors:    mergedAuthors,
+    configured: bitbucketRepoWalk.configured,
+    tried:      [...(bitbucketRepoWalk.tried || []), ...(devStatus.tried || [])],
+    repos:      bitbucketRepoWalk.repos || 0,
+    prActivitiesScanned: bitbucketRepoWalk.prActivitiesScanned || 0,
+    devStatus:  { scanned: devStatus.scanned || 0, prs: devStatus.prs || 0, commits: devStatus.commits || 0, configured: devStatus.configured },
+    error:      bitbucketRepoWalk.error || null,
+  };
+  log.push(`[pulse] dev-status: scanned ${devStatus.scanned||0} dev-info calls, found ${devStatus.prs||0} PR · ${devStatus.commits||0} commits`);
+  log.push(`[pulse] done in ${Date.now() - t0}ms · ${reports.filter(r => !r.error).length}/${reports.length} PKs ok`);
+  setPhase('finalize');
+
+  const zephyrResultFieldId = reports.find(r => r.zephyrResultFieldId)?.zephyrResultFieldId || '';
+  return {
+    reports,
+    fetchedAt:   new Date().toISOString(),
+    projectKeys: pks,
+    jiraBaseUrl: String(cfg.jiraBaseUrl || '').replace(/\/+$/, ''),
+    zephyrResultFieldId,
+    bitbucket,
+    confluence,
+    diagnostics: {
+      totalMs:  Date.now() - t0,
+      perPk:    reports.map(r => ({ pk: r.projectKey, ms: r._ms || 0, ok: !r.error, error: r.error || null, issues: (r.issues || []).length })),
+      log,
+    },
+  };
+}
+
 /**
  * V17.2 I2c — Confluence activity collector.
  *
@@ -1788,154 +1958,50 @@ async function handleIntegrationsApi(req, res, pathname) {
     // returns flat per-PK reports with `error` set on individual failures (so one
     // broken PK doesn't kill the whole response).
     if (pathname === '/api/integrations/portfolio-pulse') {
-      if (!cfg.jiraBaseUrl || !cfg.jiraToken) { writeJson(res, 400, { error: 'Jira не настроена' }); return; }
-      // Resolve project keys: from request body OR from cfg.jiraProjectKeys OR cfg.areas
-      let pks = Array.isArray(body.projectKeys) ? body.projectKeys
-              : String(body.projectKeys || '').split(',');
-      pks = pks.map(s => String(s||'').trim()).filter(Boolean);
-      if (!pks.length) {
-        const fromCfg = String(cfg.jiraProjectKeys || '').split(',').map(s=>s.trim()).filter(Boolean);
-        const fromAreas = jiraSanitizeAreas(cfg.areas).map(a => a.projectKey);
-        pks = fromCfg.length ? fromCfg : fromAreas;
+      // V18 P7 — sync POST остался для backward-compat и contract-тестов;
+      // вся логика выделена в `_runPortfolioPulse` чтобы async-job /start
+      // мог переиспользовать тот же код. Новый frontend → /start + /status.
+      try {
+        const result = await _runPortfolioPulse(body, cfg, tls);
+        writeJson(res, 200, result);
+      } catch (e) {
+        writeJson(res, e.statusCode || 500, { error: e.message || String(e) });
       }
-      if (!pks.length) { writeJson(res, 400, { error: 'Не указаны projectKeys' }); return; }
+      return;
+    }
 
-      // Fetch each PK independently — concurrency 2 for politeness, but each
-      // PK has its OWN timeout. One slow team can't sink the whole request.
-      // Bitbucket / Confluence run in parallel, never block per-PK results.
-      // V17.2 I2c — окно активности теперь конфигурируемое (default 72h).
-      //   +1ч запас на CQL-сторону для защиты от TZ-skew (план Step 5),
-      //   точная фильтрация делается у нас по cutoffTs.
-      const winHours    = Math.min(168, Math.max(1, Number(cfg.activityWindowHours) || 72));
-      const cutoffTs    = Date.now() - winHours * 3600 * 1000;
-      const cutoffIso   = new Date(cutoffTs).toISOString();
-      const cqlCutoffTs = cutoffTs - 60 * 60 * 1000;     // +1h padding для CQL (TZ-skew guard)
-      // Default 45s. SMECM-class teams (huge backlog + heavy changelog) hit
-      // 30-31s in the wild; 35s left only ~4s of headroom against transient
-      // Jira slowness. Override via env if needed: `PULSE_PK_TIMEOUT_MS=60000`.
-      // 90s default — gives breathing room for slow corp Jira + occasional 429
-      // backoff retries (jiraRequest can spend up to ~14s on retry chains).
-      // Override via PULSE_PK_TIMEOUT_MS env var if your Jira is faster.
-      const PER_PK_TIMEOUT_MS = parseInt(process.env.PULSE_PK_TIMEOUT_MS || '90000', 10);
-      const t0 = Date.now();
-      const log = [`[pulse] start: ${pks.length} PKs, timeout/PK ${PER_PK_TIMEOUT_MS}ms`];
-
-      // Wraps a promise with a timeout; returns the resolved value or
-      // a sentinel `{ __timeout: ms }`. Logs result to the shared log buffer.
-      const withTimeout = (label, promise, ms) => Promise.race([
-        promise.then(v => ({ ok: true, value: v })),
-        new Promise(resolve => setTimeout(() => resolve({ ok: false, timeout: ms }), ms)),
-      ]).then(r => {
-        if (!r.ok) log.push(`[pulse] ${label} TIMEOUT after ${r.timeout}ms`);
-        return r;
+    // ── /api/integrations/portfolio-pulse/start ──────────────
+    // V18 P7 — async-job pattern (mirrors /black-dashboard/start).
+    if (pathname === '/api/integrations/portfolio-pulse/start') {
+      // Fail-fast: явные ошибки валидации возвращаем СРАЗУ (без создания job),
+      // чтобы клиент мог показать их сразу, а не через poll.
+      if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
+        writeJson(res, 400, { error: 'Jira не настроена' });
+        return;
+      }
+      const job = pulseCreateJob(body);
+      pulseRunJob(job, async (j) => {
+        return await _runPortfolioPulse(body, cfg, tls, (newPhase) => { j.phase = newPhase; });
       });
+      writeJson(res, 200, { jobId: job.id, startedAt: job.startedAt });
+      return;
+    }
 
-      const reportsPromise = jiraPLimit(2, pks.map(pk => async () => {
-        const pkStart = Date.now();
-        const area    = { name: pk, projectKey: pk };
-        const r = await withTimeout(`pk:${pk}`, jiraBuildAreaReport(cfg, area), PER_PK_TIMEOUT_MS);
-        const elapsed = Date.now() - pkStart;
-        if (!r.ok) {
-          log.push(`[pulse] ${pk}: timeout after ${elapsed}ms`);
-          return { projectKey: pk, error: `timeout ${PER_PK_TIMEOUT_MS}ms`, issues: [], sprintKeys: [], inProgressKeys: [], backlogKeys: [], _ms: elapsed };
-        }
-        const data = r.value;
-        // Surface per-stage timings into the pulse log so the user sees
-        // which sub-query (sprint / recent / inProgress / backlog) is the
-        // bottleneck for slow PKs.
-        if (Array.isArray(data.stageTimings)) {
-          for (const s of data.stageTimings) {
-            log.push(`[pulse] ${pk} · ${s.name}: ${s.ms}ms ${s.ok ? '✓ ' + (s.count ?? 0) + ' issues' : '✗ ' + (s.error || 'failed')}`);
-          }
-        }
-        log.push(`[pulse] ${pk}: ${data.error ? 'ERROR ' + data.error : (data.issues?.length || 0) + ' issues'} · ${elapsed}ms`);
-        return {
-          projectKey: pk,
-          error:          data.error || null,
-          issues:         data.issues || [],
-          sprintKeys:     data.sprintKeys || [],
-          inProgressKeys: data.inProgressKeys || [],
-          backlogKeys:    data.backlogKeys || [],
-          stageTimings:   data.stageTimings || [],
-          _ms:            elapsed,
-        };
-      }));
-
-      const bbPromise = withTimeout('bitbucket',
-        ppFetchBitbucketActivity(cfg, tls, cutoffTs, cutoffIso), PER_PK_TIMEOUT_MS);
-      // V17.2 I2c — pass cqlCutoffTs (with +1h padding) and the body's
-      //   `employees` array for per-employee CQL `contributor in (...)`.
-      const ppCfEmployees = Array.isArray(body?.employees) ? body.employees : [];
-      const cfPromise = withTimeout('confluence',
-        ppFetchConfluenceActivity(cfg, tls, cutoffTs, { cqlCutoffTs, employees: ppCfEmployees }), PER_PK_TIMEOUT_MS);
-
-      const [reports, bbR, cfR] = await Promise.all([reportsPromise, bbPromise, cfPromise]);
-      const bitbucketRepoWalk = bbR.ok ? bbR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
-      const confluence = cfR.ok ? cfR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
-
-      // Phase 1: Jira dev-status panel as a SECOND PR/commit source.
-      // Catches activity in repos NOT listed in `bitbucketProjectKeys` —
-      // Jira already knows which PRs/commits link to each issue via the
-      // standard Bitbucket connector. Restricted to "hot" issues
-      // (sprint + recent + inProgress, NOT backlog) so the call budget
-      // stays bounded.
-      const hotIssues = [];
-      for (const r of reports) {
-        if (r.error) continue;
-        const backlogSet = new Set(r.backlogKeys || []);
-        for (const it of (r.issues || [])) {
-          if (!backlogSet.has(it.key)) hotIssues.push(it);
-        }
-      }
-      const dsR = await withTimeout('dev-status',
-        ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues), PER_PK_TIMEOUT_MS).catch(()=>({ ok:false }));
-      const devStatus = dsR && dsR.ok ? dsR.value : { authors: {}, configured: false, tried: [], scanned: 0 };
-      // V17.2 I1d — defensive filter: dev-status walker pulls PR/commit data
-      //   from Jira's dev-info panel. Some Jira deployments return entries
-      //   with only `displayName` (no email, no login). When merged with
-      //   repo-walk authors and matched against employees by email/login,
-      //   email-less entries can never be confidently attributed — better
-      //   to drop them than risk fuzzy-name fallback.
-      const _devStatusAuthorsFiltered = {};
-      for (const [k, v] of Object.entries(devStatus.authors || {})) {
-        const hasEmail = !!String(v?.email || '').trim();
-        const hasLoginishKey = /^[a-z0-9._-]+$/i.test(String(k).trim());
-        if (hasEmail || hasLoginishKey) _devStatusAuthorsFiltered[k] = v;
-      }
-      const mergedAuthors = _ppMergeAuthorMaps(bitbucketRepoWalk.authors || {}, _devStatusAuthorsFiltered);
-      const bitbucket = {
-        authors:    mergedAuthors,
-        // `configured` reflects Bitbucket settings only — dev-status is a
-        // supplementary source that piggybacks on the Jira credentials. Keeping
-        // this tied to bitbucketBaseUrl+bitbucketToken preserves the contract
-        // for the verify-bitbucket flow and the «не настроен» pill state.
-        configured: bitbucketRepoWalk.configured,
-        tried:      [...(bitbucketRepoWalk.tried || []), ...(devStatus.tried || [])],
-        repos:      bitbucketRepoWalk.repos || 0,
-        prActivitiesScanned: bitbucketRepoWalk.prActivitiesScanned || 0,
-        devStatus:  { scanned: devStatus.scanned || 0, prs: devStatus.prs || 0, commits: devStatus.commits || 0, configured: devStatus.configured },
-        error:      bitbucketRepoWalk.error || null,
-      };
-      log.push(`[pulse] dev-status: scanned ${devStatus.scanned||0} dev-info calls, found ${devStatus.prs||0} PR · ${devStatus.commits||0} commits`);
-      log.push(`[pulse] done in ${Date.now() - t0}ms · ${reports.filter(r => !r.error).length}/${reports.length} PKs ok`);
-
-      // Phase 3: hoist zephyr fieldId from any one report (it's same per Jira).
-      const zephyrResultFieldId = reports.find(r => r.zephyrResultFieldId)?.zephyrResultFieldId || '';
+    // ── /api/integrations/portfolio-pulse/status?jobId=X ─────
+    if (pathname === '/api/integrations/portfolio-pulse/status') {
+      const qs = (req.url.split('?')[1] || '');
+      const params = new URLSearchParams(qs);
+      const jobId = (params.get('jobId') || '').trim();
+      const job = pulseGetJob(jobId);
+      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
       writeJson(res, 200, {
-        reports,
-        fetchedAt:  new Date().toISOString(),
-        projectKeys: pks,
-        // Base URL for issue-key links in the renderer (e.g. {base}/browse/PROJ-1).
-        // Stripped trailing slash so concatenation is safe; empty string if unset.
-        jiraBaseUrl: String(cfg.jiraBaseUrl || '').replace(/\/+$/, ''),
-        zephyrResultFieldId,
-        bitbucket,
-        confluence,
-        diagnostics: {
-          totalMs:  Date.now() - t0,
-          perPk:    reports.map(r => ({ pk: r.projectKey, ms: r._ms || 0, ok: !r.error, error: r.error || null, issues: (r.issues || []).length })),
-          log,
-        },
+        jobId:      job.id,
+        status:     job.status,
+        phase:      job.phase,
+        startedAt:  job.startedAt,
+        finishedAt: job.finishedAt,
+        result:     job.status === 'done' ? job.result : null,
+        error:      job.error,
       });
       return;
     }
