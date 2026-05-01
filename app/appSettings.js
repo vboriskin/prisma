@@ -180,6 +180,12 @@ export const AppSettings = {
   apply(cfg) {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
+    // V18.1 — nav-items live inside .sidebar-nav wrapper (sibling of the
+    // footer chevron-button). Reordering must append into the wrapper, not
+    // the sidebar itself — otherwise items get pushed AFTER the chevron and
+    // an empty .sidebar-nav (flex:1) eats all space, leaving items pinned
+    // to the bottom of the sidebar. Fallback to #sidebar for forward-compat.
+    const navHost = sidebar.querySelector('.sidebar-nav') || sidebar;
     const ordered = AppSettings.resolveOrder(cfg);
     const dividerAfterSet = new Set(cfg.dividerAfter || []);
     document.body.classList.toggle('app-debug-off', !cfg.debugMode);
@@ -192,16 +198,17 @@ export const AppSettings = {
     });
 
     // 1) Reorder nav items in DOM, hide/show, update labels.
-    //    We walk the configured order and append each existing nav button to the
-    //    sidebar (appendChild moves the node, preserving event listeners).
+    //    We walk the configured order and append each existing nav button to
+    //    the .sidebar-nav wrapper (appendChild moves the node, preserving
+    //    event listeners). This guarantees items stay above the footer chevron.
     ordered.forEach((s) => {
       const navBtn = sidebar.querySelector(`.nav-item[data-section="${s.key}"]`);
       if (!navBtn) return;
       navBtn.classList.toggle('nav-item-hidden', cfg.hiddenSections.includes(s.key));
       const labelSpan = navBtn.querySelector('.nav-label');
       if (labelSpan) labelSpan.textContent = s.label;
-      // Move to end-of-sidebar in order
-      sidebar.appendChild(navBtn);
+      // Move to end-of-nav-host in order
+      navHost.appendChild(navBtn);
     });
 
     // 2) Strip ALL existing nav-divider elements, then insert per cfg.dividerAfter.
