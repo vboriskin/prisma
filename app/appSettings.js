@@ -25,8 +25,8 @@
    ============================================================ */
 
 import { Utils }            from '../utils.js';
-import { state }            from '../state.js';
-import { Storage, notify }  from '../dataStore.js';
+import { state, notify }    from '../state.js';
+import { Storage }          from '../dataStore.js';
 import { HistoryLog }       from '../historyLog.js';
 import { AppDataStore }     from '../appDataStore.js';
 import { StorageSettings }  from './storageSettings.js';
