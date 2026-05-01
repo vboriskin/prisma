@@ -7,7 +7,7 @@
     "start":       "node launch.js 8080",
     "start:3000":  "node launch.js 3000",
     "server":      "node server.js 8080",
-    "test":          "node testRunner.js && npm run test:unit && node contractTest.js",
+    "test":          "node testRunner.js && npm run test:unit && npm run test:contract",
     "test:unit":     "node --test --test-reporter=spec 'tests/unit/**/*.test.js'",
     "test:contract": "node --test --test-reporter=spec 'tests/contract/**/*.test.js'",
     "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec 'tests/unit/**/*.test.js'",

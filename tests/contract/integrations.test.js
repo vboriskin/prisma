@@ -1,0 +1,139 @@
+'use strict';
+/* ============================================================
+   Contract tests — /api/integrations + Portfolio Pulse
+   --
+   Поднимает fake Jira + real server.js, проверяет shape ответов
+   и поведение /api/integrations/*. Раньше жило в `contractTest.js` (root)
+   с самописным runner'ом; V18 P2 — переехало под `node:test`.
+   ============================================================ */
+
+const { describe, test, before, after } = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  FAKE_PORT,
+  startFakeJira, stopFakeJira,
+  startApp, stopApp,
+  req, j,
+  getServerInfoHits,
+} = require('./_setup.js');
+
+describe('Contract tests — /api/integrations + Portfolio Pulse', () => {
+  before(async () => {
+    await startFakeJira();
+    await startApp();
+    // give /health a tick to be reachable
+    await new Promise(r => setTimeout(r, 200));
+    // Configure the running app to use the fake Jira.
+    await req('POST', '/api/jira/config', {
+      jiraBaseUrl:    `http://127.0.0.1:${FAKE_PORT}`,
+      jiraToken:      'fake-token-for-tests',
+      jiraProjectKeys: 'TEST',
+    });
+  });
+
+  after(() => {
+    stopApp();
+    stopFakeJira();
+  });
+
+  test('config GET sanitises tokens, exposes hasJiraToken', async () => {
+    const r = await req('GET', '/api/jira/config');
+    const cfg = j(r.body);
+    assert.equal(r.status, 200);
+    assert.ok(!cfg.jiraToken && !cfg.bitbucketToken && !cfg.confluenceToken, 'TOKEN LEAKED');
+    assert.ok(cfg.jiraBaseUrl, 'jiraBaseUrl missing');
+    assert.equal(cfg.hasJiraToken, true, 'hasJiraToken should be true after we set one');
+  });
+
+  test('jira/verify connects to fake Jira and returns ok', async () => {
+    const r = await req('POST', '/api/jira/verify', {});
+    assert.equal(r.status, 200, 'expected 200, got ' + r.status + ' body=' + r.body);
+    const data = j(r.body);
+    assert.ok(data.ok, 'verify said ok=false: ' + r.body);
+    assert.equal(data.who, 'Test User');
+  });
+
+  test('portfolio-pulse: shape correct (reports + bb + cf), 1 issue echoed', async () => {
+    const r = await req('POST', '/api/integrations/portfolio-pulse', { projectKeys: ['TEST'] });
+    assert.equal(r.status, 200, 'expected 200, got ' + r.status + ' body=' + r.body);
+    const data = j(r.body);
+    assert.ok(Array.isArray(data.reports), 'reports[] missing');
+    assert.equal(data.reports.length, 1);
+    assert.ok(data.fetchedAt, 'fetchedAt missing');
+    assert.ok(Array.isArray(data.projectKeys), 'projectKeys[] missing');
+    assert.equal(typeof data.bitbucket,  'object', 'bitbucket block missing');
+    assert.equal(typeof data.confluence, 'object', 'confluence block missing');
+    const rep = data.reports[0];
+    assert.equal(rep.projectKey, 'TEST');
+    assert.ok(Array.isArray(rep.issues), 'issues[] missing');
+    assert.ok(rep.issues.length && rep.issues[0].key === 'TEST-1', 'expected TEST-1');
+  });
+
+  test('portfolio-pulse: empty projectKeys → 4xx (no 5xx)', async () => {
+    const r = await req('POST', '/api/integrations/portfolio-pulse', { projectKeys: [] });
+    assert.ok(r.status < 500, 'expected 4xx, got ' + r.status);
+  });
+
+  test('bitbucket-prs without config → 4xx', async () => {
+    const r = await req('POST', '/api/integrations/bitbucket-prs', { jiraKey: 'TEST-1' });
+    assert.ok(r.status < 500, 'expected 4xx, got ' + r.status);
+  });
+
+  test('jira-issue: missing-key → 4xx; valid key → enriched', async () => {
+    const rNoKey = await req('POST', '/api/integrations/jira-issue', {});
+    assert.ok(rNoKey.status < 500, 'expected 4xx for missing key');
+    const rKey = await req('POST', '/api/integrations/jira-issue', { key: 'TEST-1' });
+    assert.equal(rKey.status, 200);
+    const data = j(rKey.body);
+    assert.equal(data.key, 'TEST-1');
+    assert.ok(data.assignee && data.status, 'jira-issue missing fields: ' + rKey.body);
+  });
+
+  test('portfolio-pulse: bb/cf configured=false when not set', async () => {
+    const r = await req('POST', '/api/integrations/portfolio-pulse', { projectKeys: ['TEST'] });
+    const data = j(r.body);
+    assert.equal(data.bitbucket.configured,  false);
+    assert.equal(data.confluence.configured, false);
+  });
+
+  test('tech-info: shape correct, bb/cf surface errors, jira data echoed', async () => {
+    const before = getServerInfoHits();
+    const r = await req('POST', '/api/integrations/tech-info', { source: 'all' });
+    assert.equal(r.status, 200, 'expected 200, got ' + r.status + ' body=' + r.body);
+    const data = j(r.body);
+    for (const k of ['jira', 'bitbucket', 'confluence', 'fetchedAt', 'errors', 'stale', 'cache']) {
+      assert.ok(k in data, 'missing top-level key: ' + k);
+    }
+    assert.equal(data.jira?.serverInfo?.version, '9.99.0');
+    assert.equal(data.jira.projects.length, 1);
+    assert.equal(data.jira.projects[0].key, 'TEST');
+    assert.ok(data.errors.bitbucket  && /настроен/i.test(data.errors.bitbucket),  'expected bitbucket error mentioning «не настроен»');
+    assert.ok(data.errors.confluence && /настроен/i.test(data.errors.confluence), 'expected confluence error mentioning «не настроен»');
+    assert.ok(getServerInfoHits() > before, 'fake serverInfo was never hit');
+  });
+
+  test('tech-info: no token / token-field-name leakage in response', async () => {
+    const r = await req('POST', '/api/integrations/tech-info', { source: 'all' });
+    assert.ok(!/fake-token-for-tests/.test(r.body), 'TOKEN LEAKED in tech-info response');
+    assert.ok(!/jiraToken|sigmaJiraToken|bitbucketToken|confluenceToken/.test(r.body), 'token field name leaked');
+  });
+
+  test('tech-info: source error does not cascade', async () => {
+    const r = await req('POST', '/api/integrations/tech-info', { source: 'all' });
+    const data = j(r.body);
+    assert.ok(data.jira?.serverInfo, 'jira section dropped despite bb/cf failures');
+  });
+
+  test('tech-info: forceRefresh bypasses 10-min cache', async () => {
+    // Prime the cache
+    await req('POST', '/api/integrations/tech-info', { source: 'all' });
+    const beforeRefresh = getServerInfoHits();
+    // Without forceRefresh — should NOT increment (10-min cache)
+    await req('POST', '/api/integrations/tech-info', { source: 'all' });
+    assert.equal(getServerInfoHits(), beforeRefresh, 'cache miss when expected hit');
+    // With forceRefresh — must increment
+    await req('POST', '/api/integrations/tech-info', { source: 'all', forceRefresh: true });
+    assert.ok(getServerInfoHits() > beforeRefresh, 'forceRefresh did not bypass cache');
+  });
+});
