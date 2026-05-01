@@ -1,6 +1,8 @@
 # V18 — Structural debt cleanup + DX enablement
 
 **Стартовая дата:** 2026-05-01
+**Прогресс:** 8/15 (Block A + Block B полностью закрыты)
+**Tests:** 534 unit / 11 contract / 0 fail (held throughout)
 **Базис:** V17.2 (534 unit / 11 contract / 0 fail) + 12 docs + PR-template + .gitignore
 **Триггер:** аудит Phase 3 «Документирование проекта для LLM-агентов» — 27 zon роста выявлено
 
@@ -20,25 +22,25 @@ V17 закрыл **поведенческие баги** (token leak, fuzzy matc
 
 Делаем последовательно. После каждого пункта — тесты + audit-md. Блоки могут перемежаться (если P3 застрял на ревью — идём к P5).
 
-### Block A — Process foundation (4 пункта)
+### Block A — Process foundation (4 пункта) ✅
 
-| # | Что | Effort | Impact | Файл-отчёт |
-|---|---|---|---|---|
-| **P1** | `git init` + первый коммит. Включает: проверку что в файлах нет токенов (audit), создание initial branch `main`, push в репо (если нужно). | M | **Critical** | `01-git-init.md` |
-| **P2** | Поправить `test:contract` config: либо переместить `contractTest.js` в `tests/contract/`, либо обновить script на правильный путь. Сейчас `package.json` указывает на пустую папку. | XS | Low | `02-test-contract-fix.md` |
-| **P3** | `CONTRIBUTING.md` — точка сборки: ссылки на CLAUDE.md / state-contracts / spine-pill / dont-touch + правила «как мы коммитим / как пишем audit-метки / как добавляем view/integration». Включает `npm install` для dev. | S | Medium | `03-contributing.md` |
-| **P4** | CI gate (GitHub Actions / GitLab CI yaml): `npm run ci` на каждый PR. Должен ругать если `npm test` не зелёный или lint > 215. | S | Medium | `04-ci-gate.md` |
+| # | Что | Effort | Impact | Файл-отчёт | Status |
+|---|---|---|---|---|---|
+| **P1** | `git init` + первый коммит. Audit на токены, initial branch `main`. | M | **Critical** | [`01-git-init.md`](./01-git-init.md) | ✅ `ee1580c` |
+| **P2** | Поправить `test:contract` config: миграция `contractTest.js` в `tests/contract/integrations.test.js` под node:test. | XS | Low | [`02-test-contract-fix.md`](./02-test-contract-fix.md) | ✅ `e6fcab3` |
+| **P3** | `CONTRIBUTING.md` — entry point для humans: workflow, commits, V-эпохи, contracts, style, pre-merge. | S | Medium | [`03-contributing.md`](./03-contributing.md) | ✅ `1e3e3ba` |
+| **P4** | CI gate: GitHub Actions + GitLab CI yaml. Stages typecheck → lint → tests → smoke. | S | Medium | [`04-ci-gate.md`](./04-ci-gate.md) | ✅ `0f56b5b` |
 
-### Block B — Integration consistency (4 пункта)
+### Block B — Integration consistency (4 пункта) ✅
 
-| # | Что | Effort | Impact | Файл-отчёт |
-|---|---|---|---|---|
-| **P5** | `_cfPathCascade(paths, baseUrl, headers, opts)` helper — вынести pattern из 5 мест (ppFetchConfluenceActivity, confluence-search, verify-confluence, confluence-resolve-user, confluence-audit-logins) в один helper. Тесты что failure-modes сохранились. | S-M | Medium | `05-path-cascade-helper.md` |
-| **P6** | Единый token-middleware для всех `/api/integrations/*`: scrub + auth-header + redact регекс в одном wrapper'е. Сейчас 3 разных места легко забыть в новом endpoint'е. | M | **High (security)** | `06-token-middleware.md` |
-| **P7** | Унификация long-running запросов: Pulse сейчас sync-blocking 10-минутный POST, Black Dashboard async-job. Перевести Pulse тоже на async-job pattern (start → poll → done) — UI получит progress + cancel. | L | High | `07-async-job-unification.md` |
-| **P8** | Bitbucket bucket separation: `bitbucket.repoAuthors` + `bitbucket.devStatusAuthors` отдельно. UI решает что показывать. Вместо single merged authors. | M | Medium | `08-bb-bucket-split.md` |
+| # | Что | Effort | Impact | Файл-отчёт | Status |
+|---|---|---|---|---|---|
+| **P5** | `_cfPathCascade(urls, opts)` helper — вынес pattern из 3-5 мест в один helper (3 переписаны, 2 оставлены с обоснованием). | S | Medium | [`05-path-cascade-helper.md`](./05-path-cascade-helper.md) | ✅ `962ce18` |
+| **P6** | Token-handling consolidation: централизованный `_ppRedactSecretsInText` (server) + `Utils.redactSecretsInText` (frontend); унификация `_ppMakeAuthHeader`. | S | **High (security)** | [`06-token-middleware.md`](./06-token-middleware.md) | ✅ `4cd0c85` |
+| **P7** | Pulse async-job pattern: новые `/start` + `/status` endpoints, выделен `_runPortfolioPulse` helper, frontend на polling+fallback. | L | High | [`07-async-job-unification.md`](./07-async-job-unification.md) | ✅ `165a15c` |
+| **P8** | Bitbucket bucket separation: `bitbucket.{repoAuthors, devStatusAuthors}` раздельно + `p.bbSource` provenance. | S | Medium | [`08-bb-bucket-split.md`](./08-bb-bucket-split.md) | ✅ `c2efed8` |
 
-### Block C — Decomposition (3 пункта)
+### Block C — Decomposition (3 пункта) — отложено в V18.1
 
 | # | Что | Effort | Impact | Файл-отчёт |
 |---|---|---|---|---|
@@ -46,14 +48,14 @@ V17 закрыл **поведенческие баги** (token leak, fuzzy matc
 | **P10** | `server.js` 2537 LOC → разбить на `server/*` модули (по примеру frontend `integrations/*`). Кандидаты: `server/integrations/jiraPulse.js`, `bitbucket.js`, `confluence.js`, `audit.js`. Цель: server.js < 1500 LOC, остальные ≤ 500. | M | High | `10-server-decomposition.md` |
 | **P11** | `views/gantt.js` 2637 LOC → разбить на `views/gantt/{render,ctxMenu,dnd,history}.js`. Главный view, читабельность критична. | L | High | `11-gantt-split.md` |
 
-### Block D — Testing (2 пункта)
+### Block D — Testing (2 пункта) — отложено в V18.1
 
 | # | Что | Effort | Impact | Файл-отчёт |
 |---|---|---|---|---|
 | **P12** | `testRunner.js` 900 LOC legacy → миграция 104 тестов в `tests/unit/*.test.js` (node:test). После — удалить testRunner.js. План в файле-отчёте. | L | Medium | `12-testrunner-retire.md` |
 | **P13** | Поднять покрытие `app.js` / `server.js` / `views/*`. Сейчас 0 unit для них; покрываются только через contract+e2e. Цель: + ~30 unit-тестов на ключевых функциях. | L | Medium | `13-coverage-expansion.md` |
 
-### Block E — Operations (2 пункта)
+### Block E — Operations (2 пункта) — отложено в V18.1
 
 | # | Что | Effort | Impact | Файл-отчёт |
 |---|---|---|---|---|

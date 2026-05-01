@@ -19,7 +19,8 @@ Audit-папки (`audit-2026-*/`) играют роль ADR — детали в
 | **V17** | 2026-04-30 → 2026-05-01 | `audit-2026-05-V17` | overnight roadmap (12 пунктов): технический аудит, chat redesign, Performance tab, Portfolio Pulse + Black Dashboard refactor, аудит 6 dashboard-вкладок / Реестр / Шапка / Фильтры / Тур |
 | **V17.1** | 2026-05-01 | `audit-2026-05-V17/MASTER_PLAN.md § V17.1` | Patch pack: 12 групп правок (chat A1-A5, registry stretch, gantt 12 fixes, html-export, employees, settings, etc) |
 | **V17.2** | 2026-05-01 | `audit-2026-05-V17/13-integrations-audit.md` | **Identity-deterministic integrations** (I1+I2+I3+I4+I5) + **Confluence I2c** (space-scope, per-employee CQL, comments+mentions, audit log) |
-| **V18** | 2026-05-01 → in progress | `audit-2026-05-V18/MASTER_PLAN.md` | **Structural debt cleanup + DX enablement** — 15 пунктов в 5 блоках: process foundation (git/CI/CONTRIBUTING), integration consistency (path-cascade, token-middleware, async-job, BB bucket split), decomposition (`app.js`/`server.js`/`gantt.js`/`styles.css`), testRunner retire, structured logging |
+| **V18** (Block A+B) | 2026-05-01 ✅ | `audit-2026-05-V18/MASTER_PLAN.md` | **Process foundation + integration consistency** — 8/15 пунктов: P1 git init, P2 contract-tests migration to node:test, P3 CONTRIBUTING.md, P4 CI gate (GitHub + GitLab), P5 _cfPathCascade helper, P6 token-handling consolidation, P7 Pulse async-job pattern, P8 BB bucket separation |
+| **V18.1** (Block C-E) | TBD | (TODO `audit-2026-05-V18/`) | **Decomposition + Testing + Operations** — 7 отложенных пунктов: P9 app.js → app/*, P10 server.js → server/*, P11 gantt.js разбивка, P12 testRunner retire, P13 coverage expansion, P14 structured logging, P15 styles.css cleanup |
 
 ## Что появилось в каждой версии
 
