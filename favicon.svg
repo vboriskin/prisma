@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  СБОФ Планирование — favicon (V18.1)
-  Spine-pill style: solid accent surface, mono SVG, no gradients,
-  no animations. Letter «С» (СБОФ — Сбер Онлайн Финансирование).
-  Foreground: white. Background: var(--accent) #4f46e5.
+  СБОФ Планирование favicon (V18.1).
+  Spine-pill: solid accent surface, mono SVG, no gradients, no animations.
+  Letter С (СБОФ — Сбер Онлайн Финансирование).
+  Foreground white on accent #4f46e5 (mirror of CSS accent token).
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <rect width="32" height="32" rx="6" fill="#4f46e5"/>
