@@ -82,13 +82,66 @@ function emptyDayLanguage(p, day) {
 }
 
 function statusOfPerson(p) {
-  // P1 эвристика — не классификатор Движется/Под наблюдением/Стоп (это P2),
-  // только blocker-маркер «есть stale issues + нет активности сегодня».
+  // V18.1 P1 эвристика для row-level blocker-индикатора `▌` слева.
+  // Группа из P2 (см. classifyPerson) даёт КАТЕГОРИЮ, эта функция —
+  // более точечный per-row маркер «есть stale issues + 0 today».
   const today  = (p.timelineToday || []).length;
   const stale  = (p.stale || []).length;
   if (stale > 0 && today === 0) return 'blocked';
   return 'normal';
 }
+
+/**
+ * V18.1 P2 — Classify participant into one of 4 groups.
+ *
+ * Synthesised from panel: SM (sprint-goal alignment), PO (release risk),
+ * тимлид (stand-up triage). Pure function над участником из analysePulse,
+ * никаких side-effects, легко тестируется.
+ *
+ * Возвращает:
+ *  - 'stop'    — есть stale issues (>=7d без update в WIP) И нет активности сегодня.
+ *                Это самый красный сигнал: «висит и не движется».
+ *  - 'watch'   — один из триггеров «может стать стоп»:
+ *                · WIP >=3 (overcommitment, человек переключается)
+ *                · есть stale но есть today (тянет старое + новое)
+ *                · был активен вчера, тишина сегодня (новая тишина)
+ *  - 'moving'  — есть активность сегодня и нет красных флагов.
+ *  - 'idle'    — совсем нет следов нигде (свернётся в отдельную секцию,
+ *                не зашумляет основной экран).
+ *
+ * Намеренно НЕ учитывает (требует расширения данных в P3):
+ *  - PR-aging (age в Code Review > 24ч) — нужен server-side dwell-time
+ *  - context-switch index — нужен computed signal в model'и
+ */
+export function classifyPerson(p) {
+  const today = (p?.timelineToday    || []).length;
+  const yest  = (p?.timelineYesterday || []).length;
+  const wip   = (p?.issuesNow         || []).length;
+  const stale = (p?.stale             || []).length;
+  const prs48 = p?.badges?.pr48h      || 0;
+  const com48 = p?.badges?.commits48h || 0;
+
+  // Idle: совсем нет signal'ов. Сворачиваемая группа.
+  if (today === 0 && yest === 0 && wip === 0 && stale === 0 && prs48 === 0 && com48 === 0) {
+    return 'idle';
+  }
+  // Stop: blocker без движения.
+  if (stale > 0 && today === 0) return 'stop';
+  // Watch: триггеры.
+  if (wip >= 3) return 'watch';
+  if (stale > 0 && today > 0) return 'watch';
+  if (today === 0 && yest > 0) return 'watch';
+  // Moving: остальное (есть today, без флагов).
+  return 'moving';
+}
+
+/** Pretty-name + a11y description per group. */
+const GROUP_META = {
+  stop:   { label: 'Стоп',           desc: 'Висят без движения — нужен разговор сегодня' },
+  watch:  { label: 'Под наблюдением', desc: 'Триггеры: перегрузка, тишина или старое тянется' },
+  moving: { label: 'Движется',       desc: 'Есть активность сегодня, без красных флагов' },
+  idle:   { label: 'Без активности',  desc: 'Нет следов в Jira / BB / CF' },
+};
 
 /* ── Top bar ─────────────────────────────────────────── */
 
@@ -117,30 +170,30 @@ export function renderTopBar(model) {
 
 export function renderTeamGlance(model) {
   const parts = model?.participants || [];
-  const active = parts.filter(p => (p.timelineToday?.length || 0) > 0).length;
-  let commits48h = 0, prs48h = 0, blocked = 0;
+  // V18.1 P2 — counts per classified group. Дают prevailing read'у тимлида
+  // за 1 секунду: «куда смотреть в первую очередь?»
+  const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
+  let commits48h = 0, prs48h = 0;
   for (const p of parts) {
+    counts[classifyPerson(p)]++;
     commits48h += p.badges?.commits48h || 0;
     prs48h     += p.badges?.pr48h      || 0;
-    if (statusOfPerson(p) === 'blocked') blocked++;
   }
-  // P1: «застряли >24ч» считаем приближённо как participants со stale issues
-  // и без активности сегодня. Полный age-in-status в P3.
-  const stuckLine = blocked > 0
-    ? `<span class="ts2-glance-stuck">▌ ${blocked} ${plural(blocked, ['застрял', 'застряли', 'застряли'])}</span>`
-    : '';
-
+  const segs = [];
+  if (counts.moving > 0) segs.push(`<span class="ts2-glance-num">${counts.moving}</span><span class="ts2-glance-lab">движется</span>`);
+  if (counts.watch  > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span><span class="ts2-glance-lab">наблюдение</span>`);
+  if (counts.stop   > 0) segs.push(`<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span> ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`);
+  if (counts.idle   > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span><span class="ts2-glance-lab">без активности</span>`);
+  const groupLine = segs.length ? segs.join(`<span class="ts2-glance-sep">·</span>`) : `<span class="ts2-glance-lab">Нет данных</span>`;
   return `
     <div class="ts2-glance">
-      <span class="ts2-glance-num">${active}</span>
-      <span class="ts2-glance-lab">${plural(active, ['человек активен', 'человека активны', 'человек активны'])}</span>
+      ${groupLine}
       <span class="ts2-glance-sep">·</span>
       <span class="ts2-glance-num">${commits48h}</span>
       <span class="ts2-glance-lab">${plural(commits48h, ['коммит', 'коммита', 'коммитов'])} (48ч)</span>
       <span class="ts2-glance-sep">·</span>
       <span class="ts2-glance-num">${prs48h}</span>
       <span class="ts2-glance-lab">PR (48ч)</span>
-      ${stuckLine ? `<span class="ts2-glance-sep">·</span>${stuckLine}` : ''}
     </div>
   `;
 }
@@ -152,19 +205,56 @@ export function renderPersonRows(model, ctx = {}) {
   if (!parts.length) {
     return `<div class="ts2-empty">Нет данных по участникам за выбранные проекты.</div>`;
   }
-  // Sort: у кого активность сегодня — выше; внутри — по timelineToday.length desc.
-  const sorted = parts.slice().sort((a, b) => {
-    const aT = (a.timelineToday?.length || 0);
-    const bT = (b.timelineToday?.length || 0);
+  // V18.1 P2 — group by classifyPerson. Внутри группы сортируем по
+  // timelineToday desc, потом yesterday desc.
+  const groups = { stop: [], watch: [], moving: [], idle: [] };
+  for (const p of parts) groups[classifyPerson(p)].push(p);
+  const sortFn = (a, b) => {
+    const aT = (a.timelineToday    || []).length;
+    const bT = (b.timelineToday    || []).length;
     if (aT !== bT) return bT - aT;
-    const aY = (a.timelineYesterday?.length || 0);
-    const bY = (b.timelineYesterday?.length || 0);
-    return bY - aY;
-  });
+    return (b.timelineYesterday || []).length - (a.timelineYesterday || []).length;
+  };
+  groups.stop.sort(sortFn);
+  groups.watch.sort(sortFn);
+  groups.moving.sort(sortFn);
+  groups.idle.sort(sortFn);
 
   const expandedKey = ctx.expandedKey || '';
-  const rows = sorted.map(p => renderRow(p, expandedKey === p.key)).join('');
-  return `<div class="ts2-rows">${rows}</div>`;
+  const renderGroup = (key) => {
+    const arr = groups[key];
+    if (!arr.length) return '';
+    const meta = GROUP_META[key];
+    const rows = arr.map(p => renderRow(p, expandedKey === p.key)).join('');
+    const head = `
+      <div class="ts2-group-head">
+        <span class="ts2-group-label">${esc(meta.label)}</span>
+        <span class="ts2-group-count" title="${esc(meta.desc)}">${arr.length}</span>
+      </div>`;
+    if (key === 'idle') {
+      // Сворачиваемая, по умолчанию закрыта — снимает шум с главного экрана.
+      return `
+        <details class="ts2-group ts2-group-${key}">
+          <summary class="ts2-group-summary">${head}</summary>
+          <div class="ts2-rows-inner">${rows}</div>
+        </details>`;
+    }
+    return `
+      <div class="ts2-group ts2-group-${key}">
+        ${head}
+        <div class="ts2-rows-inner">${rows}</div>
+      </div>`;
+  };
+
+  // Порядок групп = приоритет внимания тимлида утром.
+  return `
+    <div class="ts2-rows">
+      ${renderGroup('stop')}
+      ${renderGroup('watch')}
+      ${renderGroup('moving')}
+      ${renderGroup('idle')}
+    </div>
+  `;
 }
 
 function renderRow(p, isExpanded) {
