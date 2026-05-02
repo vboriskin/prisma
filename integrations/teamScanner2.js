@@ -37,6 +37,10 @@ import {
 } from './teamScanner2Config.js';
 // V19 C4 — telemetry events (понять как scanner2 реально используется).
 import { emit as telemetryEmit } from './telemetry.js';
+// V19 C2 — multi-day history (Anna PO + Dmitry pilot ask: «какие новости?»).
+import {
+  saveDailySnapshot, loadHistory, extractTrendSeries,
+} from './teamScanner2History.js';
 import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
   renderMultiTeamView, renderTeamConfigModal,
@@ -344,6 +348,9 @@ export const TeamScanner2 = {
       // считалась относительно вчерашнего, а не этого же fetch'а.
       this._prevSnapshot = this._readPrevSnapshot();
       this._saveSnapshot(this._model);
+      // V19 C2 — persist multi-day history (1 snapshot/день, deduped).
+      // Используется для 14-day sparkline trend в team-glance.
+      try { saveDailySnapshot(this._model, projectKeys); } catch (_) {}
       this._cancelled = false;
       this._errorMsg  = '';
       this._renderFull();
@@ -387,6 +394,9 @@ export const TeamScanner2 = {
     // V18.1 P7-S3.1 — aria-live region для panel open/close announcements.
     // V18.1 P7-S4.2 — prev snapshot для trend-deltas (если есть и не stale).
     const prev = this._prevSnapshot || null;
+    // V19 C2 — multi-day history для sparkline (PO ask «какие новости?»).
+    const { projectKeys } = this._readConfig();
+    const history = (this._activeView !== 'multi') ? loadHistory(projectKeys, 14) : [];
     // V18.1 P7-S4.1 — multi-team view (Dmitry blocker). В режиме multi
     // — render table сводок по командам вместо per-person rows.
     // V18.3 A5b — pk-filter применяется к team-view (single).
@@ -396,7 +406,7 @@ export const TeamScanner2 = {
     const bodyHtml = this._activeView === 'multi'
       ? renderMultiTeamView(m)
       : `
-        ${renderTeamGlance(filteredModel, { prev, pkFilter: this._activePkFilter })}
+        ${renderTeamGlance(filteredModel, { prev, pkFilter: this._activePkFilter, history })}
         ${renderPersonRows(filteredModel, { expandedKey: this._expandedKey })}`;
     const html = `
       <div class="ts2-root">

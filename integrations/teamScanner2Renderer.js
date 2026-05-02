@@ -51,6 +51,43 @@ function fmtHours(seconds) {
   return h < 10 ? h.toFixed(1) : Math.round(h).toString();
 }
 
+/**
+ * V19 C2 — Mini-sparkline для history-серии (14 дней).
+ * Pure inline-SVG, ~12 LOC SVG. Не использует external charting library.
+ *
+ * @param {number[]} series — values, ASC-by-day
+ * @param {object}   [opts] — { width=80, height=18, lastIsBad?: bool }
+ */
+function renderSparkline(series, opts = {}) {
+  if (!Array.isArray(series) || series.length < 2) return '';
+  const w = Number(opts.width)  || 80;
+  const h = Number(opts.height) || 18;
+  const max = Math.max(1, Math.max(...series));
+  const min = Math.min(0, Math.min(...series));
+  const range = max - min || 1;
+  const stepX = w / (series.length - 1);
+  const points = series.map((v, i) => {
+    const x = Math.round(i * stepX);
+    const y = Math.round(h - ((v - min) / range) * (h - 2) - 1);
+    return `${x},${y}`;
+  }).join(' ');
+  // Цвет последней точки: lastIsBad → red если возрастает, иначе accent.
+  const last = series[series.length - 1];
+  const prev = series[series.length - 2];
+  const trendUp = last > prev;
+  const dotCls = (opts.lastIsBad && trendUp) ? 'ts2-spark-dot-bad'
+              : (opts.lastIsBad && !trendUp) ? 'ts2-spark-dot-good'
+              : 'ts2-spark-dot';
+  const lastX = Math.round((series.length - 1) * stepX);
+  const lastY = Math.round(h - ((last - min) / range) * (h - 2) - 1);
+  return `
+    <svg class="ts2-sparkline-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+      <polyline class="ts2-sparkline-line" fill="none" points="${points}"/>
+      <circle class="${dotCls}" cx="${lastX}" cy="${lastY}" r="2"/>
+    </svg>
+  `;
+}
+
 /** V18.1 P7-S4.2 — render trend-delta arrow для PO/руководителя.
  *  positiveIsBad=true → ↑ red (orphans, stop), ↑ green (moving, progress).
  *  Returns '' если нет prev или delta=0.
@@ -383,6 +420,11 @@ export function renderTeamGlance(model, ctx = {}) {
          <button class="ts2-pk-filter-clear" id="ts2-pk-filter-clear" type="button" title="Сбросить фильтр">✕</button>
        </div>`
     : '';
+  // V19 C2 — history sparklines (PO ask «какие новости?»).
+  // Показываем только если у нас ≥ 2 daily snapshots; иначе скрыто.
+  const history = Array.isArray(ctx.history) ? ctx.history : [];
+  const trendRow = history.length >= 2 ? renderHistoryTrendRow(history) : '';
+
   return `
     <div class="ts2-glance">
       ${filterBadge}
@@ -399,6 +441,36 @@ export function renderTeamGlance(model, ctx = {}) {
         <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
       </div>
       ${riskLine ? `<div class="ts2-glance-line ts2-glance-risk-row">${riskLine}</div>` : ''}
+      ${trendRow}
+    </div>
+  `;
+}
+
+/**
+ * V19 C2 — История 14 дней: 3 sparkline'а в одном ряду.
+ * Без зависимостей: pure inline-SVG, ~14×3=42 polyline points max.
+ */
+function renderHistoryTrendRow(history) {
+  // Series ASC-by-day. 3 metrics: stop count, OOS count, sprint progress.
+  const stopSeries     = history.map(h => h?.counts?.stop || 0);
+  const oosSeries      = history.map(h => h?.risks?.totalOutOfSprint || 0);
+  const progressSeries = history.map(h => h?.sprintGoal?.aggregateProgress || 0);
+  const days = history.length;
+  return `
+    <div class="ts2-glance-line ts2-glance-trend-row">
+      <span class="ts2-glance-trend-label">${days} ${plural(days, ['день', 'дня', 'дней'])}:</span>
+      <span class="ts2-glance-trend-item" title="Stop count за ${days} дней — должен снижаться">
+        <span class="ts2-glance-trend-mini-lab">▌stop</span>
+        ${renderSparkline(stopSeries, { lastIsBad: true })}
+      </span>
+      <span class="ts2-glance-trend-item" title="Out-of-sprint events за ${days} дней — должен снижаться">
+        <span class="ts2-glance-trend-mini-lab">OOS</span>
+        ${renderSparkline(oosSeries, { lastIsBad: true })}
+      </span>
+      <span class="ts2-glance-trend-item" title="Sprint Goal progress % за ${days} дней — должен расти">
+        <span class="ts2-glance-trend-mini-lab">spr</span>
+        ${renderSparkline(progressSeries)}
+      </span>
     </div>
   `;
 }

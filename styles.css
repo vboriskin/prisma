@@ -11592,6 +11592,42 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   outline-offset: 2px;
 }
 
+/* V19 C2 — История 14 дней: row из 3 sparkline'ов в team-glance. */
+.ts2-glance-trend-row {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px; margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+  gap: 14px !important;
+}
+.ts2-glance-trend-label {
+  font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
+  color: var(--text-3);
+}
+.ts2-glance-trend-item {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.ts2-glance-trend-mini-lab {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 9px;
+  color: var(--text-4, #94a3b8);
+  letter-spacing: .3px; text-transform: uppercase;
+}
+.ts2-sparkline-svg {
+  display: block;
+  vertical-align: middle;
+}
+.ts2-sparkline-line {
+  stroke: var(--text-3);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .75;
+}
+.ts2-spark-dot      { fill: var(--accent); }
+.ts2-spark-dot-bad  { fill: var(--danger,  #dc2626); }
+.ts2-spark-dot-good { fill: var(--success, #10b981); }
+
 /* V18.1 P7-S4.2 — trend deltas (↑N / ↓N) для PO + руководителя. */
 .ts2-delta {
   display: inline-block;
