@@ -87,12 +87,30 @@ function dotStrip(hourBuckets, ariaLabel) {
   return `<span class="ts2-strip" role="img" aria-label="${esc(ariaLabel || '')}">${cells}</span>`;
 }
 
-/** Product-language вместо "0 событий" — снимаем обвиняющий тон (HR-роль). */
+/** Product-language вместо "0 событий" — снимаем обвиняющий тон (HR-роль).
+ *  V18.1 P7-S1.3 — учитывает все 4 источника, не только Jira+CF.
+ *  Это критично для тимлидов / senior'ов / архитекторов: их активность
+ *  часто ВНЕ Jira changelog'а (PR-ревью, коммиты без транзишенов, CF-доки).
+ *  До фикса: senior с 0 jira-events + 5 PR-reviews видел «Нет следа», что
+ *  ложно и унизительно.
+ */
 function emptyDayLanguage(p, day) {
-  // day = 'today' | 'yesterday'
+  // day = 'today' | 'yesterday' (пока не используется — P3 будет per-day language)
   const reviewSig = (p.badges?.reviews || 0) + (p.badges?.approves || 0);
-  if (reviewSig > 0)                return 'Фокус на ревью';
-  if ((p.cfItems || []).length > 0) return 'Документация / комментарии';
+  const commits   = p.badges?.commits48h || 0;
+  const prs       = p.badges?.pr48h || 0;
+  const cfN       = (p.cfItems || []).length;
+  const bbN       = (p.bbItems || []).length;
+  const zephyrN   = ((p.zephyrTestsCreatedRecent  || []).length
+                  +  (p.zephyrTestsExecutedRecent || []).length);
+
+  // Order matters — самый специфичный сигнал выигрывает.
+  if (reviewSig > 0)               return 'Фокус на код-ревью';
+  if (commits > 0 && prs === 0)    return 'Коммиты без транзишенов';
+  if (prs > 0)                     return 'Работа с PR';
+  if (zephyrN > 0)                 return 'Тестовые прогоны';
+  if (cfN > 0)                     return 'Документация / комментарии';
+  if (bbN > 0)                     return 'Активность в Bitbucket';
   return 'Нет следа в Jira / BB / CF';
 }
 
@@ -144,9 +162,20 @@ export function classifyPerson(p) {
   const stuck = stuckListOf(p).length;
   const prs48 = p?.badges?.pr48h      || 0;
   const com48 = p?.badges?.commits48h || 0;
+  // V18.1 P7-S1.3 — расширили idle-проверку на BB/CF/Zephyr-сигналы.
+  // Без этого senior/тимлид/архитектор с активностью только в PR-ревью
+  // или CF-доках попадали в idle (свёрнутая группа) — это ложь и
+  // обидно. Теперь любая активность в любом источнике вытаскивает из idle.
+  const reviewSig = (p?.badges?.reviews   || 0) + (p?.badges?.approves || 0);
+  const cfN       = (p?.cfItems || []).length;
+  const bbN       = (p?.bbItems || []).length;
+  const zephyrN   = ((p?.zephyrTestsCreatedRecent  || []).length
+                  +  (p?.zephyrTestsExecutedRecent || []).length);
+  const anyOtherSig = reviewSig > 0 || cfN > 0 || bbN > 0 || zephyrN > 0;
 
-  // Idle: совсем нет signal'ов. Сворачиваемая группа.
-  if (today === 0 && yest === 0 && wip === 0 && stuck === 0 && prs48 === 0 && com48 === 0) {
+  // Idle: совсем нет signal'ов нигде (Jira + BB + CF + Zephyr + reviews).
+  if (today === 0 && yest === 0 && wip === 0 && stuck === 0
+      && prs48 === 0 && com48 === 0 && !anyOtherSig) {
     return 'idle';
   }
   // Stop: stuck без движения.
@@ -155,7 +184,8 @@ export function classifyPerson(p) {
   if (wip >= 3) return 'watch';
   if (stuck > 0 && today > 0) return 'watch';
   if (today === 0 && yest > 0) return 'watch';
-  // Moving: остальное (есть today, без флагов).
+  // Moving: остальное — есть today ИЛИ есть other-signal (BB/CF/Zephyr/reviews).
+  // Reviewer-heavy роли с 0 today, но активные в PR/CF не должны быть idle.
   return 'moving';
 }
 
