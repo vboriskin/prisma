@@ -183,11 +183,13 @@ export function renderTeamGlance(model) {
   // V18.1 P2 — counts per classified group. Дают prevailing read'у тимлида
   // за 1 секунду: «куда смотреть в первую очередь?»
   const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
-  let commits48h = 0, prs48h = 0;
+  let commits48h = 0, prs48h = 0, conf48h = 0;
   for (const p of parts) {
     counts[classifyPerson(p)]++;
     commits48h += p.badges?.commits48h || 0;
     prs48h     += p.badges?.pr48h      || 0;
+    // V18.1 P6.2 — Confluence info теперь видна в team-glance.
+    conf48h    += p.badges?.conf48h    || 0;
   }
   const segs = [];
   if (counts.moving > 0) segs.push(`<span class="ts2-glance-num">${counts.moving}</span><span class="ts2-glance-lab">движется</span>`);
@@ -204,6 +206,9 @@ export function renderTeamGlance(model) {
       <span class="ts2-glance-sep">·</span>
       <span class="ts2-glance-num">${prs48h}</span>
       <span class="ts2-glance-lab">PR (48ч)</span>
+      <span class="ts2-glance-sep">·</span>
+      <span class="ts2-glance-num">${conf48h}</span>
+      <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
     </div>
   `;
 }
@@ -353,7 +358,15 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
   const blockers = Array.isArray(p.blockers) ? p.blockers : [];
 
   const tl = Array.isArray(p.timeline72h) ? p.timeline72h : [];
-  const filteredTl = tl;  // P5: jira-фильтр применяется на heatmap, события — все.
+  // V18.1 P6.2 — фильтр J/B/C/Z теперь применяется и к events feed (не
+  // только к heatmap row dim'у). Если какой-то источник off — события
+  // оттуда скрываются. Все 4 source'а присутствуют после расширенного
+  // computeTimeline72h.
+  const SRC_TO_FLAG = { jira: 'j', bb: 'b', cf: 'c', zephyr: 'z' };
+  const filteredTl = tl.filter(e => {
+    const flag = SRC_TO_FLAG[e?.src] || 'j';
+    return filters[flag] !== false;
+  });
 
   return `
     <div class="ts2-panel" role="dialog" aria-label="Детализация по сотруднику">
@@ -519,22 +532,78 @@ function renderEventsFeed(timeline72h) {
     return `
       <div class="ts2-panel-section ts2-panel-section-tight">
         <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч</span></div>
-        <div class="ts2-empty-text">Нет событий за 72ч.</div>
+        <div class="ts2-empty-text">Нет событий за 72ч (или все источники в фильтре выключены).</div>
       </div>
     `;
   }
-  const items = timeline72h.slice(0, 30).map(e => {
-    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
-    const issueKey = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
-    const text  = esc(e.text || e.kind || '');
-    return `<li class="ts2-recent-li"><span class="ts2-recent-at">${esc(at)}</span> ${issueKey} <span class="ts2-recent-text">${text}</span></li>`;
-  }).join('');
+  const items = timeline72h.slice(0, 40).map(renderEventLine).join('');
   return `
     <div class="ts2-panel-section ts2-panel-section-tight">
-      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч · top 30</span></div>
+      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч · top 40 · все источники</span></div>
       <ul class="ts2-recent ts2-recent-feed">${items}</ul>
     </div>
   `;
+}
+
+/** Render one event row — different per src. V18.1 P6.2. */
+function renderEventLine(e) {
+  const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+  const src = e?.src || 'jira';
+  const srcBadge = renderSrcBadge(src);
+  let body = '';
+  if (src === 'jira') {
+    const issueKey = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
+    const text = esc(e.text || e.kind || '');
+    body = `${issueKey} <span class="ts2-recent-text">${text}</span>`;
+  } else if (src === 'bb') {
+    // bbItem: { kind: 'pr'|'commit'|'review', title, url, repo, status? }
+    const kind = e.kind || '';
+    const repo = e.repo ? `<span class="ts2-recent-meta">${esc(e.repo)}</span>` : '';
+    const status = e.status ? ` · ${esc(e.status)}` : '';
+    const title = esc((e.title || '').slice(0, 80));
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${repo} <span class="ts2-recent-text">${title}${status}</span>`;
+  } else if (src === 'cf') {
+    // cfItem: { kind: 'edit'|'create'|'comment', title, spaceName, spaceKey, url }
+    const kind = e.kind || 'edit';
+    const space = e.spaceName || e.spaceKey ? `<span class="ts2-recent-meta">${esc(e.spaceName || e.spaceKey)}</span>` : '';
+    const title = esc((e.title || '').slice(0, 80));
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${space} <span class="ts2-recent-text">${title}</span>`;
+  } else if (src === 'zephyr') {
+    const kind = e.kind || 'test';
+    const result = e.result ? ` · ${esc(e.result)}` : '';
+    const title = esc((e?.slim?.summary || e.title || '').slice(0, 80));
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('zephyr', kind))}</span> <span class="ts2-recent-text">${title}${result}</span>`;
+  } else {
+    body = esc(e.text || '');
+  }
+  return `<li class="ts2-recent-li">${srcBadge}<span class="ts2-recent-at">${esc(at)}</span> ${body}</li>`;
+}
+
+function renderSrcBadge(src) {
+  const map = { jira: { l: 'J', cls: 'src-j' }, bb: { l: 'B', cls: 'src-b' }, cf: { l: 'C', cls: 'src-c' }, zephyr: { l: 'Z', cls: 'src-z' } };
+  const m = map[src] || map.jira;
+  return `<span class="ts2-recent-src ts2-recent-${m.cls}" title="${esc(src)}">${m.l}</span>`;
+}
+
+function kindLabel(src, kind) {
+  if (src === 'bb') {
+    if (kind === 'pr')     return 'PR';
+    if (kind === 'commit') return 'commit';
+    if (kind === 'review') return 'review';
+    return kind;
+  }
+  if (src === 'cf') {
+    if (kind === 'create')  return 'создал страницу';
+    if (kind === 'edit')    return 'правка';
+    if (kind === 'comment') return 'коммент';
+    return kind;
+  }
+  if (src === 'zephyr') {
+    if (kind === 'test' || kind === 'testSet') return 'тест-кейс';
+    if (kind === 'testExec' || kind === 'execution') return 'прогон';
+    return kind;
+  }
+  return kind;
 }
 
 function renderSwitchesNote(cs) {

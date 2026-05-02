@@ -164,6 +164,41 @@ describe('computeTimeline72h', () => {
     }));
     assert.equal(tl.length, 1);
   });
+
+  // V18.1 P6.2 — unified timeline объединяет 4 источника с src-тегом.
+  test('merge: jira + bb + cf + zephyr → src tags корректные', () => {
+    const t0 = new Date('2026-05-01T10:00:00Z').toISOString();
+    const tl = computeTimeline72h(mk({
+      timelineToday:               [ev(t0, 'A')],
+      bbItems:                     [{ at: t0, kind: 'pr',     title: 'Fix auth', repo: 'r1' }],
+      cfItems:                     [{ at: t0, kind: 'edit',   title: 'Page',     spaceName: 'TEAM' }],
+      zephyrTestsCreatedRecent:    [{ at: t0, kind: 'test',   slim: { summary: 'Login test' } }],
+      zephyrTestsExecutedRecent:   [{ at: t0, kind: 'testExec', result: 'PASS' }],
+    }));
+    assert.equal(tl.length, 5, '4 источника объединены в один лента');
+    const srcs = tl.map(e => e.src).sort();
+    assert.deepEqual(srcs, ['bb', 'cf', 'jira', 'zephyr', 'zephyr']);
+  });
+
+  test('jira events сохраняют src=jira + dayOffset', () => {
+    const t0 = new Date('2026-05-01T10:00:00Z').toISOString();
+    const tl = computeTimeline72h(mk({ timelineToday: [ev(t0, 'A')] }));
+    assert.equal(tl.length, 1);
+    assert.equal(tl[0].src, 'jira');
+  });
+
+  test('bb/cf items получают dayOffset вычисленный от at', () => {
+    const today = new Date(); today.setHours(10, 0, 0, 0);
+    const yest  = new Date(today); yest.setDate(today.getDate() - 1);
+    const tl = computeTimeline72h(mk({
+      bbItems: [{ at: today.toISOString(), kind: 'pr',  title: 'a' }],
+      cfItems: [{ at: yest.toISOString(),  kind: 'edit', title: 'b' }],
+    }));
+    const bb = tl.find(e => e.src === 'bb');
+    const cf = tl.find(e => e.src === 'cf');
+    assert.equal(bb?.dayOffset, 0, 'bb сегодняшний → 0');
+    assert.equal(cf?.dayOffset, 1, 'cf вчерашний → 1');
+  });
 });
 
 /* ── findLastStatusChange ────────────────────────────────── */

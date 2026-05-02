@@ -165,22 +165,59 @@ export function computeContextSwitches(p) {
 /* ────────────────────────────────────────────────────────── */
 
 /**
- * Returns array of events с дополненными полями `dayOffset` (0|1|2) и
- * `hourBucket` (0..23). Sorted DESC by `at`.
+ * Returns array of events с дополненными полями `src` (jira/bb/cf/zephyr),
+ * `dayOffset` (0|1|2|null) и `hourBucket` (0..23). Sorted DESC by `at`.
+ *
+ * V18.1 P6.2 — расширено с jira-only до unified лента всех 4 источников:
+ *  - jira:   timelineToday/Yesterday/Prev (events с issue + kind)
+ *  - bb:     bbItems (PR/commit/review с repo/url/status)
+ *  - cf:     cfItems (page edit/create/comment с title/spaceName)
+ *  - zephyr: zephyrTestsCreatedRecent + zephyrTestsExecutedRecent
+ *
+ * Это закрывает gap «инфа о Confluence не показывается в events feed» —
+ * до этого фикса P3 timeline72h был jira-only, и в detail-panel
+ * Confluence-активность считалась в heatmap row C, но не отображалась.
  */
 export function computeTimeline72h(p) {
   const out = [];
-  const tag = (events, dayOffset) => {
+  // Jira — из 3 day-buckets с dayOffset для совместимости с существующим UI.
+  const tagJira = (events, dayOffset) => {
     for (const e of events) {
       if (!e?.at) continue;
       const d = new Date(e.at);
       if (isNaN(d.getTime())) continue;
-      out.push({ ...e, dayOffset, hourBucket: d.getHours() });
+      out.push({ ...e, src: 'jira', dayOffset, hourBucket: d.getHours() });
     }
   };
-  tag(p?.timelineToday    || [], 0);
-  tag(p?.timelineYesterday || [], 1);
-  tag(p?.timelinePrev      || [], 2);
+  tagJira(p?.timelineToday    || [], 0);
+  tagJira(p?.timelineYesterday || [], 1);
+  tagJira(p?.timelinePrev      || [], 2);
+
+  // BB / CF / Zephyr — тегируем `src`, dayOffset вычисляем по at.
+  const today00 = new Date(); today00.setHours(0, 0, 0, 0);
+  const yest00  = new Date(today00); yest00.setDate(today00.getDate() - 1);
+  const prev00  = new Date(today00); prev00.setDate(today00.getDate() - 2);
+  const dayOffsetOf = (at) => {
+    const t = new Date(at).getTime();
+    if (isNaN(t)) return null;
+    if (t >= today00.getTime()) return 0;
+    if (t >= yest00.getTime())  return 1;
+    if (t >= prev00.getTime())  return 2;
+    return null;   // events older than 72h end up here, но они отфильтрованы 72h-окном на сервере
+  };
+  const tagOther = (items, src) => {
+    for (const it of items) {
+      if (!it?.at) continue;
+      const d = new Date(it.at);
+      if (isNaN(d.getTime())) continue;
+      out.push({ ...it, src, dayOffset: dayOffsetOf(it.at), hourBucket: d.getHours() });
+    }
+  };
+  tagOther(p?.bbItems                     || [], 'bb');
+  tagOther(p?.cfItems                     || [], 'cf');
+  tagOther(p?.zephyrTestsCreatedRecent    || [], 'zephyr');
+  tagOther(p?.zephyrTestsExecutedRecent   || [], 'zephyr');
+
   out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   return out;
 }

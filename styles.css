@@ -11666,7 +11666,38 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 }
 
 /* Events feed inside panel — denser */
-.ts2-recent-feed { max-height: 320px; overflow-y: auto; }
+.ts2-recent-feed { max-height: 360px; overflow-y: auto; }
+/* V18.1 P6.2 — per-source badges + kind labels в events feed */
+.ts2-recent-li {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 6px;
+}
+.ts2-recent-src {
+  display: inline-block;
+  width: 16px; text-align: center;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 9px; font-weight: 700; letter-spacing: .4px;
+  border-radius: 3px;
+  padding: 1px 0;
+  background: var(--bg-2, #f1f5f9);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ts2-recent-src-j { color: var(--accent); border-color: var(--accent-light, #c7d2fe); }
+.ts2-recent-src-b { color: #16a34a; border-color: #bbf7d0; }
+.ts2-recent-src-c { color: #d97706; border-color: #fde68a; }
+.ts2-recent-src-z { color: #9333ea; border-color: #e9d5ff; }
+.ts2-recent-kind {
+  font-size: 10px; letter-spacing: .3px; text-transform: uppercase;
+  color: var(--text-2); font-weight: 600;
+  background: var(--bg-2, #f1f5f9);
+  padding: 0 4px; border-radius: 2px;
+}
+.ts2-recent-meta {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px; color: var(--text-3);
+}
 
 .ts2-panel-footer-note {
   padding: 10px 20px;
