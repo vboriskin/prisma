@@ -415,10 +415,12 @@ function renderRow(p, isExpanded) {
     ? `<span class="ts2-row-badges">${dwellBadge}${switchBadge}</span>`
     : `<span class="ts2-row-badges-spacer"></span>`;
 
+  // V18.1 P7-S3.1 — aria-controls связывает row с panel id (=ts2-panel-main),
+  // SR анонсирует «связан с panel'ью «Детализация по сотруднику»».
   return `
-    <div class="ts2-row ${isExpanded ? 'ts2-row-expanded' : ''}" data-key="${esc(p.key)}" tabindex="0" role="button" aria-expanded="${isExpanded}">
+    <div class="ts2-row ${isExpanded ? 'ts2-row-expanded' : ''}" data-key="${esc(p.key)}" tabindex="0" role="button" aria-expanded="${isExpanded}" aria-controls="ts2-panel-main">
       ${blockerMark}
-      <span class="ts2-name" title="${esc(p.label)}${p.email ? ' · ' + esc(p.email) : ''}">${esc(p.label || '—')}</span>
+      <span class="ts2-name" title="${esc(p.label)}">${esc(p.label || '—')}</span>
       <span class="ts2-strip-wrap ts2-strip-wrap-today">${todayBlock}</span>
       <span class="ts2-strip-wrap ts2-strip-wrap-yest">${yestBlock}</span>
       ${badges}
@@ -474,8 +476,11 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
     return filters[flag] !== false;
   });
 
+  // V18.1 P7-S3.1 — id для aria-controls; aria-modal для focus-trap;
+  // tabindex=-1 чтобы можно было программно фокусировать.
   return `
-    <div class="ts2-panel" role="dialog" aria-label="Детализация по сотруднику">
+    <div class="ts2-panel" id="ts2-panel-main" role="dialog" aria-modal="true"
+         aria-labelledby="ts2-panel-title" tabindex="-1">
       ${renderPanelHeader(p, tToday, tYest, tPrev)}
       ${renderCounters(p)}
       ${renderHeatmap72x4(heat72, filters)}
@@ -510,7 +515,7 @@ function renderPanelHeader(p, tToday, tYest, tPrev) {
   return `
     <div class="ts2-panel-head">
       <div class="ts2-panel-titleblock">
-        <div class="ts2-panel-name">${esc(p.label || '—')}</div>
+        <div class="ts2-panel-name" id="ts2-panel-title">${esc(p.label || '—')}</div>
         <div class="ts2-panel-sub">
           <span class="ts2-panel-meta">сегодня ${tToday}</span>
           <span class="ts2-panel-meta">вчера ${tYest}</span>
@@ -582,7 +587,10 @@ function renderHeatmap72x4(h, filters) {
       if (isPeak) classes.push('ts2-hcell-peak');
       if (isHigh) classes.push('ts2-hcell-saturated');
       const hoursAgo = 71 - hourIdx;
-      return `<span class="${classes.join(' ')}" style="opacity:${op}" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
+      // V18.1 P7-S3.1 — aria-hidden на каждой клетке: parent .ts2-heatmap
+      // имеет один aria-label с summary; SR не должен читать 288
+      // отдельных tooltip'ов. title= оставлен для mouse hover.
+      return `<span class="${classes.join(' ')}" style="opacity:${op}" aria-hidden="true" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
     }).join('');
     return `
       <div class="ts2-hrow ${visible ? '' : 'ts2-hrow-hidden'}">
@@ -592,12 +600,16 @@ function renderHeatmap72x4(h, filters) {
       </div>
     `;
   }).join('');
+  // V18.1 P7-S3.1 — a11y summary для SR'а: один aria-label на контейнер
+  // вместо 288 разрозненных tooltip'ов на каждой клетке.
+  const totalEvents = h.rowTotals.reduce((s, n) => s + n, 0);
+  const ariaSummary = `Heatmap активности 72 часа × 4 источника (Jira/Bitbucket/Confluence/Zephyr). Всего ${totalEvents} событий за 72ч. ${peakHint}.`;
   return `
     <div class="ts2-panel-section">
       <div class="ts2-panel-section-title">Heatmap 72×4 <span class="ts2-panel-section-hint">${esc(peakHint)}</span></div>
-      <div class="ts2-heatmap">
+      <div class="ts2-heatmap" role="img" aria-label="${esc(ariaSummary)}">
         ${rows}
-        <div class="ts2-haxis">
+        <div class="ts2-haxis" aria-hidden="true">
           <span class="ts2-haxis-tick">−72ч</span>
           <span class="ts2-haxis-tick">−48ч</span>
           <span class="ts2-haxis-tick">−24ч</span>

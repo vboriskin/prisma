@@ -11832,6 +11832,25 @@ body.theme-dark .ts2-recent-src { color: var(--text-2); }
   border-top: 1px solid var(--border);
 }
 
+/* V18.1 P7-S3.1 — visually-hidden aria-live для SR-only announcements.
+   Pattern из WCAG (clip-path вместо display:none, чтобы AT видело). */
+.ts2-aria-live {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* V18.1 P7-S3.1 — dark-theme contrast fix для source-borders.
+   AA-tested: каждый цвет ≥ 4.5:1 на dark card (#121a2f). */
+body.theme-dark .ts2-recent-src-j { border-left-color: #818cf8; }   /* indigo-400 */
+body.theme-dark .ts2-recent-src-b { border-left-color: #34d399; }   /* emerald-400 */
+body.theme-dark .ts2-recent-src-c { border-left-color: #fbbf24; }   /* amber-400 */
+body.theme-dark .ts2-recent-src-z { border-left-color: #c084fc; }   /* purple-400 */
+
 /* Dark theme adjustments */
 body.theme-dark .ts2-panel { background: var(--card, #121a2f); }
 body.theme-dark .ts2-panel-head,

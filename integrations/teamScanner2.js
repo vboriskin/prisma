@@ -218,16 +218,34 @@ export const TeamScanner2 = {
     const panelHtml = this._expandedKey
       ? renderEmployeeDetailPanel(m, this._expandedKey, { filters: this._panelFilters })
       : '';
+    // V18.1 P7-S3.1 — aria-live region для panel open/close announcements.
     const html = `
       <div class="ts2-root">
         ${renderTopBar(m)}
         ${renderTeamGlance(m)}
         ${renderPersonRows(m, { expandedKey: this._expandedKey })}
       </div>
+      <div class="ts2-aria-live" aria-live="polite" aria-atomic="true" id="ts2-aria-live"></div>
       ${this._expandedKey ? `<div class="ts2-panel-backdrop" id="ts2-panel-backdrop"></div>${panelHtml}` : ''}
     `;
     this._container.innerHTML = html;
     this._bindEvents();
+    // V18.1 P7-S3.1 — focus management + announcement при открытии panel.
+    if (this._expandedKey) {
+      const panel = this._container.querySelector('#ts2-panel-main');
+      // Async чтобы DOM закончил commit перед focus.
+      if (panel) requestAnimationFrame(() => panel.focus());
+      const p = (m.participants || []).find(x => x.key === this._expandedKey);
+      this._announce(`Открыта детализация по сотруднику ${p?.label || ''}`);
+    }
+  },
+
+  /** V18.1 P7-S3.1 — text announcement для SR'а через aria-live polite. */
+  _announce(msg) {
+    const el = this._container?.querySelector('#ts2-aria-live');
+    if (!el) return;
+    el.textContent = '';   // force re-announce при том же текст
+    requestAnimationFrame(() => { el.textContent = String(msg || ''); });
   },
 
   /**
@@ -272,7 +290,23 @@ export const TeamScanner2 = {
     root.querySelector('#ts2-panel-backdrop')?.addEventListener('click', () => this._closePanel());
     if (this._expandedKey) {
       if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
-      this._escHandler = (e) => { if (e.key === 'Escape') this._closePanel(); };
+      // V18.1 P7-S3.1 — single keydown handler делает 2 вещи:
+      //   - Escape → закрыть panel
+      //   - Tab при focus вне panel → focus-trap, возврат внутрь panel
+      // Tab между focusable элементами panel'и работает естественно
+      // (browser default), но при выходе за её пределы — мы перехватываем.
+      this._escHandler = (e) => {
+        if (e.key === 'Escape') { this._closePanel(); return; }
+        if (e.key !== 'Tab') return;
+        const panel = root.querySelector('#ts2-panel-main');
+        if (!panel) return;
+        // Если active focus уже вне panel'и — fight-back inside.
+        const active = document.activeElement;
+        if (!panel.contains(active)) {
+          e.preventDefault();
+          panel.focus();
+        }
+      };
       document.addEventListener('keydown', this._escHandler);
     }
     // V18.1 P7-S2.4 — filter pill click → partial re-render только panel'и,
@@ -319,12 +353,21 @@ export const TeamScanner2 = {
   },
 
   _closePanel() {
+    // V18.1 P7-S3.1 — сохранили key до сброса, чтобы restore focus
+    // на row после rebuild'а dashboard.
+    const focusKey = this._expandedKey;
     this._expandedKey = '';
     if (this._escHandler) {
       document.removeEventListener('keydown', this._escHandler);
       this._escHandler = null;
     }
     this._renderFull();
+    // Restore focus на row из которого открыли panel.
+    if (focusKey && this._container) {
+      const row = this._container.querySelector(`.ts2-row[data-key="${focusKey}"]`);
+      if (row) requestAnimationFrame(() => row.focus());
+    }
+    this._announce('Панель детализации закрыта');
   },
 
   /**
