@@ -7,6 +7,9 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+// V19 E4 — structured logger вместо ad-hoc console.* calls.
+// JSON output по умолчанию (для ELK ingestion), levels via LOG_LEVEL env.
+const logger = require('./server/logger.js');
 
 const PORT = parseInt(process.argv[2], 10) || 8080;
 const ROOT = __dirname;
@@ -459,7 +462,7 @@ function _jiraGateClose(ms, reason) {
   if (until > _jiraGateUntil) {
     _jiraGateUntil = until;
     _jiraGateReason = reason;
-    console.warn(`[jira:gate] closed for ${ms}ms — ${reason}`);
+    logger.warn('[jira:gate] closed', { gateMs: ms, reason });
   }
 }
 
@@ -2075,7 +2078,7 @@ async function handleIntegrationsApi(req, res, pathname) {
         pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, payload);
         writeJson(res, 200, payload);
       } catch (e) {
-        console.warn('[employee-detail] enrichment failed:', e);
+        logger.error('[employee-detail] enrichment failed', { err: e?.message || String(e), jobId, employeeKey });
         writeJson(res, 500, { error: 'enrichment failed: ' + (e?.message || 'unknown') });
       }
       return;
@@ -2706,7 +2709,7 @@ server.on('error', (err) => {
       currentPort = next;
       server.listen(currentPort, '127.0.0.1');
     } else {
-      console.error(`Порты ${PORT}–${PORT + 9} заняты. Освободи порт или задай другой: node server.js 9090`);
+      logger.error('Все порты заняты, не могу стартовать', { tried: `${PORT}-${PORT + 9}`, hint: 'Освободи порт или задай другой: node server.js 9090' });
       process.exit(1);
     }
   } else {
@@ -2717,7 +2720,9 @@ server.on('error', (err) => {
 server.listen(PORT, '127.0.0.1', () => {
   const actualPort = server.address().port;
   // Machine-readable marker so launch.js knows the real port.
+  // V19 E4 — startup-banner идёт через logger; LISTENING:N остаётся
+  // plain console.log потому что launch.js парсит его регексом для
+  // авто-detection порта (см. launch.js).
   console.log(`LISTENING:${actualPort}`);
-  console.log(`SBOF Planner — http://localhost:${actualPort}`);
-  console.log('Ctrl+C to stop');
+  logger.info('SBOF Planner started', { port: actualPort, url: `http://localhost:${actualPort}` });
 });

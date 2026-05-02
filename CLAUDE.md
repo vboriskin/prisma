@@ -92,6 +92,31 @@ npm run lint                 # eslint --max-warnings 215
 npm run ci                   # typecheck + lint + test + e2e + perfBudget
 ```
 
+## Server logging (V19 E4)
+
+Server использует `server/logger.js` — structured JSON logger вместо
+ad-hoc `console.log`. По умолчанию newline-delimited JSON в stdout
+(error → stderr) для ELK ingestion.
+
+```bash
+LOG_LEVEL=debug node server.js     # показать debug entries (default: info)
+LOG_FORMAT=pretty node server.js   # human-readable для разработки
+LOG_TS=epoch node server.js        # ms timestamps вместо ISO
+```
+
+Code:
+```js
+const logger = require('./server/logger.js');
+logger.info('jira-fetch ok', { pks: ['A','B'], ms: 234 });
+logger.error('crashed', { err: e.message });
+const reqLogger = logger.withReqId('r-42');   // child с reqId
+reqLogger.info('handling /api/foo');
+logger.event('scanner2.detail_open', { ... }); // V19 C4 telemetry
+logger.timeStart('jira.fetch');
+// ... work ...
+logger.timeEnd('jira.fetch', { pks });   // emits info с latencyMs
+```
+
 Для одного теста: `node --test tests/unit/foo.test.js`
 
 ## Куда копать при типичных задачах
