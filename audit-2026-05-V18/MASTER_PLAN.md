@@ -122,3 +122,14 @@ audit-2026-05-V18/
 ---
 
 **Готовность V18 к старту:** есть план + есть аудит-папка + есть PR-template + есть .gitignore. Можно приступать к P1.
+
+---
+
+## V18.1 P7 — Сканнер команд 2.0 (V18.1 → V18.2 graduation)
+
+Параллельно V18.1 декомпозиции (P9-P10) команда экспертов спроектировала и реализовала **новый «Сканнер команд 2.0»** — отдельный subtab в /integrations с чистого листа. После 6 фаз initial implementation (P1-P6) + pre-release audit + 3 sprints fixing 17 P0/P1 findings — graduate в production V18.2.
+
+- **Дизайн:** [`scanner2-graduation.md`](./scanner2-graduation.md) — ADR с decisions, trade-offs, rollback
+- **Operations:** [`../docs/integrations/team-scanner-v2.md`](../docs/integrations/team-scanner-v2.md) — что считается, какие пороги, как читать сигналы
+- **Tests:** 645 unit / 18 contract / 0 fail
+- **Status (2026-05-02):** Sprint 3 closed, automated DoD passed. Pre-release audit completed. Pending: pilot feedback + manual smoke.
