@@ -11476,6 +11476,52 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 .ts2-glance-num-watch { color: var(--warning, #b45309); }
 .ts2-glance-num-stop  { color: var(--danger,  #dc2626); }
 .ts2-glance-num-muted { color: var(--text-4,  #94a3b8); }
+/* V18.3 A5b — pk-filter badge (Anna PO finding: реальный фильтр
+   participants после click team-row в multi-view). */
+.ts2-pk-filter-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  background: var(--accent-light, rgba(99, 102, 241, .1));
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  font-size: 12px;
+  align-self: flex-start;
+}
+.ts2-pk-filter-label {
+  color: var(--text-3); font-size: 10px;
+  letter-spacing: .5px; text-transform: uppercase;
+}
+.ts2-pk-filter-pk {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  font-weight: 700; color: var(--text-1);
+}
+.ts2-pk-filter-clear {
+  background: transparent; border: none; cursor: pointer;
+  width: 18px; height: 18px;
+  border-radius: 3px;
+  font-size: 11px; color: var(--text-3); padding: 0;
+}
+.ts2-pk-filter-clear:hover { background: var(--bg-2); color: var(--text-1); }
+.ts2-pk-filter-clear:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* V18.3 A5a — clickable group-count buttons в team-glance.
+   Без visual change — видом как inline-text с cursor:pointer. */
+.ts2-glance-jump {
+  background: transparent; border: none; padding: 0; margin: 0;
+  font: inherit; color: inherit;
+  cursor: pointer;
+  display: inline-flex; align-items: baseline; gap: 4px;
+  border-radius: 3px;
+}
+.ts2-glance-jump:hover { background: var(--bg-2, #f1f5f9); }
+.ts2-glance-jump:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* V18.1 P7-S4.2 — trend deltas (↑N / ↓N) для PO + руководителя. */
 .ts2-delta {
   display: inline-block;

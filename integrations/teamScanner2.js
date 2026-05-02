@@ -53,6 +53,10 @@ export const TeamScanner2 = {
   // V18.1 P7-S4.1 — multi-team view toggle. 'team' = single (legacy),
   // 'multi' = aggregate per-team table. Pilot Dmitry blocker fix.
   _activeView: 'team',
+  // V18.3 A5b — фильтр по project key. Click team-row в multi-view →
+  // переключает в team-view и фильтрует participants по `projects[]`.
+  // Empty string = no filter (default).
+  _activePkFilter: '',
   // V18.1 P4 — captured jobId (из callback fetchPulseData → onJobId)
   // используется для lazy server-side drill-down. Истекает через
   // 30 мин по TTL `_pulseJobs` cluster'а на сервере.
@@ -357,11 +361,15 @@ export const TeamScanner2 = {
     const prev = this._prevSnapshot || null;
     // V18.1 P7-S4.1 — multi-team view (Dmitry blocker). В режиме multi
     // — render table сводок по командам вместо per-person rows.
+    // V18.3 A5b — pk-filter применяется к team-view (single).
+    const filteredModel = (this._activePkFilter && this._activeView === 'team')
+      ? this._applyPkFilter(m, this._activePkFilter)
+      : m;
     const bodyHtml = this._activeView === 'multi'
       ? renderMultiTeamView(m)
       : `
-        ${renderTeamGlance(m, { prev })}
-        ${renderPersonRows(m, { expandedKey: this._expandedKey })}`;
+        ${renderTeamGlance(filteredModel, { prev, pkFilter: this._activePkFilter })}
+        ${renderPersonRows(filteredModel, { expandedKey: this._expandedKey })}`;
     const html = `
       <div class="ts2-root">
         ${renderTopBar(m, { prev, activeView: this._activeView })}
@@ -380,6 +388,21 @@ export const TeamScanner2 = {
       const p = (m.participants || []).find(x => x.key === this._expandedKey);
       this._announce(`Открыта детализация по сотруднику ${p?.label || ''}`);
     }
+  },
+
+  /**
+   * V18.3 A5b — клонирует model с отфильтрованными participants.
+   * Filter: оставить только тех у кого pk in p.projects. Sprint-goal,
+   * risks и spaces НЕ фильтруются — они per-pk сами по себе.
+   */
+  _applyPkFilter(model, pk) {
+    if (!model || !pk) return model;
+    return {
+      ...model,
+      participants: (model.participants || []).filter(
+        p => Array.isArray(p.projects) && p.projects.includes(pk),
+      ),
+    };
   },
 
   /** V18.1 P7-S3.1 — text announcement для SR'а через aria-live polite. */
@@ -410,14 +433,26 @@ export const TeamScanner2 = {
       this._activeView = this._activeView === 'multi' ? 'team' : 'multi';
       this._closePanel();   // closes any open detail panel + does _renderFull
     });
-    // V18.1 P7-S4.1 — click по team-row в multi-view → switch to single-team
-    // view с этой PK как visual context (P7 simple: just toggle back, future
-    // V19: filter participants по pk).
+    // V18.3 A5a — group-jump: click по counter в team-glance → scroll
+    // к соответствующей группе rows. Anna PO finding.
+    root.querySelectorAll('.ts2-glance-jump[data-jump-group]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = root.querySelector(`[data-group-anchor="${btn.dataset.jumpGroup}"]`);
+        if (!target) return;
+        // Если target — <details> и closed — открыть.
+        if (target.tagName === 'DETAILS' && !target.open) target.open = true;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+    // V18.1 P7-S4.1 + V18.3 A5b — click по team-row в multi-view →
+    // переключает в team-view + фильтрует participants по этой pk.
+    // Anna PO finding: «click team-row в multi-view → реальный фильтр
+    // participants по pk (сейчас просто toggle вида)».
     root.querySelectorAll('.ts2-team-row[data-team-pk]').forEach(el => {
       el.addEventListener('click', () => {
         this._activeView = 'team';
+        this._activePkFilter = el.dataset.teamPk || '';
         this._renderFull();
-        // Scroll-into-view не нужен — пользователь ожидает увидеть team-list.
       });
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -425,6 +460,11 @@ export const TeamScanner2 = {
           el.click();
         }
       });
+    });
+    // V18.3 A5b — clear pk-filter button.
+    root.querySelector('#ts2-pk-filter-clear')?.addEventListener('click', () => {
+      this._activePkFilter = '';
+      this._renderFull();
     });
     // Click по строке → открыть/закрыть side-panel.
     // V18.1 P7-S1.5 — keyboard activation Enter/Space (WCAG 2.1.1).

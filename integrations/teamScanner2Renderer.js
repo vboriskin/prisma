@@ -342,11 +342,16 @@ export function renderTeamGlance(model, ctx = {}) {
   const dWatch  = prev ? renderDelta(counts.watch,  prev.counts?.watch,  { positiveIsBad: true }) : '';
   const dStop   = prev ? renderDelta(counts.stop,   prev.counts?.stop,   { positiveIsBad: true }) : '';
 
+  // V18.3 A5a — group-counts кликабельны → scroll-jump к соответствующей
+  // группе. Anna PO finding: «Я вижу «1 требует разговора», но чтобы
+  // найти кого — скроллю. Anchor-jump к ts2-group-stop напрашивается».
+  const jumpBtn = (groupKey, content) =>
+    `<button type="button" class="ts2-glance-jump" data-jump-group="${groupKey}" title="Прыгнуть к группе">${content}</button>`;
   const segs = [];
-  if (counts.moving > 0) segs.push(`<span class="ts2-glance-num">${counts.moving}</span>${dMoving}<span class="ts2-glance-lab">движется</span>`);
-  if (counts.watch  > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span>${dWatch}<span class="ts2-glance-lab">наблюдение</span>`);
-  if (counts.stop   > 0) segs.push(`<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span>${dStop} ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`);
-  if (counts.idle   > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span><span class="ts2-glance-lab">без активности</span>`);
+  if (counts.moving > 0) segs.push(jumpBtn('moving', `<span class="ts2-glance-num">${counts.moving}</span>${dMoving}<span class="ts2-glance-lab">движется</span>`));
+  if (counts.watch  > 0) segs.push(jumpBtn('watch',  `<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span>${dWatch}<span class="ts2-glance-lab">наблюдение</span>`));
+  if (counts.stop   > 0) segs.push(jumpBtn('stop',   `<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span>${dStop} ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`));
+  if (counts.idle   > 0) segs.push(jumpBtn('idle',   `<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span><span class="ts2-glance-lab">без активности</span>`));
   const groupLine = segs.length ? segs.join(`<span class="ts2-glance-sep">·</span>`) : `<span class="ts2-glance-lab">Нет данных</span>`;
   // V18.1 P7-S2.1.5 — risk shelf: orphans + out-of-sprint.
   // Закрывает сигналы #6 + #7 из synthesis-плана для PO/SM.
@@ -367,8 +372,19 @@ export function renderTeamGlance(model, ctx = {}) {
   }
   const riskLine = riskBlocks.length ? riskBlocks.join(`<span class="ts2-glance-sep">·</span>`) : '';
 
+  // V18.3 A5b — filter-badge показывает что view filtered по pk + дает
+  // кнопку clear filter.
+  const pkFilter = ctx.pkFilter || '';
+  const filterBadge = pkFilter
+    ? `<div class="ts2-pk-filter-badge">
+         <span class="ts2-pk-filter-label">Фильтр:</span>
+         <span class="ts2-pk-filter-pk">${esc(pkFilter)}</span>
+         <button class="ts2-pk-filter-clear" id="ts2-pk-filter-clear" type="button" title="Сбросить фильтр">✕</button>
+       </div>`
+    : '';
   return `
     <div class="ts2-glance">
+      ${filterBadge}
       <div class="ts2-glance-line">
         ${groupLine}
         <span class="ts2-glance-sep">·</span>
@@ -535,13 +551,13 @@ export function renderPersonRows(model, ctx = {}) {
     if (key === 'idle') {
       // Сворачиваемая, по умолчанию закрыта — снимает шум с главного экрана.
       return `
-        <details class="ts2-group ts2-group-${key}">
+        <details class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
           <summary class="ts2-group-summary">${head}</summary>
           <div class="ts2-rows-inner">${rows}</div>
         </details>`;
     }
     return `
-      <div class="ts2-group ts2-group-${key}">
+      <div class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
         ${head}
         <div class="ts2-rows-inner">${rows}</div>
       </div>`;
