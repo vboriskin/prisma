@@ -18,6 +18,21 @@ import { Utils } from '../utils.js';
 
 const esc = (v) => Utils.escapeHtml(String(v == null ? '' : v));
 
+/* V18.1 P7-S1.4 — render-context для построения кликабельных URL'ов
+   к внешним системам (Jira /browse/KEY). Устанавливается orchestrator'ом
+   через setRenderContext({ jiraBaseUrl }) перед каждым _renderFull. */
+let _renderContext = { jiraBaseUrl: '' };
+export function setRenderContext(ctx) {
+  _renderContext = { ..._renderContext, ...(ctx || {}) };
+}
+function jiraIssueLink(key) {
+  if (!key) return '';
+  const base = _renderContext.jiraBaseUrl || '';
+  if (!base) return `<strong>${esc(key)}</strong>`;
+  // Внешняя ссылка с rel=noopener — не передаём referrer внутрь Jira.
+  return `<a class="ts2-issue-link" href="${esc(base)}/browse/${esc(key)}" target="_blank" rel="noopener noreferrer" title="Открыть ${esc(key)} в Jira">${esc(key)}</a>`;
+}
+
 /* ── helpers ─────────────────────────────────────────── */
 
 function plural(n, forms) {
@@ -520,7 +535,7 @@ function renderBlockersShelf(blockers) {
   const items = blockers.slice(0, 8).map(b => `
     <li class="ts2-blockers-li">
       <span class="ts2-blockers-stripe"></span>
-      <span class="ts2-blockers-key">${esc(b.key)}</span>
+      <span class="ts2-blockers-key">${jiraIssueLink(b.key)}</span>
       <span class="ts2-blockers-status">${esc(b.status)}</span>
       <span class="ts2-blockers-dwell">${b.dwellHours}ч</span>
       <span class="ts2-blockers-summary">${esc((b.summary || '').slice(0, 80))}</span>
@@ -557,8 +572,10 @@ function renderEventLine(e) {
   const src = e?.src || 'jira';
   const srcBadge = renderSrcBadge(src);
   let body = '';
+  // V18.1 P7-S1.4 — все references на issue/PR/page кликабельны через
+  // настоящие <a href>. Без этого инструмент только смотрит, не работает.
   if (src === 'jira') {
-    const issueKey = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
+    const issueKey = e?.issue?.key ? jiraIssueLink(e.issue.key) : '';
     const text = esc(e.text || e.kind || '');
     body = `${issueKey} <span class="ts2-recent-text">${text}</span>`;
   } else if (src === 'bb') {
@@ -566,19 +583,29 @@ function renderEventLine(e) {
     const kind = e.kind || '';
     const repo = e.repo ? `<span class="ts2-recent-meta">${esc(e.repo)}</span>` : '';
     const status = e.status ? ` · ${esc(e.status)}` : '';
-    const title = esc((e.title || '').slice(0, 80));
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${repo} <span class="ts2-recent-text">${title}${status}</span>`;
+    const titleText = (e.title || '').slice(0, 80);
+    const titleHtml = e.url
+      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(titleText)}</a>`
+      : esc(titleText);
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${repo} <span class="ts2-recent-text">${titleHtml}${status}</span>`;
   } else if (src === 'cf') {
     // cfItem: { kind: 'edit'|'create'|'comment', title, spaceName, spaceKey, url }
     const kind = e.kind || 'edit';
     const space = e.spaceName || e.spaceKey ? `<span class="ts2-recent-meta">${esc(e.spaceName || e.spaceKey)}</span>` : '';
-    const title = esc((e.title || '').slice(0, 80));
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${space} <span class="ts2-recent-text">${title}</span>`;
+    const titleText = (e.title || '').slice(0, 80);
+    const titleHtml = e.url
+      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(titleText)}</a>`
+      : esc(titleText);
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${space} <span class="ts2-recent-text">${titleHtml}</span>`;
   } else if (src === 'zephyr') {
     const kind = e.kind || 'test';
     const result = e.result ? ` · ${esc(e.result)}` : '';
-    const title = esc((e?.slim?.summary || e.title || '').slice(0, 80));
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('zephyr', kind))}</span> <span class="ts2-recent-text">${title}${result}</span>`;
+    const slimKey = e?.slim?.key;
+    const titleText = (e?.slim?.summary || e.title || '').slice(0, 80);
+    const titleHtml = slimKey
+      ? `${jiraIssueLink(slimKey)} <span class="ts2-recent-text">${esc(titleText)}${result}</span>`
+      : `<span class="ts2-recent-text">${esc(titleText)}${result}</span>`;
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('zephyr', kind))}</span> ${titleHtml}`;
   } else {
     body = esc(e.text || '');
   }

@@ -28,7 +28,7 @@ import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
-  renderSkeleton, renderEmpty, renderError,
+  renderSkeleton, renderEmpty, renderError, setRenderContext,
 } from './teamScanner2Renderer.js';
 
 export const TeamScanner2 = {
@@ -200,6 +200,10 @@ export const TeamScanner2 = {
   _renderFull() {
     if (!this._container || !this._model) return;
     const m = this._model;
+    // V18.1 P7-S1.4 — push render-context (jiraBaseUrl) для построения
+    // кликабельных issue.key links в blockers list + events feed.
+    // Re-asserted на каждом render (settings могут поменяться).
+    setRenderContext({ jiraBaseUrl: m.jiraBaseUrl || '' });
     // V18.1 P5 — side-panel рендерится КАК БРАТ root'а (position:fixed),
     // чтобы перекрывать всю область viewport, а не сидеть в content-area.
     const panelHtml = this._expandedKey

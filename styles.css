@@ -11698,6 +11698,19 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px; color: var(--text-3);
 }
+/* V18.1 P7-S1.4 — кликабельные issue/PR/page links в panel'е */
+.ts2-issue-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed transparent;
+  transition: border-color .15s, color .15s;
+}
+.ts2-issue-link:hover { border-bottom-color: var(--accent); }
+.ts2-issue-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px; border-radius: 2px;
+}
+.ts2-blockers-key .ts2-issue-link { font-weight: 700; }
 
 .ts2-panel-footer-note {
   padding: 10px 20px;
