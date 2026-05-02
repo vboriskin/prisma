@@ -398,7 +398,7 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
   const tYest  = (p.timelineYesterday || []).length;
   const tPrev  = (p.timelinePrev      || []).length;
   const heat72 = p.heatmap72x4 || { grid: [[],[],[],[]], rowTotals: [0,0,0,0], colTotals: [], peakCell: null };
-  const spark  = p.sparkline72h || new Array(72).fill(0);
+  // V18.1 P7-S2.5 — sparkline удалён, peak-hour перенесён в heatmap hint.
   const cs     = p.contextSwitches || { distinctIssueKeys: 0, switchEvents: [], switchScore: 0 };
   const blockers = Array.isArray(p.blockers) ? p.blockers : [];
 
@@ -418,7 +418,6 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
       ${renderPanelHeader(p, tToday, tYest, tPrev)}
       ${renderCounters(p)}
       ${renderHeatmap72x4(heat72, filters)}
-      ${renderSparkline(spark)}
       ${renderFilters(filters, heat72.rowTotals)}
       ${renderBlockersShelf(blockers)}
       ${renderEventsFeed(filteredTl)}
@@ -469,6 +468,15 @@ function counterCell(num, lab, sub) {
 }
 
 function renderHeatmap72x4(h, filters) {
+  // V18.1 P7-S2.5 — peak-hour label в hint вместо отдельного sparkline.
+  // Sparkline дублировал colTotals heatmap'а 1:1 — Manager+Тимлид+Tech
+  // независимо отметили это как балласт. Удалили + перенесли peak в hint.
+  let peakHint = 'час × источник';
+  if (h.peakCell && h.peakCell.count > 0) {
+    const hoursAgo = 71 - h.peakCell.hourIndex;
+    const srcName = SRC_NAMES[h.peakCell.srcIdx] || '';
+    peakHint = `пик ${srcName} ${hoursAgo}ч назад · ${h.peakCell.count} ${plural(h.peakCell.count, ['событие', 'события', 'событий'])}`;
+  }
   // 4 строки × 72 колонки. Каждая клетка — opacity по плотности.
   const rows = h.grid.map((row, srcIdx) => {
     const visible = filters[SRC_KEYS[srcIdx]] !== false;
@@ -495,7 +503,7 @@ function renderHeatmap72x4(h, filters) {
   }).join('');
   return `
     <div class="ts2-panel-section">
-      <div class="ts2-panel-section-title">Heatmap 72×4 <span class="ts2-panel-section-hint">час × источник</span></div>
+      <div class="ts2-panel-section-title">Heatmap 72×4 <span class="ts2-panel-section-hint">${esc(peakHint)}</span></div>
       <div class="ts2-heatmap">
         ${rows}
         <div class="ts2-haxis">
@@ -505,29 +513,6 @@ function renderHeatmap72x4(h, filters) {
           <span class="ts2-haxis-tick ts2-haxis-tick-now">сейчас</span>
         </div>
       </div>
-    </div>
-  `;
-}
-
-function renderSparkline(spark) {
-  const max = spark.length ? Math.max(...spark) : 0;
-  if (max === 0) {
-    return `
-      <div class="ts2-panel-section ts2-panel-section-tight">
-        <div class="ts2-panel-section-title">Загрузка <span class="ts2-panel-section-hint">events/час</span></div>
-        <div class="ts2-empty-text">Нет событий за 72ч.</div>
-      </div>
-    `;
-  }
-  const bars = spark.map((n, i) => {
-    const h = max > 0 ? Math.max(2, Math.round((n / max) * 24)) : 0;
-    const hoursAgo = 71 - i;
-    return `<span class="ts2-spark-bar" style="height:${h}px" title="${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
-  }).join('');
-  return `
-    <div class="ts2-panel-section ts2-panel-section-tight">
-      <div class="ts2-panel-section-title">Загрузка <span class="ts2-panel-section-hint">peak ${max} events/час</span></div>
-      <div class="ts2-sparkline">${bars}</div>
     </div>
   `;
 }

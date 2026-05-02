@@ -11619,20 +11619,9 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 }
 .ts2-haxis-tick-now { color: var(--accent); font-weight: 700; }
 
-/* Sparkline */
-.ts2-sparkline {
-  display: grid; grid-template-columns: repeat(72, 1fr);
-  align-items: flex-end; gap: 1px;
-  height: 28px; padding: 2px 0;
-}
-.ts2-spark-bar {
-  display: block;
-  background: var(--text-3);
-  border-radius: 1px;
-  min-width: 2px;
-  opacity: .65;
-}
-.ts2-spark-bar:hover { opacity: 1; background: var(--accent); }
+/* V18.1 P7-S2.5 — Sparkline удалён: дублировал heatmap.colTotals 1:1.
+   Peak-hour теперь живёт в hint heatmap-секции.
+   .ts2-sparkline / .ts2-spark-bar — преднамеренно удалены. */
 
 /* Filter pills */
 .ts2-panel-filters {
