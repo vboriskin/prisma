@@ -60,6 +60,84 @@ export const TeamScanner2 = {
 
   isLoading() { return this._loading; },
 
+  /* ── V18.1 P7-S4.2 — Trend snapshot N vs N-1 ───────────
+     Pilot finding (Anna PO + Dmitry руководитель):
+     «8 out-of-sprint без anchor'а — нужна базовая линия».
+     «Какие новости? — не закрыто. Нужно сравнение «вчера было лучше
+      или хуже»».
+     Решение: persistent snapshot в localStorage 24h TTL.
+     Перед каждым новым fetch → readPrevSnapshot, после успеха → save. */
+  _SNAPSHOT_TTL_MS: 24 * 3600 * 1000,
+  _SNAPSHOT_KEY_PREFIX: 'q2_scanner2_snapshot:',
+
+  _hashProjectKeys(keys) {
+    // Стабильный детерминистичный hash — sort + join.
+    return [...(keys || [])].sort().join(',');
+  },
+  _snapshotKey() {
+    const { projectKeys } = this._readConfig();
+    return this._SNAPSHOT_KEY_PREFIX + this._hashProjectKeys(projectKeys);
+  },
+  _extractSnapshot(model) {
+    if (!model) return null;
+    const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
+    // Reuse renderer's classifier import indirectly через direct count:
+    // делаем простой count здесь чтобы не тащить classifyPerson сюда.
+    for (const p of (model.participants || [])) {
+      const today = (p.timelineToday || []).length;
+      const yest  = (p.timelineYesterday || []).length;
+      const wip   = (p.issuesNow || []).length;
+      const stuck = (p.blockers?.length ?? p.stale?.length ?? 0);
+      const reviewSig = (p.badges?.reviews || 0) + (p.badges?.approves || 0);
+      const cfN = (p.cfItems || []).length;
+      const bbN = (p.bbItems || []).length;
+      const prs = p.badges?.pr48h || 0;
+      const com = p.badges?.commits48h || 0;
+      const zN = (p.zephyrTestsCreatedRecent || []).length + (p.zephyrTestsExecutedRecent || []).length;
+      const anyOther = reviewSig > 0 || cfN > 0 || bbN > 0 || zN > 0;
+      let cls;
+      if (today === 0 && yest === 0 && wip === 0 && stuck === 0 && prs === 0 && com === 0 && !anyOther) cls = 'idle';
+      else if (stuck > 0 && today === 0) cls = 'stop';
+      else if (wip >= 3 || (stuck > 0 && today > 0) || (today === 0 && yest > 0)) cls = 'watch';
+      else cls = 'moving';
+      counts[cls]++;
+    }
+    return {
+      ts: Date.now(),
+      counts,
+      risks: {
+        totalOrphans:     model.scannerV2?.risks?.totalOrphans     || 0,
+        totalOutOfSprint: model.scannerV2?.risks?.totalOutOfSprint || 0,
+        outOfSprintRatio: model.scannerV2?.risks?.outOfSprintRatio || 0,
+      },
+      sprintGoal: {
+        aggregateProgress: model.scannerV2?.sprintGoal?.aggregateProgress || 0,
+        aggregatePace:     model.scannerV2?.sprintGoal?.aggregatePace     || 'no-data',
+      },
+    };
+  },
+  _readPrevSnapshot() {
+    try {
+      const raw = localStorage.getItem(this._snapshotKey());
+      if (!raw) return null;
+      const snap = JSON.parse(raw);
+      if (!snap || !snap.ts) return null;
+      // TTL 24h: старее — игнорируем (не «вчера», а «давно»).
+      if (Date.now() - snap.ts > this._SNAPSHOT_TTL_MS) return null;
+      // Тоже не показываем дельту если snap слишком свежий (<5 мин — это
+      // тот же fetch с retry, не реальное «прошлое»).
+      if (Date.now() - snap.ts < 5 * 60 * 1000) return null;
+      return snap;
+    } catch (_) { return null; }
+  },
+  _saveSnapshot(model) {
+    try {
+      const snap = this._extractSnapshot(model);
+      if (!snap) return;
+      localStorage.setItem(this._snapshotKey(), JSON.stringify(snap));
+    } catch (_) { /* quota exceeded — ничего не делаем */ }
+  },
+
   _readConfig() {
     let cfg = {};
     try { cfg = loadSettingsRaw(); } catch (_) {}
@@ -178,14 +256,16 @@ export const TeamScanner2 = {
       // (с server-local-TZ часами и единым 24h dwell-threshold). v1 НЕ
       // запускает enrichment — нулевой impact для PortfolioPulse.
       const baseModel = analysePulse(raw, { staleDays, employees: state.employees || [] });
-      // V18.1 P7-S2.3 — browser TZ offset для consistent heatmap. Сохраняем
-      // в orchestrator state чтобы потом передать в /employee-detail (server
-      // должен пересчитать heatmap в browser-TZ, иначе drill-down съедет).
+      // V18.1 P7-S2.3 — browser TZ offset для consistent heatmap.
       this._tzOffsetMin = new Date().getTimezoneOffset();
       this._model = enrichForScanner2(baseModel, raw, {
         dwellHours: 24,
         tzOffsetMin: this._tzOffsetMin,
       });
+      // V18.1 P7-S4.2 — read prev snapshot ДО save'а нового, чтобы дельта
+      // считалась относительно вчерашнего, а не этого же fetch'а.
+      this._prevSnapshot = this._readPrevSnapshot();
+      this._saveSnapshot(this._model);
       this._cancelled = false;
       this._errorMsg  = '';
       this._renderFull();
@@ -219,10 +299,12 @@ export const TeamScanner2 = {
       ? renderEmployeeDetailPanel(m, this._expandedKey, { filters: this._panelFilters })
       : '';
     // V18.1 P7-S3.1 — aria-live region для panel open/close announcements.
+    // V18.1 P7-S4.2 — prev snapshot для trend-deltas (если есть и не stale).
+    const prev = this._prevSnapshot || null;
     const html = `
       <div class="ts2-root">
-        ${renderTopBar(m)}
-        ${renderTeamGlance(m)}
+        ${renderTopBar(m, { prev })}
+        ${renderTeamGlance(m, { prev })}
         ${renderPersonRows(m, { expandedKey: this._expandedKey })}
       </div>
       <div class="ts2-aria-live" aria-live="polite" aria-atomic="true" id="ts2-aria-live"></div>

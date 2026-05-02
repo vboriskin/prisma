@@ -11358,6 +11358,18 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 .ts2-glance-num-watch { color: var(--warning, #b45309); }
 .ts2-glance-num-stop  { color: var(--danger,  #dc2626); }
 .ts2-glance-num-muted { color: var(--text-4,  #94a3b8); }
+/* V18.1 P7-S4.2 — trend deltas (↑N / ↓N) для PO + руководителя. */
+.ts2-delta {
+  display: inline-block;
+  margin-left: 2px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 2px;
+}
+.ts2-delta-good { color: var(--success, #10b981); }
+.ts2-delta-bad  { color: var(--danger,  #dc2626); }
 /* V18.1 P7-S2.1.5 — risk row (orphans + out-of-sprint) */
 .ts2-glance-risk-row {
   border-top: 1px dashed var(--border);

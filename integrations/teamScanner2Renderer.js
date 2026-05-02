@@ -51,6 +51,22 @@ function fmtHours(seconds) {
   return h < 10 ? h.toFixed(1) : Math.round(h).toString();
 }
 
+/** V18.1 P7-S4.2 — render trend-delta arrow для PO/руководителя.
+ *  positiveIsBad=true → ↑ red (orphans, stop), ↑ green (moving, progress).
+ *  Returns '' если нет prev или delta=0.
+ */
+function renderDelta(curr, prev, opts = {}) {
+  if (typeof prev !== 'number') return '';
+  const delta = curr - prev;
+  if (delta === 0) return '';
+  const positiveIsBad = !!opts.positiveIsBad;
+  const arrow = delta > 0 ? '↑' : '↓';
+  const cls = positiveIsBad
+    ? (delta > 0 ? 'ts2-delta-bad'  : 'ts2-delta-good')
+    : (delta > 0 ? 'ts2-delta-good' : 'ts2-delta-bad');
+  return `<span class="ts2-delta ${cls}" title="вчера было ${prev}">${arrow}${Math.abs(delta)}</span>`;
+}
+
 /**
  * Bucket events by local hour-of-day (0..23). Each bucket = number of events
  * starting in that hour. Returns Int8Array(24).
@@ -201,7 +217,7 @@ const GROUP_META = {
 
 /* ── Top bar ─────────────────────────────────────────── */
 
-export function renderTopBar(model) {
+export function renderTopBar(model, ctx = {}) {
   const fetchedAt = model?.fetchedAt
     ? new Date(model.fetchedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     : '—';
@@ -211,7 +227,8 @@ export function renderTopBar(model) {
   // V18.1 P7-S2.1 — Sprint Goal gauge (правее заголовка). Сигнал #1 из
   // synthesis-плана: PO защищает у CTO «где квартальные цели».
   const sg = model?.scannerV2?.sprintGoal;
-  const sprintGauge = sg && sg.aggregateTotal > 0 ? renderSprintGauge(sg) : '';
+  const prevSprint = ctx.prev?.sprintGoal;
+  const sprintGauge = sg && sg.aggregateTotal > 0 ? renderSprintGauge(sg, prevSprint) : '';
   return `
     <div class="ts2-topbar">
       <div class="ts2-topbar-title">
@@ -244,7 +261,7 @@ const PACE_LABEL = {
  *  S4.4 fix: если несколько спринтов → показываем per-pk пилюли рядом
  *  с aggregate. Если один — старое поведение (одиночный gauge).
  */
-function renderSprintGauge(sg) {
+function renderSprintGauge(sg, prevSg) {
   const pct = sg.aggregateProgress;
   const pace = sg.aggregatePace;
   const paceLabel = PACE_LABEL[pace] || '—';
@@ -253,6 +270,8 @@ function renderSprintGauge(sg) {
   const daysSuffix  = (typeof daysLeft === 'number')
     ? ` · ${daysLeft} ${plural(daysLeft, ['день', 'дня', 'дней'])}`
     : '';
+  // V18.1 P7-S4.2 — sprint progress delta vs previous snapshot.
+  const dProgress = prevSg ? renderDelta(pct, prevSg.aggregateProgress) : '';
 
   // Один sprint — без перегрузки UI, оставляем legacy single-gauge.
   if (sg.sprints.length <= 1) {
@@ -264,7 +283,7 @@ function renderSprintGauge(sg) {
         <span class="ts2-sprint-bar">
           <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
         </span>
-        <span class="ts2-sprint-pct">${pct}%</span>
+        <span class="ts2-sprint-pct">${pct}%</span>${dProgress}
         <span class="ts2-sprint-pace">${paceLabel}${daysSuffix}</span>
       </div>
     `;
@@ -293,7 +312,7 @@ function renderSprintGauge(sg) {
         <span class="ts2-sprint-bar">
           <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
         </span>
-        <span class="ts2-sprint-pct">${pct}%</span>
+        <span class="ts2-sprint-pct">${pct}%</span>${dProgress}
         <span class="ts2-sprint-pace">${paceLabel}</span>
       </div>
       <div class="ts2-sprint-pk-pills">${pkPills}</div>
@@ -303,7 +322,7 @@ function renderSprintGauge(sg) {
 
 /* ── Team glance — single-line summary ─────────────── */
 
-export function renderTeamGlance(model) {
+export function renderTeamGlance(model, ctx = {}) {
   const parts = model?.participants || [];
   // V18.1 P2 — counts per classified group. Дают prevailing read'у тимлида
   // за 1 секунду: «куда смотреть в первую очередь?»
@@ -316,10 +335,16 @@ export function renderTeamGlance(model) {
     // V18.1 P6.2 — Confluence info теперь видна в team-glance.
     conf48h    += p.badges?.conf48h    || 0;
   }
+  // V18.1 P7-S4.2 — trend-deltas из prev snapshot (если есть).
+  const prev = ctx.prev || null;
+  const dMoving = prev ? renderDelta(counts.moving, prev.counts?.moving) : '';
+  const dWatch  = prev ? renderDelta(counts.watch,  prev.counts?.watch,  { positiveIsBad: true }) : '';
+  const dStop   = prev ? renderDelta(counts.stop,   prev.counts?.stop,   { positiveIsBad: true }) : '';
+
   const segs = [];
-  if (counts.moving > 0) segs.push(`<span class="ts2-glance-num">${counts.moving}</span><span class="ts2-glance-lab">движется</span>`);
-  if (counts.watch  > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span><span class="ts2-glance-lab">наблюдение</span>`);
-  if (counts.stop   > 0) segs.push(`<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span> ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`);
+  if (counts.moving > 0) segs.push(`<span class="ts2-glance-num">${counts.moving}</span>${dMoving}<span class="ts2-glance-lab">движется</span>`);
+  if (counts.watch  > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span>${dWatch}<span class="ts2-glance-lab">наблюдение</span>`);
+  if (counts.stop   > 0) segs.push(`<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span>${dStop} ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`);
   if (counts.idle   > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span><span class="ts2-glance-lab">без активности</span>`);
   const groupLine = segs.length ? segs.join(`<span class="ts2-glance-sep">·</span>`) : `<span class="ts2-glance-lab">Нет данных</span>`;
   // V18.1 P7-S2.1.5 — risk shelf: orphans + out-of-sprint.
@@ -328,13 +353,16 @@ export function renderTeamGlance(model) {
   const orphans  = risks?.totalOrphans     || 0;
   const oos      = risks?.totalOutOfSprint || 0;
   const oosRatio = risks?.outOfSprintRatio || 0;
+  // V18.1 P7-S4.2 — risk-deltas: orphans/oos increasing = bad.
+  const dOrphans = prev ? renderDelta(orphans, prev.risks?.totalOrphans, { positiveIsBad: true }) : '';
+  const dOos     = prev ? renderDelta(oos,     prev.risks?.totalOutOfSprint, { positiveIsBad: true }) : '';
   const riskBlocks = [];
   if (orphans > 0) {
-    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-stop">${orphans}</span> ${plural(orphans, ['без assignee', 'без assignee', 'без assignee'])}</span>`);
+    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-stop">${orphans}</span>${dOrphans} ${plural(orphans, ['без assignee', 'без assignee', 'без assignee'])}</span>`);
   }
   if (oos > 0) {
     const pct = Math.round(oosRatio * 100);
-    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-watch">${oos}</span> out-of-sprint ${pct > 0 ? `(${pct}%)` : ''}</span>`);
+    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-watch">${oos}</span>${dOos} out-of-sprint ${pct > 0 ? `(${pct}%)` : ''}</span>`);
   }
   const riskLine = riskBlocks.length ? riskBlocks.join(`<span class="ts2-glance-sep">·</span>`) : '';
 
