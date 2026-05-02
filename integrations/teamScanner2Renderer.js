@@ -450,6 +450,22 @@ function renderRow(p, isExpanded) {
   // ≥3 → подсвечиваем amber (overcommit signal).
   const wipN  = (p.issuesNow || []).length;
   const wipCls = wipN >= 4 ? 'ts2-counter ts2-counter-warn' : (wipN >= 3 ? 'ts2-counter ts2-counter-amber' : 'ts2-counter');
+  // V18.1 P7-S4.5 — B/C/Z source-indicators в row (inline после имени).
+  // Pilot finding (Vasiliy + Elena consensus): «multi-source signal должен
+  // быть в строке, а не только в side-panel — heatmap 72×4 хорош, но это
+  // «уровень 3», а решение принимается на «уровне 2»».
+  // Counts из p.bbItems / cfItems / zephyr — все за 72ч окно.
+  const bbN = (p.bbItems || []).length;
+  const cfN = (p.cfItems || []).length;
+  const zN  = ((p.zephyrTestsCreatedRecent || []).length
+            + (p.zephyrTestsExecutedRecent || []).length);
+  const srcChip = (label, n, cls) => n > 0
+    ? `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${label} активность за 72ч: ${n} событий"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`
+    : '';
+  const srcChips = (bbN || cfN || zN)
+    ? `<span class="ts2-row-src-chips">${srcChip('Bitbucket', bbN, 'b')}${srcChip('Confluence', cfN, 'c')}${srcChip('Zephyr', zN, 'z')}</span>`
+    : '';
+
   // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
   const switches = p.contextSwitches?.switchEvents?.length || 0;
   const maxDwell = (p.blockers && p.blockers[0]?.dwellHours) || 0;
@@ -475,7 +491,10 @@ function renderRow(p, isExpanded) {
   return `
     <div class="ts2-row ${isExpanded ? 'ts2-row-expanded' : ''}" data-key="${esc(p.key)}" tabindex="0" role="button" aria-expanded="${isExpanded}" aria-controls="ts2-panel-main">
       ${blockerMark}
-      <span class="ts2-name" title="${esc(p.label)}">${esc(p.label || '—')}</span>
+      <span class="ts2-name-block">
+        <span class="ts2-name" title="${esc(p.label)}">${esc(p.label || '—')}</span>
+        ${srcChips}
+      </span>
       <span class="ts2-strip-wrap ts2-strip-wrap-today">${todayBlock}</span>
       <span class="ts2-strip-wrap ts2-strip-wrap-yest">${yestBlock}</span>
       ${badges}

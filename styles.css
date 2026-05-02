@@ -11441,6 +11441,41 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   font-size: 13px; font-weight: 600; color: var(--text-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* V18.1 P7-S4.5 — name + source-chips block. Чтобы chips не съели всю
+   ширину колонки имени, name truncates сначала. */
+.ts2-name-block {
+  display: flex; align-items: baseline; gap: 6px;
+  min-width: 0;
+}
+.ts2-row-src-chips {
+  display: inline-flex; gap: 3px; flex-shrink: 0;
+}
+.ts2-row-src-chip {
+  display: inline-flex; align-items: baseline; gap: 2px;
+  padding: 0 4px;
+  border-left: 2px solid var(--text-3);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  font-size: 9px;
+  background: var(--bg-2, #f8fafc);
+  border-radius: 2px;
+}
+.ts2-row-src-b { border-left-color: #16a34a; }
+.ts2-row-src-c { border-left-color: #d97706; }
+.ts2-row-src-z { border-left-color: #9333ea; }
+.ts2-row-src-chip-key {
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0;
+}
+.ts2-row-src-chip-num {
+  font-weight: 700;
+  color: var(--text-1);
+}
+/* Dark theme: lighter src colors */
+body.theme-dark .ts2-row-src-b { border-left-color: #34d399; }
+body.theme-dark .ts2-row-src-c { border-left-color: #fbbf24; }
+body.theme-dark .ts2-row-src-z { border-left-color: #c084fc; }
 
 .ts2-strip-wrap { display: flex; align-items: center; }
 
