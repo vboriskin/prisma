@@ -1288,6 +1288,55 @@ function pulseCreateJob(payload) { return _pulseCluster.create(payload); }
 function pulseGetJob(id)         { return _pulseCluster.get(id); }
 function pulseRunJob(job, runner){ return _pulseCluster.run(job, runner); }
 
+/* ──────────────────────────────────────────────────────────
+   V18.1 P7-S1.2 — rate-limit + result cache для /employee-detail.
+   Sliding window 60s, max 30 req per jobId. Дополнительно
+   результат-cache по (jobId, employeeKey, dwellHours) с TTL 5 мин —
+   повторный запрос мгновенный, без re-running analysePulse.
+
+   Без этих двух механизмов был DoS-vector: знающий jobId клиент
+   мог в while-loop'е валить server через тяжёлую analysePulse logic.
+   ────────────────────────────────────────────────────────── */
+const PULSE_DETAIL_RATE_WINDOW_MS = 60 * 1000;
+const PULSE_DETAIL_RATE_MAX       = 30;
+const PULSE_DETAIL_CACHE_TTL_MS   = 5 * 60 * 1000;
+const _pulseDetailRate  = new Map();   // jobId → { count, windowStartMs }
+const _pulseDetailCache = new Map();   // `${jobId}|${employeeKey}|${dwellHours}` → { result, atMs }
+
+/** Returns true if request allowed; false if rate-limit exceeded. */
+function pulseDetailRateAllow(jobId) {
+  const now = Date.now();
+  const entry = _pulseDetailRate.get(jobId);
+  if (!entry || now - entry.windowStartMs >= PULSE_DETAIL_RATE_WINDOW_MS) {
+    _pulseDetailRate.set(jobId, { count: 1, windowStartMs: now });
+    return true;
+  }
+  if (entry.count >= PULSE_DETAIL_RATE_MAX) return false;
+  entry.count++;
+  return true;
+}
+
+function pulseDetailCacheGet(jobId, employeeKey, dwellHours) {
+  const key = `${jobId}|${employeeKey}|${dwellHours}`;
+  const entry = _pulseDetailCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.atMs >= PULSE_DETAIL_CACHE_TTL_MS) {
+    _pulseDetailCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function pulseDetailCacheSet(jobId, employeeKey, dwellHours, result) {
+  const key = `${jobId}|${employeeKey}|${dwellHours}`;
+  _pulseDetailCache.set(key, { result, atMs: Date.now() });
+  // GC старых entries: если cache > 100 — выкидываем самые старые.
+  if (_pulseDetailCache.size > 100) {
+    const oldest = [..._pulseDetailCache.entries()].sort((a, b) => a[1].atMs - b[1].atMs)[0];
+    if (oldest) _pulseDetailCache.delete(oldest[0]);
+  }
+}
+
 /**
  * V18 P7 — выделено из inline /api/integrations/portfolio-pulse handler'а.
  * Возвращает full Pulse response { reports, bitbucket, confluence, ... }.
@@ -1932,6 +1981,15 @@ async function handleIntegrationsApi(req, res, pathname) {
         writeJson(res, 400, { error: 'jobId and employeeKey required' });
         return;
       }
+      // V18.1 P7-S1.2 — rate-limit per-jobId 30 req / 60s. Защищает
+      // analysePulse от DoS через retry-loop (любой knowing jobId).
+      if (!pulseDetailRateAllow(jobId)) {
+        writeJson(res, 429, {
+          error: 'Rate limit: max 30 requests per minute per jobId',
+          retryAfter: Math.ceil(PULSE_DETAIL_RATE_WINDOW_MS / 1000),
+        });
+        return;
+      }
       const job = pulseGetJob(jobId);
       if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
       if (job.status !== 'done') {
@@ -1940,6 +1998,15 @@ async function handleIntegrationsApi(req, res, pathname) {
       }
       if (!job.result) {
         writeJson(res, 404, { error: 'Job has no result (cancelled or errored)' });
+        return;
+      }
+      // V18.1 P7-S1.2 — result cache TTL 5 мин. Hit → no analysePulse re-run.
+      const cached = pulseDetailCacheGet(jobId, employeeKey, dwellHours);
+      if (cached) {
+        writeJson(res, 200, {
+          ...cached,
+          meta: { ...(cached.meta || {}), fromCache: true, fromResultCache: true },
+        });
         return;
       }
       const t0 = Date.now();
@@ -1956,14 +2023,17 @@ async function handleIntegrationsApi(req, res, pathname) {
           writeJson(res, 404, { error: 'employeeKey not found in cached participants' });
           return;
         }
-        writeJson(res, 200, {
+        const payload = {
           employee: {
             key:           p.key,
             label:         p.label,
             email:         p.email,
             jiraAccountId: p.jiraAccountId,
             avatar:        p.avatar,
-            projects:      p.projects,
+            // V18.1 P7-S1.2 — defensive: projects может быть Set до Array.from
+            //   на model.js:629. Если кто-то рефакторит pp model — JSON.stringify(Set)
+            //   = '{}'. Здесь явно конвертируем.
+            projects:      Array.isArray(p.projects) ? p.projects : Array.from(p.projects || []),
           },
           enrichment: {
             heatmap:         p.heatmap,
@@ -1981,12 +2051,15 @@ async function handleIntegrationsApi(req, res, pathname) {
           },
           meta: {
             fromCache: true,
+            fromResultCache: false,
             jobId,
             builtMs: Date.now() - t0,
             dwellThresholdHours: enriched.scannerV2?.dwellThresholdHours ?? dwellHours,
             serverLocalTZ:       enriched.scannerV2?.serverLocalTZ       ?? true,
           },
-        });
+        };
+        pulseDetailCacheSet(jobId, employeeKey, dwellHours, payload);
+        writeJson(res, 200, payload);
       } catch (e) {
         console.warn('[employee-detail] enrichment failed:', e);
         writeJson(res, 500, { error: 'enrichment failed: ' + (e?.message || 'unknown') });

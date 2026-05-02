@@ -172,6 +172,72 @@ describe('Contract tests — /api/integrations + Portfolio Pulse', () => {
     assert.equal(r.status, 405, 'expected 405 for GET on POST endpoint');
   });
 
+  // V18.1 P7-S1.2 — rate-limit guard. Защищает от DoS через retry-loop
+  // (любой клиент знающий jobId мог валить server через analysePulse).
+  test('employee-detail: rate-limit 30 req/мин per-jobId → 429', async () => {
+    // Используем bogus jobId — нам нужен только test того что
+    // rate-limit реагирует ДО того как в pulseGetJob возвращается 404.
+    // Server проверяет rate-limit ПЕРВЫМ (после basic 400), поэтому
+    // даже на несуществующий jobId превышение лимита даёт 429.
+    const fakeJobId = 'pulse-rate-test-' + Date.now();
+    const reqs = [];
+    for (let i = 0; i < 35; i++) {
+      reqs.push(req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+        jobId: fakeJobId,
+        employeeKey: 'whoever',
+      }));
+    }
+    const results = await Promise.all(reqs);
+    const got429  = results.filter(r => r.status === 429).length;
+    const got404  = results.filter(r => r.status === 404).length;
+    assert.ok(got429 >= 5, `expected at least 5 of 35 requests rate-limited, got ${got429}`);
+    assert.ok(got404 <= 30, `expected ≤30 to reach handler (404 unknown jobId), got ${got404}`);
+    // Заголовок retryAfter должен быть в body 429-х.
+    const r429 = results.find(r => r.status === 429);
+    if (r429) {
+      const j429 = j(r429.body);
+      assert.match(j429.error || '', /[Rr]ate.?limit/);
+      assert.ok(j429.retryAfter > 0, 'retryAfter в body 429');
+    }
+  });
+
+  test('employee-detail: result cache даёт fromResultCache=true на повторе', async () => {
+    // Запускаем pulse, получаем jobId.
+    const startR = await req('POST', '/api/integrations/portfolio-pulse/start', { projectKeys: ['TEST'] });
+    assert.equal(startR.status, 200);
+    const startJ = j(startR.body);
+    // Poll до done.
+    let jobDone = false;
+    for (let i = 0; i < 20; i++) {
+      const sR = await req('GET', `/api/integrations/portfolio-pulse/status?jobId=${encodeURIComponent(startJ.jobId)}`);
+      const job = j(sR.body);
+      if (job.status === 'done') { jobDone = true; break; }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    assert.ok(jobDone, 'job did not finish in time');
+    // Берём первого участника из результата для запроса детали.
+    const { analysePulse } = await import('../../integrations/portfolioPulseModel.js');
+    const sR2 = await req('GET', `/api/integrations/portfolio-pulse/status?jobId=${encodeURIComponent(startJ.jobId)}`);
+    const job = j(sR2.body);
+    const baseModel = analysePulse(job.result, { staleDays: 7, employees: [] });
+    if (!baseModel.participants?.length) return;     // нет участников в fixture — skip
+    const employeeKey = baseModel.participants[0].key;
+    // Первый запрос — cache miss.
+    const r1 = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+      jobId: startJ.jobId, employeeKey, dwellHours: 24,
+    });
+    assert.equal(r1.status, 200, 'first call should succeed; got ' + r1.status + ' body=' + r1.body);
+    const j1 = j(r1.body);
+    assert.equal(j1.meta?.fromResultCache, false, 'first call should be cache miss');
+    // Второй запрос — cache hit.
+    const r2 = await req('POST', '/api/integrations/portfolio-pulse/employee-detail', {
+      jobId: startJ.jobId, employeeKey, dwellHours: 24,
+    });
+    assert.equal(r2.status, 200);
+    const j2 = j(r2.body);
+    assert.equal(j2.meta?.fromResultCache, true, 'second call should hit result cache');
+  });
+
   test('employee-detail: happy path 200 с правильным shape (cache hit)', async () => {
     // Сначала запускаем pulse через /start чтобы получить jobId с reports.
     const startR = await req('POST', '/api/integrations/portfolio-pulse/start', { projectKeys: ['TEST'] });
