@@ -242,18 +242,37 @@ export function renderTeamGlance(model) {
   if (counts.stop   > 0) segs.push(`<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span> ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`);
   if (counts.idle   > 0) segs.push(`<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span><span class="ts2-glance-lab">без активности</span>`);
   const groupLine = segs.length ? segs.join(`<span class="ts2-glance-sep">·</span>`) : `<span class="ts2-glance-lab">Нет данных</span>`;
+  // V18.1 P7-S2.1.5 — risk shelf: orphans + out-of-sprint.
+  // Закрывает сигналы #6 + #7 из synthesis-плана для PO/SM.
+  const risks = model?.scannerV2?.risks;
+  const orphans  = risks?.totalOrphans     || 0;
+  const oos      = risks?.totalOutOfSprint || 0;
+  const oosRatio = risks?.outOfSprintRatio || 0;
+  const riskBlocks = [];
+  if (orphans > 0) {
+    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-stop">${orphans}</span> ${plural(orphans, ['без assignee', 'без assignee', 'без assignee'])}</span>`);
+  }
+  if (oos > 0) {
+    const pct = Math.round(oosRatio * 100);
+    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-watch">${oos}</span> out-of-sprint ${pct > 0 ? `(${pct}%)` : ''}</span>`);
+  }
+  const riskLine = riskBlocks.length ? riskBlocks.join(`<span class="ts2-glance-sep">·</span>`) : '';
+
   return `
     <div class="ts2-glance">
-      ${groupLine}
-      <span class="ts2-glance-sep">·</span>
-      <span class="ts2-glance-num">${commits48h}</span>
-      <span class="ts2-glance-lab">${plural(commits48h, ['коммит', 'коммита', 'коммитов'])} (48ч)</span>
-      <span class="ts2-glance-sep">·</span>
-      <span class="ts2-glance-num">${prs48h}</span>
-      <span class="ts2-glance-lab">PR (48ч)</span>
-      <span class="ts2-glance-sep">·</span>
-      <span class="ts2-glance-num">${conf48h}</span>
-      <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
+      <div class="ts2-glance-line">
+        ${groupLine}
+        <span class="ts2-glance-sep">·</span>
+        <span class="ts2-glance-num">${commits48h}</span>
+        <span class="ts2-glance-lab">${plural(commits48h, ['коммит', 'коммита', 'коммитов'])} (48ч)</span>
+        <span class="ts2-glance-sep">·</span>
+        <span class="ts2-glance-num">${prs48h}</span>
+        <span class="ts2-glance-lab">PR (48ч)</span>
+        <span class="ts2-glance-sep">·</span>
+        <span class="ts2-glance-num">${conf48h}</span>
+        <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
+      </div>
+      ${riskLine ? `<div class="ts2-glance-line ts2-glance-risk-row">${riskLine}</div>` : ''}
     </div>
   `;
 }

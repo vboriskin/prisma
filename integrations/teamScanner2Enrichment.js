@@ -121,6 +121,9 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     p.sparkline72h    = computeSparkline72h(p);      // 72 значений events/час (deprecated в S2.5)
   }
 
+  // V18.1 P7-S2.1.5 — risk summary (orphans + out-of-sprint).
+  const risks = computeRiskSummary(model);
+
   model.scannerV2 = {
     enrichedAt: Date.now(),
     dwellThresholdHours: dwellHours,    // backward-compat (default fallback)
@@ -128,6 +131,7 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     tzOffsetMin: tz,                    // V18.1 P7-S2.3 — null = environment-local
     serverLocalTZ: tz === null,         // если null → server local; иначе TZ-aware
     switchGapSec: SWITCH_GAP_SEC,
+    risks,                              // V18.1 P7-S2.1.5
   };
   return model;
 }
@@ -286,6 +290,78 @@ export function computeTimeline72h(p, tzOffsetMin) {
 
   out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   return out;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/* Risk summary — Orphans + Out-of-sprint (V18.1 P7-S2.1.5)   */
+/* ────────────────────────────────────────────────────────── */
+
+/**
+ * Считает ключевые риск-сигналы для PO/SM из synthesis-плана:
+ *   - Orphan-задачи (без assignee) per project key
+ *   - Out-of-sprint Work — events на issues ВНЕ активного спринта,
+ *     per participant + total
+ *
+ * Закрывает сигналы #6 (Out-of-sprint) и #7 (Orphan Risks) из synthesis
+ * 7-сигналов плана.
+ *
+ * Returns:
+ *   {
+ *     orphansByPk: { [pk]: count },
+ *     totalOrphans: number,
+ *     outOfSprintByPerson: { [participantKey]: count },
+ *     totalOutOfSprint: number,
+ *     outOfSprintRatio: 0..1   // share of all events that are out-of-sprint
+ *   }
+ *
+ * Также SET'ит `p.outOfSprintEvents` на каждого participant'а (для UI).
+ */
+export function computeRiskSummary(model) {
+  if (!model) return { orphansByPk: {}, totalOrphans: 0, outOfSprintByPerson: {}, totalOutOfSprint: 0, outOfSprintRatio: 0 };
+  const orphansByPk = {};
+  let totalOrphans = 0;
+  for (const [pk, list] of Object.entries(model.unassignedByPk || {})) {
+    const n = (list || []).length;
+    if (n > 0) orphansByPk[pk] = n;
+    totalOrphans += n;
+  }
+  // Build set of sprint-issue keys across ALL projects.
+  const sprintKeysSet = new Set();
+  for (const space of Object.values(model.spaces || {})) {
+    for (const it of (space?.sprintIssues || [])) {
+      if (it?.key) sprintKeysSet.add(it.key);
+    }
+  }
+  const outOfSprintByPerson = {};
+  let totalOutOfSprint = 0;
+  let totalEvents       = 0;
+  for (const p of (model.participants || [])) {
+    let count = 0;
+    let myTotal = 0;
+    const events = []
+      .concat(p.timelineToday    || [])
+      .concat(p.timelineYesterday || [])
+      .concat(p.timelinePrev      || []);
+    for (const e of events) {
+      const key = e?.issue?.key;
+      if (!key) continue;
+      myTotal++;
+      // Если sprint pool пустой (нет активных спринтов) — все events
+      // считаются in-scope (нет «out» для сравнения).
+      if (sprintKeysSet.size > 0 && !sprintKeysSet.has(key)) count++;
+    }
+    p.outOfSprintEvents = count;
+    if (count > 0) outOfSprintByPerson[p.key] = count;
+    totalOutOfSprint += count;
+    totalEvents      += myTotal;
+  }
+  return {
+    orphansByPk,
+    totalOrphans,
+    outOfSprintByPerson,
+    totalOutOfSprint,
+    outOfSprintRatio: totalEvents > 0 ? totalOutOfSprint / totalEvents : 0,
+  };
 }
 
 /* ────────────────────────────────────────────────────────── */

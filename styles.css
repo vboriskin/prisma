@@ -11248,11 +11248,14 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 
 /* Team-glance — single-line summary */
 .ts2-glance {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px;
+  display: flex; flex-direction: column; gap: 6px;
   padding: 10px 14px;
   background: var(--card); border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 13px; color: var(--text-2);
+}
+.ts2-glance-line {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px;
 }
 .ts2-glance-num {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -11271,6 +11274,14 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 .ts2-glance-num-watch { color: var(--warning, #b45309); }
 .ts2-glance-num-stop  { color: var(--danger,  #dc2626); }
 .ts2-glance-num-muted { color: var(--text-4,  #94a3b8); }
+/* V18.1 P7-S2.1.5 — risk row (orphans + out-of-sprint) */
+.ts2-glance-risk-row {
+  border-top: 1px dashed var(--border);
+  margin-top: 6px; padding-top: 8px;
+}
+.ts2-glance-risk {
+  display: inline-flex; align-items: baseline; gap: 4px;
+}
 
 /* Per-person rows + groups (V18.1 P2) */
 .ts2-rows {

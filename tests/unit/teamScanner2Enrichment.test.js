@@ -30,6 +30,7 @@ import {
   pickDwellThreshold,
   DEFAULT_DWELL_THRESHOLDS,
   getLocalHour,
+  computeRiskSummary,
 } from '../../integrations/teamScanner2Enrichment.js';
 
 /* ── Helpers — конструируем event'ы и participant'ов ──────── */
@@ -571,6 +572,79 @@ describe('enrichForScanner2 c tzOffsetMin (S2.3)', () => {
     enrichForScanner2(model);
     assert.equal(model.scannerV2.tzOffsetMin, null);
     assert.equal(model.scannerV2.serverLocalTZ, true);
+  });
+});
+
+/* ── V18.1 P7-S2.1.5: Risk summary (orphans + out-of-sprint) ── */
+
+describe('computeRiskSummary (S2.1.5)', () => {
+  test('пустой model → нули', () => {
+    const r = computeRiskSummary({});
+    assert.equal(r.totalOrphans, 0);
+    assert.equal(r.totalOutOfSprint, 0);
+    assert.equal(r.outOfSprintRatio, 0);
+    assert.deepEqual(r.orphansByPk, {});
+  });
+
+  test('orphans считаются из unassignedByPk', () => {
+    const r = computeRiskSummary({
+      unassignedByPk: { PRJ: [{ key: 'PRJ-1' }, { key: 'PRJ-2' }], OTHER: [{ key: 'OTHER-1' }] },
+    });
+    assert.equal(r.totalOrphans, 3);
+    assert.equal(r.orphansByPk.PRJ, 2);
+    assert.equal(r.orphansByPk.OTHER, 1);
+  });
+
+  test('out-of-sprint: events на keys не в sprintIssues → counted', () => {
+    const model = {
+      spaces: { PRJ: { sprintIssues: [{ key: 'PRJ-1' }] } },
+      participants: [{
+        key: 'u1',
+        timelineToday: [
+          { at: '2026-05-02T10:00:00Z', issue: { key: 'PRJ-1' } },   // in sprint
+          { at: '2026-05-02T11:00:00Z', issue: { key: 'PRJ-2' } },   // out!
+          { at: '2026-05-02T12:00:00Z', issue: { key: 'OTHER-99' } },// out!
+        ],
+        timelineYesterday: [], timelinePrev: [],
+      }],
+    };
+    const r = computeRiskSummary(model);
+    assert.equal(r.totalOutOfSprint, 2);
+    assert.equal(r.outOfSprintByPerson.u1, 2);
+    assert.ok(r.outOfSprintRatio > 0.6 && r.outOfSprintRatio < 0.7,
+      `expected ratio ≈ 2/3, got ${r.outOfSprintRatio}`);
+    // Side effect: p.outOfSprintEvents tagged
+    assert.equal(model.participants[0].outOfSprintEvents, 2);
+  });
+
+  test('пустой sprintIssues set → totalOutOfSprint = 0 (нет sprint = нет out)', () => {
+    const model = {
+      spaces: {},
+      participants: [{
+        key: 'u1',
+        timelineToday: [{ at: '2026-05-02T10:00:00Z', issue: { key: 'X-1' } }],
+        timelineYesterday: [], timelinePrev: [],
+      }],
+    };
+    const r = computeRiskSummary(model);
+    assert.equal(r.totalOutOfSprint, 0,
+      'без active sprints всё in-scope, нет «out» для сравнения');
+  });
+
+  test('events без issue.key игнорируются', () => {
+    const model = {
+      spaces: { PRJ: { sprintIssues: [{ key: 'PRJ-1' }] } },
+      participants: [{
+        key: 'u1',
+        timelineToday: [
+          { at: '2026-05-02T10:00:00Z', kind: 'comment' },   // нет issue
+          { at: '2026-05-02T11:00:00Z', issue: { key: 'PRJ-2' } },
+        ],
+        timelineYesterday: [], timelinePrev: [],
+      }],
+    };
+    const r = computeRiskSummary(model);
+    assert.equal(r.totalOutOfSprint, 1);
   });
 });
 
