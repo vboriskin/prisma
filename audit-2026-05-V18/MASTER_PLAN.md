@@ -132,4 +132,5 @@ audit-2026-05-V18/
 - **Дизайн:** [`scanner2-graduation.md`](./scanner2-graduation.md) — ADR с decisions, trade-offs, rollback
 - **Operations:** [`../docs/integrations/team-scanner-v2.md`](../docs/integrations/team-scanner-v2.md) — что считается, какие пороги, как читать сигналы
 - **Tests:** 645 unit / 18 contract / 0 fail
-- **Status (2026-05-02):** Sprint 3 closed, automated DoD passed. Pre-release audit completed. **Pilot Day-14 PASSED with conditions** ([feedback](./scanner2-pilot-feedback.md)) — 5-6/7 daily users. Recommendation: graduate now (Option A) + Sprint 4 follow-up для 3 P1 findings (multi-team / trends / WIP-counter).
+- **Status (2026-05-02):** Sprint 3 closed, automated DoD passed. Pre-release audit completed. **Pilot Day-14 PASSED with conditions** ([feedback](./scanner2-pilot-feedback.md)) — 5-6/7 daily users. Sprint 4 (multi-team + trends + WIP + 3 polish) closed. **V18.2 graduated to production.**
+- **Next:** [`v18-3-and-v19-roadmap.md`](./v18-3-and-v19-roadmap.md) — V18.3 (Scanner 2.0 P2 polish + gantt split) + V19 (structural backlog: telemetry, persistent retention, RBAC, etc.).
