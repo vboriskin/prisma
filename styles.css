@@ -11271,6 +11271,37 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   .ts2-sprint-bar  { width: 40px; }
   .ts2-sprint-pace { display: none; }
 }
+
+/* V18.1 P7-S4.4 — Multi-sprint gauge: aggregate + per-pk pills */
+.ts2-sprint-gauge-multi {
+  display: inline-flex; flex-direction: column; gap: 4px;
+}
+.ts2-sprint-pk-pills {
+  display: inline-flex; flex-wrap: wrap; gap: 4px;
+  padding-left: 8px;
+}
+.ts2-sprint-pk-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 6px;
+  border-left: 2px solid var(--text-3);
+  background: var(--bg-2, #f8fafc);
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+}
+.ts2-sprint-pk-pill.ts2-sprint-pace-ahead    { border-left-color: var(--success, #10b981); }
+.ts2-sprint-pk-pill.ts2-sprint-pace-on-track { border-left-color: var(--accent); }
+.ts2-sprint-pk-pill.ts2-sprint-pace-behind   { border-left-color: var(--danger, #dc2626); }
+.ts2-sprint-pk-pill.ts2-sprint-pace-no-data  { border-left-color: var(--text-4, #94a3b8); }
+.ts2-sprint-pk-pill-key {
+  font-weight: 700; color: var(--text-2);
+}
+.ts2-sprint-pk-pill-pct {
+  font-weight: 700; color: var(--text-1);
+}
+.ts2-sprint-pk-pill.ts2-sprint-pace-behind .ts2-sprint-pk-pill-pct { color: var(--danger, #dc2626); }
+.ts2-sprint-pk-pill.ts2-sprint-pace-ahead  .ts2-sprint-pk-pill-pct { color: var(--success, #10b981); }
 .ts2-topbar-meta { display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 12px; }
 .ts2-meta-item { font-feature-settings: "tnum" 1; }
 .ts2-meta-sep  { opacity: .5; }

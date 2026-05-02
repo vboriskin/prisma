@@ -228,33 +228,75 @@ export function renderTopBar(model) {
   `;
 }
 
-/** V18.1 P7-S2.1 — Sprint Goal gauge: progress + pace + days left. */
+const PACE_LABEL = {
+  'ahead':    'опережает',
+  'on-track': 'по плану',
+  'behind':   'отстаёт',
+  'no-data':  'нет дат',
+};
+
+/** V18.1 P7-S2.1 + S4.4 — Sprint Goal gauge: aggregate + per-pk pills.
+ *  Anna PO pilot finding: «aggregate скрывает асимметрию, если Backend
+ *  behind а Platform ahead — aggregatePace='behind' и я не понимаю кого
+ *  тянуть. Per-pk breakdown в gauge'е нет — приходится открывать
+ *  tooltip и копать sg.sprints[]».
+ *
+ *  S4.4 fix: если несколько спринтов → показываем per-pk пилюли рядом
+ *  с aggregate. Если один — старое поведение (одиночный gauge).
+ */
 function renderSprintGauge(sg) {
   const pct = sg.aggregateProgress;
   const pace = sg.aggregatePace;
-  const paceLabel = {
-    'ahead':    'опережает',
-    'on-track': 'по плану',
-    'behind':   'отстаёт',
-    'no-data':  'нет дат',
-  }[pace] || '—';
-  // Берём первый sprint для подписи name/daysLeft (если несколько pk —
-  // делаем aggregate, но имя первого как репрезентативное).
+  const paceLabel = PACE_LABEL[pace] || '—';
   const firstSprint = sg.sprints[0];
-  const sprintName  = firstSprint?.name ? esc(firstSprint.name) : '';
   const daysLeft    = firstSprint?.daysLeft;
   const daysSuffix  = (typeof daysLeft === 'number')
     ? ` · ${daysLeft} ${plural(daysLeft, ['день', 'дня', 'дней'])}`
     : '';
-  return `
-    <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="Sprint Goal: ${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}">
-      <span class="ts2-sprint-label">Спринт</span>
-      <span class="ts2-sprint-name">${sprintName}</span>
-      <span class="ts2-sprint-bar">
-        <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
+
+  // Один sprint — без перегрузки UI, оставляем legacy single-gauge.
+  if (sg.sprints.length <= 1) {
+    const sprintName  = firstSprint?.name ? esc(firstSprint.name) : '';
+    return `
+      <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="Sprint Goal: ${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}">
+        <span class="ts2-sprint-label">Спринт</span>
+        <span class="ts2-sprint-name">${sprintName}</span>
+        <span class="ts2-sprint-bar">
+          <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
+        </span>
+        <span class="ts2-sprint-pct">${pct}%</span>
+        <span class="ts2-sprint-pace">${paceLabel}${daysSuffix}</span>
+      </div>
+    `;
+  }
+
+  // Несколько спринтов — aggregate сверху + per-pk пилюли снизу.
+  const pkPills = sg.sprints.map(s => {
+    const sPace = s.pace || 'no-data';
+    const sPaceLabel = PACE_LABEL[sPace] || '—';
+    const sDays = (typeof s.daysLeft === 'number')
+      ? ` · ${s.daysLeft}д`
+      : '';
+    return `
+      <span class="ts2-sprint-pk-pill ts2-sprint-pace-${sPace}" title="${esc(s.pk)} «${esc(s.name || '')}» · ${s.done}/${s.total} done · ${sPaceLabel}${sDays}">
+        <span class="ts2-sprint-pk-pill-key">${esc(s.pk)}</span>
+        <span class="ts2-sprint-pk-pill-pct">${s.progressPct}%</span>
       </span>
-      <span class="ts2-sprint-pct">${pct}%</span>
-      <span class="ts2-sprint-pace">${paceLabel}${daysSuffix}</span>
+    `;
+  }).join('');
+
+  return `
+    <div class="ts2-sprint-gauge-multi">
+      <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="Aggregate Sprint Goal: ${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}">
+        <span class="ts2-sprint-label">Спринты</span>
+        <span class="ts2-sprint-name">${sg.sprints.length}×</span>
+        <span class="ts2-sprint-bar">
+          <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
+        </span>
+        <span class="ts2-sprint-pct">${pct}%</span>
+        <span class="ts2-sprint-pace">${paceLabel}</span>
+      </div>
+      <div class="ts2-sprint-pk-pills">${pkPills}</div>
     </div>
   `;
 }
