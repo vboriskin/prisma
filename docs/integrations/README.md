@@ -57,6 +57,24 @@ state.employees ─┐
 
 Файлы: `integrations/portfolioPulse*.js` (8 файлов суммарно).
 
+**Facade (V19 D3):** для high-touch consumers есть consolidated entry-point
+`integrations/pulse/index.js` — re-exports 58+ функций со всех 8 файлов.
+
+```js
+// Single import вместо 5 раздельных:
+import {
+  PortfolioPulse, fetchPulseData, fetchEmployeeDetail,
+  analysePulse, filterModelByPk,
+  buildInsights, buildMetrics, buildBacklogModel,
+  parseProjectKeys, slimIssue, isTerminalStatus,
+} from './pulse';
+```
+
+Direct imports (`./portfolioPulseModel.js` etc.) продолжают работать —
+backward-compat сохранён. Facade удобен для new consumers (Scanner 2.0)
+и упрощает future refactor (если перенесём файлы в `pulse/`-subfolder
+полностью — facade просто обновится, consumers без изменений).
+
 ### 2. Black Dashboard (Sigma goal-coverage)
 
 Async-job pattern (большой long-running запрос):

@@ -22,10 +22,15 @@
 
 import { state } from '../state.js';
 import { loadSettingsRaw } from './integrationsStore.js';
-import { fetchPulseData, fetchEmployeeDetail } from './portfolioPulseApi.js';
-import { analysePulse } from './portfolioPulseModel.js';
+// V19 D3 — facade pulse/index.js consolidates 8-file API. Direct
+// portfolio-pulse-* imports тоже работают (no breaking change), но facade
+// читабельнее в high-touch consumers.
+import {
+  fetchPulseData, fetchEmployeeDetail,
+  analysePulse,
+  parseProjectKeys,
+} from './pulse/index.js';
 import { enrichForScanner2 } from './teamScanner2Enrichment.js';
-import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
   loadTeamConfig, saveTeamConfig, applyPreset, resetTeam,
   buildTeamThresholdsMap, PRESET_THRESHOLDS,
