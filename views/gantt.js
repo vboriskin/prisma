@@ -16,6 +16,13 @@ import {
   WORK_TYPES,
 } from '../constants.js';
 import { RH } from './renderHelpers.js';
+// V18.3 B1 (partial split) — 4 self-contained method'а вынесены в aux.
+import {
+  openHistoryModal as _auxHistoryModal,
+  openAddEpicModal as _auxAddEpicModal,
+  bindFastTooltip as _auxBindFastTooltip,
+  drawPostponeArrows as _auxDrawPostponeArrows,
+} from './gantt/aux.js';
 
 // V17.1 C11+C12 — единый плюрализатор для русских окончаний.
 // Пример: pl(1, ['задача','задачи','задач']) → 'задача', pl(3,…) → 'задачи',
@@ -491,174 +498,15 @@ export const GanttView = {
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
    *  state.actionLog (наполняется HistoryLog.data/.gantt + HistoryManager). */
-  _openHistoryModal() {
-    const log = Array.isArray(state.actionLog) ? state.actionLog : [];
-    // Фильтр: записи, относящиеся к Ганту по type или category=='gantt'.
-    const GANTT_PATTERNS = /^(assign_pill|unassign_pill|set_dates|move|move_back|undo|redo|checkpoint|plan_lock|edit_mode|delete|add_type|drop|drag|trail|epic_add|epic_)/i;
-    const ganttEntries = log.filter(e => {
-      if (!e) return false;
-      if (e.category === 'gantt') return true;
-      if (GANTT_PATTERNS.test(String(e.type || ''))) return true;
-      const lbl = String(e.label || '').toLowerCase();
-      return /колодц|пилюл|релиз 1\.|перенос|план|эпик|гант/i.test(lbl);
-    });
-    const escH = Utils.escapeHtml;
-    const fmtTime = (iso) => {
-      try {
-        const d = new Date(iso);
-        return d.toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-      } catch(_) { return iso; }
-    };
-    const rowsHtml = ganttEntries.length
-      ? ganttEntries.slice(0, 500).map(e => `
-          <tr>
-            <td class="gdt-hist-time">${escH(fmtTime(e.at))}</td>
-            <td class="gdt-hist-type"><span class="gdt-hist-pill">${escH(e.type || '—')}</span></td>
-            <td class="gdt-hist-label">${escH(e.label || '')}</td>
-            <td class="gdt-hist-source">${escH(e.source || '')}</td>
-          </tr>`).join('')
-      : `<tr><td colspan="4" class="gdt-hist-empty">Нет записей в истории Ганта</td></tr>`;
-    // V17.1.1 — переписано под существующий шаблон (`.modal-box` + inline body padding).
-    const html = `
-      <div class="modal-overlay" id="modal-gantt-history">
-        <div class="modal-box modal-box-wide">
-          <div class="modal-header">
-            <h3>История изменений Ганта</h3>
-            <button class="modal-close-btn" data-close-modal>✕</button>
-          </div>
-          <div class="ae-modal-body">
-            <div class="gdt-hist-meta">Показано записей: ${ganttEntries.length}</div>
-            <div class="gdt-hist-table-wrap">
-              <table class="gdt-hist-table">
-                <thead><tr><th>Время</th><th>Тип</th><th>Описание</th><th>Источник</th></tr></thead>
-                <tbody>${rowsHtml}</tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    document.getElementById('modal-gantt-history')?.remove();
-    document.body.insertAdjacentHTML('beforeend', html);
-    const overlay = document.getElementById('modal-gantt-history');
-    const close = () => overlay?.remove();
-    overlay?.addEventListener('click', (ev) => { if (ev.target === overlay || ev.target.closest('[data-close-modal]')) close(); });
-    document.addEventListener('keydown', function escClose(ev){ if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); } });
-  },
+  // V18.3 B1 — extracted to ./gantt/aux.js (60 LOC moved out).
+  _openHistoryModal() { _auxHistoryModal(); },
 
-  /** V17.1 C13 — «Добавить эпик» modal. Полный набор полей по согласованию
-   *  с пользователем (Q2=б): команда / эпик / scope / релиз / типы работ /
-   *  зависимости (blocking) / комментарий. После сохранения создаём строку
-   *  через RowFactory.create, добавляем в state.rows, инвалидируем кэш и
-   *  перерендеривает гант. */
+  /** V17.1 C13 — «Добавить эпик» modal. V18.3 B1 — extracted to
+   *  ./gantt/aux.js (110 LOC moved). onCreated callback вызывает
+   *  GanttView.renderChart() — это дает aux.js быть pure без circular
+   *  GanttView reference. */
   _openAddEpicModal(presetTeam) {
-    const escH = Utils.escapeHtml;
-    const allTeams = Utils.unique(state.rows.map(r => r.team).filter(Boolean));
-    if (presetTeam && !allTeams.includes(presetTeam)) allTeams.unshift(presetTeam);
-    const wtList = Array.isArray(WORK_TYPES) ? WORK_TYPES : [];
-    const releases = ['1.20','1.21','1.22','overtime'];
-    const releaseLabel = { '1.20':'Релиз 1.20', '1.21':'Релиз 1.21', '1.22':'Релиз 1.22', 'overtime':'Овертайм' };
-    // V17.1.1 — переписано под существующий шаблон модалок (`modal-box` /
-    //   `modal-close-btn` + inline padding в body/footer). Прежняя версия
-    //   использовала `.modal-lg / .modal-body / .modal-footer / .modal-close`,
-    //   которых нет в styles.css → модалка отрисовывалась без фоновой карточки.
-    const html = `
-      <div class="modal-overlay" id="modal-gantt-add-epic">
-        <div class="modal-box modal-box-wide ae-modal-box">
-          <div class="modal-header">
-            <h3>Добавить эпик</h3>
-            <button class="modal-close-btn" data-close-modal>✕</button>
-          </div>
-          <div class="ae-modal-body">
-            <div class="form-grid">
-              <label class="form-row">
-                <span class="form-label">Команда</span>
-                <input list="ae-teams" id="ae-team" class="form-input" placeholder="Команда…" value="${escH(presetTeam || '')}">
-                <datalist id="ae-teams">${allTeams.map(t => `<option value="${escH(t)}">`).join('')}</datalist>
-              </label>
-              <label class="form-row">
-                <span class="form-label">Эпик</span>
-                <input id="ae-epic" class="form-input" placeholder="Название эпика…" autofocus>
-              </label>
-              <label class="form-row">
-                <span class="form-label">Категория / тэги</span>
-                <input id="ae-category" class="form-input" placeholder="Например: BE, FE, QA">
-              </label>
-              <label class="form-row">
-                <span class="form-label">Scope</span>
-                <select id="ae-scope" class="form-input">
-                  ${(SCOPE_OPTIONS || ['Да','Нет','Требует подтверждения']).map(s => `<option value="${escH(s)}">${escH(s)}</option>`).join('')}
-                </select>
-              </label>
-              <label class="form-row">
-                <span class="form-label">Релиз</span>
-                <select id="ae-release" class="form-input">
-                  ${releases.map(r => `<option value="${escH(r)}">${escH(releaseLabel[r])}</option>`).join('')}
-                </select>
-              </label>
-              <fieldset class="form-row">
-                <legend class="form-label">Типы работ</legend>
-                <div class="ae-wt-list">
-                  ${wtList.map(w => `<label class="ae-wt-item"><input type="checkbox" value="${escH(w)}"> ${escH(w)}</label>`).join('')}
-                </div>
-              </fieldset>
-              <label class="form-row">
-                <span class="form-label">Зависимости (через запятую)</span>
-                <input id="ae-deps" class="form-input" placeholder="Например: SBOF-101, SBOF-102">
-              </label>
-              <label class="form-row form-row-checkbox">
-                <input type="checkbox" id="ae-blocking">
-                <span>Блокирующая зависимость (deadline-критична)</span>
-              </label>
-              <label class="form-row">
-                <span class="form-label">Комментарий</span>
-                <textarea id="ae-comment" class="form-input" rows="2" placeholder="Дополнительный контекст…"></textarea>
-              </label>
-            </div>
-          </div>
-          <div class="ae-modal-footer">
-            <button class="btn btn-outline btn-sm" data-close-modal>Отмена</button>
-            <button class="btn btn-primary btn-sm" id="ae-save">Сохранить</button>
-          </div>
-        </div>
-      </div>`;
-    document.getElementById('modal-gantt-add-epic')?.remove();
-    document.body.insertAdjacentHTML('beforeend', html);
-    const overlay = document.getElementById('modal-gantt-add-epic');
-    const close = () => overlay?.remove();
-    overlay?.addEventListener('click', (ev) => {
-      if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
-    });
-    document.addEventListener('keydown', function esc(ev){ if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
-    document.getElementById('ae-save').addEventListener('click', () => {
-      const team = (document.getElementById('ae-team').value || '').trim();
-      const epic = (document.getElementById('ae-epic').value || '').trim();
-      if (!team || !epic) {
-        window.showToast?.('Команда и эпик — обязательные поля', 'warning', 1800);
-        return;
-      }
-      const category = (document.getElementById('ae-category').value || '').trim();
-      const scope = document.getElementById('ae-scope').value || '';
-      const release = document.getElementById('ae-release').value || '';
-      const wts = Array.from(overlay.querySelectorAll('.ae-wt-item input:checked')).map(c => c.value);
-      const deps = (document.getElementById('ae-deps').value || '').trim();
-      const blocking = !!document.getElementById('ae-blocking').checked;
-      const comment = (document.getElementById('ae-comment').value || '').trim();
-      const fieldByRel = { '1.20':'release120Types', '1.21':'release121Types', '1.22':'release122Types', 'overtime':'overtimeTypes' };
-      const seed = { team, epic, category, tags: category, scopeStatus: scope, taskComment: comment, blockingDependency: blocking, dependencies: deps };
-      if (release && fieldByRel[release]) seed[fieldByRel[release]] = wts;
-      else seed.backlogTypes = wts;
-      window.HistoryManager?.checkpoint?.(`добавить эпик «${epic}» в ${team}`);
-      const newRow = RowFactory.create(seed);
-      RowFactory.updateDerived(newRow);
-      state.rows = [...state.rows, newRow];
-      try { RiskEngine.computeAll(); } catch(_) {}
-      Storage.save();
-      try { window.HistoryLog?.data?.('epic_add', `Добавлен эпик «${epic}» в команду ${team}`, { rowId: newRow.id, team, epic }); } catch(_) {}
-      try { window.App?.populateFilterDropdowns?.(); } catch(_) {}
-      close();
-      GanttView.renderChart();
-      window.showToast?.(`Эпик «${epic}» добавлен в ${team}`, 'success', 1800);
-    });
+    _auxAddEpicModal(presetTeam, { onCreated: () => GanttView.renderChart() });
   },
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt-fullscreen');
@@ -2452,183 +2300,13 @@ export const GanttView = {
   },
   /** Lightweight body-attached tooltip — replaces native `title=` (which
    *  has a ~1.5 s delay browsers don't expose any API to shorten). 200 ms
-   *  hover delay before showing. Multi-line via `\n` in `data-tip`. */
-  bindFastTooltip(wrap) {
-    if (GanttView._fastTipBound) return;
-    GanttView._fastTipBound = true;
-    let el = null;
-    let timer = null;
-    const ensureEl = () => {
-      if (el) return el;
-      el = document.createElement('div');
-      el.className = 'gdt-fasttip';
-      el.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;' +
-        'max-width:340px;padding:6px 10px;border-radius:6px;font-size:11px;line-height:1.45;' +
-        'white-space:pre-line;box-shadow:0 4px 14px rgba(0,0,0,.20);' +
-        'background:#1f2937;color:#f3f4f6;' +
-        'transition:opacity .12s';
-      document.body.appendChild(el);
-      return el;
-    };
-    const place = (target) => {
-      const txt = target.dataset.tip;
-      if (!txt) return;
-      const node = ensureEl();
-      node.textContent = txt;
-      node.style.display = 'block';
-      // Position above target, centered. Flip below if it would clip the top.
-      const r = target.getBoundingClientRect();
-      const tipR = node.getBoundingClientRect();
-      let left = Math.round(r.left + r.width / 2 - tipR.width / 2);
-      left = Math.max(8, Math.min(left, window.innerWidth - tipR.width - 8));
-      let top = Math.round(r.top - tipR.height - 8);
-      if (top < 8) top = Math.round(r.bottom + 8);   // flip
-      node.style.left = left + 'px';
-      node.style.top  = top + 'px';
-    };
-    const hide = () => {
-      clearTimeout(timer); timer = null;
-      if (el) el.style.display = 'none';
-    };
-    wrap.addEventListener('mouseover', (e) => {
-      const t = e.target.closest('[data-tip]');
-      if (!t) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => place(t), 200);
-    });
-    wrap.addEventListener('mouseout', (e) => {
-      if (e.target.closest('[data-tip]')) hide();
-    });
-    // Edge cases — scroll, drag, blur should kill an open tip.
-    wrap.addEventListener('mousedown', hide);
-    window.addEventListener('scroll', hide, true);
-  },
-  drawPostponeArrows(wrap) {
-    const container = wrap.querySelector('.gdt-container');
-    const body      = wrap.querySelector('.gantt-body') || container;
-    if (!container || !body) return;
-    /* remove stale SVG */
-    wrap.querySelectorAll('.gdt-arrows-svg').forEach(el => el.remove());
-
-    // V15 (1.4): each move now lives in a dedicated trail sub-row whose
-    // src + dst ghost-pills share `data-arrow-at`. Match endpoints by that
-    // unique key so the SVG arrow is purely horizontal (same row → same y).
-    // Fallback to the legacy by-cell lookup keeps old data renderable
-    // while we settle the new format.
-    const cssEsc = (s) => (window.CSS?.escape ? window.CSS.escape(s) : String(s).replace(/"/g, '\\"'));
-    const findTrailPair = (rowId, at) => {
-      const src = wrap.querySelector(`.gdt-trail-src[data-row-id="${cssEsc(rowId)}"][data-arrow-at="${cssEsc(at || '')}"]`);
-      const dst = wrap.querySelector(`.gdt-trail-dst[data-row-id="${cssEsc(rowId)}"][data-arrow-at="${cssEsc(at || '')}"]`);
-      return { src, dst };
-    };
-    const findCell = (rowId, col) =>
-      wrap.querySelector(`.gantt-cell[data-col="${cssEsc(col)}"][data-row-id="${cssEsc(rowId)}"]`);
-
-    /* collect all recorded arrows from visible rows */
-    const arrows = [];
-    const diag   = { rowsWithArrows: 0, arrowsTotal: 0, srcMissing: 0, dstMissing: 0, drawn: 0 };
-    state.rows.forEach(row => {
-      if (!row.ganttArrows?.length) return;
-      diag.rowsWithArrows++;
-      row.ganttArrows.forEach(a => {
-        diag.arrowsTotal++;
-        const pair = findTrailPair(row.id, a.at);
-        const srcEl = pair.src || findCell(row.id, a.srcCol);
-        const dstEl = pair.dst || findCell(row.id, a.dstCol);
-        if (!srcEl) diag.srcMissing++;
-        if (!dstEl) diag.dstMissing++;
-        if (srcEl && dstEl) { arrows.push({ srcEl, dstEl, wt: a.wt }); diag.drawn++; }
-      });
-    });
-    // Surface the diagnostic so DevTools shows it when arrows fail to appear.
-    // Quiet when there's nothing to draw — only complain if data says there
-    // SHOULD be arrows but rendering can't find the elements.
-    if (diag.arrowsTotal && (diag.srcMissing || diag.dstMissing || !diag.drawn)) {
-      console.warn('[gantt] drawPostponeArrows:', diag);
-    }
-    if (!arrows.length) return;
-
-    // Slight overhang on height so the downward Bezier sag for the very last
-    // row of the body doesn't get clipped by SVG's own viewBox.
-    const sw = Math.max(body.scrollWidth,  body.clientWidth);
-    const sh = Math.max(body.scrollHeight, body.clientHeight) + 30;
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    // For SVG elements `className` is `SVGAnimatedString` and the property is
-    // read-only via assignment (throws TypeError in spec-compliant browsers).
-    // Use setAttribute('class', ...) — `querySelectorAll('.gdt-arrows-svg')`
-    // on line 851 still matches by attribute.
-    svg.setAttribute('class', 'gdt-arrows-svg');
-    svg.setAttribute('width',  sw);
-    svg.setAttribute('height', sh);
-    svg.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:50;overflow:visible';
-
-    /* V16 (gantt-roadmap #4) — arrow uses the work-type accent colour
-       («narrative» stroke instead of generic grey). Per-wt arrow markers
-       are generated lazily so we don't bloat the SVG defs when only a few
-       types are in play. */
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    svg.appendChild(defs);
-    const _markerCache = new Set();
-    const _markerId = (color) => `gdt-ah-${color.replace(/[^a-z0-9]/gi, '')}`;
-    const _ensureMarker = (color) => {
-      const id = _markerId(color);
-      if (_markerCache.has(id)) return id;
-      _markerCache.add(id);
-      const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-      marker.setAttribute('id', id);
-      marker.setAttribute('markerWidth',  '6');
-      marker.setAttribute('markerHeight', '6');
-      marker.setAttribute('refX', '5.5');
-      marker.setAttribute('refY', '3');
-      marker.setAttribute('orient', 'auto');
-      marker.innerHTML = `<polygon points="0 0, 6 3, 0 6" fill="${color}"/>`;
-      defs.appendChild(marker);
-      return id;
-    };
-
-    // SVG is now inside .gantt-body which IS the scroll context; coords are body-relative,
-    // so no extra scrollLeft/scrollTop adjustment is needed.
-    const cRect = body.getBoundingClientRect();
-
-    arrows.forEach(({ srcEl, dstEl, wt }) => {
-      const sR = srcEl.getBoundingClientRect();
-      const dR = dstEl.getBoundingClientRect();
-      if (!sR.width || !dR.width) return;
-
-      /* anchor points: right-middle of source pill → left-middle of destination pill */
-      const sx = sR.right  - cRect.left - 1;
-      const sy = sR.top    + sR.height * 0.5 - cRect.top;
-      const dx = dR.left   - cRect.left + 1;
-      const dy = dR.top    + dR.height * 0.5 - cRect.top;
-
-      // Pick the wt's accent so the trail arrow rhymes with its source &
-      // destination ghost-pills. Fallback to neutral grey when wt is not
-      // in the canonical palette (custom strings).
-      const wtColor  = (PHASE_COLORS && PHASE_COLORS[wt]) || '#94a3b8';
-      const markerId = _ensureMarker(wtColor);
-
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', `M ${sx} ${sy} L ${dx} ${dy}`);
-      path.setAttribute('stroke',           wtColor);
-      path.setAttribute('stroke-width',     '1.2');
-      path.setAttribute('stroke-linecap',   'round');
-      path.setAttribute('fill',             'none');
-      path.setAttribute('marker-end',       `url(#${markerId})`);
-      path.setAttribute('opacity',          '0.7');
-      svg.appendChild(path);
-    });
-
-    // V15 Spine 2026-04-30 — `position:relative` ALONE does not establish
-    // a stacking context (z-index stays `auto`), so the inner SVG at z:50
-    // shared the SAME context as the sticky `.gantt-header` (z:5) and
-    // out-painted it on vertical scroll → user saw arrows «наезжают» on
-    // the column header. Adding `z-index:0` makes the body its own
-    // stacking context: SVG's z:50 is now local to the body, the body
-    // itself is at z:0, header at z:5 wins on top during scroll.
-    body.style.position = 'relative';
-    body.style.zIndex   = '0';
-    body.appendChild(svg);
-  },
+   *  hover delay before showing. Multi-line via `\n` in `data-tip`.
+   *  V18.3 B1 — extracted to ./gantt/aux.js (50 LOC moved). once-flag
+   *  передаётся через mutable boundState reference. */
+  _fastTipBoundState: { bound: false },
+  bindFastTooltip(wrap) { _auxBindFastTooltip(wrap, GanttView._fastTipBoundState); },
+  // V18.3 B1 — extracted to ./gantt/aux.js (132 LOC moved).
+  drawPostponeArrows(wrap) { _auxDrawPostponeArrows(wrap); },
   // [removed] renderArrows / renderUltra / renderEpics / renderArrowsNew —
   //   legacy modes retired. Only `detailedTasks` (default) survives in V14.
   //   bindGanttModes() in app.js silently migrates the old state values to
