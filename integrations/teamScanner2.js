@@ -284,6 +284,16 @@ export const TeamScanner2 = {
         this._renderPanelOnly();
       });
     });
+    // V18.1 P7-S3.5 — email reveal toggle. Click переключает masked ↔ full.
+    root.querySelectorAll('[data-email-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const isMasked = btn.textContent.includes('*');
+        btn.textContent = isMasked ? btn.dataset.emailFull : btn.dataset.emailMasked;
+        btn.setAttribute('aria-label', isMasked
+          ? 'Email сотрудника показан целиком, нажать чтобы скрыть'
+          : 'Email сотрудника, нажать чтобы показать целиком');
+      });
+    });
   },
 
   /**

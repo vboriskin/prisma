@@ -481,7 +481,26 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
   `;
 }
 
+/**
+ * V18.1 P7-S3.5 — email PII masking. Default: «v.b****@sber.ru»;
+ * раскрытие по hover/focus (CSS) + click toggles full reveal.
+ * Tech panel finding: email surface'ится в panel header без masking,
+ * GDPR-vector при shared screenshots / shared screens на статус-митингах.
+ */
+function maskEmail(email) {
+  if (!email) return '';
+  const at = email.indexOf('@');
+  if (at < 0) return email;
+  const local = email.slice(0, at);
+  const domain = email.slice(at);   // включая @
+  if (local.length <= 1) return email;   // нечего маскировать
+  // Берём первый символ локальной части, остальное — звёздочки.
+  return `${local[0]}${'*'.repeat(Math.max(3, local.length - 1))}${domain}`;
+}
+
 function renderPanelHeader(p, tToday, tYest, tPrev) {
+  const emailFull = p.email || '';
+  const emailMasked = maskEmail(emailFull);
   return `
     <div class="ts2-panel-head">
       <div class="ts2-panel-titleblock">
@@ -490,7 +509,12 @@ function renderPanelHeader(p, tToday, tYest, tPrev) {
           <span class="ts2-panel-meta">сегодня ${tToday}</span>
           <span class="ts2-panel-meta">вчера ${tYest}</span>
           <span class="ts2-panel-meta">позавчера ${tPrev}</span>
-          ${p.email ? `<span class="ts2-panel-meta ts2-panel-meta-muted">${esc(p.email)}</span>` : ''}
+          ${emailFull ? `
+            <button class="ts2-panel-email" data-email-toggle type="button"
+                    aria-label="Email сотрудника, нажать чтобы показать целиком"
+                    title="Click — показать целиком"
+                    data-email-full="${esc(emailFull)}"
+                    data-email-masked="${esc(emailMasked)}">${esc(emailMasked)}</button>` : ''}
         </div>
       </div>
       <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
