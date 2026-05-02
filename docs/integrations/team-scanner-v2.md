@@ -183,6 +183,21 @@ Key: `${jobId}|${employeeKey}|${dwellHours}|${tzOffsetMin ?? 'srv'}`. TTL 5 ми
 - **No tokens в response** — server возвращает только enrichment + employee identity. Token leakage grep пройдён clean.
 - **CSRF** — endpoint POST принимает JSON. CORP network → low priority. Add при первом ext-deploy.
 
+## 10.1 Productivity-signals visibility (V18.1 P7-S4.6)
+
+`↻N` context-switch badge может pахнуть watchdog'ом для руководителей.
+Опциональное скрытие через localStorage:
+
+```js
+// Скрыть ↻N badge на per-person rows (только для текущего браузера)
+localStorage.setItem('q2_scanner_hide_productivity', '1');
+// Показать снова (default behaviour)
+localStorage.removeItem('q2_scanner_hide_productivity');
+```
+
+`▌Nh` dwell-badge **НЕ скрывается** — это операционный blocker-сигнал,
+не productivity-tracking. Спрятать его = потерять stop-list workflow.
+
 ## 11. Тесты
 
 - **`tests/unit/teamScanner2Classifier.test.js`** (20 тестов) — classifyPerson edge cases.

@@ -411,8 +411,15 @@ function renderRow(p, isExpanded) {
   // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
   const switches = p.contextSwitches?.switchEvents?.length || 0;
   const maxDwell = (p.blockers && p.blockers[0]?.dwellHours) || 0;
-  const switchBadge = switches >= 3
-    ? `<span class="ts2-badge ts2-badge-switch" title="Переключений между задачами за 72ч (gap < 30 мин)">↻${switches}</span>`
+  // V18.1 P7-S4.6 — switch-index ↻N теперь опционален через
+  // localStorage-флаг q2_scanner_hide_productivity. Pilot finding (Dmitry):
+  // «↻N switch-badge выглядит как watchdog, тимлиды учуют». ▌Nh dwell-badge
+  // НЕ скрывается — это операционный blocker-сигнал, не productivity-tracking.
+  const hideProductivity = (() => {
+    try { return localStorage.getItem('q2_scanner_hide_productivity') === '1'; } catch (_) { return false; }
+  })();
+  const switchBadge = (!hideProductivity && switches >= 3)
+    ? `<span class="ts2-badge ts2-badge-switch" title="Переключений между задачами за 72ч (gap < 30 мин). Скрыть: localStorage.q2_scanner_hide_productivity = '1'">↻${switches}</span>`
     : '';
   const dwellBadge = maxDwell >= 24
     ? `<span class="ts2-badge ts2-badge-dwell" title="Максимальный dwell-time блокера (часов в текущем статусе)">▌${maxDwell}ч</span>`
