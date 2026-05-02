@@ -135,3 +135,4 @@ audit-2026-05-V18/
 - **Status (2026-05-02):** Sprint 3 closed, automated DoD passed. Pre-release audit completed. **Pilot Day-14 PASSED with conditions** ([feedback](./scanner2-pilot-feedback.md)) — 5-6/7 daily users. Sprint 4 (multi-team + trends + WIP + 3 polish) closed. **V18.2 graduated to production.**
 - **Next:** [`v18-3-and-v19-roadmap.md`](./v18-3-and-v19-roadmap.md) — V18.3 (Scanner 2.0 P2 polish + gantt split) + V19 (structural backlog: telemetry, persistent retention, RBAC, etc.).
 - **V18.3 kickoff:** [`v18-3-MASTER_PLAN.md`](./v18-3-MASTER_PLAN.md) — open questions resolved (UI config / reconnaissance / Olga last / no D4 для B1). Order: A3→A2→A4→A5→B1→A1. Effort ~30-40ч.
+- **V18.3 closed (2026-05-02):** all 6/6 пунктов закрыты — A3/A2/A4/A5/B1 partial split/A1 per-team config. Tests 670 unit / 18 contract / 0 fail. Olga ML re-pilot pending.

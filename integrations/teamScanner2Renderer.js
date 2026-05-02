@@ -240,6 +240,7 @@ export function renderTopBar(model, ctx = {}) {
         <span class="ts2-meta-sep">·</span>
         <span class="ts2-meta-item">обновлено ${esc(fetchedAt)}</span>
         ${pkCount >= 2 ? `<button class="ts2-btn ts2-btn-ghost ts2-view-toggle ${ctx.activeView === 'multi' ? 'ts2-view-toggle-active' : ''}" id="ts2-view-toggle" type="button" title="Переключить вид: одна команда / все команды">${ctx.activeView === 'multi' ? '👥 По командам' : '👥 По командам'}</button>` : ''}
+        <button class="ts2-btn ts2-btn-ghost" id="ts2-config-btn" type="button" title="Настройка команд: per-team пороги dwell-time (research / hotfix presets)" aria-label="Настройка команд">⚙</button>
         <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">↻ Обновить данные</button>
       </div>
     </div>
@@ -400,6 +401,103 @@ export function renderTeamGlance(model, ctx = {}) {
       ${riskLine ? `<div class="ts2-glance-line ts2-glance-risk-row">${riskLine}</div>` : ''}
     </div>
   `;
+}
+
+/* ── Team config modal (V18.3 A1) ───────────────────────── */
+
+const PRESET_LABELS = {
+  default:  'По умолчанию',
+  research: 'Research / ML',
+  hotfix:   'Hotfix / SRE',
+};
+
+const THRESHOLD_FIELDS = [
+  { key: 'codeReview', label: 'Code Review' },
+  { key: 'qa',         label: 'QA / Testing' },
+  { key: 'inProgress', label: 'In Progress' },
+  { key: 'todo',       label: 'To Do' },
+  { key: 'default',    label: 'Default (другие статусы)' },
+];
+
+/**
+ * Pilot finding (Olga, ML-research):
+ * «CR > 8ч порог не подходит, нужен per-team override через UI, не JSON».
+ *
+ * Modal со списком всех известных pk + поля для thresholds + presets.
+ *
+ * @param {object} model — current pulse model (источник списка pk)
+ * @param {object} currentConfig — { [pk]: { mode, dwellHours: {...} } }
+ * @param {object} presets — PRESET_THRESHOLDS map
+ */
+export function renderTeamConfigModal(model, currentConfig, presets) {
+  const pks = Object.keys(model?.spaces || {});
+  if (!pks.length) {
+    return `
+      <div class="modal-overlay" id="ts2-config-modal">
+        <div class="modal-box">
+          <div class="modal-header">
+            <h3>Настройка команд</h3>
+            <button class="modal-close-btn" data-close-modal>✕</button>
+          </div>
+          <div class="ae-modal-body">
+            <div class="ts2-empty-text">Сначала загрузите данные Сканнера: проектные ключи не известны.</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  const teamCards = pks.map(pk => {
+    const cfg = currentConfig[pk] || {};
+    const mode = cfg.mode || 'default';
+    const dh = cfg.dwellHours || presets.default;
+    const presetOptions = Object.keys(presets).map(p =>
+      `<option value="${esc(p)}" ${p === mode ? 'selected' : ''}>${esc(PRESET_LABELS[p] || p)}</option>`
+    ).join('');
+    const fields = THRESHOLD_FIELDS.map(f => `
+      <label class="ts2-config-field">
+        <span class="ts2-config-field-label">${esc(f.label)}</span>
+        <input type="number" min="1" max="240" class="form-input ts2-config-input"
+               data-pk="${esc(pk)}" data-field="${esc(f.key)}"
+               value="${esc(dh[f.key] ?? presets.default[f.key])}">
+        <span class="ts2-config-field-suffix">ч</span>
+      </label>
+    `).join('');
+    const isCustom = !!cfg.dwellHours;
+    return `
+      <div class="ts2-config-team-card ${isCustom ? 'ts2-config-team-card-active' : ''}" data-pk="${esc(pk)}">
+        <div class="ts2-config-team-head">
+          <span class="ts2-config-team-pk">${esc(pk)}</span>
+          <select class="form-input ts2-config-preset" data-pk="${esc(pk)}">
+            ${presetOptions}
+          </select>
+          ${isCustom ? `<button class="ts2-btn ts2-btn-ghost ts2-config-reset" data-pk="${esc(pk)}" type="button" title="Сбросить к глобальным дефолтам">сброс</button>` : ''}
+        </div>
+        <div class="ts2-config-fields">${fields}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="modal-overlay" id="ts2-config-modal">
+      <div class="modal-box modal-box-wide">
+        <div class="modal-header">
+          <h3>Настройка команд — пороги dwell-time</h3>
+          <button class="modal-close-btn" data-close-modal>✕</button>
+        </div>
+        <div class="ae-modal-body">
+          <div class="ts2-config-help">
+            Per-команда override порогов «висит без движения» по статусам.
+            Issue в статусе дольше threshold попадает в «Старые задачи» (blocker-shelf).
+            Presets: Research/ML — длинные периоды на ревью моделей; Hotfix/SRE —
+            быстрые сроки реакции.
+          </div>
+          <div class="ts2-config-teams">${teamCards}</div>
+        </div>
+        <div class="ae-modal-footer">
+          <button class="btn btn-outline btn-sm" data-close-modal>Отмена</button>
+          <button class="btn btn-primary btn-sm" id="ts2-config-save">Сохранить</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 /* ── Multi-team aggregate view (V18.1 P7-S4.1) ──────────── */

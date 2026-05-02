@@ -27,8 +27,12 @@ import { analysePulse } from './portfolioPulseModel.js';
 import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
+  loadTeamConfig, saveTeamConfig, applyPreset, resetTeam,
+  buildTeamThresholdsMap, PRESET_THRESHOLDS,
+} from './teamScanner2Config.js';
+import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
-  renderMultiTeamView,
+  renderMultiTeamView, renderTeamConfigModal,
   renderSkeleton, renderEmpty, renderError, setRenderContext,
 } from './teamScanner2Renderer.js';
 
@@ -308,9 +312,12 @@ export const TeamScanner2 = {
       const baseModel = analysePulse(raw, { staleDays, employees: state.employees || [] });
       // V18.1 P7-S2.3 — browser TZ offset для consistent heatmap.
       this._tzOffsetMin = new Date().getTimezoneOffset();
+      // V18.3 A1 — per-team thresholds override из user-config (Olga ML pilot).
+      const teamThresholds = buildTeamThresholdsMap();
       this._model = enrichForScanner2(baseModel, raw, {
         dwellHours: 24,
         tzOffsetMin: this._tzOffsetMin,
+        teamThresholds,
       });
       // V18.1 P7-S4.2 — read prev snapshot ДО save'а нового, чтобы дельта
       // считалась относительно вчерашнего, а не этого же fetch'а.
@@ -432,6 +439,10 @@ export const TeamScanner2 = {
     root.querySelector('#ts2-view-toggle')?.addEventListener('click', () => {
       this._activeView = this._activeView === 'multi' ? 'team' : 'multi';
       this._closePanel();   // closes any open detail panel + does _renderFull
+    });
+    // V18.3 A1 — gear button → open team-config modal.
+    root.querySelector('#ts2-config-btn')?.addEventListener('click', () => {
+      this._openConfigModal();
     });
     // V18.3 A5a — group-jump: click по counter в team-glance → scroll
     // к соответствующей группе rows. Anna PO finding.
@@ -582,6 +593,82 @@ export const TeamScanner2 = {
     // Re-bind только panel events (dashboard события на старых nodes
     // остаются валидными — мы их не трогали).
     this._bindPanelEvents();
+  },
+
+  /**
+   * V18.3 A1 — Per-team config modal. Olga (ML pilot) override workflow.
+   * Modal живёт в document.body (не в container), чтобы overlay перекрывал
+   * весь viewport. State хранится в localStorage через teamScanner2Config.
+   */
+  _openConfigModal() {
+    if (!this._model) return;
+    const currentConfig = loadTeamConfig();
+    const html = renderTeamConfigModal(this._model, currentConfig, PRESET_THRESHOLDS);
+    document.getElementById('ts2-config-modal')?.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById('ts2-config-modal');
+    const close = () => overlay?.remove();
+    overlay?.addEventListener('click', (ev) => {
+      if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
+    });
+    document.addEventListener('keydown', function esc(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+    });
+    // Preset selector — обновляет inputs к preset values.
+    overlay.querySelectorAll('.ts2-config-preset').forEach(sel => {
+      sel.addEventListener('change', () => {
+        const pk = sel.dataset.pk;
+        const presetName = sel.value;
+        const preset = PRESET_THRESHOLDS[presetName] || PRESET_THRESHOLDS.default;
+        overlay.querySelectorAll(`.ts2-config-input[data-pk="${pk}"]`).forEach(input => {
+          input.value = preset[input.dataset.field] ?? preset.default;
+        });
+      });
+    });
+    // Reset button per team.
+    overlay.querySelectorAll('.ts2-config-reset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pk = btn.dataset.pk;
+        resetTeam(pk);
+        close();
+        this._openConfigModal();   // re-open чтобы UI обновился
+      });
+    });
+    // Save button — собираем все inputs → applyPreset/manual save.
+    overlay.querySelector('#ts2-config-save')?.addEventListener('click', () => {
+      const newConfig = loadTeamConfig();
+      const pks = new Set();
+      overlay.querySelectorAll('.ts2-config-input').forEach(input => pks.add(input.dataset.pk));
+      for (const pk of pks) {
+        const presetSel = overlay.querySelector(`.ts2-config-preset[data-pk="${pk}"]`);
+        const mode = presetSel?.value || 'default';
+        const dwellHours = {};
+        overlay.querySelectorAll(`.ts2-config-input[data-pk="${pk}"]`).forEach(input => {
+          const v = Number(input.value);
+          if (Number.isFinite(v) && v > 0) dwellHours[input.dataset.field] = v;
+        });
+        newConfig[pk] = { mode, dwellHours };
+      }
+      saveTeamConfig(newConfig);
+      close();
+      // Re-enrich model с новыми порогами без re-fetch'а данных.
+      this._reEnrichWithNewConfig();
+      this._announce('Настройки команд сохранены, blockers пересчитаны');
+    });
+  },
+
+  /**
+   * V18.3 A1 — пересчитать enrichment с новой config'ой. Поскольку
+   * blockers требуют raw assigneeIndex (которым model owner is not),
+   * самый простой вариант — refresh всего pulse'а с новыми порогами.
+   * 5-15 сек на re-fetch это accepted price для UX «save → instant
+   * pересчёт». Альтернатива — кэшировать rawReports в orchestrator'е,
+   * но это удваивает memory footprint (raw + model хранятся вместе).
+   */
+  _reEnrichWithNewConfig() {
+    // Trigger полный refresh — берёт teamThresholds через
+    // buildTeamThresholdsMap() в _fetchAndRender автоматически.
+    this.refresh();
   },
 
   _closePanel() {

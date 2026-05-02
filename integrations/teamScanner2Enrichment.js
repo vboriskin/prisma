@@ -109,6 +109,11 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     default: dwellHours,
     ...(opts.thresholds || {}),
   };
+  // V18.3 A1 — per-team thresholds override (Olga ML pilot finding).
+  // Map<pk, thresholds-map>. computeBlockers ниже использует teamThresholds[pk]
+  // если для конкретной команды задан override, иначе fallback на global
+  // thresholds.
+  const teamThresholds = opts.teamThresholds || {};
 
   const assigneeIndex = rawReports ? buildAssigneeIndex(rawReports) : null;
 
@@ -120,7 +125,9 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     p.heatmap         = computeHeatmap(p, tz);
     p.contextSwitches = computeContextSwitches(p);
     p.timeline72h     = computeTimeline72h(p, tz);
-    p.blockers        = assigneeIndex ? computeBlockers(p, assigneeIndex, thresholds) : [];
+    p.blockers        = assigneeIndex
+      ? computeBlockers(p, assigneeIndex, thresholds, teamThresholds)
+      : [];
     // V18.1 P5 — расширенные сигналы для side-panel:
     p.heatmap72x4     = computeHeatmap72x4(p, tz);   // 4 sources × 72 hours
     p.sparkline72h    = computeSparkline72h(p);      // 72 значений events/час (deprecated в S2.5)
@@ -134,7 +141,8 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
   model.scannerV2 = {
     enrichedAt: Date.now(),
     dwellThresholdHours: dwellHours,    // backward-compat (default fallback)
-    dwellThresholds: thresholds,        // V18.1 P7-S2.2 — full map
+    dwellThresholds: thresholds,        // V18.1 P7-S2.2 — full map (global default)
+    teamThresholds,                     // V18.3 A1 — per-pk override map
     tzOffsetMin: tz,                    // V18.1 P7-S2.3 — null = environment-local
     serverLocalTZ: tz === null,         // если null → server local; иначе TZ-aware
     switchGapSec: SWITCH_GAP_SEC,
@@ -630,17 +638,17 @@ export function findLastStatusChange(issue) {
 
 /**
  * Returns array of blocker objects:
- *   { key, summary, status, sinceIso, dwellHours, thresholdHours }
- * Sorted by dwellHours DESC. Только non-terminal статусы. Dedup'ит по
- * issue.key.
+ *   { key, summary, status, sinceIso, dwellHours, thresholdHours, pk }
+ * Sorted by dwellHours DESC.
  *
- * V18.1 P7-S2.2 — `thresholds` теперь map (DEFAULT_DWELL_THRESHOLDS).
- * Backward-compat: если передан number — используется как default только.
+ * V18.1 P7-S2.2 — `thresholds` map (DEFAULT_DWELL_THRESHOLDS).
+ * V18.3 A1 — опциональный 4-й параметр teamThresholds: Map<pk, threshold-map>.
+ * Если issue's pk имеет custom thresholds → используются они, иначе global.
  */
-export function computeBlockers(p, assigneeIndex, thresholds) {
+export function computeBlockers(p, assigneeIndex, thresholds, teamThresholds = {}) {
   if (!assigneeIndex || !p) return [];
   // Accept either map (P7+) or scalar number (legacy P3-P6).
-  const tmap = (typeof thresholds === 'number')
+  const globalMap = (typeof thresholds === 'number')
     ? { ...DEFAULT_DWELL_THRESHOLDS, default: thresholds }
     : (thresholds || DEFAULT_DWELL_THRESHOLDS);
   const now = Date.now();
@@ -658,17 +666,22 @@ export function computeBlockers(p, assigneeIndex, thresholds) {
     const since = new Date(c.lastStatusChangeIso).getTime();
     if (isNaN(since)) continue;
     const dwellMsActual = now - since;
-    // V18.1 P7-S2.2 — порог теперь зависит от статуса.
+    // V18.3 A1 — pk lookup для per-team threshold override.
+    // pk извлекается из issue.key prefix (X-1234 → X) или явно из field.
+    const pk = c?.issue?.fields?.project?.key
+            || (key.split('-')[0] || '');
+    const tmap = (pk && teamThresholds[pk]) ? teamThresholds[pk] : globalMap;
     const thresholdHours = pickDwellThreshold(c.statusName, tmap);
     const dwellMs = thresholdHours * 3600 * 1000;
     if (dwellMsActual < dwellMs) continue;
     out.push({
       key,
+      pk,                        // V18.3 A1 — для UI «BACKEND CR > 8ч»
       summary:    c.issue?.fields?.summary || '',
       status:     c.statusName,
       sinceIso:   c.lastStatusChangeIso,
       dwellHours: Math.round(dwellMsActual / 3600 / 1000),
-      thresholdHours,            // P7-S2.2 — для UI: «42ч (порог 8ч)»
+      thresholdHours,
     });
   }
   out.sort((a, b) => b.dwellHours - a.dwellHours);
