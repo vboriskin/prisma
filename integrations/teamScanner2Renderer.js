@@ -159,11 +159,12 @@ export function renderTopBar(model) {
     ? new Date(model.fetchedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
     : '—';
   const pkCount = (model?.projectKeys || []).length;
+  // V18.1 P6 — graduated из preview, pill «v2 preview» убран. v1 живёт
+  // как «legacy» сабтаб рядом, переключение через subtab-bar.
   return `
     <div class="ts2-topbar">
       <div class="ts2-topbar-title">
-        <span class="ts2-h1">Сканнер команд 2.0</span>
-        <span class="ts2-pill ts2-pill-preview" title="Превью v2.0 — v1 рядом во вкладке «📡 Сканнер команд»">v2 preview</span>
+        <span class="ts2-h1">Сканнер команд</span>
       </div>
       <div class="ts2-topbar-meta">
         <span class="ts2-meta-item">${pkCount} ${plural(pkCount, ['проект', 'проекта', 'проектов'])}</span>

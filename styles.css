@@ -8419,13 +8419,28 @@ body.theme-dark .ceo-scenario-desc   { color: #475569; }
 }
 .int-subtab:hover { color: var(--text-1); }
 .int-subtab-active { color: var(--accent); border-bottom-color: var(--accent); }
-/* V18.1 P1 — preview pill для «Сканнер команд 2.0». */
+/* V18.1 P1 — accent pill для метки «v2». В P6 более не используется,
+   оставлен как generic class для будущих pill-маркеров. */
 .int-subtab-pill {
   display: inline-block; margin-left: 6px;
   font-size: 9px; font-weight: 700; letter-spacing: .6px;
   padding: 1px 5px; border-radius: 3px;
   background: var(--accent); color: #fff;
   vertical-align: 1px;
+}
+/* V18.1 P6 — legacy pill (muted) + legacy subtab style.
+   Старая версия Сканнера деэмфазирована: serif-grey pill, ослабленный
+   текст. Subtab остаётся кликабельным как fallback. */
+.int-subtab-legacy {
+  color: var(--text-4, #94a3b8);
+  font-weight: 500;
+}
+.int-subtab-legacy:hover { color: var(--text-3); }
+.int-subtab-pill-legacy {
+  background: var(--bg-2, #f1f5f9);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  text-transform: uppercase;
 }
 
 .pp-root { display: flex; flex-direction: column; gap: 14px; }

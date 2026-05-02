@@ -411,8 +411,10 @@ function openSettingsModal(activeTab) {
 export const IntegrationsView = {
   _root: null,
 
-  // 'pulse' is the default — Portfolio Pulse is now the first sub-tab.
-  _activeSubtab: 'pulse',  // 'pulse' | 'scanner2' | 'black' | 'perf' | 'overview'
+  // V18.1 P6 — Сканнер 2.0 graduated из preview и теперь дефолт. v1
+  // (PortfolioPulse) остаётся доступен как «legacy» fallback. После
+  // ~2-3 итераций без жалоб v1 будет удалён.
+  _activeSubtab: 'scanner2',  // 'scanner2' | 'pulse' | 'black' | 'perf' | 'overview'
 
   // Pulse data is cached after first load. Subsequent tab switches restore
   // the cached UI without refetching. The user explicitly refreshes via the
@@ -434,13 +436,15 @@ export const IntegrationsView = {
 
     // Sub-tab nav (Portfolio Pulse first per user request).
     // V17 P4 — added «Производительность сотрудников» sub-tab.
+    // V18.1 P6 — порядок subtab'ов отражает graduation: scanner2 первый
+    // (default), legacy-v1 в конце с muted-pill «legacy».
     const subtabsHtml = `
       <div class="int-subtabs">
-        <button class="int-subtab ${this._activeSubtab==='pulse'?'int-subtab-active':''}"    data-subtab="pulse">📡 Сканнер команд</button>
-        <button class="int-subtab ${this._activeSubtab==='scanner2'?'int-subtab-active':''}" data-subtab="scanner2">Сканнер команд 2.0 <span class="int-subtab-pill">v2</span></button>
+        <button class="int-subtab ${this._activeSubtab==='scanner2'?'int-subtab-active':''}" data-subtab="scanner2">Сканнер команд</button>
         <button class="int-subtab ${this._activeSubtab==='black'?'int-subtab-active':''}"    data-subtab="black">⚫ Чёрный дашборд</button>
         <button class="int-subtab ${this._activeSubtab==='perf'?'int-subtab-active':''}"     data-subtab="perf">👥 Производительность сотрудников</button>
         <button class="int-subtab ${this._activeSubtab==='overview'?'int-subtab-active':''}" data-subtab="overview">Сводная</button>
+        <button class="int-subtab int-subtab-legacy ${this._activeSubtab==='pulse'?'int-subtab-active':''}" data-subtab="pulse" title="Старая версия Сканнера. Будет удалена в одной из следующих итераций.">📡 Сканнер команд <span class="int-subtab-pill int-subtab-pill-legacy">legacy</span></button>
       </div>`;
 
     let bodyHtml;
