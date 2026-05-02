@@ -539,22 +539,32 @@ function renderFilters(filters, rowTotals) {
 }
 
 function renderBlockersShelf(blockers) {
+  // V18.1 P7-S2.2 — пороги status-зависимые: Code Review > 8ч, QA > 16ч,
+  // In Progress > 48ч, To Do > 72ч, default > 24ч.
   if (!blockers.length) {
     return `
       <div class="ts2-panel-section ts2-panel-section-tight">
-        <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">dwell ≥ 24ч</span></div>
-        <div class="ts2-empty-text">Нет blocker'ов с dwell-time ≥ 24ч.</div>
+        <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">пороги: CR ≥ 8ч · QA ≥ 16ч · IP ≥ 48ч</span></div>
+        <div class="ts2-empty-text">Все blockers движутся (dwell в пределах нормы).</div>
       </div>
     `;
   }
-  const items = blockers.slice(0, 8).map(b => `
+  // V18.1 P7-S2.2 — показываем «42ч (порог 8ч)» если threshold не дефолт,
+  // чтобы PO/SM понимали ПОЧЕМУ задача в blocker'ах.
+  const items = blockers.slice(0, 8).map(b => {
+    const threshold = b.thresholdHours;
+    const dwellLabel = (threshold && threshold !== 24)
+      ? `${b.dwellHours}ч <span class="ts2-blockers-threshold">(порог ${threshold}ч)</span>`
+      : `${b.dwellHours}ч`;
+    return `
     <li class="ts2-blockers-li">
       <span class="ts2-blockers-stripe"></span>
       <span class="ts2-blockers-key">${jiraIssueLink(b.key)}</span>
       <span class="ts2-blockers-status">${esc(b.status)}</span>
-      <span class="ts2-blockers-dwell">${b.dwellHours}ч</span>
+      <span class="ts2-blockers-dwell">${dwellLabel}</span>
       <span class="ts2-blockers-summary">${esc((b.summary || '').slice(0, 80))}</span>
-    </li>`).join('');
+    </li>`;
+  }).join('');
   return `
     <div class="ts2-panel-section ts2-panel-section-tight">
       <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">dwell ≥ 24ч · top 8</span></div>

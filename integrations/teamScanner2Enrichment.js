@@ -30,6 +30,34 @@ const SWITCH_GAP_SEC = 30 * 60;            // 30 минут
 const SWITCHES_PER_HOUR_FOR_FULL_SCORE = 4; // нормировка switchScore=1.0
 
 /**
+ * V18.1 P7-S2.2 — differential dwell-thresholds (status-aware).
+ *
+ * SM/PO panel: единый 24ч порог для blocker'ов смешивает семантики.
+ * Code Review > 8ч уже горит для команды, In Progress 30ч — норма.
+ * Семантика «blocker» становится действенной только когда threshold
+ * привязан к статусу.
+ *
+ * Lookup — fuzzy lowercase match по statusName. Override через opts.thresholds.
+ */
+export const DEFAULT_DWELL_THRESHOLDS = {
+  codeReview:  8,   // Code Review > 8ч = блокер (зависает на ревьюерах)
+  qa:         16,   // QA / Testing > 16ч = блокер
+  inProgress: 48,   // In Progress > 48ч = блокер (давно начали, не закончили)
+  todo:       72,   // To Do > 72ч в спринте = подвис
+  default:    24,   // Все остальные non-terminal — fallback
+};
+
+/** Pick dwell-threshold for a status name. Fuzzy lowercase match. */
+export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESHOLDS) {
+  const s = String(statusName || '').toLowerCase();
+  if (/code\s*review|peer\s*review|на\s+ревью|ревью\s+кода/.test(s)) return thresholds.codeReview;
+  if (/\bqa\b|\btest(ing)?\b|тестирован/.test(s))                    return thresholds.qa;
+  if (/in\s*progress|\bworking\b|\bdoing\b|в\s+работе|разработ/.test(s)) return thresholds.inProgress;
+  if (/\btodo\b|to\s*do|\bopen\b|\bnew\b|открыт|новая/.test(s))      return thresholds.todo;
+  return thresholds.default;
+}
+
+/**
  * Apply v2.0 enrichment to a model produced by analysePulse(). MUTATES the
  * model — добавляет per-participant поля + top-level `model.scannerV2` meta.
  *
@@ -42,6 +70,14 @@ const SWITCHES_PER_HOUR_FOR_FULL_SCORE = 4; // нормировка switchScore=
 export function enrichForScanner2(model, rawReports = null, opts = {}) {
   if (!model || !Array.isArray(model.participants)) return model;
   const dwellHours = Number(opts.dwellHours || DEFAULT_DWELL_HOURS);
+  // V18.1 P7-S2.2 — каждое статус-зависимое значение можно override'нуть
+  // через opts.thresholds. Bare scalar `dwellHours` остался как
+  // backward-compat для default-fallback.
+  const thresholds = {
+    ...DEFAULT_DWELL_THRESHOLDS,
+    default: dwellHours,
+    ...(opts.thresholds || {}),
+  };
 
   const assigneeIndex = rawReports ? buildAssigneeIndex(rawReports) : null;
 
@@ -49,16 +85,17 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     p.heatmap         = computeHeatmap(p);
     p.contextSwitches = computeContextSwitches(p);
     p.timeline72h     = computeTimeline72h(p);
-    p.blockers        = assigneeIndex ? computeBlockers(p, assigneeIndex, dwellHours) : [];
+    p.blockers        = assigneeIndex ? computeBlockers(p, assigneeIndex, thresholds) : [];
     // V18.1 P5 — расширенные сигналы для side-panel:
     p.heatmap72x4     = computeHeatmap72x4(p);   // 4 sources × 72 hours
-    p.sparkline72h    = computeSparkline72h(p);  // 72 значений events/час
+    p.sparkline72h    = computeSparkline72h(p);  // 72 значений events/час (deprecated в S2.5)
   }
 
   model.scannerV2 = {
     enrichedAt: Date.now(),
-    dwellThresholdHours: dwellHours,
-    serverLocalTZ: true,         // P3 fixed; P4+ может стать browser TZ
+    dwellThresholdHours: dwellHours,    // backward-compat (default fallback)
+    dwellThresholds: thresholds,        // V18.1 P7-S2.2 — full map
+    serverLocalTZ: true,                // P3 fixed; P4+ может стать browser TZ
     switchGapSec: SWITCH_GAP_SEC,
   };
   return model;
@@ -380,13 +417,19 @@ export function findLastStatusChange(issue) {
 
 /**
  * Returns array of blocker objects:
- *   { key, summary, status, sinceIso, dwellHours }
+ *   { key, summary, status, sinceIso, dwellHours, thresholdHours }
  * Sorted by dwellHours DESC. Только non-terminal статусы. Dedup'ит по
- * issue.key (один issue может прийти и по accountId, и по email).
+ * issue.key.
+ *
+ * V18.1 P7-S2.2 — `thresholds` теперь map (DEFAULT_DWELL_THRESHOLDS).
+ * Backward-compat: если передан number — используется как default только.
  */
-export function computeBlockers(p, assigneeIndex, dwellHours) {
+export function computeBlockers(p, assigneeIndex, thresholds) {
   if (!assigneeIndex || !p) return [];
-  const dwellMs = dwellHours * 3600 * 1000;
+  // Accept either map (P7+) or scalar number (legacy P3-P6).
+  const tmap = (typeof thresholds === 'number')
+    ? { ...DEFAULT_DWELL_THRESHOLDS, default: thresholds }
+    : (thresholds || DEFAULT_DWELL_THRESHOLDS);
   const now = Date.now();
   const candidates = []
     .concat(assigneeIndex.get(p.jiraAccountId) || [])
@@ -402,6 +445,9 @@ export function computeBlockers(p, assigneeIndex, dwellHours) {
     const since = new Date(c.lastStatusChangeIso).getTime();
     if (isNaN(since)) continue;
     const dwellMsActual = now - since;
+    // V18.1 P7-S2.2 — порог теперь зависит от статуса.
+    const thresholdHours = pickDwellThreshold(c.statusName, tmap);
+    const dwellMs = thresholdHours * 3600 * 1000;
     if (dwellMsActual < dwellMs) continue;
     out.push({
       key,
@@ -409,6 +455,7 @@ export function computeBlockers(p, assigneeIndex, dwellHours) {
       status:     c.statusName,
       sinceIso:   c.lastStatusChangeIso,
       dwellHours: Math.round(dwellMsActual / 3600 / 1000),
+      thresholdHours,            // P7-S2.2 — для UI: «42ч (порог 8ч)»
     });
   }
   out.sort((a, b) => b.dwellHours - a.dwellHours);

@@ -27,6 +27,8 @@ import {
   computeBlockers,
   computeHeatmap72x4,
   computeSparkline72h,
+  pickDwellThreshold,
+  DEFAULT_DWELL_THRESHOLDS,
 } from '../../integrations/teamScanner2Enrichment.js';
 
 /* ── Helpers — конструируем event'ы и participant'ов ──────── */
@@ -249,8 +251,9 @@ describe('computeBlockers', () => {
     };
   }
 
-  test('issue в non-terminal status старше 24ч → blocker', () => {
-    const oldIso = new Date(Date.now() - 30 * 3600 * 1000).toISOString();   // 30 часов назад
+  test('issue в non-terminal status старше threshold → blocker', () => {
+    // P7-S2.2: статус «In Progress» имеет порог 48ч, поэтому используем 50ч.
+    const oldIso = new Date(Date.now() - 50 * 3600 * 1000).toISOString();
     const raw = makeRaw(issue({
       key: 'X-1', status: 'In Progress', cat: 'indeterminate',
       histories: [{ created: oldIso, items: [{ field: 'status' }] }],
@@ -260,7 +263,7 @@ describe('computeBlockers', () => {
     const out = computeBlockers(p, idx, 24);
     assert.equal(out.length, 1);
     assert.equal(out[0].key, 'X-1');
-    assert.ok(out[0].dwellHours >= 24, `expected dwell >= 24, got ${out[0].dwellHours}`);
+    assert.ok(out[0].dwellHours >= 48, `expected dwell >= 48 for In Progress, got ${out[0].dwellHours}`);
   });
 
   test('issue в terminal status (Done) → НЕ blocker даже если старый', () => {
@@ -288,7 +291,8 @@ describe('computeBlockers', () => {
   });
 
   test('один issue матчится и по accountId, и по email — dedup', () => {
-    const oldIso = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+    // P7-S2.2: используем 50ч чтобы превысить порог 48ч для In Progress.
+    const oldIso = new Date(Date.now() - 50 * 3600 * 1000).toISOString();
     const raw = makeRaw(issue({
       key: 'X-1', status: 'In Progress',
       assignee: { accountId: 'u1', emailAddress: 'u1@e.com' },
@@ -301,10 +305,11 @@ describe('computeBlockers', () => {
   });
 
   test('сортировка blockers по dwellHours DESC', () => {
+    // P7-S2.2: оба должны превышать IP-порог 48ч.
     const t100h = new Date(Date.now() - 100 * 3600 * 1000).toISOString();
-    const t30h  = new Date(Date.now() -  30 * 3600 * 1000).toISOString();
+    const t60h  = new Date(Date.now() -  60 * 3600 * 1000).toISOString();
     const raw = makeRaw(
-      issue({ key: 'X-1', histories: [{ created: t30h,  items: [{ field: 'status' }] }] }),
+      issue({ key: 'X-1', histories: [{ created: t60h,  items: [{ field: 'status' }] }] }),
       issue({ key: 'X-2', histories: [{ created: t100h, items: [{ field: 'status' }] }] }),
     );
     const idx = buildAssigneeIndex(raw);
@@ -396,6 +401,96 @@ describe('computeSparkline72h', () => {
     const p = mk({ timelineToday: [ev(ago1h, 'A'), ev(ago1h, 'B')] });
     const s = computeSparkline72h(p);
     assert.equal(s[70], 2);
+  });
+});
+
+/* ── V18.1 P7-S2.2: differential dwell-thresholds ────────── */
+
+describe('pickDwellThreshold (S2.2)', () => {
+  test('Code Review → 8ч', () => {
+    assert.equal(pickDwellThreshold('Code Review'),     8);
+    assert.equal(pickDwellThreshold('code review'),     8);
+    assert.equal(pickDwellThreshold('На ревью'),         8);
+    assert.equal(pickDwellThreshold('Peer Review'),     8);
+  });
+  test('QA / Testing → 16ч', () => {
+    assert.equal(pickDwellThreshold('QA'),       16);
+    assert.equal(pickDwellThreshold('Testing'),  16);
+    assert.equal(pickDwellThreshold('Тестирование'), 16);
+  });
+  test('In Progress → 48ч', () => {
+    assert.equal(pickDwellThreshold('In Progress'), 48);
+    assert.equal(pickDwellThreshold('Working'),     48);
+    assert.equal(pickDwellThreshold('В работе'),     48);
+    assert.equal(pickDwellThreshold('Разработка'),   48);
+  });
+  test('To Do / Open → 72ч', () => {
+    assert.equal(pickDwellThreshold('To Do'),    72);
+    assert.equal(pickDwellThreshold('Open'),     72);
+    assert.equal(pickDwellThreshold('New'),      72);
+    assert.equal(pickDwellThreshold('Открыта'),   72);
+  });
+  test('Неизвестный статус → default 24ч', () => {
+    assert.equal(pickDwellThreshold('Stalled'),       24);
+    assert.equal(pickDwellThreshold('Random Status'), 24);
+    assert.equal(pickDwellThreshold(''),              24);
+  });
+  test('opts.thresholds override', () => {
+    const custom = { ...DEFAULT_DWELL_THRESHOLDS, codeReview: 4 };
+    assert.equal(pickDwellThreshold('Code Review', custom), 4);
+  });
+});
+
+describe('computeBlockers с differential thresholds (S2.2)', () => {
+  function makeRaw(...issues) { return { reports: [{ issues }] }; }
+  function issue(opts) {
+    return {
+      key: opts.key,
+      fields: {
+        summary: opts.summary || '',
+        status: { name: opts.status, statusCategory: { key: opts.cat || 'indeterminate' } },
+        assignee: { accountId: 'u1', emailAddress: 'u1@e.com' },
+        created: '2026-04-01T00:00:00Z',
+      },
+      changelog: { histories: [{ created: opts.changedAtIso, items: [{ field: 'status' }] }] },
+    };
+  }
+
+  test('Code Review > 8ч → blocker (раньше нужно было > 24ч)', () => {
+    const t10h = new Date(Date.now() - 10 * 3600 * 1000).toISOString();
+    const raw = makeRaw(issue({ key: 'CR-1', status: 'Code Review', changedAtIso: t10h }));
+    const idx = buildAssigneeIndex(raw);
+    const out = computeBlockers({ jiraAccountId: 'u1', email: 'u1@e.com' }, idx,
+                                 DEFAULT_DWELL_THRESHOLDS);
+    assert.equal(out.length, 1, 'CR через 10ч должен быть blocker (порог 8ч)');
+    assert.equal(out[0].thresholdHours, 8);
+  });
+
+  test('In Progress > 30ч → НЕ blocker (порог 48ч)', () => {
+    const t30h = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+    const raw = makeRaw(issue({ key: 'IP-1', status: 'In Progress', changedAtIso: t30h }));
+    const idx = buildAssigneeIndex(raw);
+    const out = computeBlockers({ jiraAccountId: 'u1', email: 'u1@e.com' }, idx,
+                                 DEFAULT_DWELL_THRESHOLDS);
+    assert.equal(out.length, 0, 'IP 30ч < порог 48ч — не blocker');
+  });
+
+  test('Backward-compat: scalar threshold работает как default', () => {
+    const t30h = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+    const raw = makeRaw(issue({ key: 'X-1', status: 'Some Custom', changedAtIso: t30h }));
+    const idx = buildAssigneeIndex(raw);
+    // Передаём scalar 24 — старый API. Custom-status попадает в default → 24.
+    const out = computeBlockers({ jiraAccountId: 'u1', email: 'u1@e.com' }, idx, 24);
+    assert.equal(out.length, 1);
+  });
+
+  test('thresholdHours присутствует в результате', () => {
+    const t10h = new Date(Date.now() - 10 * 3600 * 1000).toISOString();
+    const raw = makeRaw(issue({ key: 'CR-1', status: 'Code Review', changedAtIso: t10h }));
+    const idx = buildAssigneeIndex(raw);
+    const out = computeBlockers({ jiraAccountId: 'u1', email: 'u1@e.com' }, idx,
+                                 DEFAULT_DWELL_THRESHOLDS);
+    assert.equal(out[0].thresholdHours, 8);
   });
 });
 
