@@ -469,7 +469,16 @@ export const IntegrationsView = {
     // Sub-tab clicks
     root.querySelectorAll('.int-subtab').forEach(b => {
       b.addEventListener('click', () => {
-        this._activeSubtab = b.dataset.subtab;
+        const next = b.dataset.subtab;
+        // V18.1 P7-S1.1 — unmount lifecycle для scanner2: убираем
+        // orphan-листенер `_escHandler` с `document` при уходе со
+        // вкладки. Без этого через несколько переключений subtab'ов
+        // Esc в чужой вкладке дёргал _closePanel() на детачнутом
+        // scanner2-контейнере (race + DOM operations on detached node).
+        if (this._activeSubtab === 'scanner2' && next !== 'scanner2') {
+          try { TeamScanner2.unmount?.(); } catch (_) {}
+        }
+        this._activeSubtab = next;
         this.render();
       });
     });

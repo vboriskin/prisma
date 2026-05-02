@@ -267,4 +267,27 @@ export const TeamScanner2 = {
     }
     this._renderFull();
   },
+
+  /**
+   * V18.1 P7-S1.1 — unmount lifecycle hook. Вызывается из IntegrationsView
+   * когда пользователь переключается с subtab'а scanner2 на другой
+   * (pulse/black/perf/overview).
+   *
+   * Зачем: `_escHandler` живёт на `document` (global), а не на нашем
+   * container'е. Без unmount при смене subtab handler копится — каждое
+   * открытие panel'и + переключение subtab оставляет orphan listener.
+   * Через 5 повторений Esc в чужом subtab'е дёргает несуществующую
+   * panel в скрытом scanner2 → race + DOM operations on detached node.
+   *
+   * unmount НЕ сбрасывает `_model` / `_jobId` / `_detailCache` — они
+   * нужны при возврате на subtab (cache hit без re-fetch).
+   */
+  unmount() {
+    if (this._escHandler) {
+      document.removeEventListener('keydown', this._escHandler);
+      this._escHandler = null;
+    }
+    // Закрываем panel чтобы не сохранять её состояние в скрытом subtab'е.
+    this._expandedKey = '';
+  },
 };
