@@ -758,7 +758,12 @@ function renderPanelHeader(p, tToday, tYest, tPrev) {
                     data-email-masked="${esc(emailMasked)}">${esc(emailMasked)}</button>` : ''}
         </div>
       </div>
-      <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+      <div class="ts2-panel-head-actions">
+        <button class="ts2-btn ts2-btn-ghost ts2-panel-share" id="ts2-detail-share" type="button"
+                title="Скопировать ссылку на этот вид (для async-команды можно отправить в TG/Slack)"
+                aria-label="Скопировать ссылку на детализацию">🔗</button>
+        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+      </div>
     </div>
   `;
 }

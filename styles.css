@@ -11801,13 +11801,23 @@ body.theme-dark .ts2-row-src-z { border-left-color: #c084fc; }
 .ts2-panel-empty {
   align-items: center; justify-content: center; padding: 20px;
 }
-.ts2-panel-close {
+/* V18.3 A4 — panel-head actions group: share + close. */
+.ts2-panel-head-actions {
   position: absolute; top: 10px; right: 10px;
+  display: flex; gap: 4px;
+}
+.ts2-panel-close,
+.ts2-panel-share {
   width: 32px; height: 32px;
   font-size: 16px; line-height: 1; color: var(--text-3);
   border-radius: 6px;
 }
-.ts2-panel-close:hover { color: var(--text-1); background: var(--bg-2, #f1f5f9); }
+.ts2-panel-close:hover,
+.ts2-panel-share:hover { color: var(--text-1); background: var(--bg-2, #f1f5f9); }
+.ts2-panel-share-copied {
+  color: var(--success, #10b981) !important;
+  background: rgba(16, 185, 129, .1);
+}
 .ts2-panel-head {
   padding: 18px 20px 14px;
   border-bottom: 1px solid var(--border);

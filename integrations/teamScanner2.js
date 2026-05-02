@@ -163,9 +163,51 @@ export const TeamScanner2 = {
     if (!projectKeys.length) { container.innerHTML = renderEmpty(); return; }
     if (this._cancelled) { this._paintCancelled(); return; }
     if (this._errorMsg)  { this._paintError(this._errorMsg); return; }
+    // V18.3 A4 — share-link: при первом mount считываем URL hash и
+    // авто-открываем panel если matches participant key.
+    this._consumeShareLink();
     // Cache hit: re-paint без сети.
     if (this._model) { this._renderFull(); return; }
     await this._fetchAndRender();
+  },
+
+  /**
+   * V18.3 A4 — parse URL hash в формате `#scanner2/employee/<key>`.
+   * Если hash present и participant с таким key есть в model — auto-open
+   * panel. Pilot finding (Maksim, async-команда):
+   * «scanner → async-pin → результат, без discussion-overhead. Это мой
+   * workflow. Сейчас только через копирование URL вручную».
+   */
+  _consumeShareLink() {
+    const m = (typeof location !== 'undefined' ? location.hash : '') || '';
+    const match = m.match(/^#scanner2\/employee\/(.+)$/);
+    if (!match) return;
+    const key = decodeURIComponent(match[1]);
+    if (!key) return;
+    // Если model уже загружен — open immediately. Если нет — выставим
+    // pending key, который сработает после _fetchAndRender'а в _renderFull.
+    if (this._model && (this._model.participants || []).some(p => p.key === key)) {
+      this._expandedKey = key;
+    } else {
+      // _pendingShareKey — будет применён в _renderFull() после fetch.
+      this._pendingShareKey = key;
+    }
+  },
+
+  /** V18.3 A4 — записать current expandedKey в URL hash (replaceState
+   *  чтобы не плодить history entries). При close — очищаем. */
+  _updateShareLinkHash() {
+    if (typeof history === 'undefined' || typeof location === 'undefined') return;
+    try {
+      const newHash = this._expandedKey
+        ? `#scanner2/employee/${encodeURIComponent(this._expandedKey)}`
+        : '';
+      // Сравним с текущим чтобы не пушить лишние replaceState.
+      if (location.hash !== newHash) {
+        const url = location.pathname + location.search + (newHash || '');
+        history.replaceState(null, '', url);
+      }
+    } catch (_) { /* безопасный no-op */ }
   },
 
   async refresh() {
@@ -293,6 +335,14 @@ export const TeamScanner2 = {
   _renderFull() {
     if (!this._container || !this._model) return;
     const m = this._model;
+    // V18.3 A4 — apply pending share-link если model только что загружен.
+    if (this._pendingShareKey) {
+      const exists = (m.participants || []).some(p => p.key === this._pendingShareKey);
+      if (exists) this._expandedKey = this._pendingShareKey;
+      this._pendingShareKey = '';
+    }
+    // Sync URL hash с current expandedKey.
+    this._updateShareLinkHash();
     // V18.1 P7-S1.4 — push render-context (jiraBaseUrl) для построения
     // кликабельных issue.key links в blockers list + events feed.
     // Re-asserted на каждом render (settings могут поменяться).
@@ -440,6 +490,35 @@ export const TeamScanner2 = {
           ? 'Email сотрудника показан целиком, нажать чтобы скрыть'
           : 'Email сотрудника, нажать чтобы показать целиком');
       });
+    });
+    // V18.3 A4 — Share-link button: copies current URL with hash to clipboard.
+    root.querySelector('#ts2-detail-share')?.addEventListener('click', async () => {
+      const btn = root.querySelector('#ts2-detail-share');
+      if (!btn) return;
+      try {
+        const url = (typeof location !== 'undefined' ? location.href : '');
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url);
+        } else {
+          // Fallback для старых браузеров: temp textarea + execCommand.
+          const ta = document.createElement('textarea');
+          ta.value = url; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+          document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+        }
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        btn.classList.add('ts2-panel-share-copied');
+        setTimeout(() => {
+          btn.textContent = orig;
+          btn.classList.remove('ts2-panel-share-copied');
+        }, 1500);
+        this._announce('Ссылка скопирована в буфер обмена');
+      } catch (e) {
+        console.warn('[scanner2] share-link copy failed:', e);
+        btn.textContent = '✕';
+        setTimeout(() => { btn.textContent = '🔗'; }, 1500);
+      }
     });
   },
 
