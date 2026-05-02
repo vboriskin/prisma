@@ -170,7 +170,7 @@ export function renderTopBar(model) {
         <span class="ts2-meta-item">${pkCount} ${plural(pkCount, ['проект', 'проекта', 'проектов'])}</span>
         <span class="ts2-meta-sep">·</span>
         <span class="ts2-meta-item">обновлено ${esc(fetchedAt)}</span>
-        <button class="ts2-btn ts2-btn-ghost" id="ts2-refresh-btn" type="button" title="Обновить данные">↻ Обновить</button>
+        <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">↻ Обновить данные</button>
       </div>
     </div>
   `;
