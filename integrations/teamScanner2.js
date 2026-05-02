@@ -63,8 +63,13 @@ export const TeamScanner2 = {
   _readConfig() {
     let cfg = {};
     try { cfg = loadSettingsRaw(); } catch (_) {}
+    // V18.1 P6.1 fix — поле в localStorage называется `jiraProjectKeys`,
+    // не `projectKeys` (см. integrationsStore.js, defaults + loadSettings).
+    // До этого фикса v2 ВСЕГДА видел пустые ключи → renderEmpty → у этого
+    // состояния нет refresh-кнопки → жалоба «настройки заполнены, кнопки нет».
+    // v1 PortfolioPulse читает то же поле — теперь оба сканера согласованы.
     return {
-      projectKeys: parseProjectKeys(cfg.projectKeys || ''),
+      projectKeys: parseProjectKeys(cfg.jiraProjectKeys || ''),
       staleDays:   Number(cfg.pulseStaleDays || 7),
     };
   },
