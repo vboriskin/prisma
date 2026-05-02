@@ -279,6 +279,54 @@ describe('Contract tests — /api/integrations + Portfolio Pulse', () => {
     assert.match(errJ.error || '', /not found/i, 'expected error mentioning «not found»');
   });
 
+  // V19 C4 — telemetry endpoint contract.
+  test('telemetry: empty body → 400', async () => {
+    const r = await req('POST', '/api/telemetry', {});
+    assert.equal(r.status, 400);
+  });
+
+  test('telemetry: single valid event → 200 accepted=1', async () => {
+    const r = await req('POST', '/api/telemetry', {
+      event: 'scanner2.test_event',
+      data: { foo: 'bar', count: 42 },
+    });
+    assert.equal(r.status, 200);
+    const j_ = j(r.body);
+    assert.equal(j_.ok, true);
+    assert.equal(j_.accepted, 1);
+  });
+
+  test('telemetry: invalid event-name → silent skip (accepted=0)', async () => {
+    const r = await req('POST', '/api/telemetry', {
+      event: 'NOT_VALID name with spaces!',  // не matches whitelist
+      data: {},
+    });
+    assert.equal(r.status, 200);
+    assert.equal(j(r.body).accepted, 0);
+  });
+
+  test('telemetry: batch (3 events, 1 invalid) → accepted=2', async () => {
+    const r = await req('POST', '/api/telemetry', {
+      events: [
+        { event: 'scanner2.detail_open', data: { mode: 'team' } },
+        { event: 'INVALID', data: {} },
+        { event: 'scanner2.view_change', data: { mode: 'multi' } },
+      ],
+    });
+    assert.equal(r.status, 200);
+    const j_ = j(r.body);
+    assert.equal(j_.accepted, 2);
+    assert.equal(j_.total, 3);
+  });
+
+  test('telemetry: > 50 events → 400', async () => {
+    const events = [];
+    for (let i = 0; i < 60; i++) events.push({ event: 'scanner2.test_event' });
+    const r = await req('POST', '/api/telemetry', { events });
+    assert.equal(r.status, 400);
+    assert.match(r.body, /max 50/);
+  });
+
   test('tech-info: forceRefresh bypasses 10-min cache', async () => {
     // Prime the cache
     await req('POST', '/api/integrations/tech-info', { source: 'all' });

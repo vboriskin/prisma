@@ -11,6 +11,67 @@ const { URL } = require('url');
 // JSON output по умолчанию (для ELK ingestion), levels via LOG_LEVEL env.
 const logger = require('./server/logger.js');
 
+/**
+ * V19 C4 — telemetry endpoint handler.
+ * Принимает single event или batch events от frontend, emit'ит через
+ * logger.event() в structured log. Side-effect: только log entry,
+ * никакой DB.
+ *
+ * Безопасность:
+ *   - whitelist event-name regex (защита от arbitrary string flood)
+ *   - max-batch 50 events / req
+ *   - rate-limit уже применён upstream
+ *   - сами data поля sanitized: only primitives + plain objects, depth ≤ 3
+ *
+ * Frontend usage:
+ *   navigator.sendBeacon('/api/telemetry', JSON.stringify({event, data}))
+ *   — fire-and-forget, не блокирует UI.
+ */
+async function handleTelemetry(req, res) {
+  try {
+    const raw = await readBody(req, 64 * 1024);
+    const body = raw ? JSON.parse(raw) : {};
+    const events = Array.isArray(body.events)
+      ? body.events
+      : (body.event ? [body] : []);
+    if (!events.length) { writeJson(res, 400, { error: 'event[s] required' }); return; }
+    if (events.length > 50) { writeJson(res, 400, { error: 'max 50 events per request' }); return; }
+    let accepted = 0;
+    for (const e of events) {
+      const name = String(e?.event || '').trim();
+      // Whitelist: <namespace>.<action> — alphanumeric + dot, max 80 chars.
+      if (!/^[a-z][a-z0-9_]{0,30}\.[a-z][a-z0-9_]{0,40}$/.test(name)) continue;
+      const data = _sanitizeTelemetryData(e?.data);
+      logger.event(name, { ...data, src: 'browser' });
+      accepted++;
+    }
+    writeJson(res, 200, { ok: true, accepted, total: events.length });
+  } catch (err) {
+    logger.warn('[telemetry] handler error', { err: err?.message || String(err) });
+    writeJson(res, 400, { error: 'Invalid telemetry payload' });
+  }
+}
+
+/** Sanitize телеметрии payload: primitives + flat object, max 1KB JSON. */
+function _sanitizeTelemetryData(data) {
+  if (data == null || typeof data !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    // Whitelist key chars + max 40-char keys.
+    if (!/^[a-zA-Z0-9_]{1,40}$/.test(k)) continue;
+    // Primitives only at top level. Nested objects coerced to JSON-string
+    // truncated 200 chars (visibility, не storage).
+    if (v == null) continue;
+    if (typeof v === 'string')   { out[k] = v.slice(0, 200); continue; }
+    if (typeof v === 'number')   { out[k] = Number.isFinite(v) ? v : 0; continue; }
+    if (typeof v === 'boolean')  { out[k] = v; continue; }
+    if (Array.isArray(v))        { out[k] = v.slice(0, 20).join(','); continue; }
+    // Fallback: stringify nested object (truncated).
+    try { out[k] = JSON.stringify(v).slice(0, 200); } catch (_) { /* skip */ }
+  }
+  return out;
+}
+
 const PORT = parseInt(process.argv[2], 10) || 8080;
 const ROOT = __dirname;
 const DEFAULT_GIGACHAT_BASE = process.env.GIGACHAT_API_BASE || 'https://gigachat.devices.sberbank.ru/api/v1';
@@ -1943,6 +2004,13 @@ async function handleIntegrationsApi(req, res, pathname) {
         return;
       }
       const job = pulseCreateJob(body);
+      // V19 C4 — telemetry: pulse-job started (server-side counterpart
+      // к scanner2.fetch_done с client-side latency).
+      logger.event('pulse.start', {
+        jobId: job.id,
+        pkCount: (body.projectKeys || []).length,
+        empCount: (body.employees || []).length,
+      });
       pulseRunJob(job, async (j) => {
         return await _runPortfolioPulse(body, cfg, tls, (newPhase) => { j.phase = newPhase; });
       });
@@ -2076,6 +2144,10 @@ async function handleIntegrationsApi(req, res, pathname) {
           },
         };
         pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, payload);
+        // V19 C4 — telemetry: drill-down compute с latency.
+        logger.event('pulse.detail_built', {
+          jobId, builtMs: payload.meta.builtMs, dwellHours, hasTz: tzOffsetMin !== null,
+        });
         writeJson(res, 200, payload);
       } catch (e) {
         logger.error('[employee-detail] enrichment failed', { err: e?.message || String(e), jobId, employeeKey });
@@ -2689,6 +2761,13 @@ const server = http.createServer((req, res) => {
     }
   }
 
+  // V19 C4 — telemetry endpoint. Frontend POST'ит usage events,
+  // server logger.event() emits как structured log entry для ELK.
+  // Body: { event: string, data?: object } | { events: [{event, data}, ...] }
+  // Защищён rate-limit'ом (выше). Никаких side-effects кроме log entry.
+  if (req.method === 'POST' && pathname === '/api/telemetry') {
+    handleTelemetry(req, res); return;
+  }
   if (req.method === 'POST' && pathname === '/api/llm/chat') {
     proxyChat(req, res); return;
   }

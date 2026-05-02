@@ -35,6 +35,8 @@ import {
   loadTeamConfig, saveTeamConfig, applyPreset, resetTeam,
   buildTeamThresholdsMap, PRESET_THRESHOLDS,
 } from './teamScanner2Config.js';
+// V19 C4 — telemetry events (понять как scanner2 реально используется).
+import { emit as telemetryEmit } from './telemetry.js';
 import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
   renderMultiTeamView, renderTeamConfigModal,
@@ -179,6 +181,12 @@ export const TeamScanner2 = {
     // V18.3 A4 — share-link: при первом mount считываем URL hash и
     // авто-открываем panel если matches participant key.
     this._consumeShareLink();
+    // V19 C4 — telemetry: scanner2 mount event (понимаем DAU/sessions).
+    telemetryEmit('scanner2.mount', {
+      pkCount: projectKeys.length,
+      cacheHit: !!this._model,
+      hasShareLink: !!this._pendingShareKey,
+    });
     // Cache hit: re-paint без сети.
     if (this._model) { this._renderFull(); return; }
     await this._fetchAndRender();
@@ -295,6 +303,8 @@ export const TeamScanner2 = {
     this._loading = true;
     this._loadingMsg = `Запрашиваю ${projectKeys.length} проект(а/ов) из Jira…`;
     this._showLoader();
+    // V19 C4 — pulse fetch latency telemetry.
+    const fetchStart = Date.now();
 
     try {
       if (this._abort) this._abort.abort();
@@ -310,6 +320,12 @@ export const TeamScanner2 = {
         onJobId: (id) => { this._jobId = id; this._detailCache.clear(); },
       });
       if (reqId !== this._reqId) return;
+      // V19 C4 — pulse fetch выполнен → emit latency event.
+      telemetryEmit('scanner2.fetch_done', {
+        pkCount: projectKeys.length,
+        latencyMs: Date.now() - fetchStart,
+        reportsCount: (raw?.reports || []).length,
+      });
       // V18.1 P3 — после стандартного анализа применяем v2.0-специфический
       // enrichment: heatmap[3][24], contextSwitches, timeline72h, blockers
       // (с server-local-TZ часами и единым 24h dwell-threshold). v1 НЕ
@@ -443,6 +459,8 @@ export const TeamScanner2 = {
     // V18.1 P7-S4.1 — view toggle (team ↔ multi).
     root.querySelector('#ts2-view-toggle')?.addEventListener('click', () => {
       this._activeView = this._activeView === 'multi' ? 'team' : 'multi';
+      // V19 C4 — telemetry: view-mode usage (Dmitry multi-team feature uptake).
+      telemetryEmit('scanner2.view_change', { mode: this._activeView });
       this._closePanel();   // closes any open detail panel + does _renderFull
     });
     // V18.3 A1 — gear button → open team-config modal.
@@ -488,7 +506,11 @@ export const TeamScanner2 = {
       const activate = (e) => {
         if (e.target.closest('a, button')) return;
         const key = el.dataset.key;
-        this._expandedKey = (this._expandedKey === key) ? '' : key;
+        const opening = (this._expandedKey !== key);
+        this._expandedKey = opening ? key : '';
+        // V19 C4 — telemetry: detail-panel open/close (понимаем drill-down rate).
+        if (opening) telemetryEmit('scanner2.detail_open', { mode: this._activeView });
+        else         telemetryEmit('scanner2.detail_close', { trigger: 'row_toggle' });
         this._renderFull();   // полный rebuild — меняется и dashboard (highlight active row)
       };
       el.addEventListener('click', activate);
@@ -644,9 +666,11 @@ export const TeamScanner2 = {
       const newConfig = loadTeamConfig();
       const pks = new Set();
       overlay.querySelectorAll('.ts2-config-input').forEach(input => pks.add(input.dataset.pk));
+      const modesUsed = {};
       for (const pk of pks) {
         const presetSel = overlay.querySelector(`.ts2-config-preset[data-pk="${pk}"]`);
         const mode = presetSel?.value || 'default';
+        modesUsed[mode] = (modesUsed[mode] || 0) + 1;
         const dwellHours = {};
         overlay.querySelectorAll(`.ts2-config-input[data-pk="${pk}"]`).forEach(input => {
           const v = Number(input.value);
@@ -655,6 +679,11 @@ export const TeamScanner2 = {
         newConfig[pk] = { mode, dwellHours };
       }
       saveTeamConfig(newConfig);
+      // V19 C4 — telemetry: config save с агрегатом modes (Olga ML adoption).
+      telemetryEmit('scanner2.config_save', {
+        teamCount: pks.size,
+        modes: JSON.stringify(modesUsed),   // server-side stringify limited to 200 chars
+      });
       close();
       // Re-enrich model с новыми порогами без re-fetch'а данных.
       this._reEnrichWithNewConfig();
