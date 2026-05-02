@@ -23,6 +23,10 @@ import { DEFAULT_DWELL_THRESHOLDS } from './teamScanner2Enrichment.js';
 
 const LS_KEY = 'q2_scanner2_team_config';
 
+// V20 S8.5 #2 — METRIC_THRESHOLDS живёт в Enrichment (там же где используется),
+// здесь re-export для consumers которым удобно из Config (UI / tests).
+export { METRIC_THRESHOLDS } from './teamScanner2Enrichment.js';
+
 /** Pre-defined preset thresholds — Olga's «research» mode + «hotfix». */
 export const PRESET_THRESHOLDS = {
   default: { ...DEFAULT_DWELL_THRESHOLDS },

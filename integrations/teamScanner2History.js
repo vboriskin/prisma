@@ -21,6 +21,12 @@
      pruneHistory(projectKeys, maxEntries=30)
    ============================================================ */
 
+// V20 S8 #15 — single source of truth для классификации.
+// Раньше тут была inline-копия (`_extractMinimalSnapshot` дублировал правила).
+// Tech Lead audit: «когда S8 добавит сигнал в classifier, history будет
+//   отставать → drift между real model и snapshot day N».
+import { classifyPerson } from './teamScanner2Classifier.js';
+
 const LS_KEY_PREFIX = 'q2_scanner2_history:';
 const MAX_ENTRIES = 30;
 const MS_PER_DAY = 86400000;
@@ -42,28 +48,10 @@ function _dayKey(ts) {
 /** Extract minimal snapshot из model. Same shape as S4.2 + day-key. */
 function _extractMinimalSnapshot(model) {
   if (!model) return null;
+  // V20 S8 #15 — единственный source of truth для класификации (был inline copy).
   const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
   for (const p of (model.participants || [])) {
-    // Inline classification (без import classifyPerson чтобы избежать
-    // циклических зависимостей — это OK потому что minimal subset
-    // используется только для history-агрегата, не для UI grouping).
-    const today = (p.timelineToday || []).length;
-    const yest  = (p.timelineYesterday || []).length;
-    const wip   = (p.issuesNow || []).length;
-    const stuck = (p.blockers?.length ?? p.stale?.length ?? 0);
-    const reviewSig = (p.badges?.reviews || 0) + (p.badges?.approves || 0);
-    const cfN = (p.cfItems || []).length;
-    const bbN = (p.bbItems || []).length;
-    const prs = p.badges?.pr48h || 0;
-    const com = p.badges?.commits48h || 0;
-    const zN = (p.zephyrTestsCreatedRecent || []).length + (p.zephyrTestsExecutedRecent || []).length;
-    const anyOther = reviewSig > 0 || cfN > 0 || bbN > 0 || zN > 0;
-    let cls;
-    if (today === 0 && yest === 0 && wip === 0 && stuck === 0 && prs === 0 && com === 0 && !anyOther) cls = 'idle';
-    else if (stuck > 0 && today === 0) cls = 'stop';
-    else if (wip >= 3 || (stuck > 0 && today > 0) || (today === 0 && yest > 0)) cls = 'watch';
-    else cls = 'moving';
-    counts[cls]++;
+    counts[classifyPerson(p)]++;
   }
   return {
     ts: Date.now(),
@@ -111,7 +99,11 @@ export function saveDailySnapshot(model, projectKeys) {
       history = history.slice(history.length - MAX_ENTRIES);
     }
     localStorage.setItem(key, JSON.stringify(history));
-  } catch (_) { /* quota exceeded / corrupt — silent skip */ }
+  } catch (e) {
+    // V20 S8 #16 — quota-exceeded больше не silent. Минимальный console.warn —
+    // не тащим зависимость на telemetry, History — pure module без orchestrator.
+    try { console.warn('[scanner2History] saveDailySnapshot failed:', e.message || e); } catch (_) {}
+  }
 }
 
 /** Load history for given projectKeys. Returns ASC by ts. */

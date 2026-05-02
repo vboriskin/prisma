@@ -143,6 +143,90 @@ export const Utils = {
       .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
       .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
   },
+
+  /**
+   * V20 S2 — Scrub-contract helpers для diagnostic JSON export.
+   *
+   * Применяются ТОЛЬКО в `mode='safe'` экспорта. Для `mode='raw'`
+   * безопасный экспорт пропускается, но disclaimer-modal требует
+   * явного консента + audit log в localStorage.
+   *
+   * Контракт документирован в docs/integrations/auth-and-secrets.md
+   * (раздел «Diagnostic export»).
+   */
+
+  /**
+   * Mask email для diagnostic exports. Сохраняет домен (полезно
+   * для дебага «не то поле domain» / «не тот @sber.ru»), но скрывает
+   * локальную часть до первой буквы.
+   *   ivanov.ii@sber.ru   →  i******@sber.ru
+   *   x@a.b               →  x@a.b   (1-symbol local — не маскируем)
+   *   плохой_input        →  ***
+   */
+  maskEmail(email) {
+    if (!email || typeof email !== 'string') return '';
+    const at = email.indexOf('@');
+    if (at < 1 || at === email.length - 1) return '***';
+    const local = email.slice(0, at);
+    const domain = email.slice(at + 1);
+    if (local.length <= 1) return email;     // одно-буквенный local не выдаёт идентичность
+    return local[0] + '*'.repeat(Math.min(local.length - 1, 6)) + '@' + domain;
+  },
+
+  /**
+   * Hash accountId/jiraAccountId/bitbucketLogin/etc. в коротный токен,
+   * стабильный В ПРЕДЕЛАХ ОДНОГО ЭКСПОРТА (per-export salt). Это значит:
+   *   - в одном JSON одного и того же сотрудника видно как одинаковый hash
+   *     (можно coreлировать события одного человека между секциями)
+   *   - между разными экспортами hash меняется (нельзя re-identify
+   *     по двум JSON'ам, отправленным в разные дни)
+   *
+   * Реализация — sync FNV-1a (no crypto dependency, browser+node одинаково).
+   * НЕ криптографически стойкая, но достаточная для anti-correlation.
+   *
+   *   hashAccountId('aaa', 'salt-2026-05-02') → 'h:7c3a91'
+   */
+  hashAccountId(id, salt) {
+    if (!id) return '';
+    const s = String(salt || '') + ':' + String(id);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = (h * 0x01000193) >>> 0;     // FNV prime, keep unsigned 32-bit
+    }
+    return 'h:' + h.toString(16).padStart(8, '0').slice(0, 6);
+  },
+
+  /**
+   * Truncate Jira issue.summary / Confluence page-title для diagnostic
+   * exports. Default 30 символов — баланс между «понять о чём задача»
+   * и «не утечь sensitive content». Эллипсис ставится только если
+   * truncation реально произошёл.
+   */
+  truncateSummary(text, maxLen = 30) {
+    if (!text || typeof text !== 'string') return '';
+    const s = text.trim();
+    if (s.length <= maxLen) return s;
+    return s.slice(0, maxLen).trimEnd() + '…';
+  },
+
+  /**
+   * Per-export salt для hashAccountId. Random per-export, без persist'а.
+   * Используется ОДИН раз внутри prepareDiagnosticExport — все hash'и
+   * в одном JSON получаются стабильными между собой, между разными
+   * экспортами salt разный → re-identification по двум JSON'ам не
+   * возможна.
+   */
+  newExportSalt() {
+    // 8 random bytes хватит — это NOT cryptographic key, просто salt.
+    const a = new Uint8Array(8);
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      crypto.getRandomValues(a);
+    } else {
+      for (let i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+  },
   escapeCSV(v) {
     if (v==null) return '';
     let s = String(v);

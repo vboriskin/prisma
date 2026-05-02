@@ -73,6 +73,7 @@ export function analysePulse(rawReports, opts = {}) {
     // status pills "Bitbucket: ✓/настр-н/ошибка" in the header).
     bitbucket:    rawReports?.bitbucket  || { authors: {}, configured: false },
     confluence:   rawReports?.confluence || { authors: {}, configured: false },
+    zephyr:       rawReports?.zephyr     || { authors: {}, configured: false },     // V20 S9
     // Per-PK timing log + log buffer from server (#2.3 — surface why one team
     // sometimes times out so the user has actionable info).
     diagnostics:  rawReports?.diagnostics || { totalMs: 0, perPk: [], log: [] },
@@ -497,6 +498,8 @@ export function analysePulse(rawReports, opts = {}) {
   const bbRepoAuthors    = (rawReports?.bitbucket?.repoAuthors)      || {};
   const bbDevStatusAuthors=(rawReports?.bitbucket?.devStatusAuthors) || {};
   const cfAuthors = (rawReports?.confluence?.authors) || {};
+  // V20 S9 — Real Zephyr authors (deterministic match by JIRAUSER-key).
+  const zephyrAuthors = (rawReports?.zephyr?.authors) || null;
   const employees = Array.isArray(opts?.employees) ? opts.employees : [];
   const allowFuzzy = !!opts?.allowFuzzyAuthorMatch;
 
@@ -563,6 +566,9 @@ export function analysePulse(rawReports, opts = {}) {
     if (!emp && p.jiraAccountId && empByJiraId.has(p.jiraAccountId.toLowerCase())) {
       emp = empByJiraId.get(p.jiraAccountId.toLowerCase());
     }
+    // V20 S4 — propagate service-account flag (если включен в реестре).
+    // Auto-detect happens в EmployeeFactory.normalize() при загрузке employees.
+    p.isServiceAccount = !!(emp?.isServiceAccount);
 
     // 2) Bitbucket: prefer employee.bitbucketLogin lookup. If employee
     //    has no BB login, do NOT attribute (this is the user's complaint:
@@ -615,6 +621,33 @@ export function analysePulse(rawReports, opts = {}) {
       p.badges.conf48h = cf.edits || 0;
       p.cfItems = Array.isArray(cf.items) ? cf.items.slice() : [];
       p.cfItems.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    }
+
+    // 4) V20 S9 — Real Zephyr attribution. Zephyr DC возвращает userKey
+    //    в JIRAUSERnnn-формате — это ровно то же что Jira accountId
+    //    (у Sber DC). Match deterministic по emp.jiraAccountId / p.jiraAccountId.
+    //    Старая heuristic (zephyrKind по типу issue) НЕ удалена — она
+    //    остаётся для legacy-флоу (test executions через Jira changelog),
+    //    но на pilot data zephyrKind возвращал 0/0 потому что test cases
+    //    в Sber Zephyr — отдельные сущности, не Jira issues.
+    if (zephyrAuthors) {
+      const zKey = String(emp?.jiraAccountId || p.jiraAccountId || '').trim();
+      const zEntry = zKey ? (zephyrAuthors[zKey] || zephyrAuthors[zKey.toUpperCase()] || zephyrAuthors[zKey.toLowerCase()]) : null;
+      if (zEntry) {
+        p.badges.testsCreated48h  = zEntry.testsCreated || 0;
+        p.badges.testsExecuted48h = (p.badges.testsExecuted48h || 0) + (zEntry.testsExecuted || 0);
+        // Конвертим Zephyr-items → формат zephyrTestsCreatedRecent / Executed
+        // (renderer ожидает { slim, kind, at } / { slim, result, at }).
+        for (const it of (zEntry.items || [])) {
+          const slimItem = { key: it.key, type: it.kind === 'test-run' ? 'TestExecution' : 'Test', summary: it.name || '' };
+          if (it.kind === 'test-run') {
+            const result = it.status === 'Done' ? 'PASS' : 'EXECUTED';
+            p.zephyrTestsExecutedRecent.push({ slim: slimItem, result, at: it.at, source: 'zephyr-api' });
+          } else {
+            p.zephyrTestsCreatedRecent.push({ slim: slimItem, kind: 'test', at: it.at, source: 'zephyr-api' });
+          }
+        }
+      }
     }
   }
   // Aggregate totals on summary

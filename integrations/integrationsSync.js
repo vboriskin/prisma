@@ -245,11 +245,14 @@ export async function fullPullFromSystems(existingRows, { onProgress } = {}) {
 
 /* ── Verify connections (via server endpoints) ────────────── */
 export async function verifyJira() {
-  const res = await fetch('/api/jira/verify', {
-    method: 'POST', signal: AbortSignal.timeout(10000),
-  });
-  const data = await res.json().catch(() => ({}));
-  return { ok: !!data.ok, who: data.who, error: data.error };
+  // V20 S7 B5 — унифицирован на proxyPost (как verifyBitbucket / verifyConfluence).
+  // Раньше raw fetch без headers — за корп-proxy с CSRF policy ломалось тихо.
+  try {
+    const data = await proxyPost('/api/jira/verify', {});
+    return { ok: !!data.ok, who: data.who, error: data.error };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 export async function verifyBitbucket() {
@@ -267,5 +270,28 @@ export async function verifyConfluence() {
     return { ok: !!data.ok, error: data.error };
   } catch(e) {
     return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * V20 S4 — Bulk identity resolver.
+ *
+ * Дёргает `/api/integrations/resolve-identities` с массивом
+ * { key, email, fullname? }. Сервер параллельно (конкурентность 5)
+ * ищет каждого в BB и CF по email. Возвращает diff-readable массив,
+ * который UI отрисует в preview-modal'е.
+ *
+ * Не мутирует state — это делает caller (через Reactive.silent).
+ *
+ * @param {Array<{key,email,fullname?}>} items
+ * @returns {Promise<{ results, summary, error? }>}
+ */
+export async function resolveIdentitiesByEmail(items) {
+  try {
+    const data = await proxyPost('/api/integrations/resolve-identities', { items });
+    if (data.error) return { results: [], summary: {}, error: data.error };
+    return { results: data.results || [], summary: data.summary || {} };
+  } catch (e) {
+    return { results: [], summary: {}, error: e.message || 'сеть' };
   }
 }

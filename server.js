@@ -1347,7 +1347,10 @@ function bdRunJob(job, cfg) {
   _bdCluster.run(job, () => buildBlackDashboard(cfg));
 }
 
-const _pulseCluster = createJobsCluster({ prefix: 'pulse', ttlMs: 30 * 60 * 1000, maxCount: 20, label: 'pulse' });
+// V20 S8 #13 — pulse job TTL 30 → 120 мин. Pилот feedback: «захожу в diag
+// раз в 2 недели — jobId протух всегда». 120 мин покрывает большинство
+// сценариев + сберегает память (jobs ≤ 20, не существенно).
+const _pulseCluster = createJobsCluster({ prefix: 'pulse', ttlMs: 120 * 60 * 1000, maxCount: 20, label: 'pulse' });
 function pulseCreateJob(payload) { return _pulseCluster.create(payload); }
 function pulseGetJob(id)         { return _pulseCluster.get(id); }
 function pulseRunJob(job, runner){ return _pulseCluster.run(job, runner); }
@@ -1479,11 +1482,17 @@ async function _runPortfolioPulse(body, cfg, tls, onPhase) {
   const ppCfEmployees = Array.isArray(body?.employees) ? body.employees : [];
   const cfPromise = withTimeout('confluence',
     ppFetchConfluenceActivity(cfg, tls, cutoffTs, { cqlCutoffTs, employees: ppCfEmployees }), PER_PK_TIMEOUT_MS);
+  // V20 S9 — Real Zephyr fetch (parallel with BB/CF). Pилот finding: zephyr
+  // counts всегда 0/0 потому что использовался Jira issue-type heuristic.
+  // Теперь — отдельный fetch /rest/tests/1.0/* (Zephyr Tests app DC).
+  const zephyrPromise = withTimeout('zephyr',
+    ppFetchZephyrActivity(cfg, tls, cutoffTs), PER_PK_TIMEOUT_MS);
 
-  const [reports, bbR, cfR] = await Promise.all([reportsPromise, bbPromise, cfPromise]);
+  const [reports, bbR, cfR, zR] = await Promise.all([reportsPromise, bbPromise, cfPromise, zephyrPromise]);
   setPhase('fetch-bb-cf-done');
   const bitbucketRepoWalk = bbR.ok ? bbR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
   const confluence = cfR.ok ? cfR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
+  const zephyr = zR.ok ? zR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms`, configured: false };
 
   const hotIssues = [];
   for (const r of reports) {
@@ -1537,6 +1546,7 @@ async function _runPortfolioPulse(body, cfg, tls, onPhase) {
     zephyrResultFieldId,
     bitbucket,
     confluence,
+    zephyr,                                            // V20 S9 — Real Zephyr fetch (Sber DC)
     diagnostics: {
       totalMs:  Date.now() - t0,
       perPk:    reports.map(r => ({ pk: r.projectKey, ms: r._ms || 0, ok: !r.error, error: r.error || null, issues: (r.issues || []).length })),
@@ -1766,7 +1776,305 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
   // Cleanup _seenTargets перед возвратом (это служебное поле).
   for (const a of Object.values(authors)) delete a._seenTargets;
 
+  // ── V20 S5.3 — Audit-log fallback ────────────────────────
+  // Если CQL search ничего/мало вернул (типичная ситуация для Sber DC где
+  // user.email не индексирован) — добираем events через audit log.
+  // /rest/auditing/1.0/events?affectedObject=Space,<id> возвращает все
+  // события за период с author.name = ФИО. Match'им по emp.fio.
+  //
+  // Решение применяется ТОЛЬКО если:
+  //   · есть spaceKeys (без них audit нерелевантен)
+  //   · CQL дал < 5 events ИЛИ < 50% от identity-list authors
+  // Прерываемся раньше если audit token не имеет прав или нет space ID.
+  const cqlAuthorsCount = Object.keys(authors).length;
+  const identityCount = identityList.length;
+  const cqlSparse = cqlAuthorsCount < Math.max(5, Math.floor(identityCount * 0.5));
+  if (spaceKeys.length && cqlSparse && employees.length) {
+    try {
+      await _ppCfAuditAugment({
+        baseRaw, auth, tls, cutoffTs, spaceKeys, employees,
+        authors, ensureAuthor, pushItem, tried,
+      });
+    } catch (e) {
+      tried.push({ type: 'audit-fallback', error: _ppRedactSecretsInText(e?.message || 'thrown', 100) });
+    }
+  }
+  for (const a of Object.values(authors)) delete a._seenTargets;     // повторный cleanup
+
   return { authors, configured: true, tried, scope: { spaces: spaceKeys, employees: identityList.length, windowHours: Math.round((Date.now() - cutoffTs) / 3600000) } };
+}
+
+/**
+ * V20 S5.3 — Confluence audit log → augment authors map.
+ *
+ * Pipeline:
+ *   1) Resolve каждый spaceKey → spaceId (через /rest/api/space/<key>).
+ *   2) Для каждого spaceId fetch /rest/auditing/1.0/events?affectedObject=Space,<id>
+ *      paginated (cursor-based в DC).
+ *   3) Для каждого event:
+ *      · фильтр timestamp >= cutoffTs (client-side, т.к. audit не принимает period filter
+ *        в DC до 7.20)
+ *      · author.name (= ФИО) → match по emp.fio (case-insensitive).
+ *      · если match — bump соответствующий counter (edits/comments/mentions)
+ *        исходя из event.type.action.
+ *
+ * Не заменяет CQL pipeline — augmentирует. Дедуп через _seenTargets.
+ */
+async function _ppCfAuditAugment(opts) {
+  const { baseRaw, auth, tls, cutoffTs, spaceKeys, employees, authors, ensureAuthor, pushItem, tried } = opts;
+  // V20 S6.1 — Build FIO → employee map. Service-аккаунты ИСКЛЮЧАЮТСЯ —
+  // если бот зарегистрирован с FIO (auto-create), его не должны путать с
+  // настоящим автором, даже если ФИО совпадает.
+  const fioMap = new Map();
+  for (const e of employees) {
+    if (e.isServiceAccount) continue;
+    const fio = String(e.fio || '').toLowerCase().trim();
+    if (fio) fioMap.set(fio, e);
+  }
+  if (!fioMap.size) return;
+
+  // 1) Resolve space IDs.
+  const spaceIds = [];
+  for (const key of spaceKeys.slice(0, 5)) {     // cap = 5 spaces чтобы не спамить
+    const url = `${baseRaw}/rest/api/space/${encodeURIComponent(key)}`;
+    const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(() => ({ status: 0 }));
+    tried.push({ type: 'audit-space-resolve', key, status: r.status });
+    if (r.status < 200 || r.status >= 300) continue;
+    try {
+      const parsed = JSON.parse(r.text);
+      if (parsed.id) spaceIds.push({ key, id: String(parsed.id) });
+    } catch (_) {}
+  }
+  if (!spaceIds.length) return;
+
+  // 2) Fetch audit events per space, paginated by cursor. Cap = 5 pages × 100 = 500 events.
+  const action2counter = (action) => {
+    const a = String(action || '').toLowerCase();
+    if (a.includes('comment'))                 return 'comments';
+    if (a.includes('mention'))                 return 'mentions';
+    if (a.includes('updated') || a.includes('edited') || a.includes('created')) return 'edits';
+    return null;
+  };
+
+  let augmented = 0;
+  for (const sp of spaceIds) {
+    let cursor = null;
+    let pages = 0;
+    while (pages < 5) {
+      let url = `${baseRaw}/rest/auditing/1.0/events?affectedObject=${encodeURIComponent(`Space,${sp.id}`)}&limit=100`;
+      if (cursor) url += `&pageCursor=${encodeURIComponent(cursor)}&offset=0`;
+      const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 12000 }).catch(e => ({ status: 0, _err: e?.message }));
+      tried.push({ type: 'audit-events', spaceKey: sp.key, page: pages, status: r.status });
+      if (r.status === 401 || r.status === 403) {
+        return;     // нет прав на audit — bail
+      }
+      if (r.status < 200 || r.status >= 300) break;
+      let parsed; try { parsed = JSON.parse(r.text); } catch (_) { break; }
+      const events = parsed.entities || [];
+      if (!events.length) break;
+      let oldestEventBeforeCutoff = false;
+      for (const ev of events) {
+        const ts = Date.parse(ev.timestamp || '');
+        if (!Number.isFinite(ts)) continue;
+        if (ts < cutoffTs) { oldestEventBeforeCutoff = true; continue; }
+        const fio = String(ev.author?.name || '').toLowerCase().trim();
+        if (!fio) continue;
+        const emp = fioMap.get(fio);
+        if (!emp) continue;     // не наш сотрудник
+        // Найдём target.
+        const target = (ev.affectedObjects || []).find(o => o.type === 'Page' || o.type === 'Comment' || o.type === 'Blogpost') || {};
+        const counter = action2counter(ev.type?.action);
+        if (!counter) continue;
+        const dn = ev.author?.name || '';
+        const em = emp.email || '';
+        const k = _ppKeyForAuthor(dn, em);
+        if (!k) continue;
+        const a = ensureAuthor(dn, em, k);
+        a[counter]++;
+        pushItem(a, {
+          kind: counter === 'edits' ? 'edit' : (counter === 'comments' ? 'comment' : 'mention'),
+          title: target.name || ev.type?.action || 'audit',
+          url:   target.uri || '',
+          at:    ev.timestamp || '',
+          spaceKey:  sp.key,
+          targetId:  String(target.id || ev.id || `${sp.id}-${ts}`),
+          source:    'audit-log',
+        });
+        augmented++;
+      }
+      // Если самый старый event на странице УЖЕ до cutoff — следующая будет ещё старее, прерываемся.
+      if (oldestEventBeforeCutoff && events.length === parsed.pagingInfo?.size) break;
+      cursor = parsed.pagingInfo?.nextPageCursor || null;
+      if (!cursor || parsed.pagingInfo?.lastPage) break;
+      pages++;
+    }
+  }
+  tried.push({ type: 'audit-augmented', count: augmented, spaces: spaceIds.length });
+}
+
+/* ════════════════════════════════════════════════════════════
+   V20 S9 — REAL ZEPHYR FETCH (Sber DC compatible)
+   ────────────────────────────────────────────────────────────
+   Pилот finding: zephyr counts всегда 0/0 потому что текущая
+   реализация ищет Jira issues с типом «Test» (heuristic
+   `zephyrKind`). В Sber Zephyr DC test cases — это НЕ Jira issues,
+   а отдельные сущности `/rest/tests/1.0/testcase/...`.
+
+   API endpoints (Zephyr Tests for Jira Server/DC):
+     GET /rest/tests/1.0/testcase/search?query=testCase.projectId+IN+(<id>)+AND+testCase.updatedOn>="<iso>"
+         → test cases (created/updated)
+     GET /rest/tests/1.0/testrun/search?query=testRun.projectId+IN+(<id>)+AND+testRun.updatedOn>="<iso>"
+         → test runs (executed)
+   Project ID — numeric (требует resolve через /rest/api/2/project/{key}).
+
+   Без N²M expense: НЕ дёргаем testresults per-run. Использует:
+     · testCase.createdBy/updatedBy → testsCreated
+     · testRun.userKeys[] / createdBy / updatedBy → testsExecuted
+   ──────────────────────────────────────────────────────────── */
+
+const _PROJECT_ID_TTL = 30 * 60 * 1000;   // 30 min cache
+const _projectIdCache = new Map();         // 'baseUrl|key' → { id, at }
+
+/** Resolve projectKey → numeric projectId via /rest/api/2/project/{key}. */
+async function jiraResolveProjectId(cfg, projectKey) {
+  const cacheKey = `${cfg.jiraBaseUrl}|${projectKey}`;
+  const cached = _projectIdCache.get(cacheKey);
+  if (cached && (Date.now() - cached.at) < _PROJECT_ID_TTL) {
+    return cached.id;
+  }
+  try {
+    const proj = await jiraRequest(cfg, 'GET', `/rest/api/2/project/${encodeURIComponent(projectKey)}`);
+    const id = String(proj?.id || '');
+    if (id) {
+      _projectIdCache.set(cacheKey, { id, at: Date.now() });
+      return id;
+    }
+  } catch (_) { /* probe failed */ }
+  // Negative cache 5 min — не пробуем повторно срочно.
+  _projectIdCache.set(cacheKey, { id: '', at: Date.now() - _PROJECT_ID_TTL + 5 * 60 * 1000 });
+  return '';
+}
+
+/**
+ * V20 S9 — Fetch Zephyr activity per project.
+ * Returns: { authors: { [userKey]: { testsCreated, testsExecuted, items: [...], displayName } },
+ *            configured: bool, tried: [], summary: { tcCount, trCount } }
+ */
+async function ppFetchZephyrActivity(cfg, tls, cutoffTs) {
+  if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
+    return { authors: {}, configured: false, tried: [] };
+  }
+  const projectKeys = String(cfg.jiraProjectKeys || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  if (!projectKeys.length) return { authors: {}, configured: false, tried: [] };
+  const baseRaw = String(cfg.jiraBaseUrl).replace(/\/+$/, '');
+  const auth = _ppMakeAuthHeader(cfg.jiraToken);
+  const tried = [];
+  const isoCutoff = new Date(cutoffTs).toISOString().replace('T', ' ').slice(0, 19);
+
+  // Step 1: Resolve project keys → numeric IDs (parallel, cached).
+  const projects = [];
+  await Promise.all(projectKeys.map(async (pk) => {
+    const id = await jiraResolveProjectId(cfg, pk);
+    if (id) projects.push({ pk, id });
+    else tried.push({ type: 'project-resolve', pk, status: 0, error: 'no-id' });
+  }));
+  if (!projects.length) return { authors: {}, configured: true, tried, error: 'projects-unresolved' };
+
+  // Step 2: Fetch test cases + test runs per project (parallel within project).
+  const authors = {};
+  const ensureAuthor = (k, dn) => {
+    if (!k) return null;
+    if (!authors[k]) authors[k] = { testsCreated: 0, testsExecuted: 0, items: [], displayName: dn || k };
+    else if (dn && !authors[k].displayName) authors[k].displayName = dn;
+    return authors[k];
+  };
+
+  const tcFields = 'id,key,projectId,name,createdBy,createdOn,updatedBy,updatedOn';
+  const trFields = 'id,key,projectId,name,createdBy,createdOn,updatedBy,updatedOn,userKeys,executionTime,testResultStatuses,status(id,name)';
+
+  let tcTotal = 0, trTotal = 0;
+  await Promise.all(projects.map(async ({ pk, id }) => {
+    // Test cases — created/updated ≥ cutoff.
+    try {
+      const cqlTC = `testCase.projectId IN (${id}) AND testCase.updatedOn >= "${isoCutoff}"`;
+      const urlTC = `${baseRaw}/rest/tests/1.0/testcase/search?query=${encodeURIComponent(cqlTC)}&fields=${tcFields}&maxResults=200&startAt=0&archived=false`;
+      const r = await jiraForward({ targetUrl: urlTC, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 15000 }).catch(e => ({ status: 0, _err: e?.message }));
+      tried.push({ type: 'zephyr-testcase', pk, status: r.status });
+      if (r.status >= 200 && r.status < 300) {
+        const parsed = JSON.parse(r.text || '{}');
+        const results = Array.isArray(parsed?.results) ? parsed.results : [];
+        tcTotal += results.length;
+        for (const tc of results) {
+          const updatedMs = Date.parse(tc.updatedOn || tc.createdOn || '');
+          if (Number.isFinite(updatedMs) && updatedMs < cutoffTs) continue;
+          const creator = String(tc.createdBy || '').trim();
+          const updater = String(tc.updatedBy || tc.createdBy || '').trim();
+          // Created bucket — by createdBy.
+          const a1 = ensureAuthor(creator);
+          if (a1) {
+            a1.testsCreated++;
+            if (a1.items.length < 50) a1.items.push({
+              kind: 'test-case', key: tc.key || '', name: (tc.name || '').slice(0, 80),
+              at: tc.updatedOn || tc.createdOn || '', pk,
+              url: `${baseRaw}/secure/Tests.jspa#/testCase/${encodeURIComponent(tc.key || '')}`,
+            });
+          }
+          // Updated by another → also creator-bucket для updater (если ≠ creator).
+          if (updater && updater !== creator) {
+            const a2 = ensureAuthor(updater);
+            if (a2 && a2.items.length < 50) a2.items.push({
+              kind: 'test-case-edit', key: tc.key || '', name: (tc.name || '').slice(0, 80),
+              at: tc.updatedOn || '', pk,
+              url: `${baseRaw}/secure/Tests.jspa#/testCase/${encodeURIComponent(tc.key || '')}`,
+            });
+          }
+        }
+      }
+    } catch (e) { tried.push({ type: 'zephyr-testcase', pk, error: String(e?.message || e).slice(0, 100) }); }
+
+    // Test runs — created/updated ≥ cutoff.
+    try {
+      const cqlTR = `testRun.projectId IN (${id}) AND testRun.updatedOn >= "${isoCutoff}"`;
+      const urlTR = `${baseRaw}/rest/tests/1.0/testrun/search?query=${encodeURIComponent(cqlTR)}&fields=${trFields}&maxResults=200&startAt=0&archived=false`;
+      const r = await jiraForward({ targetUrl: urlTR, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 15000 }).catch(e => ({ status: 0, _err: e?.message }));
+      tried.push({ type: 'zephyr-testrun', pk, status: r.status });
+      if (r.status >= 200 && r.status < 300) {
+        const parsed = JSON.parse(r.text || '{}');
+        const results = Array.isArray(parsed?.results) ? parsed.results : [];
+        trTotal += results.length;
+        for (const tr of results) {
+          const updatedMs = Date.parse(tr.updatedOn || tr.createdOn || '');
+          if (Number.isFinite(updatedMs) && updatedMs < cutoffTs) continue;
+          // Executor bucket — все userKeys[] + updatedBy.
+          const executors = new Set();
+          if (Array.isArray(tr.userKeys)) for (const u of tr.userKeys) if (u) executors.add(String(u).trim());
+          if (tr.updatedBy)  executors.add(String(tr.updatedBy).trim());
+          if (tr.createdBy && (tr.status?.name === 'Done' || tr.status?.id === 4956)) {
+            // Если run был «выполнен» (status=Done) и нет userKeys — приписать creator'у.
+            if (executors.size === 0) executors.add(String(tr.createdBy).trim());
+          }
+          for (const u of executors) {
+            const a = ensureAuthor(u);
+            if (!a) continue;
+            a.testsExecuted++;
+            if (a.items.length < 50) a.items.push({
+              kind: 'test-run', key: tr.key || '', name: (tr.name || '').slice(0, 80),
+              at: tr.updatedOn || tr.createdOn || '', pk,
+              status: tr.status?.name || '', executionTime: tr.executionTime || 0,
+              url: `${baseRaw}/secure/Tests.jspa#/testPlayer/${encodeURIComponent(tr.key || '')}`,
+            });
+          }
+        }
+      }
+    } catch (e) { tried.push({ type: 'zephyr-testrun', pk, error: String(e?.message || e).slice(0, 100) }); }
+  }));
+
+  return {
+    authors,
+    configured: true,
+    tried,
+    summary: { projectsResolved: projects.length, testCasesScanned: tcTotal, testRunsScanned: trTotal },
+  };
 }
 
 async function jiraBuildReport(cfg) {
@@ -2024,7 +2332,7 @@ async function handleIntegrationsApi(req, res, pathname) {
       const params = new URLSearchParams(qs);
       const jobId = (params.get('jobId') || '').trim();
       const job = pulseGetJob(jobId);
-      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
+      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
       writeJson(res, 200, {
         jobId:      job.id,
         status:     job.status,
@@ -2070,7 +2378,7 @@ async function handleIntegrationsApi(req, res, pathname) {
         return;
       }
       const job = pulseGetJob(jobId);
-      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
+      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
       if (job.status !== 'done') {
         writeJson(res, 409, { error: `Job not done yet (status=${job.status})` });
         return;
@@ -2384,7 +2692,7 @@ async function handleIntegrationsApi(req, res, pathname) {
         const params = new URLSearchParams(qs);
         const jobId = params.get('jobId') || '';
         const job = bdGetJob(jobId);
-        if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 30 мин)' }); return; }
+        if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
         const out = {
           jobId:     job.id,
           status:    job.status,
@@ -2570,6 +2878,216 @@ async function handleIntegrationsApi(req, res, pathname) {
       }
       if (!resolved) { writeJson(res, 200, { ok: false, error: 'Пользователь не найден в Confluence', tried }); return; }
       writeJson(res, 200, { ok: true, user: resolved, tried });
+      return;
+    }
+
+    // ── /api/integrations/diag-audit ─────────────────────────
+    // V20 S8 #14 — Server-side audit-log для diagnostic JSON export.
+    // localStorage-only audit можно очистить — HR-compliance ненадёжен.
+    // Логируем факт экспорта в structured-log → попадает в ELK через
+    // server logger pipeline. БЕЗ contents — только метаданные.
+    if (pathname === '/api/integrations/diag-audit') {
+      try {
+        logger.event('integrations.diag_audit', {
+          mode:              String(body.mode || 'safe').slice(0, 16),
+          sizeBytes:         Math.min(Number(body.sizeBytes) || 0, 10 * 1024 * 1024),
+          pkCount:           Math.min(Number(body.pkCount) || 0, 100),
+          consentGiven:      !!body.consentGiven,
+          consentSource:     String(body.consentSource || 'unknown').slice(0, 32),
+          disclaimerVersion: String(body.disclaimerVersion || '').slice(0, 32),
+        });
+        writeJson(res, 200, { ok: true });
+      } catch (e) {
+        writeJson(res, 500, { ok: false, error: 'audit log failed' });
+      }
+      return;
+    }
+
+    // ── /api/integrations/resolve-identities ─────────────────
+    // V20 S4 — bulk resolver: для каждого { key, email, fullname }
+    //   парраллельно дёргаем BB user-search + CF user-search,
+    //   возвращаем найденные { bbLogin, bbDisplayName, cfAccountId,
+    //   cfDisplayName }. ИЗ POV V17.2 I1c контракта это identity-
+    //   deterministic: email — авторитетный SAML-claim, lookup по нему
+    //   через API детерминированный, не fuzzy-match по ФИО.
+    //
+    // Concurrency: max 5 parallel to не уронить BB/CF при 100+ users.
+    // Per-user timeout: 8 сек на источник.
+    //
+    // Ответ:
+    //   { results: [{ key, email, bb: {ok, slug?, displayName?, error?},
+    //                 cf: {ok, accountId?, displayName?, error?} }, ...],
+    //     summary: { total, bbResolved, cfResolved } }
+    if (pathname === '/api/integrations/resolve-identities') {
+      const items = Array.isArray(body.items) ? body.items.slice(0, 500) : [];
+      if (!items.length) { writeJson(res, 400, { error: 'items[] is empty or missing' }); return; }
+      const bbConfigured = !!(cfg.bitbucketBaseUrl && cfg.bitbucketToken);
+      const cfConfigured = !!(cfg.confluenceBaseUrl && cfg.confluenceToken);
+      if (!bbConfigured && !cfConfigured) {
+        writeJson(res, 400, { error: 'Ни BB, ни Confluence не настроены — нечего резолвить' });
+        return;
+      }
+      const bbBase = bbConfigured ? cfg.bitbucketBaseUrl.replace(/\/+$/, '') : null;
+      const bbAuth = bbConfigured ? makeAuthHeader(cfg.bitbucketToken) : null;
+      const cfBase = cfConfigured ? cfg.confluenceBaseUrl.replace(/\/+$/, '').replace(/\/wiki$/i, '') : null;
+      const cfAuth = cfConfigured ? makeAuthHeader(cfg.confluenceToken) : null;
+
+      const tryBbByEmail = async (email) => {
+        // BB Server: /rest/api/1.0/users?filter=<email> — filter ищет по
+        // username/email/displayName. Берём только тех у кого emailAddress
+        // совпадает (защита от false-positive по фамилии).
+        try {
+          const url = `${bbBase}/rest/api/1.0/users?filter=${encodeURIComponent(email)}&limit=10`;
+          const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: bbAuth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(e => ({ status: 0, text: String(e?.message || e) }));
+          if (r.status < 200 || r.status >= 300) return { ok: false, error: `HTTP ${r.status}` };
+          const parsed = JSON.parse(r.text || '{}');
+          const values = Array.isArray(parsed.values) ? parsed.values : [];
+          const match = values.find(u => String(u.emailAddress || '').toLowerCase() === email);
+          if (!match) return { ok: false, error: 'не найден' };
+          return { ok: true, slug: match.slug || match.name || '', displayName: match.displayName || '', emailAddress: match.emailAddress || '' };
+        } catch (e) { return { ok: false, error: _ppRedactSecretsInText(e.message || 'thrown', 100) }; }
+      };
+
+      const tryCfByEmail = async (email, fullname) => {
+        // V20 S5.2 — CF cascade redesigned для Sber Confluence DC.
+        //
+        // Контекст из API-примеров (Confluence DC 7.x):
+        //   · user.email cql НЕ работает (всегда 0 results)
+        //   · /rest/api/user?username=X нужен NUMERIC LDAP id, не email-prefix
+        //   · /rest/api/search?cql=user.fullname="ФИО" работает по ТОЧНОМУ
+        //     ФИО match (это наш ключ — берём fio из Jira displayName).
+        //   · audit log пишет author.name = ФИО → можно match'ить obratno.
+        //
+        // Cascade:
+        //   1) cql=user.fullname="<FIO>"  — точный match по ФИО (требует
+        //      fullname в input'ах, что мы передаём из state.employees.fio)
+        //   2) cql=user.fullname~"<FIO>"  — подстрока (lucene tilde-search)
+        //   3) /rest/api/user/search?username=<email-prefix>  — может сработать
+        //      если username совпадает с email-prefix (бывает у некоторых
+        //      сетапов LDAP).
+        //   4) cql=user.email = "..."     — последний fallback на DC, обычно empty.
+        //
+        // Из ответа берём username (LDAP-numeric) → cfAccountId.
+        try {
+          const prefix = email.split('@')[0];
+          const fioEsc = String(fullname || '').replace(/"/g, '\\"').trim();
+
+          const candidates = [];
+          if (fioEsc) {
+            // 1) ТОЧНЫЙ match по ФИО — самый надёжный для Sber CF.
+            candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.fullname = "${fioEsc}"`)}&limit=5`);
+            // 2) Подстрока ФИО — cheaper fallback (синтаксис `~` в DC).
+            candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.fullname ~ "${fioEsc}"`)}&limit=5`);
+          }
+          if (prefix) {
+            // 3) username-as-email-prefix lookup.
+            candidates.push(`${cfBase}/rest/api/user/search?username=${encodeURIComponent(prefix)}&limit=5`);
+          }
+          // 4) email cql — final fallback, обычно 0 в DC.
+          candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.email = "${email}"`)}&limit=5`);
+
+          const triedDebug = [];
+          // V20 S6.1 — early-break tracking. Если первые 2 candidate'а вернули
+          // 200 OK с пустым result — дальше пробовать бесполезно (CQL не
+          // настроен на этом instance). Сохраняем cascade time с ~12 мин до
+          // ~20-40 сек на 110 сотрудников при широком unsupported.
+          let consecutiveEmptyOk = 0;
+          for (const url of candidates) {
+            const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: cfAuth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(e => ({ status: 0, text: String(e?.message || e) }));
+            triedDebug.push(`${url.replace(/\?.*$/, '...')} → ${r.status}`);
+            if (r.status === 401 || r.status === 403) return { ok: false, error: `HTTP ${r.status}: токен Confluence не имеет прав на user-search` };
+            if (r.status < 200 || r.status >= 300) continue;
+            let parsed; try { parsed = JSON.parse(r.text); } catch (_) { continue; }
+            const results = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
+            // V20 S6.1 — если 200 OK + пустой результат → это «эндпоинт
+            // ответил, но не нашёл». 2 подряд таких → break cascade.
+            if (results.length === 0) {
+              consecutiveEmptyOk++;
+              if (consecutiveEmptyOk >= 2) break;
+              continue;
+            }
+            consecutiveEmptyOk = 0;
+            // V20 S7 B8 — collect all FIO matches, return ambiguous if >1.
+            // Раньше брали первого «по индексу» при тёзках — недетерминированно.
+            const fioMatches = [];
+            let exactEmailMatch = null;
+            for (const item of results) {
+              const u = item.user || item;
+              const u_email = String(u.email || u.emailAddress || '').toLowerCase().trim();
+              const u_fullname = String(u.displayName || u.publicName || u.name || u.title || '').trim();
+              const exactEmail = u_email && u_email === email;
+              const exactFio   = fioEsc && u_fullname && u_fullname.toLowerCase() === fioEsc.toLowerCase();
+              const username = u.username || u.name || u.userName || _extractUsernameFromCfUri(u);
+              if (!username) continue;
+              const candidate = {
+                accountId:   u.userKey || u.accountId || u.key || username,
+                username,
+                displayName: u_fullname || username,
+              };
+              if (exactEmail) { exactEmailMatch = { ...candidate, matchedBy: 'email' }; break; }
+              if (exactFio) fioMatches.push(candidate);
+              else if (results.length === 1) fioMatches.push(candidate);     // single — trust
+            }
+            if (exactEmailMatch) return { ok: true, ...exactEmailMatch };
+            if (fioMatches.length === 1) {
+              return { ok: true, ...fioMatches[0], matchedBy: 'fio' };
+            }
+            if (fioMatches.length > 1) {
+              // Ambiguous — несколько тёзок. Возвращаем кандидатов для UI choice.
+              return {
+                ok: false,
+                error: `ambiguous: ${fioMatches.length} тёзок с ФИО "${fioEsc}"`,
+                ambiguousCandidates: fioMatches.map(c => ({ username: c.username, displayName: c.displayName })),
+              };
+            }
+          }
+          return { ok: false, error: `не найден; tried ${triedDebug.length} endpoints (last: ${triedDebug[triedDebug.length-1] || 'none'})` };
+        } catch (e) { return { ok: false, error: _ppRedactSecretsInText(e.message || 'thrown', 100) }; }
+      };
+
+      // CF user-объект иногда даёт username не напрямую, а в URL self-ссылке.
+      // Пример: uri="https://confluence.../viewuser.action?username=19468503"
+      function _extractUsernameFromCfUri(u) {
+        const uri = u?._links?.self || u?.links?.self?.[0]?.href || u?.uri || '';
+        if (!uri) return '';
+        const m = String(uri).match(/[?&]username=([^&]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+      }
+
+      // Concurrency control: max 5 одновременно. Простой semaphore через
+      // worker-loop без зависимостей.
+      const CONCURRENCY = 5;
+      const results = new Array(items.length);
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < items.length) {
+          const i = cursor++;
+          const it = items[i];
+          const email    = String(it?.email    || '').trim().toLowerCase();
+          const fullname = String(it?.fullname || '').trim();
+          const key      = String(it?.key      || '').trim();
+          if (!email && !fullname) {
+            results[i] = { key, email: '', bb: { ok: false, error: 'нет email и fio' }, cf: { ok: false, error: 'нет email и fio' } };
+            continue;
+          }
+          const [bb, cf] = await Promise.all([
+            (bbConfigured && email) ? tryBbByEmail(email) : Promise.resolve({ ok: false, error: email ? 'BB не настроен' : 'нет email' }),
+            cfConfigured ? tryCfByEmail(email, fullname) : Promise.resolve({ ok: false, error: 'CF не настроен' }),
+          ]);
+          results[i] = { key, email, fullname, bb, cf };
+        }
+      };
+      const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker());
+      await Promise.all(workers);
+
+      const summary = {
+        total:       items.length,
+        bbResolved:  results.filter(r => r.bb?.ok).length,
+        cfResolved:  results.filter(r => r.cf?.ok).length,
+        noEmail:     results.filter(r => !r.email).length,
+      };
+      logger.event('integrations.resolve_identities', summary);
+      writeJson(res, 200, { results, summary });
       return;
     }
 

@@ -147,11 +147,34 @@ export function renderSettingsModal(settings, opts = {}) {
             <input class="int-field-input" id="int-cf-space-keys" type="text" placeholder="DEV, PAY, SBOF" value="${esc(s.confluenceSpaceKeys||'')}">
             <span class="int-field-hint">Через запятую. Видны в URL: <code>/spaces/&lt;KEY&gt;/pages/...</code>. Используются во всех запросах к Confluence (поиск страниц, активность, проверка подключения). Пустое поле = искать по всем доступным пространствам.</span>
           </div>
-          <!-- V17.2 I2c — Окно активности (часов) — единое для Confluence + Pulse -->
+          <!-- V17.2 I2c — Окно активности (часов) — единое для BB / Jira / Confluence + Pulse -->
+          <!-- V20 S1.3 — пресеты 24/72/168 + custom (PO request: «удобный выбор окна»). -->
           <div class="int-field-group">
-            <label class="int-field-label">Окно активности (часов)</label>
-            <input class="int-field-input" id="int-cf-window-hours" type="number" min="1" max="168" placeholder="72" value="${esc(String(s.activityWindowHours||72))}">
-            <span class="int-field-hint">За какой период собирать активность (правки, комментарии, упоминания, логины). По умолчанию 72ч (3 дня). Максимум 168ч (1 неделя).</span>
+            <label class="int-field-label">Окно активности — Bitbucket / Jira / Confluence (часов)</label>
+            ${(() => {
+              const wh = Number(s.activityWindowHours) || 72;
+              const isPreset = wh === 24 || wh === 72 || wh === 168;
+              const preset = isPreset ? String(wh) : 'custom';
+              const r = (val, label, hint) =>
+                `<label class="int-window-preset ${preset === val ? 'int-window-preset-active' : ''}">
+                  <input type="radio" name="int-cf-window-preset" value="${val}" ${preset === val ? 'checked' : ''}>
+                  <span class="int-window-preset-label">${esc(label)}</span>
+                  <span class="int-window-preset-hint">${esc(hint)}</span>
+                </label>`;
+              return `
+                <div class="int-window-presets" role="radiogroup" aria-label="Окно активности">
+                  ${r('24',     '24 ч',  'сутки')}
+                  ${r('72',     '72 ч',  '3 дня — по умолчанию')}
+                  ${r('168',    '168 ч', 'неделя')}
+                  ${r('custom', 'своё',  '1–168 ч')}
+                </div>
+                <div class="int-window-custom ${preset === 'custom' ? '' : 'hidden'}" id="int-cf-window-custom-wrap">
+                  <input class="int-field-input" id="int-cf-window-hours" type="number" min="1" max="168" placeholder="72" value="${esc(String(wh))}">
+                  <span class="int-field-hint">диапазон: 1–168 часов</span>
+                </div>
+              `;
+            })()}
+            <span class="int-field-hint">За какой период собирать активность из всех трёх систем: коммиты, PR, правки страниц, комментарии и события Jira-таймлайна. Heatmap всегда показывает ровно 72ч независимо от этого значения.</span>
           </div>
           <div class="int-field-actions">
             <button class="int-btn int-btn-ghost" id="int-cf-verify">Проверить подключение</button>

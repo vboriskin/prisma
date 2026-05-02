@@ -26,8 +26,75 @@
 import { isTerminalStatus } from './portfolioPulseUtils.js';
 
 const DEFAULT_DWELL_HOURS = 24;
-const SWITCH_GAP_SEC = 30 * 60;            // 30 минут
-const SWITCHES_PER_HOUR_FOR_FULL_SCORE = 4; // нормировка switchScore=1.0
+
+/**
+ * V20 S6.2.4 — Merge blockers (computed from assigneeIndex) со stale items
+ * (computed in pulseModel из broader timeline-based signal).
+ *
+ * Правила:
+ *   · blockers wins на дубликатах по issue.key (он точнее — учитывает
+ *     dwellHours и пороги).
+ *   · stale items без блокирующих признаков (но в long-stale статусе)
+ *     добавляются как «дополнительные blockers» с source='stale-merge'.
+ *   · result сортируется по dwellHours desc.
+ */
+function _mergeBlockersWithStale(blockers, stale) {
+  const blockerKeys = new Set();
+  for (const b of (blockers || [])) {
+    if (b?.key) blockerKeys.add(b.key);
+  }
+  const merged = [...(blockers || [])];
+  for (const s of (stale || [])) {
+    if (!s?.key) continue;
+    if (blockerKeys.has(s.key)) continue;
+    // Stale-only entries: переносим как «soft» blockers с источником.
+    merged.push({
+      ...s,
+      source: 'stale-merge',
+    });
+  }
+  // Сортировка по dwellHours desc (если есть). Старые items внизу — игнорируем.
+  merged.sort((a, b) => Number(b?.dwellHours || 0) - Number(a?.dwellHours || 0));
+  return merged;
+}
+
+/**
+ * V20 S4 — Inline service-account pattern detection.
+ *
+ * Дублирует логику EmployeeFactory.detectServiceAccount, но напрямую
+ * вызывается из enrichment'а для «legacy storage employees» у которых
+ * нет isServiceAccount флага. Не импортируем rowFactory чтобы избежать
+ * циклической зависимости (rowFactory → state → tooling → ...).
+ *
+ * При изменении паттернов — синхронизировать обе копии.
+ */
+function _detectServiceAccountByKey(rawKey) {
+  const key = String(rawKey || '').toLowerCase().trim();
+  if (!key) return false;
+  if (/^(cab-sa-|sbt-|sa-|out-dinov-|out-|svc-|bot-|system-)/i.test(key)) return true;
+  if (/-(sa|bot|svc|api|system)-/i.test(key)) return true;
+  if (/^(sbt-issue-managment-user|sbt-sbbol|cab-sa-jira\d+)$/i.test(key)) return true;
+  return false;
+}
+// V20 S8.5 #2 — METRIC_THRESHOLDS подключены. Раньше словарь был в Config,
+// но никем не использовался — оба архитектора нашли как «мёртвый словарь».
+// Импортить из Config напрямую = circular (Config импортит DEFAULT_DWELL_THRESHOLDS
+// отсюда). Решение: METRIC_THRESHOLDS живут здесь, Config их re-export'ит.
+export const METRIC_THRESHOLDS = {
+  switchGapSec:                30 * 60,
+  switchesPerHourForFullScore: 4,
+  sprintPaceTolerancePct:      10,
+  orphanFreshMs:               30 * 86400 * 1000,
+  crvSlowHours:                24,
+  crvWarnHours:                8,
+  crvOutlierMaxHours:          14 * 24,
+  prThroughputDays:            7,
+  prOverloadOpenedThreshold:   5,
+  prOverloadRateThreshold:     0.4,
+  prHealthyRateThreshold:      0.7,
+};
+const SWITCH_GAP_SEC                    = METRIC_THRESHOLDS.switchGapSec;
+const SWITCHES_PER_HOUR_FOR_FULL_SCORE  = METRIC_THRESHOLDS.switchesPerHourForFullScore;
 
 /**
  * V18.1 P7-S2.2 — differential dwell-thresholds (status-aware).
@@ -100,6 +167,36 @@ export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESH
  */
 export function enrichForScanner2(model, rawReports = null, opts = {}) {
   if (!model || !Array.isArray(model.participants)) return model;
+  // V20 S4 — отфильтровать service-accounts ДО enrichment'а. Они не
+  // должны попадать в counts / heatmap / blockers / risks. Если
+  // opts.includeServiceAccounts === true — оставляем (для диагностики
+  // или служебного режима).
+  //
+  // V20 S4 fix — defensive auto-detect по participant.key напрямую.
+  // Причина: emp.isServiceAccount устанавливается в EmployeeFactory.normalize(),
+  // который запускается ТОЛЬКО при create(). Если employees были в localStorage
+  // до S4 deploy — normalize не запускался, флаг = undefined,
+  // p.isServiceAccount = !!undefined = false, фильтр пропускал бота.
+  // Теперь вторая проверка: pattern прямо по p.key + p.jiraAccountId.
+  const filteredOutBots = [];
+  if (!opts.includeServiceAccounts) {
+    model.participants = model.participants.filter(p => {
+      if (!p) return true;
+      // 1) Явный флаг из реестра (если employee был create()'нут после S4).
+      if (p.isServiceAccount) {
+        filteredOutBots.push({ key: p.key, label: p.label, source: 'registry' });
+        return false;
+      }
+      // 2) Pattern detection прямо по participant.key (legacy storage fix).
+      if (_detectServiceAccountByKey(p.key) || _detectServiceAccountByKey(p.jiraAccountId)) {
+        filteredOutBots.push({ key: p.key, label: p.label, source: 'pattern' });
+        return false;
+      }
+      return true;
+    });
+  }
+  // Сохраняем как property модели — UI/диагностика смогут показать.
+  model.botsFilteredOut = filteredOutBots;
   const dwellHours = Number(opts.dwellHours || DEFAULT_DWELL_HOURS);
   // V18.1 P7-S2.2 — каждое статус-зависимое значение можно override'нуть
   // через opts.thresholds. Bare scalar `dwellHours` остался как
@@ -125,18 +222,50 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     p.heatmap         = computeHeatmap(p, tz);
     p.contextSwitches = computeContextSwitches(p);
     p.timeline72h     = computeTimeline72h(p, tz);
-    p.blockers        = assigneeIndex
+    // V20 S6.2.4 — Stale ↔ blockers merge.
+    // computeBlockers смотрит ТОЛЬКО на assigneeIndex (issues где user — assignee).
+    // p.stale содержит более широкий signal (включая issues где user активен через
+    // timeline = reviewer / commenter). Раньше blockers перезаписывал stale полностью —
+    // терялись reviewer-сигналы. Теперь merge by issue.key (blockers wins на дубликатах).
+    const blockersBase = assigneeIndex
       ? computeBlockers(p, assigneeIndex, thresholds, teamThresholds)
       : [];
+    p.blockers = _mergeBlockersWithStale(blockersBase, p.stale || []);
     // V18.1 P5 — расширенные сигналы для side-panel:
     p.heatmap72x4     = computeHeatmap72x4(p, tz);   // 4 sources × 72 hours
     p.sparkline72h    = computeSparkline72h(p);      // 72 значений events/час (deprecated в S2.5)
   }
 
   // V18.1 P7-S2.1.5 — risk summary (orphans + out-of-sprint).
-  const risks = computeRiskSummary(model);
   // V18.1 P7-S2.1 — sprint goal progress.
-  const sprintGoal = computeSprintGoal(model);
+  // V20 S6.3 — new metrics (включаются после S5 расширенного покрытия).
+  // V20 S8 #18 + S8.5 #3 — memoize. Fingerprint расширен:
+  //   · model.fetchedAt — основной identity модели
+  //   · participants.length — защита от мутации модели
+  //   · teamThresholds + dwellHours — Tech Lead audit gotcha: «при изменении
+  //     per-team порога memo возвращает stale, потому что fp не учитывал opts».
+  // Также memo помечен non-enumerable — НЕ попадает в JSON-export через
+  // _safeDeepClone (Senior Full-stack audit: «memo удваивает размер export'а»).
+  const memoKey = '_v20s8_metricsMemo';
+  const fpThresholds = teamThresholds ? JSON.stringify(teamThresholds).slice(0, 200) : '';
+  const fp = `${model.fetchedAt || ''}|${(model.participants || []).length}|${dwellHours}|${fpThresholds}`;
+  let cache = model[memoKey];
+  if (!cache || cache._fp !== fp) {
+    cache = {
+      _fp: fp,
+      risks:              computeRiskSummary(model),
+      sprintGoal:         computeSprintGoal(model),
+      codeReviewVelocity: computeCodeReviewVelocity(model),
+      prThroughput:       computePrThroughput(model),
+      crossTeamDeps:      computeCrossTeamDependencies(model),
+    };
+    // Non-enumerable — JSON.stringify пропускает, не попадает в diagnostic export.
+    // S8.5 #4 (BONUS): закрывает leak-vector при scrub-режиме.
+    Object.defineProperty(model, memoKey, {
+      value: cache, writable: true, enumerable: false, configurable: true,
+    });
+  }
+  const { risks, sprintGoal, codeReviewVelocity, prThroughput, crossTeamDeps } = cache;
 
   model.scannerV2 = {
     enrichedAt: Date.now(),
@@ -148,6 +277,10 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     switchGapSec: SWITCH_GAP_SEC,
     risks,                              // V18.1 P7-S2.1.5
     sprintGoal,                         // V18.1 P7-S2.1
+    // V20 S6.3 — new metrics. Видимы в diagnostic export + UI dashboards.
+    codeReviewVelocity,
+    prThroughput,
+    crossTeamDeps,
   };
   return model;
 }
@@ -314,7 +447,8 @@ export function computeTimeline72h(p, tzOffsetMin) {
 /* для defend'a у CTO.                                        */
 /* ────────────────────────────────────────────────────────── */
 
-const SPRINT_PACE_TOLERANCE_PCT = 10;   // ±10% вокруг ideal линии
+// V20 S8.5 #2 — алиасы из METRIC_THRESHOLDS (config-driven).
+const SPRINT_PACE_TOLERANCE_PCT = METRIC_THRESHOLDS.sprintPaceTolerancePct;
 
 /**
  * Считает Sprint Goal Progress per active-sprint:
@@ -384,19 +518,40 @@ export function computeSprintGoal(model) {
   }
   const totalAll = sprints.reduce((s, sp) => s + sp.total, 0);
   const doneAll  = sprints.reduce((s, sp) => s + sp.done,  0);
+  // V20 S6.2.1 — pace fallback по progress%. Pilot finding: 5 спринтов
+  // без startDate/endDate → all 'no-data' → aggregate='no-data', даже если
+  // progress=28.3% — т.е. явно behind. Вместо «no-data» используем простой
+  // proxy: progress < 25 → behind, ≥ 75 → ahead, иначе on-track.
+  // ВАЖНО: применяется ТОЛЬКО когда нет ни одного спринта с датами,
+  // т.е. когда честный pace вычислить нельзя в принципе.
   let aggregatePace = 'no-data';
   if (sprints.length > 0) {
     if (sprints.some(s => s.pace === 'behind'))   aggregatePace = 'behind';
     else if (sprints.every(s => s.pace === 'ahead')) aggregatePace = 'ahead';
-    else if (sprints.every(s => s.pace === 'no-data')) aggregatePace = 'no-data';
+    else if (sprints.every(s => s.pace === 'no-data')) {
+      // Fallback по progress, если ни один sprint не дал валидных дат.
+      const aggProg = totalAll > 0 ? (doneAll / totalAll * 100) : 0;
+      if      (aggProg <  25) aggregatePace = 'behind';
+      else if (aggProg >= 75) aggregatePace = 'ahead';
+      else                    aggregatePace = 'on-track';
+    }
     else aggregatePace = 'on-track';
   }
+  // V20 S6.2.1 — sprint-mean (sprint-weighted) рядом с issue-weighted.
+  // Tech-expert finding: spring 200/10% полностью съедает sprint 20/90% при
+  // Σ done/Σ total. Mean раскрывает асимметрию.
+  const sprintMeanProgress = sprints.length > 0
+    ? Math.round(sprints.reduce((s, sp) => s + sp.progressPct, 0) / sprints.length * 10) / 10
+    : 0;
   return {
     sprints,
     aggregateProgress: totalAll > 0 ? Math.round(doneAll / totalAll * 1000) / 10 : 0,
+    sprintMeanProgress,
     aggregateDone: doneAll,
     aggregateTotal: totalAll,
     aggregatePace,
+    aggregatePaceSource: sprints.every(s => s.pace === 'no-data') && sprints.length > 0
+      ? 'progress-fallback' : 'date-based',
   };
 }
 
@@ -425,27 +580,59 @@ export function computeSprintGoal(model) {
  * Также SET'ит `p.outOfSprintEvents` на каждого participant'а (для UI).
  */
 export function computeRiskSummary(model) {
-  if (!model) return { orphansByPk: {}, totalOrphans: 0, outOfSprintByPerson: {}, totalOutOfSprint: 0, outOfSprintRatio: 0 };
+  if (!model) return { orphansByPk: {}, totalOrphans: 0, totalRealOrphans: 0, outOfSprintByPerson: {}, totalOutOfSprint: 0, outOfSprintRatio: 0 };
+  // V20 S6.2.2 — Real Orphans фильтр.
+  // Старый totalOrphans считал ВЕСЬ unassignedByPk (для pilot 5 PK с
+  // sinceDate=2025-01-01 это 2513 issues — backlog). Не actionable.
+  //
+  // Real Orphans: только active-sprint OR обновлены за 30 дней OR priority высокий.
+  // Это ~30-80 issues — те что реально требуют внимания.
   const orphansByPk = {};
+  const realOrphansByPk = {};
   let totalOrphans = 0;
-  for (const [pk, list] of Object.entries(model.unassignedByPk || {})) {
-    const n = (list || []).length;
-    if (n > 0) orphansByPk[pk] = n;
-    totalOrphans += n;
-  }
-  // Build set of sprint-issue keys across ALL projects.
+  let totalRealOrphans = 0;
+  const FRESH_MS = METRIC_THRESHOLDS.orphanFreshMs;
+  const nowMs = Date.now();
+  // Sprint keys для проверки «в активном спринте».
   const sprintKeysSet = new Set();
   for (const space of Object.values(model.spaces || {})) {
     for (const it of (space?.sprintIssues || [])) {
       if (it?.key) sprintKeysSet.add(it.key);
     }
   }
+  const isHighPriority = (p) => {
+    const v = String(p || '').toLowerCase();
+    return v === 'highest' || v === 'critical' || v === 'major' || v === 'high';
+  };
+  for (const [pk, list] of Object.entries(model.unassignedByPk || {})) {
+    const arr = list || [];
+    const n = arr.length;
+    if (n > 0) orphansByPk[pk] = n;
+    totalOrphans += n;
+    // Real orphan = unassigned AND (in-sprint OR fresh AND high-priority).
+    let real = 0;
+    for (const it of arr) {
+      const key = it?.key;
+      const updatedMs = it?.updated ? Date.parse(it.updated) : NaN;
+      const fresh = Number.isFinite(updatedMs) && (nowMs - updatedMs) <= FRESH_MS;
+      const inSprint = key && sprintKeysSet.has(key);
+      const highPri = isHighPriority(it?.priority);
+      if (inSprint || (fresh && highPri)) real++;
+    }
+    if (real > 0) realOrphansByPk[pk] = real;
+    totalRealOrphans += real;
+  }
+  // V20 S6.2.3 — outOfSprintRatio по unique issue keys, не events.
+  // Старая формула: events-based — 10 коммитов в OOS-таск дают ratio 91%.
+  // Новая: unique(OOS keys) / unique(all touched keys per person).
   const outOfSprintByPerson = {};
   let totalOutOfSprint = 0;
-  let totalEvents       = 0;
+  // Для общего ratio: все unique keys vs OOS unique keys.
+  const allTouched = new Set();
+  const oosTouched = new Set();
   for (const p of (model.participants || [])) {
-    let count = 0;
-    let myTotal = 0;
+    const myKeys = new Set();
+    const myOosKeys = new Set();
     const events = []
       .concat(p.timelineToday    || [])
       .concat(p.timelineYesterday || [])
@@ -453,22 +640,26 @@ export function computeRiskSummary(model) {
     for (const e of events) {
       const key = e?.issue?.key;
       if (!key) continue;
-      myTotal++;
-      // Если sprint pool пустой (нет активных спринтов) — все events
-      // считаются in-scope (нет «out» для сравнения).
-      if (sprintKeysSet.size > 0 && !sprintKeysSet.has(key)) count++;
+      myKeys.add(key);
+      allTouched.add(key);
+      if (sprintKeysSet.size > 0 && !sprintKeysSet.has(key)) {
+        myOosKeys.add(key);
+        oosTouched.add(key);
+      }
     }
-    p.outOfSprintEvents = count;
-    if (count > 0) outOfSprintByPerson[p.key] = count;
-    totalOutOfSprint += count;
-    totalEvents      += myTotal;
+    p.outOfSprintEvents = myOosKeys.size;     // backward-compat name, теперь = unique keys
+    if (myOosKeys.size > 0) outOfSprintByPerson[p.key] = myOosKeys.size;
+    totalOutOfSprint += myOosKeys.size;
   }
   return {
     orphansByPk,
     totalOrphans,
+    realOrphansByPk,
+    totalRealOrphans,
     outOfSprintByPerson,
     totalOutOfSprint,
-    outOfSprintRatio: totalEvents > 0 ? totalOutOfSprint / totalEvents : 0,
+    outOfSprintRatio: allTouched.size > 0 ? oosTouched.size / allTouched.size : 0,
+    outOfSprintRatioBasis: 'unique-keys',     // S6.2.3 marker — отличить от старого events-based
   };
 }
 
@@ -686,4 +877,252 @@ export function computeBlockers(p, assigneeIndex, thresholds, teamThresholds = {
   }
   out.sort((a, b) => b.dwellHours - a.dwellHours);
   return out;
+}
+
+/* ══════════════════════════════════════════════════════════
+   V20 S6.3 — NEW METRICS
+   ══════════════════════════════════════════════════════════ */
+
+/**
+ * V20 S6.3.1 — Code Review Velocity per reviewer.
+ *
+ * Считает median time-to-first-review для каждого ревьюера за 14 дней.
+ * Сигнализирует bottleneck'и: «весь Backend ждёт ревью от Андрея».
+ *
+ * Источник: p.bbItems с kind='review' (приходит от ppFetchBitbucketActivity
+ * вместе с .at и .prId). По каждому review-event ищем opened-event того же
+ * PR в общем bbItems pool (cross-participant) — если найден,
+ * delta = review.at - openedAt.
+ *
+ * Threshold для UI: median > 24h = красный, 8-24h = жёлтый, <8h = зелёный.
+ *
+ * @returns Map<reviewerKey, { medianHours, count, threshold }>
+ */
+export function computeCodeReviewVelocity(model) {
+  if (!model || !Array.isArray(model.participants)) return {};
+  // Step 1: build prId → openedAt map by scanning all bbItems for kind='pr'.
+  const prOpenedAt = new Map();
+  for (const p of model.participants) {
+    for (const it of (p.bbItems || [])) {
+      if (it.kind !== 'pr' || !it.prId) continue;
+      const ts = Date.parse(it.at || '');
+      if (Number.isFinite(ts)) {
+        // PR может попадаться у автора и у ревьюера — берём самый ранний.
+        const cur = prOpenedAt.get(it.prId);
+        if (cur == null || ts < cur) prOpenedAt.set(it.prId, ts);
+      }
+    }
+  }
+  // Step 2: для каждого review-event считаем delta до opened.
+  const byReviewer = {};      // key → array of hours
+  for (const p of model.participants) {
+    for (const it of (p.bbItems || [])) {
+      if (it.kind !== 'review' || !it.prId) continue;
+      const reviewTs = Date.parse(it.at || '');
+      const openedTs = prOpenedAt.get(it.prId);
+      if (!Number.isFinite(reviewTs) || !Number.isFinite(openedTs)) continue;
+      const deltaH = (reviewTs - openedTs) / 3600000;
+      if (deltaH < 0 || deltaH > METRIC_THRESHOLDS.crvOutlierMaxHours) continue;     // бракуем outliers > 14 дней
+      if (!byReviewer[p.key]) byReviewer[p.key] = [];
+      byReviewer[p.key].push(deltaH);
+    }
+  }
+  // Step 3: median per reviewer.
+  const out = {};
+  for (const [k, arr] of Object.entries(byReviewer)) {
+    arr.sort((a, b) => a - b);
+    const median = arr[Math.floor(arr.length / 2)];
+    out[k] = {
+      medianHours: Math.round(median * 10) / 10,
+      count:       arr.length,
+      threshold:   median > METRIC_THRESHOLDS.crvSlowHours ? 'slow' : median > METRIC_THRESHOLDS.crvWarnHours ? 'warn' : 'ok',
+    };
+  }
+  return out;
+}
+
+/**
+ * V20 S6.3.1 — PR throughput per author за 7 дней.
+ *
+ * Аномалия: opened > 5 ∧ mergeRate < 0.4 = «тонет в правках» / ревьюеры
+ * не пускают.
+ *
+ * Источник: p.bbItems с kind='pr' и status (OPEN / MERGED / DECLINED).
+ * За 7 дней — просто фильтр по at.
+ *
+ * @returns Map<authorKey, { opened, merged, declined, mergeRate, flag }>
+ */
+export function computePrThroughput(model) {
+  if (!model || !Array.isArray(model.participants)) return {};
+  const cutoff = Date.now() - METRIC_THRESHOLDS.prThroughputDays * 86400 * 1000;
+  const out = {};
+  for (const p of model.participants) {
+    let opened = 0, merged = 0, declined = 0;
+    for (const it of (p.bbItems || [])) {
+      if (it.kind !== 'pr') continue;
+      const ts = Date.parse(it.at || '');
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+      const st = String(it.status || '').toUpperCase();
+      opened++;
+      if (st === 'MERGED')        merged++;
+      else if (st === 'DECLINED') declined++;
+    }
+    if (!opened) continue;
+    const mergeRate = merged / opened;
+    out[p.key] = {
+      opened, merged, declined,
+      mergeRate: Math.round(mergeRate * 100) / 100,
+      flag:
+        opened > METRIC_THRESHOLDS.prOverloadOpenedThreshold && mergeRate < METRIC_THRESHOLDS.prOverloadRateThreshold ? 'overload' :
+        mergeRate >= METRIC_THRESHOLDS.prHealthyRateThreshold ? 'healthy' :
+        mergeRate >= 0.4              ? 'slow'    :
+                                         'stalled',
+    };
+  }
+  return out;
+}
+
+/**
+ * V20 S6.3.4 — Cross-team dependencies.
+ *
+ * Detect: сколько PR/коммитов сделано в репозиторий ВНЕ команды автора.
+ * `repo` поле содержит "<projectKey>/<repoSlug>"; берём префикс до '/'.
+ * Сравниваем с p.projects (Jira PK) — если bb pk не пересекается → cross-team.
+ *
+ * Метрика per-team: crossTeamPRs / totalPRs.
+ *
+ * @returns Map<personKey, { crossTeamPRs, totalPRs, ratio }>
+ */
+export function computeCrossTeamDependencies(model) {
+  if (!model || !Array.isArray(model.participants)) return {};
+  const out = {};
+  for (const p of model.participants) {
+    const myPks = new Set([...(p.projects || [])].map(s => String(s).toUpperCase()));
+    let cross = 0, total = 0;
+    for (const it of (p.bbItems || [])) {
+      if (it.kind !== 'pr') continue;
+      total++;
+      const repoPk = String(it.repo || '').split('/')[0].toUpperCase();
+      if (!repoPk) continue;
+      // Сравниваем "BB pk" с Jira pks. В Сбере `bbProjectKeys` (SBOFPL,
+      // SBOF_UFS) часто отличаются от Jira pks (SBOFPLCORE, SMECM ...) —
+      // тут heuristic: если ЛЮБОЙ префикс матчит — это same-team.
+      let matched = false;
+      for (const pk of myPks) {
+        if (repoPk.startsWith(pk) || pk.startsWith(repoPk)) { matched = true; break; }
+      }
+      if (!matched) cross++;
+    }
+    if (!total) continue;
+    out[p.key] = { crossTeamPRs: cross, totalPRs: total, ratio: Math.round((cross / total) * 100) / 100 };
+  }
+  return out;
+}
+
+/**
+ * V20 S6.3.3 — Sprint Goal slope detection.
+ *
+ * Линейная регрессия y=ax+b на массиве дневных snapshots `aggregateProgress`
+ * за последние 14 дней. Возвращает `slope` (% per day), `r2` (goodness),
+ * intercept. Используется для UI «прогресс ↗ +3.2%/день» / «↘ −0.5% — стагнация».
+ *
+ * @param history массив snapshots { ts, sprintGoal: { aggregateProgress } }
+ *               (формат `loadHistory(...)` из teamScanner2History.js)
+ */
+export function computeSprintGoalSlope(history) {
+  if (!Array.isArray(history) || history.length < 3) {
+    return { slope: 0, r2: 0, days: history?.length || 0, trend: 'no-data' };
+  }
+  const cutoff = Date.now() - 14 * 86400 * 1000;
+  const points = history
+    .filter(h => h.ts >= cutoff && Number.isFinite(h.sprintGoal?.aggregateProgress))
+    .map(h => [h.ts / 86400000, h.sprintGoal.aggregateProgress]);
+  if (points.length < 3) return { slope: 0, r2: 0, days: points.length, trend: 'no-data' };
+  // OLS.
+  const n = points.length;
+  const meanX = points.reduce((s, p) => s + p[0], 0) / n;
+  const meanY = points.reduce((s, p) => s + p[1], 0) / n;
+  let num = 0, den = 0, ssTot = 0;
+  for (const [x, y] of points) {
+    num += (x - meanX) * (y - meanY);
+    den += (x - meanX) ** 2;
+    ssTot += (y - meanY) ** 2;
+  }
+  const slope = den !== 0 ? num / den : 0;
+  // R²
+  const intercept = meanY - slope * meanX;
+  let ssRes = 0;
+  for (const [x, y] of points) {
+    const yPred = slope * x + intercept;
+    ssRes += (y - yPred) ** 2;
+  }
+  const r2 = ssTot > 0 ? Math.max(0, 1 - ssRes / ssTot) : 0;
+  // Classify.
+  const trend =
+    Math.abs(slope) < 0.5 ? 'flat' :
+    slope > 0             ? 'up'   :
+                             'down';
+  return {
+    slope: Math.round(slope * 100) / 100,
+    r2:    Math.round(r2 * 100) / 100,
+    days:  n,
+    trend,
+  };
+}
+
+/**
+ * V20 S6.3.2 — Z-score anomaly detection per metric.
+ *
+ * Для history-серии (массив чисел) считает текущий Z-score = (today - μ) / σ
+ * по предыдущим N-1 точкам. |z| > 2 = anomaly.
+ *
+ * @param series массив значений (ASC по времени, today — последнее)
+ * @returns { mean, std, today, z, anomalous }
+ */
+export function computeZScore(series) {
+  if (!Array.isArray(series) || series.length < 4) {
+    return { mean: 0, std: 0, today: 0, z: 0, anomalous: false };
+  }
+  const today = series[series.length - 1];
+  const past = series.slice(0, -1);
+  const mean = past.reduce((s, x) => s + x, 0) / past.length;
+  const variance = past.reduce((s, x) => s + (x - mean) ** 2, 0) / past.length;
+  const std = Math.sqrt(variance);
+  const z = std > 0 ? (today - mean) / std : 0;
+  return {
+    mean: Math.round(mean * 100) / 100,
+    std:  Math.round(std * 100) / 100,
+    today,
+    z:    Math.round(z * 100) / 100,
+    anomalous: Math.abs(z) > 2,
+  };
+}
+
+/**
+ * V20 S6.3.2 — Exponential Moving Average (EMA) + Week-over-Week delta.
+ *
+ * EMA устойчивее к day-of-week шуму чем простое среднее. α=0.3 — рекомендация
+ * tech-expert'а (хороший баланс «реагирует быстро / не дёргается»).
+ *
+ * Возвращает: emaToday, emaLastWeek (7d ago), wowDelta = ema(today) - ema(today-7d).
+ *
+ * @param series ASC-ordered массив daily values (today последнее)
+ * @param alpha EMA smoothing factor (default 0.3)
+ */
+export function computeEmaWoW(series, alpha = 0.3) {
+  if (!Array.isArray(series) || series.length < 8) {
+    return { emaToday: series?.[series.length - 1] ?? 0, emaLastWeek: 0, wowDelta: 0 };
+  }
+  const ema = [];
+  ema[0] = series[0];
+  for (let i = 1; i < series.length; i++) {
+    ema[i] = alpha * series[i] + (1 - alpha) * ema[i - 1];
+  }
+  const emaToday = ema[ema.length - 1];
+  const emaLastWeek = ema[ema.length - 8];
+  return {
+    emaToday: Math.round(emaToday * 10) / 10,
+    emaLastWeek: Math.round(emaLastWeek * 10) / 10,
+    wowDelta: Math.round((emaToday - emaLastWeek) * 10) / 10,
+  };
 }

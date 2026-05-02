@@ -627,6 +627,29 @@ export const EmployeesView = {
       card.appendChild(sectionRow('Bitbucket login',        EmployeesView._buildIdInput(emp, 'bitbucketLogin',      'i.ivanov'),          'Username в Bitbucket. Пусто = «нет аккаунта в BB»'));
       card.appendChild(sectionRow('Confluence accountId',   EmployeesView._buildIdInput(emp, 'confluenceAccountId', '5b10a2844c20165700ede21g'), 'Опционально, для сводок Confluence'));
 
+      // V20 S7 B7 + V20 S8 #11 — Service-account toggle.
+      // Pилот feedback: «toggle для разработчика, не для меня. Я в карточку
+      // захожу что человек делает, а не чтобы его в боты записать». Решение:
+      // спрятали под <details> «Дополнительно» (collapsed by default).
+      const saWrap = document.createElement('details');
+      saWrap.className = 'employee-card-section employee-card-advanced';
+      const saId = `emp-sa-${emp.id}`;
+      saWrap.innerHTML = `
+        <summary class="employee-card-advanced-head">Дополнительно</summary>
+        <div class="employee-card-advanced-body">
+          <label for="${saId}" class="employee-card-sa-label" title="Сервисные аккаунты исключаются из counts Сканнера команд. Pattern auto-detect по jiraKey: cab-sa-*, sbt-*, out-*, svc-*, bot-*. Используйте этот toggle если автодетект ошибся.">
+            <input type="checkbox" id="${saId}" ${emp.isServiceAccount ? 'checked' : ''}>
+            <span>Сервисный аккаунт (бот/SA — исключить из Сканнера команд)</span>
+          </label>
+        </div>
+      `;
+      saWrap.querySelector('input').addEventListener('change', (ev) => {
+        emp.isServiceAccount = !!ev.target.checked;
+        emp.updatedAt = new Date().toISOString();
+        // Reactive proxy сам триггерит save через mutation listener.
+      });
+      card.appendChild(saWrap);
+
       // Footer — meta (sourceType + dates), muted
       const footer=document.createElement('div');
       footer.className='employee-card-footer';

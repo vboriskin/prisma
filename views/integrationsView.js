@@ -88,6 +88,18 @@ function bindSettingsModal() {
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
   }
 
+  // V20 S1.3 — preset-radio для window-hours: показ/скрытие custom-input
+  // и подсветка active-pill.
+  modal.querySelectorAll('input[name="int-cf-window-preset"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      modal.querySelectorAll('.int-window-preset').forEach(lbl =>
+        lbl.classList.toggle('int-window-preset-active',
+          lbl.querySelector('input[type="radio"]')?.checked));
+      const wrap = modal.querySelector('#int-cf-window-custom-wrap');
+      if (wrap) wrap.classList.toggle('hidden', radio.value !== 'custom');
+    });
+  });
+
   // helper — reads global TLS checkbox (shared across tabs)
   const getTls = () => !!(modal.querySelector('#int-global-insecure')?.checked);
   const getSince = () => {
@@ -305,9 +317,21 @@ function bindSettingsModal() {
       const url = modal.querySelector('#int-cf-url')?.value?.trim() || '';
       const tok = modal.querySelector('#int-cf-token')?.value?.trim();
       // V17.2 I2c — space-keys + activityWindowHours.
+      // V20 S1.3 — окно теперь берётся из preset-radio (24/72/168/custom).
+      // Если custom — читаем custom input. Любые ошибки → fallback 72.
       const spaceKeys = modal.querySelector('#int-cf-space-keys')?.value?.trim() || '';
-      const winRaw = modal.querySelector('#int-cf-window-hours')?.value;
-      const winHours = Number(winRaw) || 72;
+      const presetRadio = modal.querySelector('input[name="int-cf-window-preset"]:checked');
+      const presetVal = presetRadio?.value || '72';
+      let winHours;
+      if (presetVal === 'custom') {
+        const winRaw = modal.querySelector('#int-cf-window-hours')?.value;
+        winHours = Number(winRaw) || 72;
+      } else {
+        winHours = Number(presetVal) || 72;
+      }
+      // Server clamps [1,168] in saveSettings; UI redundancy для defense-in-depth.
+      if (!Number.isFinite(winHours) || winHours < 1) winHours = 72;
+      if (winHours > 168) winHours = 168;
       const patch = {
         allowInsecureTls: getTls(),
         sinceDate: getSince(),
@@ -513,6 +537,9 @@ export const IntegrationsView = {
       // V18.1 P1 — TeamScanner 2.0 mount. Mirror of pulse handoff:
       // orchestrator сам решает какое состояние рисовать (cancelled /
       // errored / loading / cached / cold) — render() идемпотентен.
+      // V20 S1.1 — cold mount теперь не auto-fetch'ит: render() рисует
+      // empty-hero с CTA «Загрузить данные». На subtab-возврате с cache
+      // (`_scanner2Loaded && _model`) — instant re-paint через _renderFull.
       const ts2Root = document.getElementById('ts2-root');
       if (ts2Root) {
         TeamScanner2._container = ts2Root;

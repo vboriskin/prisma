@@ -136,3 +136,61 @@ describe('EmployeeFactory round-trip (create → normalize idempotent)', () => {
     assert.equal(snapshot, after, 'normalize must be idempotent');
   });
 });
+
+/* ──────────────────────────────────────────────────────────
+   V20 S4 — Service-account auto-detect (pattern-based)
+   ────────────────────────────────────────────────────────── */
+
+describe('EmployeeFactory.detectServiceAccount — pattern detection', () => {
+  test('cab-sa- prefix → service account', () => {
+    const e = EmployeeFactory.create({ jiraKey: 'cab-sa-jira0008' });
+    assert.equal(e.isServiceAccount, true);
+  });
+
+  test('sbt- prefix → service account', () => {
+    assert.equal(EmployeeFactory.create({ jiraKey: 'sbt-issue-managment-user' }).isServiceAccount, true);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'sbt-sbbol' }).isServiceAccount, true);
+  });
+
+  test('out- prefix → service account', () => {
+    assert.equal(EmployeeFactory.create({ jiraKey: 'out-dinov-rk' }).isServiceAccount, true);
+  });
+
+  test('svc- / bot- / system- prefixes', () => {
+    assert.equal(EmployeeFactory.create({ jiraKey: 'svc-deploy-bot' }).isServiceAccount, true);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'bot-jenkins' }).isServiceAccount, true);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'system-monitoring' }).isServiceAccount, true);
+  });
+
+  test('обычные jirauserNNNN — НЕ service account', () => {
+    assert.equal(EmployeeFactory.create({ jiraKey: 'jirauser1675763' }).isServiceAccount, false);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'ivanov-ii' }).isServiceAccount, false);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'medvedev-vg' }).isServiceAccount, false);
+  });
+
+  test('пустой jiraKey → false (не паникуем)', () => {
+    assert.equal(EmployeeFactory.create({}).isServiceAccount, false);
+  });
+
+  test('явный override true сохраняется (не перезаписываем)', () => {
+    const e = EmployeeFactory.create({ jiraKey: 'ivanov-ii', isServiceAccount: true });
+    assert.equal(e.isServiceAccount, true);
+  });
+
+  test('явный override false сохраняется на bot-pattern', () => {
+    // Если автодетект ошибся — пользователь может вручную убрать флаг.
+    const e = EmployeeFactory.create({ jiraKey: 'sbt-real-person', isServiceAccount: false });
+    assert.equal(e.isServiceAccount, false);
+  });
+
+  test('infix patterns: -bot- / -svc- / -api-', () => {
+    assert.equal(EmployeeFactory.create({ jiraKey: 'team-bot-jira1' }).isServiceAccount, true);
+    assert.equal(EmployeeFactory.create({ jiraKey: 'foo-api-bar' }).isServiceAccount, true);
+  });
+
+  test('detectServiceAccount как чистая функция', () => {
+    assert.equal(EmployeeFactory.detectServiceAccount({ jiraKey: 'sbt-bot' }), true);
+    assert.equal(EmployeeFactory.detectServiceAccount({ jiraKey: 'normal-user' }), false);
+    assert.equal(EmployeeFactory.detectServiceAccount({}), false);
+  });
+});

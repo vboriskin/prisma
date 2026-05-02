@@ -18,7 +18,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { classifyPerson } from '../../integrations/teamScanner2Renderer.js';
+// V20 S8.5 #14 — импорт из нового модуля (single source of truth).
+// Раньше шло через re-export из renderer'а — если кто-то удалил re-export,
+// тест продолжал проходить мимо реальной реализации.
+import { classifyPerson } from '../../integrations/teamScanner2Classifier.js';
 
 /** Build a minimal participant — only fields classifyPerson reads. */
 function mk(over = {}) {

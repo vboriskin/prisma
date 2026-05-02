@@ -107,6 +107,15 @@ export const EmployeeFactory = {
       jiraAccountId: '',
       bitbucketLogin: '',
       confluenceAccountId: '',
+      // V20 S4 — service-account flag. Авто-детект по pattern на jiraKey
+      //   (см. EmployeeFactory.detectServiceAccount). Помогает исключить
+      //   bot/sa-аккаунты (cab-sa-..., sbt-..., out-...) из counts Сканнера
+      //   команд. Override'ится вручную (если автодетект ошибся).
+      // ВНИМАНИЕ: дефолт `null` — сигнал «ещё не классифицирован».
+      // normalize() запустит detectServiceAccount только если null/undefined.
+      // Этим достигается: явный override `true` или `false` через `ov`
+      // переживает normalize, не перетирается auto-detect'ом.
+      isServiceAccount: null,
       sourceType: 'manual',
       createdAt: now,
       updatedAt: now,
@@ -128,6 +137,37 @@ export const EmployeeFactory = {
     emp.jiraAccountId       = String(emp.jiraAccountId       || '').trim();
     emp.bitbucketLogin      = String(emp.bitbucketLogin      || '').trim();
     emp.confluenceAccountId = String(emp.confluenceAccountId || '').trim();
+    // V20 S4 — service-account auto-detect (если не выставлено вручную).
+    //   Если в БД есть явный override (true/false) — не трогаем.
+    //   Иначе (null / undefined) — определяем по pattern.
+    if (emp.isServiceAccount == null) {
+      emp.isServiceAccount = EmployeeFactory.detectServiceAccount(emp);
+    }
     emp.updatedAt = new Date().toISOString();
+  },
+
+  /**
+   * V20 S4 — Pattern-based service account detection.
+   *
+   * Эвристики (упорядочено по уверенности):
+   *   1) jiraKey начинается на cab-sa-, sbt-, sa-, out-, svc-, bot-, system-
+   *   2) jiraKey содержит -sa- / -bot- / -svc- / -api- (e.g. user-api-1)
+   *   3) email пустой И roles пустой И fio пустой/общий — служебный
+   *
+   * Не использует ФИО для match'а — иначе сломаем V17.2 I1c contract.
+   *
+   * @returns {boolean}
+   */
+  detectServiceAccount(emp) {
+    const key = String(emp.jiraKey || emp.jiraAccountId || emp.id || '').toLowerCase();
+    if (!key) return false;
+    // Pattern 1 — service prefixes (наиболее уверенный сигнал).
+    if (/^(cab-sa-|sbt-|sa-|out-dinov-|out-|svc-|bot-|system-)/i.test(key)) return true;
+    // Pattern 2 — service infixes.
+    if (/-(sa|bot|svc|api|system)-/i.test(key)) return true;
+    // Pattern 3 — общие имена ботов (issue-managment, sbbol etc.) — точный список,
+    // не fuzzy-substring чтобы не зацепить настоящих людей.
+    if (/^(sbt-issue-managment-user|sbt-sbbol|cab-sa-jira\d+)$/i.test(key)) return true;
+    return false;
   },
 };
