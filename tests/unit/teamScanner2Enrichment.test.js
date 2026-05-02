@@ -421,6 +421,14 @@ describe('pickDwellThreshold (S2.2)', () => {
     assert.equal(pickDwellThreshold('Testing'),  16);
     assert.equal(pickDwellThreshold('Тестирование'), 16);
   });
+  test('V18.3 A3: «Ready for QA» / «Готов к QA» → 16ч (QA bucket)', () => {
+    assert.equal(pickDwellThreshold('Ready for QA'),    16);
+    assert.equal(pickDwellThreshold('ready for qa'),    16);
+    assert.equal(pickDwellThreshold('Готов к QA'),      16);
+    assert.equal(pickDwellThreshold('готов к qa'),      16);
+    assert.equal(pickDwellThreshold('Готова к QA'),     16);
+    assert.equal(pickDwellThreshold('Готово к QA'),     16);
+  });
   test('In Progress → 48ч', () => {
     assert.equal(pickDwellThreshold('In Progress'), 48);
     assert.equal(pickDwellThreshold('Working'),     48);

@@ -73,11 +73,16 @@ export function getLocalHour(iso, tzOffsetMin) {
   return new Date(adjustedMs).getUTCHours();
 }
 
-/** Pick dwell-threshold for a status name. Fuzzy lowercase match. */
+/** Pick dwell-threshold for a status name. Fuzzy lowercase match.
+ *  V18.3 A3 — добавлен «Ready for QA» / «Готов к QA» в QA-категорию.
+ *  Pilot finding (Ilia QA): «"Ready for QA" — это PR с UI-изменениями
+ *  ждёт smoke-pass; default=24 даёт false-negative, надо 16ч как другой QA».
+ */
 export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESHOLDS) {
   const s = String(statusName || '').toLowerCase();
   if (/code\s*review|peer\s*review|на\s+ревью|ревью\s+кода/.test(s)) return thresholds.codeReview;
-  if (/\bqa\b|\btest(ing)?\b|тестирован/.test(s))                    return thresholds.qa;
+  // QA-bucket: covers Ready for QA / Готов к QA / Testing / Тестирование / QA
+  if (/\bqa\b|\btest(ing)?\b|тестирован|ready\s+for\s+qa|готов(а|о)?\s+к\s+qa/.test(s)) return thresholds.qa;
   if (/in\s*progress|\bworking\b|\bdoing\b|в\s+работе|разработ/.test(s)) return thresholds.inProgress;
   if (/\btodo\b|to\s*do|\bopen\b|\bnew\b|открыт|новая/.test(s))      return thresholds.todo;
   return thresholds.default;
