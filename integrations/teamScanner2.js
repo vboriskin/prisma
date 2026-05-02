@@ -222,12 +222,21 @@ export const TeamScanner2 = {
     if (!root) return;
     root.querySelector('#ts2-refresh-btn')?.addEventListener('click', () => this.refresh());
     // Click по строке → открыть/закрыть side-panel.
+    // V18.1 P7-S1.5 — keyboard activation: Enter/Space на focused row
+    // эмулируют click. Закрывает WCAG 2.1.1 (keyboard accessibility).
     root.querySelectorAll('.ts2-row[data-key]').forEach(el => {
-      el.addEventListener('click', (e) => {
+      const activate = (e) => {
         if (e.target.closest('a, button')) return;
         const key = el.dataset.key;
         this._expandedKey = (this._expandedKey === key) ? '' : key;
         this._renderFull();
+      };
+      el.addEventListener('click', activate);
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          activate(e);
+        }
       });
     });
     // V18.1 P5 — close: ✕ button, backdrop click, Esc key.

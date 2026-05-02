@@ -488,11 +488,17 @@ function renderSparkline(spark) {
 }
 
 function renderFilters(filters, rowTotals) {
+  // V18.1 P7-S1.6 — aria-pressed для toggle-state, чтобы NVDA/JAWS озвучивал
+  // «Jira нажато» / «Confluence не нажато». Закрывает WCAG 4.1.2 (Name,
+  // Role, Value).
   const pills = SRC_KEYS.map((k, i) => {
     const active = filters[k] !== false;
     const total = rowTotals[i] || 0;
     return `
-      <button class="ts2-filter-pill ${active ? 'ts2-filter-pill-on' : 'ts2-filter-pill-off'}" data-filter="${k}" type="button">
+      <button class="ts2-filter-pill ${active ? 'ts2-filter-pill-on' : 'ts2-filter-pill-off'}"
+              data-filter="${k}" type="button"
+              aria-pressed="${active ? 'true' : 'false'}"
+              aria-label="${SRC_NAMES[i]} · ${total} событий, ${active ? 'фильтр активен' : 'фильтр выключен'}">
         <span class="ts2-filter-pill-key">${SRC_LABELS[i]}</span>
         <span class="ts2-filter-pill-name">${SRC_NAMES[i]}</span>
         <span class="ts2-filter-pill-num">${total}</span>
