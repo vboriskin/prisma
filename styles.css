@@ -11989,16 +11989,15 @@ body.theme-dark .ts2-row-src-z { border-left-color: #c084fc; }
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
-/* V18.1 P7-S3.3 — source J/B/C/Z monochrome (designer finding):
-   amber/red palette зарезервирован за status-семантикой (watch/stop).
-   Source кодируется ТОЛЬКО border-left цветом + 9px buchstabe; текст
-   везде text-2. Avoids confusion «amber pill C = ? Confluence или
-   watch-статус?». */
-.ts2-recent-src-j { border-left: 2px solid var(--accent); }
-.ts2-recent-src-b { border-left: 2px solid #16a34a; }
-.ts2-recent-src-c { border-left: 2px solid #d97706; }
-.ts2-recent-src-z { border-left: 2px solid #9333ea; }
-/* Dark-theme contrast fix for letter visibility on dark cards. */
+/* V18.1 P7-S3.3 — source monochrome (designer finding): border-left цвет +
+   text-2 везде. Avoids confusion со status-палитрой (amber/red/green).
+   V18.3 A2 — Zephyr split: Zc (purple-cyan tone), Ze (purple-pink tone). */
+.ts2-recent-src-j  { border-left: 2px solid var(--accent); }
+.ts2-recent-src-b  { border-left: 2px solid #16a34a; }
+.ts2-recent-src-c  { border-left: 2px solid #d97706; }
+.ts2-recent-src-zc { border-left: 2px solid #6366f1; }   /* indigo — Zephyr-планы */
+.ts2-recent-src-ze { border-left: 2px solid #9333ea; }   /* purple — Zephyr-прогоны */
+/* Dark-theme contrast fix */
 body.theme-dark .ts2-recent-src { color: var(--text-2); }
 .ts2-recent-kind {
   font-size: 10px; letter-spacing: .3px; text-transform: uppercase;
@@ -12043,12 +12042,13 @@ body.theme-dark .ts2-recent-src { color: var(--text-2); }
   border: 0;
 }
 
-/* V18.1 P7-S3.1 — dark-theme contrast fix для source-borders.
+/* V18.1 P7-S3.1 + V18.3 A2 — dark-theme contrast fix для source-borders.
    AA-tested: каждый цвет ≥ 4.5:1 на dark card (#121a2f). */
-body.theme-dark .ts2-recent-src-j { border-left-color: #818cf8; }   /* indigo-400 */
-body.theme-dark .ts2-recent-src-b { border-left-color: #34d399; }   /* emerald-400 */
-body.theme-dark .ts2-recent-src-c { border-left-color: #fbbf24; }   /* amber-400 */
-body.theme-dark .ts2-recent-src-z { border-left-color: #c084fc; }   /* purple-400 */
+body.theme-dark .ts2-recent-src-j  { border-left-color: #818cf8; }   /* indigo-400 */
+body.theme-dark .ts2-recent-src-b  { border-left-color: #34d399; }   /* emerald-400 */
+body.theme-dark .ts2-recent-src-c  { border-left-color: #fbbf24; }   /* amber-400 */
+body.theme-dark .ts2-recent-src-zc { border-left-color: #a5b4fc; }   /* indigo-300 — Zc */
+body.theme-dark .ts2-recent-src-ze { border-left-color: #c084fc; }   /* purple-400 — Ze */
 
 /* Dark theme adjustments */
 body.theme-dark .ts2-panel { background: var(--card, #121a2f); }

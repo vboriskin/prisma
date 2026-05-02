@@ -69,8 +69,9 @@ function makeParticipant(over = {}) {
     loggedYesterdaySec: 0,
     loggedDayBeforeSec: 0,
     heatmap72x4: {
-      grid: [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)],
-      rowTotals: [0, 0, 0, 0],
+      // V18.3 A2: 5 sources (J/B/C/Zc/Ze)
+      grid: [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)],
+      rowTotals: [0, 0, 0, 0, 0],
       colTotals: new Array(72).fill(0),
       peakCell: null,
     },
@@ -134,12 +135,12 @@ describe('renderEmployeeDetailPanel — happy path', () => {
   });
 
   test('peakCell в heatmap получает .ts2-hcell-peak class', () => {
-    const grid = [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)];
+    const grid = [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)];
     grid[0][50] = 5;
     const p = makeParticipant({
       heatmap72x4: {
         grid,
-        rowTotals: [5, 0, 0, 0],
+        rowTotals: [5, 0, 0, 0, 0],
         colTotals: new Array(72).fill(0),
         peakCell: { srcIdx: 0, hourIndex: 50, count: 5 },
       },
@@ -150,10 +151,10 @@ describe('renderEmployeeDetailPanel — happy path', () => {
   });
 
   test('saturation outline (>=4 events) добавляет .ts2-hcell-saturated', () => {
-    const grid = [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)];
+    const grid = [new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0), new Array(72).fill(0)];
     grid[0][30] = 7;   // saturation
     const p = makeParticipant({
-      heatmap72x4: { grid, rowTotals: [7, 0, 0, 0], colTotals: new Array(72).fill(0), peakCell: null },
+      heatmap72x4: { grid, rowTotals: [7, 0, 0, 0, 0], colTotals: new Array(72).fill(0), peakCell: null },
     });
     const model = makeModel({ participants: [p] });
     const html = renderEmployeeDetailPanel(model, 'u1', { filters: { j: true, b: true, c: true, z: true } });

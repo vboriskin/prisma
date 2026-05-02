@@ -327,12 +327,12 @@ describe('computeBlockers', () => {
 /* ── computeHeatmap72x4 (P5) ─────────────────────────────── */
 
 describe('computeHeatmap72x4', () => {
-  test('пустой → grid 4×72 нулей, peakCell=null', () => {
+  test('пустой → grid 5×72 нулей, peakCell=null (V18.3 A2)', () => {
     const h = computeHeatmap72x4(mk());
-    assert.equal(h.grid.length, 4);
+    assert.equal(h.grid.length, 5);   // V18.3 A2: 5 sources (J/B/C/Zc/Ze)
     assert.equal(h.grid[0].length, 72);
     assert.equal(h.grid[0][0], 0);
-    assert.deepEqual(h.rowTotals, [0, 0, 0, 0]);
+    assert.deepEqual(h.rowTotals, [0, 0, 0, 0, 0]);
     assert.equal(h.peakCell, null);
   });
 
@@ -349,23 +349,25 @@ describe('computeHeatmap72x4', () => {
   test('event > 72ч → игнорируется', () => {
     const ago100h = new Date(Date.now() - 100 * 3600 * 1000).toISOString();
     const h = computeHeatmap72x4(mk({ timelineToday: [ev(ago100h, 'A')] }));
-    assert.deepEqual(h.rowTotals, [0, 0, 0, 0]);
+    assert.deepEqual(h.rowTotals, [0, 0, 0, 0, 0]);   // V18.3 A2: 5 sources
   });
 
-  test('источники J/B/C/Z разводятся по строкам', () => {
+  test('источники J/B/C/Zc/Ze разводятся по 5 строкам (V18.3 A2 split)', () => {
     const ago1h = new Date(Date.now() - 1 * 3600 * 1000 - 60_000).toISOString();
     const p = mk({
       timelineToday:               [ev(ago1h, 'A')],
       bbItems:                     [{ at: ago1h, kind: 'pr' }],
       cfItems:                     [{ at: ago1h, kind: 'edit' }],
       zephyrTestsCreatedRecent:    [{ at: ago1h, kind: 'test' }],
-      zephyrTestsExecutedRecent:   [{ at: ago1h, kind: 'test', result: 'PASS' }],
+      zephyrTestsExecutedRecent:   [{ at: ago1h, kind: 'testExec', result: 'PASS' }],
     });
     const h = computeHeatmap72x4(p);
+    assert.equal(h.grid.length, 5, '5 source rows after V18.3 A2 split');
     assert.equal(h.rowTotals[0], 1, 'jira');
     assert.equal(h.rowTotals[1], 1, 'bb');
     assert.equal(h.rowTotals[2], 1, 'cf');
-    assert.equal(h.rowTotals[3], 2, 'zephyr (created + executed)');
+    assert.equal(h.rowTotals[3], 1, 'zephyr-created (Zc) — only test/testSet');
+    assert.equal(h.rowTotals[4], 1, 'zephyr-executed (Ze) — only testExec');
   });
 
   test('colTotals = sum по 4 источникам в колонке', () => {

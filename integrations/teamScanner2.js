@@ -47,9 +47,9 @@ export const TeamScanner2 = {
   // Раньше (P1-P3) был inline-expand под строкой — теперь полноценный
   // slide-in. Закрытие по: ✕, click-on-row-again, Esc.
   _expandedKey: '',
-  // P5 source filters — toggle pill'ы J/B/C/Z в panel'е. Persist'ятся
-  // между переоткрытиями panel'и в одной сессии.
-  _panelFilters: { j: true, b: true, c: true, z: true },
+  // P5 source filters — toggle pill'ы в panel'е. V18.3 A2: Zephyr split на
+  // Zc (created) и Ze (executed). 5 источников total.
+  _panelFilters: { j: true, b: true, c: true, zc: true, ze: true },
   // V18.1 P7-S4.1 — multi-team view toggle. 'team' = single (legacy),
   // 'multi' = aggregate per-team table. Pilot Dmitry blocker fix.
   _activeView: 'team',

@@ -653,9 +653,11 @@ function renderRow(p, isExpanded) {
 
 /* ── Detail panel (V18.1 P5) — slide-in 480px справа ────── */
 
-const SRC_LABELS = ['J', 'B', 'C', 'Z'];
-const SRC_NAMES  = ['Jira', 'Bitbucket', 'Confluence', 'Zephyr'];
-const SRC_KEYS   = ['j', 'b', 'c', 'z'];
+// V18.3 A2 — Zephyr split на Created (Zc) и Executed (Ze).
+// Pilot finding (Ilia QA): семантически разные — план vs прогон.
+const SRC_LABELS = ['J',    'B',         'C',          'Zc',             'Ze'];
+const SRC_NAMES  = ['Jira', 'Bitbucket', 'Confluence', 'Zephyr-планы',   'Zephyr-прогоны'];
+const SRC_KEYS   = ['j',    'b',         'c',          'zc',             'ze'];
 
 /**
  * Side-panel с heatmap 72×4, sparkline, blockers, событиями и фильтрами.
@@ -673,23 +675,34 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
       </div>
     `;
   }
-  const filters = ctx.filters || { j: true, b: true, c: true, z: true };
+  const filters = ctx.filters || { j: true, b: true, c: true, zc: true, ze: true };
   const tToday = (p.timelineToday    || []).length;
   const tYest  = (p.timelineYesterday || []).length;
   const tPrev  = (p.timelinePrev      || []).length;
-  const heat72 = p.heatmap72x4 || { grid: [[],[],[],[]], rowTotals: [0,0,0,0], colTotals: [], peakCell: null };
+  // V18.3 A2 — heatmap72x4 теперь 5 источников (J/B/C/Zc/Ze). Backward-compat
+  // fallback: если raw 4-элементное (старый snapshot/server cached) —
+  // дополняем 5-м пустым row.
+  let heat72 = p.heatmap72x4 || { grid: [[],[],[],[],[]], rowTotals: [0,0,0,0,0], colTotals: [], peakCell: null };
+  if (heat72.grid && heat72.grid.length === 4) {
+    heat72 = { ...heat72, grid: [...heat72.grid, []], rowTotals: [...(heat72.rowTotals || [0,0,0,0]), 0] };
+  }
   // V18.1 P7-S2.5 — sparkline удалён, peak-hour перенесён в heatmap hint.
   const cs     = p.contextSwitches || { distinctIssueKeys: 0, switchEvents: [], switchScore: 0 };
   const blockers = Array.isArray(p.blockers) ? p.blockers : [];
 
   const tl = Array.isArray(p.timeline72h) ? p.timeline72h : [];
-  // V18.1 P6.2 — фильтр J/B/C/Z теперь применяется и к events feed (не
-  // только к heatmap row dim'у). Если какой-то источник off — события
-  // оттуда скрываются. Все 4 source'а присутствуют после расширенного
-  // computeTimeline72h.
-  const SRC_TO_FLAG = { jira: 'j', bb: 'b', cf: 'c', zephyr: 'z' };
+  // V18.1 P6.2 + V18.3 A2 — фильтр применяется и к events feed.
+  // Zephyr split: kind ∈ {test, testSet} → zc (created); kind ∈ {testExec,
+  // execution} → ze (executed). Default any zephyr → ze (более частый).
+  const isZephyrCreated = (k) => k === 'test' || k === 'testSet';
   const filteredTl = tl.filter(e => {
-    const flag = SRC_TO_FLAG[e?.src] || 'j';
+    const src = e?.src || 'jira';
+    let flag;
+    if      (src === 'jira') flag = 'j';
+    else if (src === 'bb')   flag = 'b';
+    else if (src === 'cf')   flag = 'c';
+    else if (src === 'zephyr') flag = isZephyrCreated(e?.kind) ? 'zc' : 'ze';
+    else flag = 'j';
     return filters[flag] !== false;
   });
 
@@ -922,7 +935,7 @@ function renderEventsFeed(timeline72h) {
 function renderEventLine(e) {
   const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
   const src = e?.src || 'jira';
-  const srcBadge = renderSrcBadge(src);
+  const srcBadge = renderSrcBadge(src, e?.kind);
   let body = '';
   // V18.1 P7-S1.4 — все references на issue/PR/page кликабельны через
   // настоящие <a href>. Без этого инструмент только смотрит, не работает.
@@ -950,7 +963,8 @@ function renderEventLine(e) {
       : esc(titleText);
     body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${space} <span class="ts2-recent-text">${titleHtml}</span>`;
   } else if (src === 'zephyr') {
-    const kind = e.kind || 'test';
+    // V18.3 A2 — kind ∈ {test, testSet} → Zc badge; иначе Ze.
+    const kind = e.kind || 'testExec';
     const result = e.result ? ` · ${esc(e.result)}` : '';
     const slimKey = e?.slim?.key;
     const titleText = (e?.slim?.summary || e.title || '').slice(0, 80);
@@ -964,10 +978,19 @@ function renderEventLine(e) {
   return `<li class="ts2-recent-li">${srcBadge}<span class="ts2-recent-at">${esc(at)}</span> ${body}</li>`;
 }
 
-function renderSrcBadge(src) {
-  const map = { jira: { l: 'J', cls: 'src-j' }, bb: { l: 'B', cls: 'src-b' }, cf: { l: 'C', cls: 'src-c' }, zephyr: { l: 'Z', cls: 'src-z' } };
-  const m = map[src] || map.jira;
-  return `<span class="ts2-recent-src ts2-recent-${m.cls}" title="${esc(src)}">${m.l}</span>`;
+function renderSrcBadge(src, kind) {
+  // V18.3 A2 — Zephyr split: kind ∈ {test, testSet} → Zc, иначе Ze.
+  const isZc = src === 'zephyr' && (kind === 'test' || kind === 'testSet');
+  const map = {
+    jira:  { l: 'J',  cls: 'src-j' },
+    bb:    { l: 'B',  cls: 'src-b' },
+    cf:    { l: 'C',  cls: 'src-c' },
+    zc:    { l: 'Zc', cls: 'src-zc' },
+    ze:    { l: 'Ze', cls: 'src-ze' },
+  };
+  const key = src === 'zephyr' ? (isZc ? 'zc' : 'ze') : src;
+  const m = map[key] || map.jira;
+  return `<span class="ts2-recent-src ts2-recent-${m.cls}" title="${esc(key)}">${m.l}</span>`;
 }
 
 function kindLabel(src, kind) {

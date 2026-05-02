@@ -471,32 +471,37 @@ export function computeRiskSummary(model) {
 /**
  * Returns:
  *   {
- *     grid: [J[72], B[72], C[72], Z[72]],   // chronological: [0]=oldest, [71]=now-1h
- *     rowTotals: [j, b, c, z],
+ *     grid: [J[72], B[72], C[72], Zc[72], Ze[72]],  // chronological: [0]=oldest, [71]=now-1h
+ *     rowTotals: [j, b, c, zc, ze],
  *     colTotals: number[72],
  *     peakCell: { srcIdx, hourIndex, count } | null,
  *   }
- * Sources:
- *   J = jira (timeline events, kind ∈ {transition, comment, worklog, ...})
- *   B = bitbucket (p.bbItems[])
- *   C = confluence (p.cfItems[])
- *   Z = zephyr (p.zephyrTestsCreatedRecent + p.zephyrTestsExecutedRecent)
+ * Sources (V18.3 A2 — Zephyr split):
+ *   0 = J  jira (timeline events: transition, comment, worklog, ...)
+ *   1 = B  bitbucket (p.bbItems[])
+ *   2 = C  confluence (p.cfItems[])
+ *   3 = Zc zephyr-created  (p.zephyrTestsCreatedRecent — QA пишет план)
+ *   4 = Ze zephyr-executed (p.zephyrTestsExecutedRecent — регрессия идёт)
  *
  * Bucketing — rolling 72-hour window от Date.now() назад. Каждый bucket =
  * 1 час. hourIndex 71 = последний завершённый час, hourIndex 0 = час 72ч
  * назад. События старше 72ч игнорируются.
+ *
+ * Field name `heatmap72x4` сохранён для backward compat (existing tests +
+ * server employee-detail response shape). Семантически массив теперь
+ * 5×72 — UI и тесты должны итерировать по `grid.length`, не hardcode'ить 4.
  */
 export function computeHeatmap72x4(p, _tzOffsetMin) {
   // Note: heatmap72x4 строится через rolling 72-hour window (now backwards),
   // не через "hour-of-day", поэтому tzOffsetMin тут не нужен — `hoursAgo`
   // вычисляется через absolute timestamp diff. Принимаем параметр для
-  // signature-симметрии с computeHeatmap (чтобы enrichForScanner2 мог
-  // прокидывать единообразно), но не используем.
+  // signature-симметрии с computeHeatmap.
   const grid = [
     new Array(72).fill(0),  // 0 = jira
     new Array(72).fill(0),  // 1 = bb
     new Array(72).fill(0),  // 2 = cf
-    new Array(72).fill(0),  // 3 = zephyr
+    new Array(72).fill(0),  // 3 = zephyr-created (V18.3 A2)
+    new Array(72).fill(0),  // 4 = zephyr-executed (V18.3 A2)
   ];
   const HOUR_MS = 3600 * 1000;
   const nowMs = Date.now();
@@ -511,26 +516,24 @@ export function computeHeatmap72x4(p, _tzOffsetMin) {
     grid[srcIdx][idx]++;
   };
 
-  // Jira — все timeline events с issue (исключаем bb/cf/zephyr-источники
-  // если они вдруг попали в timelineToday — у нас kind === 'transition' и т.п.)
   for (const arr of [p?.timelineToday || [], p?.timelineYesterday || [], p?.timelinePrev || []]) {
     for (const e of arr) drop(0, e?.at);
   }
-  // Bitbucket
   for (const it of (p?.bbItems || [])) drop(1, it?.at);
-  // Confluence
   for (const it of (p?.cfItems || [])) drop(2, it?.at);
-  // Zephyr
+  // V18.3 A2 — Zephyr split: created → row 3, executed → row 4.
+  // Pilot finding (Ilia QA): «create = QA пишет план, execute = регрессия
+  // идёт. Семантически разное».
   for (const it of (p?.zephyrTestsCreatedRecent  || [])) drop(3, it?.at);
-  for (const it of (p?.zephyrTestsExecutedRecent || [])) drop(3, it?.at);
+  for (const it of (p?.zephyrTestsExecutedRecent || [])) drop(4, it?.at);
 
   const rowTotals = grid.map(row => row.reduce((s, n) => s + n, 0));
   const colTotals = new Array(72).fill(0);
   for (let h = 0; h < 72; h++) {
-    for (let s = 0; s < 4; s++) colTotals[h] += grid[s][h];
+    for (let s = 0; s < grid.length; s++) colTotals[h] += grid[s][h];
   }
   let peakCell = null;
-  for (let s = 0; s < 4; s++) {
+  for (let s = 0; s < grid.length; s++) {
     for (let h = 0; h < 72; h++) {
       if (grid[s][h] > 0 && (!peakCell || grid[s][h] > peakCell.count)) {
         peakCell = { srcIdx: s, hourIndex: h, count: grid[s][h] };
