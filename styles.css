@@ -11452,6 +11452,9 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   font-size: 9px; letter-spacing: .5px; text-transform: uppercase;
   color: var(--text-4, #94a3b8); margin-top: 1px;
 }
+/* V18.1 P7-S4.3 — WIP overcommit indicator (≥3 amber, ≥4 warn). */
+.ts2-counter-amber .ts2-counter-num { color: var(--warning, #f59e0b); }
+.ts2-counter-warn  .ts2-counter-num { color: var(--danger,  #dc2626); }
 
 .ts2-chev { color: var(--text-4, #94a3b8); font-size: 14px; text-align: center; }
 

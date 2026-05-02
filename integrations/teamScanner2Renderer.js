@@ -402,6 +402,12 @@ function renderRow(p, isExpanded) {
     ...(p.timelineYesterday || []),
   ].map(e => e?.issue?.key).filter(Boolean)).size);
   const hoursToday  = fmtHours(p.loggedTodaySec || 0);
+  // V18.1 P7-S4.3 — WIP counter (issuesNow). Manager + Anna + Dmitry
+  // pilot finding: «Команды равномерно загружены? — не закрыто. WIP-counter
+  // в classifier работает (≥3 → watch), но числом не показан».
+  // ≥3 → подсвечиваем amber (overcommit signal).
+  const wipN  = (p.issuesNow || []).length;
+  const wipCls = wipN >= 4 ? 'ts2-counter ts2-counter-warn' : (wipN >= 3 ? 'ts2-counter ts2-counter-amber' : 'ts2-counter');
   // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
   const switches = p.contextSwitches?.switchEvents?.length || 0;
   const maxDwell = (p.blockers && p.blockers[0]?.dwellHours) || 0;
@@ -425,6 +431,7 @@ function renderRow(p, isExpanded) {
       <span class="ts2-strip-wrap ts2-strip-wrap-yest">${yestBlock}</span>
       ${badges}
       <span class="ts2-counters">
+        <span class="${wipCls}" title="Активные задачи (WIP). Норма ≤2, перегрузка ≥3."><span class="ts2-counter-num">${wipN}</span><span class="ts2-counter-lab">WIP</span></span>
         <span class="ts2-counter" title="PR за 48ч"><span class="ts2-counter-num">${prsCount}</span><span class="ts2-counter-lab">PR</span></span>
         <span class="ts2-counter" title="Задач затронуто за 72ч"><span class="ts2-counter-num">${tasksTouchN}</span><span class="ts2-counter-lab">задач</span></span>
         <span class="ts2-counter" title="Залогировано сегодня (часов)"><span class="ts2-counter-num">${hoursToday}</span><span class="ts2-counter-lab">ч</span></span>
