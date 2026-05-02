@@ -29,6 +29,7 @@ import {
   computeSparkline72h,
   pickDwellThreshold,
   DEFAULT_DWELL_THRESHOLDS,
+  getLocalHour,
 } from '../../integrations/teamScanner2Enrichment.js';
 
 /* ── Helpers — конструируем event'ы и participant'ов ──────── */
@@ -491,6 +492,85 @@ describe('computeBlockers с differential thresholds (S2.2)', () => {
     const out = computeBlockers({ jiraAccountId: 'u1', email: 'u1@e.com' }, idx,
                                  DEFAULT_DWELL_THRESHOLDS);
     assert.equal(out[0].thresholdHours, 8);
+  });
+});
+
+/* ── V18.1 P7-S2.3: TZ-aware heatmap ─────────────────────── */
+
+describe('getLocalHour (S2.3)', () => {
+  test('UTC ISO 11:00, offset 0 (UTC) → 11', () => {
+    assert.equal(getLocalHour('2026-05-02T11:00:00Z', 0), 11);
+  });
+  test('UTC ISO 11:00, offset -180 (МСК UTC+3) → 14', () => {
+    assert.equal(getLocalHour('2026-05-02T11:00:00Z', -180), 14);
+  });
+  test('UTC ISO 11:00, offset 480 (PST UTC-8) → 3', () => {
+    // PST = UTC-8, поэтому Date.getTimezoneOffset() = +480 (минут WEST of UTC).
+    // 11:00 UTC = 03:00 PST.
+    assert.equal(getLocalHour('2026-05-02T11:00:00Z', 480), 3);
+  });
+  test('UTC ISO 23:00, offset -180 (МСК) → wraps to 02 next day', () => {
+    // 23:00 UTC + 3h = 02:00 next day МСК
+    assert.equal(getLocalHour('2026-05-02T23:00:00Z', -180), 2);
+  });
+  test('undefined offset → environment-local Date.getHours()', () => {
+    // Не можем предсказать значение без знания env TZ, но проверяем что
+    // возвращает int в диапазоне 0..23.
+    const h = getLocalHour('2026-05-02T11:00:00Z');
+    assert.ok(h >= 0 && h < 24);
+  });
+  test('invalid ISO → -1', () => {
+    assert.equal(getLocalHour('not-iso', 0), -1);
+    assert.equal(getLocalHour('', 0), -1);
+  });
+});
+
+describe('computeHeatmap c tzOffsetMin (S2.3)', () => {
+  test('event UTC 11:00 в МСК-TZ (offset -180) → grid[0][14]', () => {
+    const p = {
+      timelineToday:     [{ at: '2026-05-02T11:00:00Z', kind: 'transition' }],
+      timelineYesterday: [],
+      timelinePrev:      [],
+    };
+    const h = computeHeatmap(p, -180);
+    assert.equal(h.grid[0][14], 1, 'event сместился в час 14:00 МСК');
+    assert.equal(h.peakHour, 14);
+  });
+  test('тот же event без tzOffsetMin → grid[0][env-local-hour]', () => {
+    const p = {
+      timelineToday:     [{ at: '2026-05-02T11:00:00Z', kind: 'transition' }],
+      timelineYesterday: [],
+      timelinePrev:      [],
+    };
+    const h = computeHeatmap(p);
+    // Не зависит от env TZ — просто проверяем что какой-то час засчитан.
+    const total = h.grid[0].reduce((a, b) => a + b, 0);
+    assert.equal(total, 1);
+  });
+});
+
+describe('enrichForScanner2 c tzOffsetMin (S2.3)', () => {
+  test('передаёт offset в computeHeatmap + scannerV2.tzOffsetMin', () => {
+    const model = { participants: [{
+      timelineToday:     [{ at: '2026-05-02T11:00:00Z' }],
+      timelineYesterday: [], timelinePrev: [],
+      bbItems: [], cfItems: [],
+      zephyrTestsCreatedRecent: [], zephyrTestsExecutedRecent: [],
+    }]};
+    enrichForScanner2(model, null, { tzOffsetMin: -180 });
+    assert.equal(model.scannerV2.tzOffsetMin, -180);
+    assert.equal(model.scannerV2.serverLocalTZ, false);
+    assert.equal(model.participants[0].heatmap.grid[0][14], 1);
+  });
+  test('без tzOffsetMin → tzOffsetMin=null + serverLocalTZ=true', () => {
+    const model = { participants: [{
+      timelineToday: [], timelineYesterday: [], timelinePrev: [],
+      bbItems: [], cfItems: [],
+      zephyrTestsCreatedRecent: [], zephyrTestsExecutedRecent: [],
+    }]};
+    enrichForScanner2(model);
+    assert.equal(model.scannerV2.tzOffsetMin, null);
+    assert.equal(model.scannerV2.serverLocalTZ, true);
   });
 });
 

@@ -112,6 +112,8 @@ export const TeamScanner2 = {
       jobId:       this._jobId,
       employeeKey,
       dwellHours:  opts.dwellHours,
+      // V18.1 P7-S2.3 — пробрасываем browser TZ для consistent heatmap.
+      tzOffsetMin: this._tzOffsetMin ?? new Date().getTimezoneOffset(),
       timeoutMs:   opts.timeoutMs || 30000,
     });
     this._detailCache.set(cacheKey, detail);
@@ -176,7 +178,14 @@ export const TeamScanner2 = {
       // (с server-local-TZ часами и единым 24h dwell-threshold). v1 НЕ
       // запускает enrichment — нулевой impact для PortfolioPulse.
       const baseModel = analysePulse(raw, { staleDays, employees: state.employees || [] });
-      this._model = enrichForScanner2(baseModel, raw, { dwellHours: 24 });
+      // V18.1 P7-S2.3 — browser TZ offset для consistent heatmap. Сохраняем
+      // в orchestrator state чтобы потом передать в /employee-detail (server
+      // должен пересчитать heatmap в browser-TZ, иначе drill-down съедет).
+      this._tzOffsetMin = new Date().getTimezoneOffset();
+      this._model = enrichForScanner2(baseModel, raw, {
+        dwellHours: 24,
+        tzOffsetMin: this._tzOffsetMin,
+      });
       this._cancelled = false;
       this._errorMsg  = '';
       this._renderFull();

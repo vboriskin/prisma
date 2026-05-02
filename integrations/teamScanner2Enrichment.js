@@ -47,6 +47,32 @@ export const DEFAULT_DWELL_THRESHOLDS = {
   default:    24,   // Все остальные non-terminal — fallback
 };
 
+/**
+ * V18.1 P7-S2.3 — TZ-aware hour extraction.
+ *
+ * Контекст: enrichment запускается и на КЛИЕНТЕ (browser TZ), и на
+ * СЕРВЕРЕ (server TZ, обычно UTC в k8s-deployment). Без offset'а
+ * heatmap «съезжает»: пик 14:00 МСК показывается в часе 11:00 при
+ * server-side drill-down /employee-detail.
+ *
+ * Решение: client передаёт `Date.getTimezoneOffset()` (минуты WEST of
+ * UTC; для МСК = -180) в /employee-detail body, server использует.
+ *
+ * @param {string} iso ISO timestamp («2026-05-02T11:00:00Z»)
+ * @param {number} [tzOffsetMin] минуты WEST of UTC (как от Date.getTimezoneOffset()).
+ *   undefined → используется environment-local Date.getHours() (для in-browser fetch).
+ * @returns {number} 0..23 hour-of-day в нужной TZ
+ */
+export function getLocalHour(iso, tzOffsetMin) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return -1;
+  if (typeof tzOffsetMin !== 'number') return d.getHours();
+  // utcMs - offsetMin*60000 → adjusted to user's TZ when read as UTC.
+  // tzOffsetMin = -180 (МСК) → utcMs - (-180)*60000 = utcMs + 180min = correctly +3h.
+  const adjustedMs = d.getTime() - tzOffsetMin * 60 * 1000;
+  return new Date(adjustedMs).getUTCHours();
+}
+
 /** Pick dwell-threshold for a status name. Fuzzy lowercase match. */
 export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESHOLDS) {
   const s = String(statusName || '').toLowerCase();
@@ -81,21 +107,26 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
 
   const assigneeIndex = rawReports ? buildAssigneeIndex(rawReports) : null;
 
+  // V18.1 P7-S2.3 — tzOffsetMin прокидывается во все TZ-зависимые
+  // computations. Если не передан — используется environment-local Date.
+  const tz = (typeof opts.tzOffsetMin === 'number') ? opts.tzOffsetMin : null;
+
   for (const p of model.participants) {
-    p.heatmap         = computeHeatmap(p);
+    p.heatmap         = computeHeatmap(p, tz);
     p.contextSwitches = computeContextSwitches(p);
-    p.timeline72h     = computeTimeline72h(p);
+    p.timeline72h     = computeTimeline72h(p, tz);
     p.blockers        = assigneeIndex ? computeBlockers(p, assigneeIndex, thresholds) : [];
     // V18.1 P5 — расширенные сигналы для side-panel:
-    p.heatmap72x4     = computeHeatmap72x4(p);   // 4 sources × 72 hours
-    p.sparkline72h    = computeSparkline72h(p);  // 72 значений events/час (deprecated в S2.5)
+    p.heatmap72x4     = computeHeatmap72x4(p, tz);   // 4 sources × 72 hours
+    p.sparkline72h    = computeSparkline72h(p);      // 72 значений events/час (deprecated в S2.5)
   }
 
   model.scannerV2 = {
     enrichedAt: Date.now(),
     dwellThresholdHours: dwellHours,    // backward-compat (default fallback)
     dwellThresholds: thresholds,        // V18.1 P7-S2.2 — full map
-    serverLocalTZ: true,                // P3 fixed; P4+ может стать browser TZ
+    tzOffsetMin: tz,                    // V18.1 P7-S2.3 — null = environment-local
+    serverLocalTZ: tz === null,         // если null → server local; иначе TZ-aware
     switchGapSec: SWITCH_GAP_SEC,
   };
   return model;
@@ -110,7 +141,7 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
  *   grid[0] = today, grid[1] = yesterday, grid[2] = day-before
  *   Hour bucket = `Date.getHours()` (server local).
  */
-export function computeHeatmap(p) {
+export function computeHeatmap(p, tzOffsetMin) {
   const grid = [
     new Array(24).fill(0),
     new Array(24).fill(0),
@@ -123,9 +154,7 @@ export function computeHeatmap(p) {
   ];
   for (let dayIdx = 0; dayIdx < 3; dayIdx++) {
     for (const e of buckets[dayIdx]) {
-      const t = new Date(e?.at || '');
-      if (isNaN(t.getTime())) continue;
-      const h = t.getHours();
+      const h = getLocalHour(e?.at, tzOffsetMin);
       if (h >= 0 && h < 24) grid[dayIdx][h]++;
     }
   }
@@ -215,7 +244,7 @@ export function computeContextSwitches(p) {
  * до этого фикса P3 timeline72h был jira-only, и в detail-panel
  * Confluence-активность считалась в heatmap row C, но не отображалась.
  */
-export function computeTimeline72h(p) {
+export function computeTimeline72h(p, tzOffsetMin) {
   const out = [];
   // Jira — из 3 day-buckets с dayOffset для совместимости с существующим UI.
   const tagJira = (events, dayOffset) => {
@@ -223,7 +252,7 @@ export function computeTimeline72h(p) {
       if (!e?.at) continue;
       const d = new Date(e.at);
       if (isNaN(d.getTime())) continue;
-      out.push({ ...e, src: 'jira', dayOffset, hourBucket: d.getHours() });
+      out.push({ ...e, src: 'jira', dayOffset, hourBucket: getLocalHour(e.at, tzOffsetMin) });
     }
   };
   tagJira(p?.timelineToday    || [], 0);
@@ -247,7 +276,7 @@ export function computeTimeline72h(p) {
       if (!it?.at) continue;
       const d = new Date(it.at);
       if (isNaN(d.getTime())) continue;
-      out.push({ ...it, src, dayOffset: dayOffsetOf(it.at), hourBucket: d.getHours() });
+      out.push({ ...it, src, dayOffset: dayOffsetOf(it.at), hourBucket: getLocalHour(it.at, tzOffsetMin) });
     }
   };
   tagOther(p?.bbItems                     || [], 'bb');
@@ -281,7 +310,12 @@ export function computeTimeline72h(p) {
  * 1 час. hourIndex 71 = последний завершённый час, hourIndex 0 = час 72ч
  * назад. События старше 72ч игнорируются.
  */
-export function computeHeatmap72x4(p) {
+export function computeHeatmap72x4(p, _tzOffsetMin) {
+  // Note: heatmap72x4 строится через rolling 72-hour window (now backwards),
+  // не через "hour-of-day", поэтому tzOffsetMin тут не нужен — `hoursAgo`
+  // вычисляется через absolute timestamp diff. Принимаем параметр для
+  // signature-симметрии с computeHeatmap (чтобы enrichForScanner2 мог
+  // прокидывать единообразно), но не используем.
   const grid = [
     new Array(72).fill(0),  // 0 = jira
     new Array(72).fill(0),  // 1 = bb

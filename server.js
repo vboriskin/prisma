@@ -1316,8 +1316,12 @@ function pulseDetailRateAllow(jobId) {
   return true;
 }
 
-function pulseDetailCacheGet(jobId, employeeKey, dwellHours) {
-  const key = `${jobId}|${employeeKey}|${dwellHours}`;
+// V18.1 P7-S2.3 — tzOffsetMin part of cache key: разные TZ → разные heatmap.
+function _pulseDetailCacheKey(jobId, employeeKey, dwellHours, tzOffsetMin) {
+  return `${jobId}|${employeeKey}|${dwellHours}|${tzOffsetMin ?? 'srv'}`;
+}
+function pulseDetailCacheGet(jobId, employeeKey, dwellHours, tzOffsetMin) {
+  const key = _pulseDetailCacheKey(jobId, employeeKey, dwellHours, tzOffsetMin);
   const entry = _pulseDetailCache.get(key);
   if (!entry) return null;
   if (Date.now() - entry.atMs >= PULSE_DETAIL_CACHE_TTL_MS) {
@@ -1327,8 +1331,8 @@ function pulseDetailCacheGet(jobId, employeeKey, dwellHours) {
   return entry.result;
 }
 
-function pulseDetailCacheSet(jobId, employeeKey, dwellHours, result) {
-  const key = `${jobId}|${employeeKey}|${dwellHours}`;
+function pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, result) {
+  const key = _pulseDetailCacheKey(jobId, employeeKey, dwellHours, tzOffsetMin);
   _pulseDetailCache.set(key, { result, atMs: Date.now() });
   // GC старых entries: если cache > 100 — выкидываем самые старые.
   if (_pulseDetailCache.size > 100) {
@@ -1977,6 +1981,10 @@ async function handleIntegrationsApi(req, res, pathname) {
       const jobId = String(body.jobId || '').trim();
       const employeeKey = String(body.employeeKey || '').trim();
       const dwellHours = Number(body.dwellHours) > 0 ? Number(body.dwellHours) : 24;
+      // V18.1 P7-S2.3 — tzOffsetMin from browser. Если не передан —
+      // server использует свой local time (legacy behavior, может «съехать»
+      // для users в другой TZ).
+      const tzOffsetMin = (typeof body.tzOffsetMin === 'number') ? body.tzOffsetMin : null;
       if (!jobId || !employeeKey) {
         writeJson(res, 400, { error: 'jobId and employeeKey required' });
         return;
@@ -2001,7 +2009,8 @@ async function handleIntegrationsApi(req, res, pathname) {
         return;
       }
       // V18.1 P7-S1.2 — result cache TTL 5 мин. Hit → no analysePulse re-run.
-      const cached = pulseDetailCacheGet(jobId, employeeKey, dwellHours);
+      // P7-S2.3: cache key включает tzOffsetMin (разные TZ → разные heatmap).
+      const cached = pulseDetailCacheGet(jobId, employeeKey, dwellHours, tzOffsetMin);
       if (cached) {
         writeJson(res, 200, {
           ...cached,
@@ -2017,7 +2026,11 @@ async function handleIntegrationsApi(req, res, pathname) {
         // employees: пустой массив — server не имеет доступа к state.employees,
         // identity-mapping не нужен для drill-down (key уже известен).
         const baseModel = analysePulse(job.result, { staleDays: 7, employees: [] });
-        const enriched  = enrichForScanner2(baseModel, job.result, { dwellHours });
+        // V18.1 P7-S2.3 — tzOffsetMin прокидывается в enrichment.
+        const enriched  = enrichForScanner2(baseModel, job.result, {
+          dwellHours,
+          ...(typeof tzOffsetMin === 'number' ? { tzOffsetMin } : {}),
+        });
         const p = (enriched.participants || []).find(x => x.key === employeeKey);
         if (!p) {
           writeJson(res, 404, { error: 'employeeKey not found in cached participants' });
@@ -2055,10 +2068,11 @@ async function handleIntegrationsApi(req, res, pathname) {
             jobId,
             builtMs: Date.now() - t0,
             dwellThresholdHours: enriched.scannerV2?.dwellThresholdHours ?? dwellHours,
-            serverLocalTZ:       enriched.scannerV2?.serverLocalTZ       ?? true,
+            serverLocalTZ:       enriched.scannerV2?.serverLocalTZ       ?? (tzOffsetMin === null),
+            tzOffsetMin:         enriched.scannerV2?.tzOffsetMin ?? tzOffsetMin,
           },
         };
-        pulseDetailCacheSet(jobId, employeeKey, dwellHours, payload);
+        pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, payload);
         writeJson(res, 200, payload);
       } catch (e) {
         console.warn('[employee-detail] enrichment failed:', e);

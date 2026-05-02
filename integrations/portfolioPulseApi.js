@@ -131,7 +131,7 @@ async function _fetchSync(body, signal) {
  *   - 'employeeKey not found' (404) — несовпадение, клиент использует local data
  *   - 'job not done' (409) — pulse ещё running, повторить позже
  */
-export async function fetchEmployeeDetail({ jobId, employeeKey, dwellHours, signal, timeoutMs = 30000 } = {}) {
+export async function fetchEmployeeDetail({ jobId, employeeKey, dwellHours, tzOffsetMin, signal, timeoutMs = 30000 } = {}) {
   if (!jobId)       throw new Error('jobId required');
   if (!employeeKey) throw new Error('employeeKey required');
   // Compose abort: external + timeout.
@@ -143,11 +143,19 @@ export async function fetchEmployeeDetail({ jobId, employeeKey, dwellHours, sign
     else signal.addEventListener('abort', () => inner.abort(signal.reason));
   }
   try {
+    // V18.1 P7-S2.3 — tzOffsetMin (browser TZ) пересылается серверу,
+    // чтобы server-side enrichment рассчитывал heatmap в TZ юзера.
+    const body = {
+      jobId,
+      employeeKey,
+      ...(dwellHours ? { dwellHours } : {}),
+      ...(typeof tzOffsetMin === 'number' ? { tzOffsetMin } : {}),
+    };
     const res = await fetch(DETAIL_EP, {
       method: 'POST',
       signal: inner.signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, employeeKey, ...(dwellHours ? { dwellHours } : {}) }),
+      body: JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
