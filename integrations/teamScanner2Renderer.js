@@ -567,16 +567,22 @@ function renderHeatmap72x4(h, filters) {
     const visible = filters[SRC_KEYS[srcIdx]] !== false;
     const peak = row.length ? Math.max(...row) : 0;
     const cells = row.map((n, hourIdx) => {
-      let op;
-      if (n === 0)      op = 0.06;
-      else if (n === 1) op = 0.45;
-      else if (n === 2) op = 0.65;
+      // V18.1 P7-S3.3 — density scale rebalanced: 0.06→0.45 был рваный
+      // (4× прыжок). Новый: 0.10/0.35/0.60/0.85/1.0 + outline для
+      // saturation (>=4 events). Saturation outline решает проблему
+      // «при 200 events/час неотличимо от 4-х» (QA finding).
+      let op, isHigh = false;
+      if (n === 0)      op = 0.10;
+      else if (n === 1) op = 0.35;
+      else if (n === 2) op = 0.60;
       else if (n === 3) op = 0.85;
-      else              op = 1.0;
+      else            { op = 1.0; isHigh = true; }
       const isPeak = h.peakCell && h.peakCell.srcIdx === srcIdx && h.peakCell.hourIndex === hourIdx;
-      const cls = isPeak ? 'ts2-hcell ts2-hcell-peak' : 'ts2-hcell';
+      const classes = ['ts2-hcell'];
+      if (isPeak) classes.push('ts2-hcell-peak');
+      if (isHigh) classes.push('ts2-hcell-saturated');
       const hoursAgo = 71 - hourIdx;
-      return `<span class="${cls}" style="opacity:${op}" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
+      return `<span class="${classes.join(' ')}" style="opacity:${op}" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
     }).join('');
     return `
       <div class="ts2-hrow ${visible ? '' : 'ts2-hrow-hidden'}">
@@ -792,12 +798,22 @@ export function renderSkeleton(initialMsg) {
 }
 
 export function renderEmpty() {
+  // V18.1 P7-S3.3 — CTA button «Открыть настройки» (designer finding:
+  // «empty state без CTA = anti-pattern, пользователь сам должен идти
+  // в шапку → settings»). Кнопка имеет data-action для глобального
+  // settings-modal handler'а.
   return `
     <div class="ts2-empty-state">
       <div class="ts2-empty-title">Нужны проектные ключи</div>
       <div class="ts2-empty-text">
-        В настройках интеграций укажите ключи проектов Jira (поле «projectKeys») —
-        Сканнер команд 2.0 опирается на тот же поток данных что и v1.
+        В настройках интеграций укажите ключи проектов Jira —
+        Сканнер команд опирается на тот же поток данных что и legacy-сканер.
+      </div>
+      <div class="ts2-empty-actions">
+        <button class="ts2-btn ts2-btn-primary" type="button"
+                data-int-action="settings" data-tab="jira">
+          Открыть настройки интеграций
+        </button>
       </div>
     </div>
   `;

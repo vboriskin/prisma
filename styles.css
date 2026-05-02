@@ -11712,6 +11712,12 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
 }
+/* V18.1 P7-S3.3 — saturation outline (≥4 events/час) — иначе при 200
+   events/час неотличимо от 4-х (QA finding). Inset shadow выделяет
+   высокую плотность без overlap'а с peak-outline'ом. */
+.ts2-hcell-saturated {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .ts2-hrow-total {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-feature-settings: "tnum" 1;
@@ -11730,7 +11736,9 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
    Peak-hour теперь живёт в hint heatmap-секции.
    .ts2-sparkline / .ts2-spark-bar — преднамеренно удалены. */
 
-/* Filter pills */
+/* V18.1 P7-S3.3 — filter-pill V15-compliant: 3px stripe-left при -on
+   состоянии + radius 6px (вместо full pill 16px). Designer finding:
+   «full pill border нарушает Spine-pill». */
 .ts2-panel-filters {
   display: flex; gap: 6px; flex-wrap: wrap;
   padding: 10px 20px;
@@ -11738,23 +11746,25 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 }
 .ts2-filter-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 4px 10px;
-  border-radius: 16px;
+  padding: 4px 10px 4px 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   background: var(--card);
   font-size: 11px; cursor: pointer;
-  transition: background .15s, border-color .15s, color .15s;
+  color: var(--text-2);
+  transition: background .15s, border-color .15s;
 }
-.ts2-filter-pill-on  { border-color: var(--accent); color: var(--accent); }
+.ts2-filter-pill-on  { border-left-color: var(--accent); }
 .ts2-filter-pill-off { color: var(--text-4, #94a3b8); }
 .ts2-filter-pill-off .ts2-filter-pill-key { text-decoration: line-through; }
 .ts2-filter-pill:hover { background: var(--bg-2, #f1f5f9); }
+.ts2-filter-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ts2-filter-pill-key {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-weight: 700; letter-spacing: .4px;
 }
-.ts2-filter-pill-name { color: var(--text-2); }
-.ts2-filter-pill-on .ts2-filter-pill-name { color: var(--accent); }
+.ts2-filter-pill-name { color: inherit; }
 .ts2-filter-pill-num {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-feature-settings: "tnum" 1;
@@ -11780,10 +11790,17 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
-.ts2-recent-src-j { color: var(--accent); border-color: var(--accent-light, #c7d2fe); }
-.ts2-recent-src-b { color: #16a34a; border-color: #bbf7d0; }
-.ts2-recent-src-c { color: #d97706; border-color: #fde68a; }
-.ts2-recent-src-z { color: #9333ea; border-color: #e9d5ff; }
+/* V18.1 P7-S3.3 — source J/B/C/Z monochrome (designer finding):
+   amber/red palette зарезервирован за status-семантикой (watch/stop).
+   Source кодируется ТОЛЬКО border-left цветом + 9px buchstabe; текст
+   везде text-2. Avoids confusion «amber pill C = ? Confluence или
+   watch-статус?». */
+.ts2-recent-src-j { border-left: 2px solid var(--accent); }
+.ts2-recent-src-b { border-left: 2px solid #16a34a; }
+.ts2-recent-src-c { border-left: 2px solid #d97706; }
+.ts2-recent-src-z { border-left: 2px solid #9333ea; }
+/* Dark-theme contrast fix for letter visibility on dark cards. */
+body.theme-dark .ts2-recent-src { color: var(--text-2); }
 .ts2-recent-kind {
   font-size: 10px; letter-spacing: .3px; text-transform: uppercase;
   color: var(--text-2); font-weight: 600;
@@ -11860,6 +11877,13 @@ body.theme-dark .ts2-panel-backdrop { background: rgba(0,0,0,.5); }
 .ts2-empty-text, .ts2-error-text {
   font-size: 13px; color: var(--text-3); line-height: 1.5;
   max-width: 520px; margin: 0 auto;
+}
+/* V18.1 P7-S3.3 — CTA button в empty-state */
+.ts2-empty-actions {
+  margin-top: 14px;
+}
+.ts2-empty-actions .ts2-btn {
+  font-size: 13px; padding: 8px 16px;
 }
 .ts2-error { border-left: 3px solid var(--danger, #dc2626); text-align: left; }
 .ts2-error #ts2-retry-btn { margin-top: 10px; }
