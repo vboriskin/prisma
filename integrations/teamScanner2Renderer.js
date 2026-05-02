@@ -189,12 +189,14 @@ export function classifyPerson(p) {
   return 'moving';
 }
 
-/** Pretty-name + a11y description per group. */
+/** V18.1 P7-S3.2 — HR-language: «Стоп» → «Требует разговора»
+ *  (HR panel: «Стоп» = приговор; «Требует разговора» = операционный
+ *  сигнал, не оценка человека). */
 const GROUP_META = {
-  stop:   { label: 'Стоп',           desc: 'Висят без движения — нужен разговор сегодня' },
-  watch:  { label: 'Под наблюдением', desc: 'Триггеры: перегрузка, тишина или старое тянется' },
-  moving: { label: 'Движется',       desc: 'Есть активность сегодня, без красных флагов' },
-  idle:   { label: 'Без активности',  desc: 'Нет следов в Jira / BB / CF' },
+  stop:   { label: 'Требует разговора', desc: 'Висят без движения — нужен разговор сегодня' },
+  watch:  { label: 'Под наблюдением',   desc: 'Триггеры: перегрузка, тишина или старое тянется' },
+  moving: { label: 'Движется',          desc: 'Есть активность сегодня, без красных флагов' },
+  idle:   { label: 'Без активности',     desc: 'Нет следов в Jira / BB / CF' },
 };
 
 /* ── Top bar ─────────────────────────────────────────── */
@@ -377,8 +379,12 @@ function renderRow(p, isExpanded) {
   const hYest  = bucketByHour(p.timelineYesterday);
   const todayN = (p.timelineToday    || []).length;
   const yestN  = (p.timelineYesterday || []).length;
-  const status = statusOfPerson(p);
-  const blockerMark = status === 'blocked' ? `<span class="ts2-blocker" title="Есть задачи без активности и нет следа сегодня">▌</span>` : `<span class="ts2-blocker-spacer"></span>`;
+  // V18.1 P7-S3.2 — убираем red ▌ stripe слева от имени (HR panel:
+  // «дублирует функцию dwellBadge ▌Nh справа, один из двух уберите»).
+  // Оставляем spacer для grid-выравнивания. Stop-сигнал идёт через
+  // принадлежность к группе «Требует разговора» с red stripe-left
+  // на уровне группы — это уже сильный визуальный маркер.
+  const blockerMark = `<span class="ts2-blocker-spacer"></span>`;
 
   const todayBlock = todayN > 0
     ? dotStrip(hToday, `Сегодня: ${todayN} событий`)
@@ -620,11 +626,15 @@ function renderFilters(filters, rowTotals) {
 function renderBlockersShelf(blockers) {
   // V18.1 P7-S2.2 — пороги status-зависимые: Code Review > 8ч, QA > 16ч,
   // In Progress > 48ч, To Do > 72ч, default > 24ч.
+  // V18.1 P7-S3.2 — обёрнуто в <details> (collapsed by default) по
+  // запросу HR panel: «снижает persona-pressure», содержимое =
+  // персональное досье на конкретного человека, должно открываться
+  // осознанным кликом, не маячить в дефолте.
   if (!blockers.length) {
     return `
       <div class="ts2-panel-section ts2-panel-section-tight">
-        <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">пороги: CR ≥ 8ч · QA ≥ 16ч · IP ≥ 48ч</span></div>
-        <div class="ts2-empty-text">Все blockers движутся (dwell в пределах нормы).</div>
+        <div class="ts2-panel-section-title">Старые задачи <span class="ts2-panel-section-hint">пороги: CR ≥ 8ч · QA ≥ 16ч · IP ≥ 48ч</span></div>
+        <div class="ts2-empty-text">Все задачи движутся (dwell в пределах нормы).</div>
       </div>
     `;
   }
@@ -645,10 +655,13 @@ function renderBlockersShelf(blockers) {
     </li>`;
   }).join('');
   return `
-    <div class="ts2-panel-section ts2-panel-section-tight">
-      <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">dwell ≥ 24ч · top 8</span></div>
+    <details class="ts2-panel-section ts2-panel-section-tight ts2-blockers-details">
+      <summary class="ts2-panel-section-title ts2-blockers-summary-toggle">
+        <span>Старые задачи <span class="ts2-blockers-count">${blockers.length}</span></span>
+        <span class="ts2-panel-section-hint">пороги: CR ≥ 8ч · QA ≥ 16ч · IP ≥ 48ч</span>
+      </summary>
       <ul class="ts2-blockers-list">${items}</ul>
-    </div>
+    </details>
   `;
 }
 

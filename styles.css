@@ -11403,10 +11403,7 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 .ts2-row-expanded { background: var(--bg-2, #f8fafc); }
 .ts2-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
 
-.ts2-blocker {
-  display: inline-block; width: 3px; height: 22px; border-radius: 2px;
-  background: var(--danger, #dc2626);
-}
+/* V18.1 P7-S3.2 — .ts2-blocker удалён (red row-stripe убран по HR-frame). */
 .ts2-blocker-spacer { display: inline-block; width: 3px; height: 22px; }
 
 .ts2-name {
@@ -11511,9 +11508,33 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   border-top: 1px dashed var(--border);
   font-size: 11px; color: var(--text-4, #94a3b8); font-style: italic;
 }
+/* V18.1 P7-S3.2 — collapsible details для blockers shelf */
+.ts2-blockers-details { background: var(--card); }
+.ts2-blockers-summary-toggle {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-right: 16px;
+}
+.ts2-blockers-summary-toggle::-webkit-details-marker { display: none; }
+.ts2-blockers-details > summary::after {
+  content: '▾'; margin-left: auto; padding-left: 8px; color: var(--text-3);
+  font-size: 12px; transition: transform .15s;
+}
+.ts2-blockers-details[open] > summary::after { content: '▴'; }
+.ts2-blockers-count {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 6px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-feature-settings: "tnum" 1;
+  background: var(--danger, #dc2626); color: #fff;
+  border-radius: 8px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0;
+}
 .ts2-blockers-list {
-  list-style: none; padding: 0; margin: 4px 0 0;
+  list-style: none; padding: 8px 0 0; margin: 4px 0 0;
   display: flex; flex-direction: column; gap: 4px;
+  border-top: 1px dashed var(--border);
 }
 .ts2-blockers-li {
   display: grid;
