@@ -206,10 +206,15 @@ export function renderTopBar(model) {
   const pkCount = (model?.projectKeys || []).length;
   // V18.1 P6 — graduated из preview, pill «v2 preview» убран. v1 живёт
   // как «legacy» сабтаб рядом, переключение через subtab-bar.
+  // V18.1 P7-S2.1 — Sprint Goal gauge (правее заголовка). Сигнал #1 из
+  // synthesis-плана: PO защищает у CTO «где квартальные цели».
+  const sg = model?.scannerV2?.sprintGoal;
+  const sprintGauge = sg && sg.aggregateTotal > 0 ? renderSprintGauge(sg) : '';
   return `
     <div class="ts2-topbar">
       <div class="ts2-topbar-title">
         <span class="ts2-h1">Сканнер команд</span>
+        ${sprintGauge}
       </div>
       <div class="ts2-topbar-meta">
         <span class="ts2-meta-item">${pkCount} ${plural(pkCount, ['проект', 'проекта', 'проектов'])}</span>
@@ -217,6 +222,37 @@ export function renderTopBar(model) {
         <span class="ts2-meta-item">обновлено ${esc(fetchedAt)}</span>
         <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">↻ Обновить данные</button>
       </div>
+    </div>
+  `;
+}
+
+/** V18.1 P7-S2.1 — Sprint Goal gauge: progress + pace + days left. */
+function renderSprintGauge(sg) {
+  const pct = sg.aggregateProgress;
+  const pace = sg.aggregatePace;
+  const paceLabel = {
+    'ahead':    'опережает',
+    'on-track': 'по плану',
+    'behind':   'отстаёт',
+    'no-data':  'нет дат',
+  }[pace] || '—';
+  // Берём первый sprint для подписи name/daysLeft (если несколько pk —
+  // делаем aggregate, но имя первого как репрезентативное).
+  const firstSprint = sg.sprints[0];
+  const sprintName  = firstSprint?.name ? esc(firstSprint.name) : '';
+  const daysLeft    = firstSprint?.daysLeft;
+  const daysSuffix  = (typeof daysLeft === 'number')
+    ? ` · ${daysLeft} ${plural(daysLeft, ['день', 'дня', 'дней'])}`
+    : '';
+  return `
+    <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="Sprint Goal: ${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}">
+      <span class="ts2-sprint-label">Спринт</span>
+      <span class="ts2-sprint-name">${sprintName}</span>
+      <span class="ts2-sprint-bar">
+        <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
+      </span>
+      <span class="ts2-sprint-pct">${pct}%</span>
+      <span class="ts2-sprint-pace">${paceLabel}${daysSuffix}</span>
     </div>
   `;
 }

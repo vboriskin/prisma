@@ -123,6 +123,8 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
 
   // V18.1 P7-S2.1.5 — risk summary (orphans + out-of-sprint).
   const risks = computeRiskSummary(model);
+  // V18.1 P7-S2.1 — sprint goal progress.
+  const sprintGoal = computeSprintGoal(model);
 
   model.scannerV2 = {
     enrichedAt: Date.now(),
@@ -132,6 +134,7 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     serverLocalTZ: tz === null,         // если null → server local; иначе TZ-aware
     switchGapSec: SWITCH_GAP_SEC,
     risks,                              // V18.1 P7-S2.1.5
+    sprintGoal,                         // V18.1 P7-S2.1
   };
   return model;
 }
@@ -290,6 +293,98 @@ export function computeTimeline72h(p, tzOffsetMin) {
 
   out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   return out;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/* Sprint Goal Progress (V18.1 P7-S2.1) — #1 в карте 7        */
+/* сигналов synthesis-плана. Без этого PO не имеет ROI-метрики */
+/* для defend'a у CTO.                                        */
+/* ────────────────────────────────────────────────────────── */
+
+const SPRINT_PACE_TOLERANCE_PCT = 10;   // ±10% вокруг ideal линии
+
+/**
+ * Считает Sprint Goal Progress per active-sprint:
+ *   { pk, name, startDate, endDate, daysLeft, daysTotal,
+ *     total, done, progressPct, idealPct, pace }
+ *
+ * pace ∈ {'ahead', 'on-track', 'behind', 'no-data'}.
+ *
+ * - progressPct = done / total * 100
+ * - idealPct    = elapsed/total of sprint duration
+ * - 'ahead'   если progress >= ideal + 10%
+ * - 'behind'  если progress <= ideal - 10%
+ * - 'on-track' иначе
+ * - 'no-data'  если sprint без startDate/endDate (ничего не считаем)
+ *
+ * Source: model.spaces[pk].sprintIssues + activeSprintName + activeSprintInfo.
+ * Done detection — через isTerminalStatus.
+ *
+ * Without SP-fields fallback: count(done) / count(total) — приемлемо для
+ * MVP, упоминается в open question §G.4 synthesis-плана.
+ */
+export function computeSprintGoal(model) {
+  if (!model?.spaces) return { sprints: [], aggregateProgress: 0, aggregateDone: 0, aggregateTotal: 0, aggregatePace: 'no-data' };
+  const now = Date.now();
+  const sprints = [];
+  for (const [pk, space] of Object.entries(model.spaces)) {
+    if (!space?.activeSprintName) continue;
+    const sprintIssues = space.sprintIssues || [];
+    if (sprintIssues.length === 0) continue;
+
+    const total = sprintIssues.length;
+    const done  = sprintIssues.filter(it => isTerminalStatus(it.status || '', it.statusCat || '')).length;
+    const progressPct = total > 0 ? Math.round((done / total) * 1000) / 10 : 0;
+
+    const sInfo = space.activeSprintInfo || {};
+    // Jira возвращает либо `startDate` / `endDate` (object), либо
+    // `startDate` строкой при serialize'е sprint custom-field. Поддерживаем оба.
+    const startDate = sInfo.startDate || sInfo.startDateLocal || null;
+    const endDate   = sInfo.endDate   || sInfo.endDateLocal   || null;
+    const startMs = startDate ? Date.parse(startDate) : NaN;
+    const endMs   = endDate   ? Date.parse(endDate)   : NaN;
+
+    let daysLeft = null, daysTotal = null, idealPct = null, pace = 'no-data';
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+      daysTotal = Math.round((endMs - startMs) / 86400000);
+      daysLeft  = Math.max(0, Math.round((endMs - now) / 86400000));
+      const elapsed = endMs - now < 0 ? daysTotal : (daysTotal - daysLeft);
+      idealPct = Math.round((elapsed / daysTotal) * 1000) / 10;
+      if      (progressPct >= idealPct + SPRINT_PACE_TOLERANCE_PCT) pace = 'ahead';
+      else if (progressPct <= idealPct - SPRINT_PACE_TOLERANCE_PCT) pace = 'behind';
+      else                                                          pace = 'on-track';
+    }
+
+    sprints.push({
+      pk,
+      name: space.activeSprintName,
+      startDate,
+      endDate,
+      daysLeft,
+      daysTotal,
+      total,
+      done,
+      progressPct,
+      idealPct,
+      pace,
+    });
+  }
+  const totalAll = sprints.reduce((s, sp) => s + sp.total, 0);
+  const doneAll  = sprints.reduce((s, sp) => s + sp.done,  0);
+  let aggregatePace = 'no-data';
+  if (sprints.length > 0) {
+    if (sprints.some(s => s.pace === 'behind'))   aggregatePace = 'behind';
+    else if (sprints.every(s => s.pace === 'ahead')) aggregatePace = 'ahead';
+    else if (sprints.every(s => s.pace === 'no-data')) aggregatePace = 'no-data';
+    else aggregatePace = 'on-track';
+  }
+  return {
+    sprints,
+    aggregateProgress: totalAll > 0 ? Math.round(doneAll / totalAll * 1000) / 10 : 0,
+    aggregateDone: doneAll,
+    aggregateTotal: totalAll,
+    aggregatePace,
+  };
 }
 
 /* ────────────────────────────────────────────────────────── */

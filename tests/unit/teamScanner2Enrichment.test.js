@@ -31,6 +31,7 @@ import {
   DEFAULT_DWELL_THRESHOLDS,
   getLocalHour,
   computeRiskSummary,
+  computeSprintGoal,
 } from '../../integrations/teamScanner2Enrichment.js';
 
 /* ── Helpers — конструируем event'ы и participant'ов ──────── */
@@ -645,6 +646,140 @@ describe('computeRiskSummary (S2.1.5)', () => {
     };
     const r = computeRiskSummary(model);
     assert.equal(r.totalOutOfSprint, 1);
+  });
+});
+
+/* ── V18.1 P7-S2.1: Sprint Goal Progress ─────────────────── */
+
+describe('computeSprintGoal (S2.1)', () => {
+  function makeSprintModel({ name = 'Sprint 12', startMs, endMs, total, doneCount }) {
+    const issues = [];
+    for (let i = 0; i < total; i++) {
+      issues.push({
+        key: `PRJ-${i + 1}`,
+        status: i < doneCount ? 'Done' : 'In Progress',
+        statusCat: i < doneCount ? 'done' : 'indeterminate',
+      });
+    }
+    return {
+      spaces: {
+        PRJ: {
+          activeSprintName: name,
+          activeSprintInfo: {
+            startDate: startMs ? new Date(startMs).toISOString() : null,
+            endDate:   endMs   ? new Date(endMs).toISOString()   : null,
+          },
+          sprintIssues: issues,
+        },
+      },
+    };
+  }
+
+  test('пустой model → no-data sprint list', () => {
+    const r = computeSprintGoal({});
+    assert.deepEqual(r.sprints, []);
+    assert.equal(r.aggregatePace, 'no-data');
+  });
+
+  test('progress = done/total * 100', () => {
+    const startMs = Date.now() - 7 * 86400000;
+    const endMs   = Date.now() + 7 * 86400000;
+    const r = computeSprintGoal(makeSprintModel({
+      startMs, endMs, total: 10, doneCount: 3,
+    }));
+    assert.equal(r.sprints[0].progressPct, 30);
+    assert.equal(r.aggregateProgress, 30);
+  });
+
+  test('on-track: progress ≈ ideal (50% done на 7-й день из 14)', () => {
+    const startMs = Date.now() - 7 * 86400000;
+    const endMs   = Date.now() + 7 * 86400000;
+    const r = computeSprintGoal(makeSprintModel({
+      startMs, endMs, total: 10, doneCount: 5,    // 50% progress, 50% ideal
+    }));
+    assert.equal(r.sprints[0].pace, 'on-track');
+  });
+
+  test('behind: progress << ideal (10% done на 12-й день из 14)', () => {
+    const startMs = Date.now() - 12 * 86400000;
+    const endMs   = Date.now() + 2  * 86400000;
+    const r = computeSprintGoal(makeSprintModel({
+      startMs, endMs, total: 10, doneCount: 1,    // 10% vs 86% ideal → behind
+    }));
+    assert.equal(r.sprints[0].pace, 'behind');
+    assert.equal(r.aggregatePace, 'behind');
+  });
+
+  test('ahead: progress >> ideal (90% done на 4-й день из 14)', () => {
+    const startMs = Date.now() - 4  * 86400000;
+    const endMs   = Date.now() + 10 * 86400000;
+    const r = computeSprintGoal(makeSprintModel({
+      startMs, endMs, total: 10, doneCount: 9,    // 90% vs ~29% ideal → ahead
+    }));
+    assert.equal(r.sprints[0].pace, 'ahead');
+    assert.equal(r.aggregatePace, 'ahead');
+  });
+
+  test('no-data: sprint без startDate/endDate', () => {
+    const r = computeSprintGoal(makeSprintModel({
+      startMs: null, endMs: null, total: 10, doneCount: 5,
+    }));
+    assert.equal(r.sprints[0].pace, 'no-data');
+    assert.equal(r.sprints[0].daysLeft, null);
+    assert.equal(r.sprints[0].daysTotal, null);
+    // progress всё равно считается
+    assert.equal(r.sprints[0].progressPct, 50);
+  });
+
+  test('aggregate: behind в любом sprint → behind aggregate', () => {
+    const model = {
+      spaces: {
+        A: makeSprintModel({
+          startMs: Date.now() - 7  * 86400000,
+          endMs:   Date.now() + 7  * 86400000,
+          total: 10, doneCount: 5,         // on-track
+        }).spaces.PRJ,
+        B: {
+          activeSprintName: 'Behind',
+          activeSprintInfo: {
+            startDate: new Date(Date.now() - 12 * 86400000).toISOString(),
+            endDate:   new Date(Date.now() + 2  * 86400000).toISOString(),
+          },
+          sprintIssues: Array.from({length: 10}, (_, i) => ({
+            key: `B-${i+1}`,
+            status: i < 1 ? 'Done' : 'In Progress',
+            statusCat: i < 1 ? 'done' : 'indeterminate',
+          })),
+        },
+      },
+    };
+    // Restructure: makeSprintModel-style spaces object под обе ключа.
+    model.spaces.A.activeSprintName = 'Sprint A';
+    const r = computeSprintGoal(model);
+    assert.equal(r.sprints.length, 2);
+    assert.equal(r.aggregatePace, 'behind');
+    assert.equal(r.aggregateTotal, 20);
+    assert.equal(r.aggregateDone, 6);
+    assert.equal(r.aggregateProgress, 30);
+  });
+
+  test('skip sprint без issues или без activeSprintName', () => {
+    const r = computeSprintGoal({
+      spaces: {
+        A: { activeSprintName: 'Empty', sprintIssues: [] },
+        B: { sprintIssues: [{ key: 'B-1' }] },     // no activeSprintName
+      },
+    });
+    assert.deepEqual(r.sprints, []);
+  });
+
+  test('daysLeft не отрицателен (sprint просрочен)', () => {
+    const startMs = Date.now() - 20 * 86400000;
+    const endMs   = Date.now() -  5 * 86400000;   // закончился 5 дней назад
+    const r = computeSprintGoal(makeSprintModel({
+      startMs, endMs, total: 10, doneCount: 8,
+    }));
+    assert.equal(r.sprints[0].daysLeft, 0, 'не отрицательный');
   });
 });
 
