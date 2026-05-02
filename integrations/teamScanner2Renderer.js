@@ -239,6 +239,7 @@ export function renderTopBar(model, ctx = {}) {
         <span class="ts2-meta-item">${pkCount} ${plural(pkCount, ['проект', 'проекта', 'проектов'])}</span>
         <span class="ts2-meta-sep">·</span>
         <span class="ts2-meta-item">обновлено ${esc(fetchedAt)}</span>
+        ${pkCount >= 2 ? `<button class="ts2-btn ts2-btn-ghost ts2-view-toggle ${ctx.activeView === 'multi' ? 'ts2-view-toggle-active' : ''}" id="ts2-view-toggle" type="button" title="Переключить вид: одна команда / все команды">${ctx.activeView === 'multi' ? '👥 По командам' : '👥 По командам'}</button>` : ''}
         <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">↻ Обновить данные</button>
       </div>
     </div>
@@ -381,6 +382,119 @@ export function renderTeamGlance(model, ctx = {}) {
         <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
       </div>
       ${riskLine ? `<div class="ts2-glance-line ts2-glance-risk-row">${riskLine}</div>` : ''}
+    </div>
+  `;
+}
+
+/* ── Multi-team aggregate view (V18.1 P7-S4.1) ──────────── */
+
+/**
+ * Pilot finding (Dmitry, руководитель отдела с 4 командами):
+ * «v2.0 = single-team view. Для 4 команд я меняю project keys в
+ * настройках каждый раз. Срывает «1-2 минуты visit» в 4-минутный quest.»
+ *
+ * Решение: opt-in режим «По командам» — table-like view со сводкой
+ * по каждому pk. Использует уже-загруженный model, не делает новых
+ * запросов. Click по строке команды → переключает на single-team
+ * view с фильтром по этой pk (V19, сейчас просто scroll).
+ */
+function computePerTeamSummary(model) {
+  if (!model?.spaces) return [];
+  const pks = Object.keys(model.spaces);
+  const out = [];
+  for (const pk of pks) {
+    const space = model.spaces[pk] || {};
+    if (space.hasError) {
+      out.push({ pk, error: space.errorMsg || 'fetch error', partsCount: 0 });
+      continue;
+    }
+    // Participants in this pk: те, у кого pk в projects[].
+    const parts = (model.participants || [])
+      .filter(p => Array.isArray(p.projects) && p.projects.includes(pk));
+    const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
+    let wipTotal = 0;
+    for (const p of parts) {
+      counts[classifyPerson(p)]++;
+      wipTotal += (p.issuesNow || []).length;
+    }
+    // Sprint per pk:
+    const sgPk = (model.scannerV2?.sprintGoal?.sprints || []).find(s => s.pk === pk);
+    // Risks per pk:
+    const orphans = model.scannerV2?.risks?.orphansByPk?.[pk] || 0;
+    // OOS per pk: считаем по participants этой команды.
+    let oosCount = 0;
+    for (const p of parts) oosCount += p.outOfSprintEvents || 0;
+    out.push({
+      pk,
+      activeSprintName: space.activeSprintName || '',
+      partsCount: parts.length,
+      counts,
+      wipTotal,
+      sprintProgress: sgPk?.progressPct ?? null,
+      sprintPace:     sgPk?.pace        ?? 'no-data',
+      sprintDaysLeft: sgPk?.daysLeft    ?? null,
+      orphans,
+      oosCount,
+    });
+  }
+  // Sort: команды с stop первые, потом по числу people desc.
+  out.sort((a, b) => (b.counts?.stop || 0) - (a.counts?.stop || 0) || (b.partsCount || 0) - (a.partsCount || 0));
+  return out;
+}
+
+export function renderMultiTeamView(model) {
+  const summary = computePerTeamSummary(model);
+  if (!summary.length) {
+    return `<div class="ts2-empty">Нет данных по командам.</div>`;
+  }
+  const rows = summary.map(t => {
+    if (t.error) {
+      return `<div class="ts2-team-row ts2-team-row-error">
+        <span class="ts2-team-pk">${esc(t.pk)}</span>
+        <span class="ts2-team-error">${esc(t.error)}</span>
+      </div>`;
+    }
+    const sprintCell = (t.sprintProgress != null)
+      ? `<span class="ts2-team-sprint ts2-sprint-pace-${t.sprintPace}">
+           <span class="ts2-team-sprint-bar"><span class="ts2-team-sprint-bar-fill" style="width:${Math.min(100, t.sprintProgress)}%"></span></span>
+           <span class="ts2-team-sprint-pct">${t.sprintProgress}%</span>
+           ${typeof t.sprintDaysLeft === 'number' ? `<span class="ts2-team-sprint-days">${t.sprintDaysLeft}д</span>` : ''}
+         </span>`
+      : `<span class="ts2-team-sprint ts2-team-sprint-empty">—</span>`;
+    const groupChips = [
+      t.counts.stop > 0   ? `<span class="ts2-team-chip ts2-team-chip-stop">▌${t.counts.stop}</span>` : '',
+      t.counts.watch > 0  ? `<span class="ts2-team-chip ts2-team-chip-watch">${t.counts.watch}</span>` : '',
+      t.counts.moving > 0 ? `<span class="ts2-team-chip ts2-team-chip-moving">${t.counts.moving}</span>` : '',
+    ].join('');
+    const risks = [
+      t.orphans  > 0 ? `<span class="ts2-team-risk-orphans">${t.orphans} orphans</span>` : '',
+      t.oosCount > 0 ? `<span class="ts2-team-risk-oos">${t.oosCount} OOS</span>` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <div class="ts2-team-row" data-team-pk="${esc(t.pk)}" tabindex="0" role="button" aria-label="Команда ${esc(t.pk)}, ${t.partsCount} человек">
+        <span class="ts2-team-pk">${esc(t.pk)}</span>
+        <span class="ts2-team-meta">
+          <span class="ts2-team-people">${t.partsCount} ${plural(t.partsCount, ['чел', 'чел', 'чел'])}</span>
+          ${t.activeSprintName ? `<span class="ts2-team-sprint-name">«${esc(t.activeSprintName)}»</span>` : ''}
+        </span>
+        <span class="ts2-team-groups">${groupChips}</span>
+        <span class="ts2-team-wip" title="Total WIP в команде">${t.wipTotal} WIP</span>
+        ${sprintCell}
+        <span class="ts2-team-risks">${risks || '—'}</span>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="ts2-multi-team">
+      <div class="ts2-multi-team-head">
+        <span>Команда</span>
+        <span>Контекст</span>
+        <span>Группы</span>
+        <span>WIP</span>
+        <span>Спринт</span>
+        <span>Риски</span>
+      </div>
+      <div class="ts2-multi-team-rows">${rows}</div>
     </div>
   `;
 }

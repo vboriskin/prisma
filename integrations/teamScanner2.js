@@ -28,6 +28,7 @@ import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
   renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
+  renderMultiTeamView,
   renderSkeleton, renderEmpty, renderError, setRenderContext,
 } from './teamScanner2Renderer.js';
 
@@ -49,6 +50,9 @@ export const TeamScanner2 = {
   // P5 source filters — toggle pill'ы J/B/C/Z в panel'е. Persist'ятся
   // между переоткрытиями panel'и в одной сессии.
   _panelFilters: { j: true, b: true, c: true, z: true },
+  // V18.1 P7-S4.1 — multi-team view toggle. 'team' = single (legacy),
+  // 'multi' = aggregate per-team table. Pilot Dmitry blocker fix.
+  _activeView: 'team',
   // V18.1 P4 — captured jobId (из callback fetchPulseData → onJobId)
   // используется для lazy server-side drill-down. Истекает через
   // 30 мин по TTL `_pulseJobs` cluster'а на сервере.
@@ -301,11 +305,17 @@ export const TeamScanner2 = {
     // V18.1 P7-S3.1 — aria-live region для panel open/close announcements.
     // V18.1 P7-S4.2 — prev snapshot для trend-deltas (если есть и не stale).
     const prev = this._prevSnapshot || null;
+    // V18.1 P7-S4.1 — multi-team view (Dmitry blocker). В режиме multi
+    // — render table сводок по командам вместо per-person rows.
+    const bodyHtml = this._activeView === 'multi'
+      ? renderMultiTeamView(m)
+      : `
+        ${renderTeamGlance(m, { prev })}
+        ${renderPersonRows(m, { expandedKey: this._expandedKey })}`;
     const html = `
       <div class="ts2-root">
-        ${renderTopBar(m, { prev })}
-        ${renderTeamGlance(m, { prev })}
-        ${renderPersonRows(m, { expandedKey: this._expandedKey })}
+        ${renderTopBar(m, { prev, activeView: this._activeView })}
+        ${bodyHtml}
       </div>
       <div class="ts2-aria-live" aria-live="polite" aria-atomic="true" id="ts2-aria-live"></div>
       ${this._expandedKey ? `<div class="ts2-panel-backdrop" id="ts2-panel-backdrop"></div>${panelHtml}` : ''}
@@ -345,6 +355,27 @@ export const TeamScanner2 = {
     const root = this._container;
     if (!root) return;
     root.querySelector('#ts2-refresh-btn')?.addEventListener('click', () => this.refresh());
+    // V18.1 P7-S4.1 — view toggle (team ↔ multi).
+    root.querySelector('#ts2-view-toggle')?.addEventListener('click', () => {
+      this._activeView = this._activeView === 'multi' ? 'team' : 'multi';
+      this._closePanel();   // closes any open detail panel + does _renderFull
+    });
+    // V18.1 P7-S4.1 — click по team-row в multi-view → switch to single-team
+    // view с этой PK как visual context (P7 simple: just toggle back, future
+    // V19: filter participants по pk).
+    root.querySelectorAll('.ts2-team-row[data-team-pk]').forEach(el => {
+      el.addEventListener('click', () => {
+        this._activeView = 'team';
+        this._renderFull();
+        // Scroll-into-view не нужен — пользователь ожидает увидеть team-list.
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          el.click();
+        }
+      });
+    });
     // Click по строке → открыть/закрыть side-panel.
     // V18.1 P7-S1.5 — keyboard activation Enter/Space (WCAG 2.1.1).
     root.querySelectorAll('.ts2-row[data-key]').forEach(el => {

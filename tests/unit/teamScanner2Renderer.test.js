@@ -42,6 +42,7 @@ const {
   renderEmpty,
   renderError,
   classifyPerson,
+  renderMultiTeamView,
 } = await import('../../integrations/teamScanner2Renderer.js');
 
 /* ── Test fixtures ───────────────────────────────────────── */
@@ -281,6 +282,81 @@ describe('renderTeamGlance risk shelf', () => {
     });
     const html = renderTeamGlance(model);
     assert.doesNotMatch(html, /ts2-glance-risk-row/);
+  });
+});
+
+/* ── Multi-team aggregate view (S4.1) ─────────────────────── */
+
+describe('renderMultiTeamView (S4.1)', () => {
+  test('пустой spaces → empty-state', () => {
+    const html = renderMultiTeamView(makeModel());
+    assert.match(html, /Нет данных по командам/);
+  });
+
+  test('строит row на каждую pk c участниками + sprint + risks', () => {
+    const partA = makeParticipant({ key: 'u1', projects: ['BACKEND'], issuesNow: [{}, {}, {}, {}] });
+    const partB = makeParticipant({ key: 'u2', projects: ['FRONTEND'], issuesNow: [{}] });
+    const model = makeModel({
+      participants: [partA, partB],
+      spaces: {
+        BACKEND:  { activeSprintName: 'Backend Sprint 12', sprintIssues: [{}, {}] },
+        FRONTEND: { activeSprintName: 'Frontend Sprint 5',  sprintIssues: [{}] },
+      },
+      scannerV2: {
+        sprintGoal: {
+          sprints: [
+            { pk: 'BACKEND',  progressPct: 60, pace: 'on-track', daysLeft: 4 },
+            { pk: 'FRONTEND', progressPct: 30, pace: 'behind',   daysLeft: 2 },
+          ],
+        },
+        risks: { orphansByPk: { BACKEND: 3 } },
+      },
+    });
+    const html = renderMultiTeamView(model);
+    assert.match(html, /BACKEND/);
+    assert.match(html, /FRONTEND/);
+    assert.match(html, /Backend Sprint 12/);
+    assert.match(html, /60%/);
+    assert.match(html, /30%/);
+    assert.match(html, /3 orphans/);
+    assert.match(html, /4 WIP/, 'BACKEND total WIP=4');
+    assert.match(html, /1 WIP/, 'FRONTEND total WIP=1');
+    // Click-handlers через data-team-pk
+    assert.match(html, /data-team-pk="BACKEND"/);
+    assert.match(html, /data-team-pk="FRONTEND"/);
+  });
+
+  test('error space → error-row', () => {
+    const model = makeModel({
+      spaces: {
+        BROKEN: { hasError: true, errorMsg: 'Jira 503' },
+      },
+    });
+    const html = renderMultiTeamView(model);
+    assert.match(html, /Jira 503/);
+    assert.match(html, /ts2-team-row-error/);
+  });
+
+  test('сортировка: stop-команды первыми', () => {
+    const partA = makeParticipant({
+      key: 'u1', projects: ['HEALTHY'],
+      issuesNow: [], stale: [], timelineToday: [{ at: new Date().toISOString(), kind: 'transition' }],
+    });
+    const partB = makeParticipant({
+      key: 'u2', projects: ['STUCK'],
+      issuesNow: [], stale: [{}, {}], timelineToday: [],
+    });
+    const model = makeModel({
+      participants: [partA, partB],
+      spaces: {
+        HEALTHY: { activeSprintName: 'A', sprintIssues: [{}] },
+        STUCK:   { activeSprintName: 'B', sprintIssues: [{}] },
+      },
+    });
+    const html = renderMultiTeamView(model);
+    const idxStuck   = html.indexOf('STUCK');
+    const idxHealthy = html.indexOf('HEALTHY');
+    assert.ok(idxStuck < idxHealthy, 'STUCK должен быть выше HEALTHY (sort by stop count)');
   });
 });
 
