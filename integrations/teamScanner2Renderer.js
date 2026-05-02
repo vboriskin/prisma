@@ -320,84 +320,236 @@ function renderRow(p, isExpanded) {
   `;
 }
 
-/* ── Detail stub (P5 will replace with 72h side-panel) ── */
+/* ── Detail panel (V18.1 P5) — slide-in 480px справа ────── */
 
-export function renderDetailStub(model, key) {
+const SRC_LABELS = ['J', 'B', 'C', 'Z'];
+const SRC_NAMES  = ['Jira', 'Bitbucket', 'Confluence', 'Zephyr'];
+const SRC_KEYS   = ['j', 'b', 'c', 'z'];
+
+/**
+ * Side-panel с heatmap 72×4, sparkline, blockers, событиями и фильтрами.
+ * @param {object} model
+ * @param {string} key — participant.key
+ * @param {object} [ctx] — { filters: {j,b,c,z} }
+ */
+export function renderEmployeeDetailPanel(model, key, ctx = {}) {
   const p = (model?.participants || []).find(x => x.key === key);
-  if (!p) return '';
-  const tToday = (p.timelineToday || []).length;
+  if (!p) {
+    return `
+      <div class="ts2-panel ts2-panel-empty">
+        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+        <div class="ts2-empty-text">Участник не найден.</div>
+      </div>
+    `;
+  }
+  const filters = ctx.filters || { j: true, b: true, c: true, z: true };
+  const tToday = (p.timelineToday    || []).length;
   const tYest  = (p.timelineYesterday || []).length;
-  const tPrev  = (p.timelinePrev || []).length;
-  // V18.1 P3 — Используем enriched timeline72h если есть, иначе fallback.
-  const tl = (p.timeline72h && p.timeline72h.length) ? p.timeline72h : []
-    .concat(p.timelineToday || [])
-    .concat(p.timelineYesterday || []);
-  const recent = tl.slice(0, 6).map(e => {
-    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
-    const issue = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
-    const text  = esc(e.text || e.kind || '');
-    return `<li class="ts2-recent-li"><span class="ts2-recent-at">${esc(at)}</span> ${issue} <span class="ts2-recent-text">${text}</span></li>`;
-  }).join('');
-
-  // V18.1 P3 — surface новые сигналы в текстовом виде (визуальный side-panel
-  // с heatmap/sparkline — P5).
-  const cs = p.contextSwitches || { distinctIssueKeys: 0, switchEvents: [], switchScore: 0 };
+  const tPrev  = (p.timelinePrev      || []).length;
+  const heat72 = p.heatmap72x4 || { grid: [[],[],[],[]], rowTotals: [0,0,0,0], colTotals: [], peakCell: null };
+  const spark  = p.sparkline72h || new Array(72).fill(0);
+  const cs     = p.contextSwitches || { distinctIssueKeys: 0, switchEvents: [], switchScore: 0 };
   const blockers = Array.isArray(p.blockers) ? p.blockers : [];
-  const heat = p.heatmap || { peakHour: -1, peakCount: 0, quietHours: [] };
 
-  const blockersHtml = blockers.length
-    ? `<ul class="ts2-blockers-list">
-        ${blockers.slice(0, 5).map(b => `
-          <li class="ts2-blockers-li">
-            <span class="ts2-blockers-stripe"></span>
-            <span class="ts2-blockers-key">${esc(b.key)}</span>
-            <span class="ts2-blockers-status">${esc(b.status)}</span>
-            <span class="ts2-blockers-dwell">${b.dwellHours}ч</span>
-            <span class="ts2-blockers-summary">${esc(b.summary || '').slice(0, 80)}</span>
-          </li>`).join('')}
-       </ul>`
-    : `<div class="ts2-detail-stub-text">Нет blocker'ов с dwell-time ≥ 24ч.</div>`;
-
-  const peakLine = heat.peakHour >= 0 && heat.peakCount > 0
-    ? `пик активности — <strong>${String(heat.peakHour).padStart(2, '0')}:00</strong> (${heat.peakCount} событий за 72ч)`
-    : 'пиковая активность не выявлена';
-  const switchLine = cs.switchEvents.length > 0
-    ? `${cs.switchEvents.length} переключений (gap < 30 мин), ${cs.distinctIssueKeys} разных задач`
-    : `${cs.distinctIssueKeys} разных задач, без частых переключений`;
+  const tl = Array.isArray(p.timeline72h) ? p.timeline72h : [];
+  const filteredTl = tl;  // P5: jira-фильтр применяется на heatmap, события — все.
 
   return `
-    <div class="ts2-detail">
-      <div class="ts2-detail-head">
-        <div class="ts2-detail-title">
-          <span class="ts2-detail-name">${esc(p.label || '—')}</span>
-          <span class="ts2-pill ts2-pill-muted">сегодня ${tToday} · вчера ${tYest} · позавчера ${tPrev}</span>
+    <div class="ts2-panel" role="dialog" aria-label="Детализация по сотруднику">
+      ${renderPanelHeader(p, tToday, tYest, tPrev)}
+      ${renderCounters(p)}
+      ${renderHeatmap72x4(heat72, filters)}
+      ${renderSparkline(spark)}
+      ${renderFilters(filters, heat72.rowTotals)}
+      ${renderBlockersShelf(blockers)}
+      ${renderEventsFeed(filteredTl)}
+      ${renderSwitchesNote(cs)}
+    </div>
+  `;
+}
+
+function renderPanelHeader(p, tToday, tYest, tPrev) {
+  return `
+    <div class="ts2-panel-head">
+      <div class="ts2-panel-titleblock">
+        <div class="ts2-panel-name">${esc(p.label || '—')}</div>
+        <div class="ts2-panel-sub">
+          <span class="ts2-panel-meta">сегодня ${tToday}</span>
+          <span class="ts2-panel-meta">вчера ${tYest}</span>
+          <span class="ts2-panel-meta">позавчера ${tPrev}</span>
+          ${p.email ? `<span class="ts2-panel-meta ts2-panel-meta-muted">${esc(p.email)}</span>` : ''}
         </div>
-        <button class="ts2-btn ts2-btn-ghost" id="ts2-detail-close" type="button">закрыть</button>
       </div>
+      <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+    </div>
+  `;
+}
 
-      <div class="ts2-detail-grid">
-        <section class="ts2-detail-section">
-          <div class="ts2-detail-section-title">Сигналы 72ч</div>
-          <div class="ts2-detail-stub-text">${peakLine}</div>
-          <div class="ts2-detail-stub-text">${switchLine}</div>
-        </section>
+function renderCounters(p) {
+  const prs48 = p.badges?.pr48h || 0;
+  const com48 = p.badges?.commits48h || 0;
+  const tasks = p.contextSwitches?.distinctIssueKeys || 0;
+  const hours = (p.loggedTodaySec     || 0) / 3600 +
+                (p.loggedYesterdaySec || 0) / 3600 +
+                (p.loggedDayBeforeSec || 0) / 3600;
+  return `
+    <div class="ts2-panel-counters">
+      ${counterCell(com48, 'коммитов', '48ч')}
+      ${counterCell(prs48, 'PR',       '48ч')}
+      ${counterCell(tasks, 'задач',    '72ч')}
+      ${counterCell(hours.toFixed(1), 'часов', '72ч')}
+    </div>
+  `;
+}
+function counterCell(num, lab, sub) {
+  return `<div class="ts2-panel-counter">
+    <div class="ts2-panel-counter-num">${esc(num)}</div>
+    <div class="ts2-panel-counter-lab">${esc(lab)}</div>
+    <div class="ts2-panel-counter-sub">${esc(sub)}</div>
+  </div>`;
+}
 
-        <section class="ts2-detail-section">
-          <div class="ts2-detail-section-title">Blocker'ы (dwell ≥ 24ч)</div>
-          ${blockersHtml}
-        </section>
-
-        <section class="ts2-detail-section ts2-detail-section-wide">
-          <div class="ts2-detail-section-title">Последние события</div>
-          ${recent ? `<ul class="ts2-recent">${recent}</ul>` : '<div class="ts2-detail-stub-text">Нет событий за окно 72ч.</div>'}
-        </section>
+function renderHeatmap72x4(h, filters) {
+  // 4 строки × 72 колонки. Каждая клетка — opacity по плотности.
+  const rows = h.grid.map((row, srcIdx) => {
+    const visible = filters[SRC_KEYS[srcIdx]] !== false;
+    const peak = row.length ? Math.max(...row) : 0;
+    const cells = row.map((n, hourIdx) => {
+      let op;
+      if (n === 0)      op = 0.06;
+      else if (n === 1) op = 0.45;
+      else if (n === 2) op = 0.65;
+      else if (n === 3) op = 0.85;
+      else              op = 1.0;
+      const isPeak = h.peakCell && h.peakCell.srcIdx === srcIdx && h.peakCell.hourIndex === hourIdx;
+      const cls = isPeak ? 'ts2-hcell ts2-hcell-peak' : 'ts2-hcell';
+      const hoursAgo = 71 - hourIdx;
+      return `<span class="${cls}" style="opacity:${op}" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
+    }).join('');
+    return `
+      <div class="ts2-hrow ${visible ? '' : 'ts2-hrow-hidden'}">
+        <span class="ts2-hrow-label" title="${SRC_NAMES[srcIdx]} · ${h.rowTotals[srcIdx]} событий">${SRC_LABELS[srcIdx]}</span>
+        <span class="ts2-hrow-cells">${cells}</span>
+        <span class="ts2-hrow-total">${h.rowTotals[srcIdx]}</span>
       </div>
-
-      <div class="ts2-detail-stub-footer">
-        Полный 72-часовой side-panel с heatmap 72×4, sparkline и фильтрами — в P5.
+    `;
+  }).join('');
+  return `
+    <div class="ts2-panel-section">
+      <div class="ts2-panel-section-title">Heatmap 72×4 <span class="ts2-panel-section-hint">час × источник</span></div>
+      <div class="ts2-heatmap">
+        ${rows}
+        <div class="ts2-haxis">
+          <span class="ts2-haxis-tick">−72ч</span>
+          <span class="ts2-haxis-tick">−48ч</span>
+          <span class="ts2-haxis-tick">−24ч</span>
+          <span class="ts2-haxis-tick ts2-haxis-tick-now">сейчас</span>
+        </div>
       </div>
     </div>
   `;
+}
+
+function renderSparkline(spark) {
+  const max = spark.length ? Math.max(...spark) : 0;
+  if (max === 0) {
+    return `
+      <div class="ts2-panel-section ts2-panel-section-tight">
+        <div class="ts2-panel-section-title">Загрузка <span class="ts2-panel-section-hint">events/час</span></div>
+        <div class="ts2-empty-text">Нет событий за 72ч.</div>
+      </div>
+    `;
+  }
+  const bars = spark.map((n, i) => {
+    const h = max > 0 ? Math.max(2, Math.round((n / max) * 24)) : 0;
+    const hoursAgo = 71 - i;
+    return `<span class="ts2-spark-bar" style="height:${h}px" title="${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
+  }).join('');
+  return `
+    <div class="ts2-panel-section ts2-panel-section-tight">
+      <div class="ts2-panel-section-title">Загрузка <span class="ts2-panel-section-hint">peak ${max} events/час</span></div>
+      <div class="ts2-sparkline">${bars}</div>
+    </div>
+  `;
+}
+
+function renderFilters(filters, rowTotals) {
+  const pills = SRC_KEYS.map((k, i) => {
+    const active = filters[k] !== false;
+    const total = rowTotals[i] || 0;
+    return `
+      <button class="ts2-filter-pill ${active ? 'ts2-filter-pill-on' : 'ts2-filter-pill-off'}" data-filter="${k}" type="button">
+        <span class="ts2-filter-pill-key">${SRC_LABELS[i]}</span>
+        <span class="ts2-filter-pill-name">${SRC_NAMES[i]}</span>
+        <span class="ts2-filter-pill-num">${total}</span>
+      </button>
+    `;
+  }).join('');
+  return `<div class="ts2-panel-filters">${pills}</div>`;
+}
+
+function renderBlockersShelf(blockers) {
+  if (!blockers.length) {
+    return `
+      <div class="ts2-panel-section ts2-panel-section-tight">
+        <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">dwell ≥ 24ч</span></div>
+        <div class="ts2-empty-text">Нет blocker'ов с dwell-time ≥ 24ч.</div>
+      </div>
+    `;
+  }
+  const items = blockers.slice(0, 8).map(b => `
+    <li class="ts2-blockers-li">
+      <span class="ts2-blockers-stripe"></span>
+      <span class="ts2-blockers-key">${esc(b.key)}</span>
+      <span class="ts2-blockers-status">${esc(b.status)}</span>
+      <span class="ts2-blockers-dwell">${b.dwellHours}ч</span>
+      <span class="ts2-blockers-summary">${esc((b.summary || '').slice(0, 80))}</span>
+    </li>`).join('');
+  return `
+    <div class="ts2-panel-section ts2-panel-section-tight">
+      <div class="ts2-panel-section-title">Blocker'ы <span class="ts2-panel-section-hint">dwell ≥ 24ч · top 8</span></div>
+      <ul class="ts2-blockers-list">${items}</ul>
+    </div>
+  `;
+}
+
+function renderEventsFeed(timeline72h) {
+  if (!timeline72h.length) {
+    return `
+      <div class="ts2-panel-section ts2-panel-section-tight">
+        <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч</span></div>
+        <div class="ts2-empty-text">Нет событий за 72ч.</div>
+      </div>
+    `;
+  }
+  const items = timeline72h.slice(0, 30).map(e => {
+    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+    const issueKey = e?.issue?.key ? `<strong>${esc(e.issue.key)}</strong>` : '';
+    const text  = esc(e.text || e.kind || '');
+    return `<li class="ts2-recent-li"><span class="ts2-recent-at">${esc(at)}</span> ${issueKey} <span class="ts2-recent-text">${text}</span></li>`;
+  }).join('');
+  return `
+    <div class="ts2-panel-section ts2-panel-section-tight">
+      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч · top 30</span></div>
+      <ul class="ts2-recent ts2-recent-feed">${items}</ul>
+    </div>
+  `;
+}
+
+function renderSwitchesNote(cs) {
+  if (!cs || cs.distinctIssueKeys === 0) return '';
+  const switches = cs.switchEvents?.length || 0;
+  const score    = Math.round((cs.switchScore || 0) * 100);
+  const note = switches > 0
+    ? `<strong>${switches}</strong> переключений между задачами (gap < 30 мин), <strong>${cs.distinctIssueKeys}</strong> разных задач за 72ч · score ${score}%`
+    : `<strong>${cs.distinctIssueKeys}</strong> разных задач за 72ч, без частых переключений`;
+  return `<div class="ts2-panel-footer-note">${note}</div>`;
+}
+
+/** Backward-compat: P3-style inline stub. Сохранён для случаев когда
+ *  side-panel не активен (например, в тестах). НЕ вызывается в P5+ UI. */
+export function renderDetailStub(model, key) {
+  return renderEmployeeDetailPanel(model, key);
 }
 
 /* ── Skeleton / empty / error ────────────────────────── */

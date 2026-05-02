@@ -25,6 +25,8 @@ import {
   findLastStatusChange,
   buildAssigneeIndex,
   computeBlockers,
+  computeHeatmap72x4,
+  computeSparkline72h,
 } from '../../integrations/teamScanner2Enrichment.js';
 
 /* ── Helpers — конструируем event'ы и participant'ов ──────── */
@@ -279,6 +281,89 @@ describe('computeBlockers', () => {
   });
 });
 
+/* ── computeHeatmap72x4 (P5) ─────────────────────────────── */
+
+describe('computeHeatmap72x4', () => {
+  test('пустой → grid 4×72 нулей, peakCell=null', () => {
+    const h = computeHeatmap72x4(mk());
+    assert.equal(h.grid.length, 4);
+    assert.equal(h.grid[0].length, 72);
+    assert.equal(h.grid[0][0], 0);
+    assert.deepEqual(h.rowTotals, [0, 0, 0, 0]);
+    assert.equal(h.peakCell, null);
+  });
+
+  test('jira event 2ч назад → grid[0][69] = 1', () => {
+    const ago2hIso = new Date(Date.now() - 2 * 3600 * 1000 - 60_000).toISOString();
+    const h = computeHeatmap72x4(mk({ timelineToday: [ev(ago2hIso, 'A')] }));
+    // hoursAgo = 2 → idx = 71 - 2 = 69
+    assert.equal(h.grid[0][69], 1);
+    assert.equal(h.rowTotals[0], 1);
+    assert.equal(h.peakCell.srcIdx, 0);
+    assert.equal(h.peakCell.hourIndex, 69);
+  });
+
+  test('event > 72ч → игнорируется', () => {
+    const ago100h = new Date(Date.now() - 100 * 3600 * 1000).toISOString();
+    const h = computeHeatmap72x4(mk({ timelineToday: [ev(ago100h, 'A')] }));
+    assert.deepEqual(h.rowTotals, [0, 0, 0, 0]);
+  });
+
+  test('источники J/B/C/Z разводятся по строкам', () => {
+    const ago1h = new Date(Date.now() - 1 * 3600 * 1000 - 60_000).toISOString();
+    const p = mk({
+      timelineToday:               [ev(ago1h, 'A')],
+      bbItems:                     [{ at: ago1h, kind: 'pr' }],
+      cfItems:                     [{ at: ago1h, kind: 'edit' }],
+      zephyrTestsCreatedRecent:    [{ at: ago1h, kind: 'test' }],
+      zephyrTestsExecutedRecent:   [{ at: ago1h, kind: 'test', result: 'PASS' }],
+    });
+    const h = computeHeatmap72x4(p);
+    assert.equal(h.rowTotals[0], 1, 'jira');
+    assert.equal(h.rowTotals[1], 1, 'bb');
+    assert.equal(h.rowTotals[2], 1, 'cf');
+    assert.equal(h.rowTotals[3], 2, 'zephyr (created + executed)');
+  });
+
+  test('colTotals = sum по 4 источникам в колонке', () => {
+    const ago2h = new Date(Date.now() - 2 * 3600 * 1000 - 60_000).toISOString();
+    const p = mk({
+      timelineToday: [ev(ago2h, 'A')],
+      bbItems:       [{ at: ago2h, kind: 'pr' }],
+    });
+    const h = computeHeatmap72x4(p);
+    assert.equal(h.colTotals[69], 2, 'jira+bb в часе -2 = 2');
+  });
+});
+
+/* ── computeSparkline72h (P5) ────────────────────────────── */
+
+describe('computeSparkline72h', () => {
+  test('пустой → 72 нулей', () => {
+    const s = computeSparkline72h(mk());
+    assert.equal(s.length, 72);
+    assert.deepEqual(s, new Array(72).fill(0));
+  });
+
+  test('переиспользует heatmap72x4.colTotals если есть', () => {
+    const p = mk();
+    p.heatmap72x4 = { colTotals: new Array(72).fill(0).map((_, i) => i) };
+    const s = computeSparkline72h(p);
+    assert.equal(s[5], 5);
+    assert.equal(s[71], 71);
+    // Должна вернуть КОПИЮ, не ссылку.
+    s[0] = 999;
+    assert.equal(p.heatmap72x4.colTotals[0], 0);
+  });
+
+  test('считает с нуля если heatmap72x4 нет', () => {
+    const ago1h = new Date(Date.now() - 1 * 3600 * 1000 - 60_000).toISOString();
+    const p = mk({ timelineToday: [ev(ago1h, 'A'), ev(ago1h, 'B')] });
+    const s = computeSparkline72h(p);
+    assert.equal(s[70], 2);
+  });
+});
+
 /* ── enrichForScanner2 — integration ─────────────────────── */
 
 describe('enrichForScanner2', () => {
@@ -290,6 +375,10 @@ describe('enrichForScanner2', () => {
     assert.ok('contextSwitches' in out.participants[0]);
     assert.ok('timeline72h' in out.participants[0]);
     assert.ok(Array.isArray(out.participants[0].blockers));
+    // P5 поля
+    assert.ok('heatmap72x4' in out.participants[0]);
+    assert.ok(Array.isArray(out.participants[0].sparkline72h));
+    assert.equal(out.participants[0].sparkline72h.length, 72);
     assert.ok(out.scannerV2);
     assert.equal(out.scannerV2.dwellThresholdHours, 24);
     assert.equal(out.scannerV2.serverLocalTZ, true);

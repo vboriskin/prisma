@@ -50,6 +50,9 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     p.contextSwitches = computeContextSwitches(p);
     p.timeline72h     = computeTimeline72h(p);
     p.blockers        = assigneeIndex ? computeBlockers(p, assigneeIndex, dwellHours) : [];
+    // V18.1 P5 — расширенные сигналы для side-panel:
+    p.heatmap72x4     = computeHeatmap72x4(p);   // 4 sources × 72 hours
+    p.sparkline72h    = computeSparkline72h(p);  // 72 значений events/час
   }
 
   model.scannerV2 = {
@@ -179,6 +182,106 @@ export function computeTimeline72h(p) {
   tag(p?.timelineYesterday || [], 1);
   tag(p?.timelinePrev      || [], 2);
   out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return out;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/* Heatmap 72×4 — 4 sources × 72 rolling hours (V18.1 P5)     */
+/* ────────────────────────────────────────────────────────── */
+
+/**
+ * Returns:
+ *   {
+ *     grid: [J[72], B[72], C[72], Z[72]],   // chronological: [0]=oldest, [71]=now-1h
+ *     rowTotals: [j, b, c, z],
+ *     colTotals: number[72],
+ *     peakCell: { srcIdx, hourIndex, count } | null,
+ *   }
+ * Sources:
+ *   J = jira (timeline events, kind ∈ {transition, comment, worklog, ...})
+ *   B = bitbucket (p.bbItems[])
+ *   C = confluence (p.cfItems[])
+ *   Z = zephyr (p.zephyrTestsCreatedRecent + p.zephyrTestsExecutedRecent)
+ *
+ * Bucketing — rolling 72-hour window от Date.now() назад. Каждый bucket =
+ * 1 час. hourIndex 71 = последний завершённый час, hourIndex 0 = час 72ч
+ * назад. События старше 72ч игнорируются.
+ */
+export function computeHeatmap72x4(p) {
+  const grid = [
+    new Array(72).fill(0),  // 0 = jira
+    new Array(72).fill(0),  // 1 = bb
+    new Array(72).fill(0),  // 2 = cf
+    new Array(72).fill(0),  // 3 = zephyr
+  ];
+  const HOUR_MS = 3600 * 1000;
+  const nowMs = Date.now();
+
+  const drop = (srcIdx, atIso) => {
+    if (!atIso) return;
+    const ms = new Date(atIso).getTime();
+    if (isNaN(ms)) return;
+    const hoursAgo = Math.floor((nowMs - ms) / HOUR_MS);
+    if (hoursAgo < 0 || hoursAgo >= 72) return;
+    const idx = 71 - hoursAgo;   // 0=oldest, 71=newest
+    grid[srcIdx][idx]++;
+  };
+
+  // Jira — все timeline events с issue (исключаем bb/cf/zephyr-источники
+  // если они вдруг попали в timelineToday — у нас kind === 'transition' и т.п.)
+  for (const arr of [p?.timelineToday || [], p?.timelineYesterday || [], p?.timelinePrev || []]) {
+    for (const e of arr) drop(0, e?.at);
+  }
+  // Bitbucket
+  for (const it of (p?.bbItems || [])) drop(1, it?.at);
+  // Confluence
+  for (const it of (p?.cfItems || [])) drop(2, it?.at);
+  // Zephyr
+  for (const it of (p?.zephyrTestsCreatedRecent  || [])) drop(3, it?.at);
+  for (const it of (p?.zephyrTestsExecutedRecent || [])) drop(3, it?.at);
+
+  const rowTotals = grid.map(row => row.reduce((s, n) => s + n, 0));
+  const colTotals = new Array(72).fill(0);
+  for (let h = 0; h < 72; h++) {
+    for (let s = 0; s < 4; s++) colTotals[h] += grid[s][h];
+  }
+  let peakCell = null;
+  for (let s = 0; s < 4; s++) {
+    for (let h = 0; h < 72; h++) {
+      if (grid[s][h] > 0 && (!peakCell || grid[s][h] > peakCell.count)) {
+        peakCell = { srcIdx: s, hourIndex: h, count: grid[s][h] };
+      }
+    }
+  }
+  return { grid, rowTotals, colTotals, peakCell };
+}
+
+/**
+ * 72-длинный массив events/hour (sum across sources). Для UI sparkline.
+ * Reuses heatmap72x4.colTotals если уже посчитан, иначе пересчитывает.
+ */
+export function computeSparkline72h(p) {
+  // Если P5 enrichment уже посчитал heatmap72x4 — переиспользуем colTotals.
+  // Иначе считаем напрямую (cheap).
+  if (p?.heatmap72x4?.colTotals) return p.heatmap72x4.colTotals.slice();
+  const HOUR_MS = 3600 * 1000;
+  const nowMs = Date.now();
+  const out = new Array(72).fill(0);
+  const drop = (atIso) => {
+    if (!atIso) return;
+    const ms = new Date(atIso).getTime();
+    if (isNaN(ms)) return;
+    const hoursAgo = Math.floor((nowMs - ms) / HOUR_MS);
+    if (hoursAgo < 0 || hoursAgo >= 72) return;
+    out[71 - hoursAgo]++;
+  };
+  for (const arr of [p?.timelineToday || [], p?.timelineYesterday || [], p?.timelinePrev || []]) {
+    for (const e of arr) drop(e?.at);
+  }
+  for (const it of (p?.bbItems || []))                      drop(it?.at);
+  for (const it of (p?.cfItems || []))                      drop(it?.at);
+  for (const it of (p?.zephyrTestsCreatedRecent  || []))    drop(it?.at);
+  for (const it of (p?.zephyrTestsExecutedRecent || []))    drop(it?.at);
   return out;
 }
 

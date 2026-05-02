@@ -27,7 +27,7 @@ import { analysePulse } from './portfolioPulseModel.js';
 import { enrichForScanner2 } from './teamScanner2Enrichment.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import {
-  renderTopBar, renderTeamGlance, renderPersonRows, renderDetailStub,
+  renderTopBar, renderTeamGlance, renderPersonRows, renderEmployeeDetailPanel,
   renderSkeleton, renderEmpty, renderError,
 } from './teamScanner2Renderer.js';
 
@@ -42,9 +42,13 @@ export const TeamScanner2 = {
   // не триггерит cold fetch на каждом refreshAll).
   _cancelled: false,
   _errorMsg: '',
-  // P1 detail-panel: которая строка раскрыта (key участника) — заглушка
-  // под будущий 72h side-panel из P5.
+  // V18.1 P5 — open key для slide-in side-panel (480px справа).
+  // Раньше (P1-P3) был inline-expand под строкой — теперь полноценный
+  // slide-in. Закрытие по: ✕, click-on-row-again, Esc.
   _expandedKey: '',
+  // P5 source filters — toggle pill'ы J/B/C/Z в panel'е. Persist'ятся
+  // между переоткрытиями panel'и в одной сессии.
+  _panelFilters: { j: true, b: true, c: true, z: true },
   // V18.1 P4 — captured jobId (из callback fetchPulseData → onJobId)
   // используется для lazy server-side drill-down. Истекает через
   // 30 мин по TTL `_pulseJobs` cluster'а на сервере.
@@ -191,13 +195,18 @@ export const TeamScanner2 = {
   _renderFull() {
     if (!this._container || !this._model) return;
     const m = this._model;
+    // V18.1 P5 — side-panel рендерится КАК БРАТ root'а (position:fixed),
+    // чтобы перекрывать всю область viewport, а не сидеть в content-area.
+    const panelHtml = this._expandedKey
+      ? renderEmployeeDetailPanel(m, this._expandedKey, { filters: this._panelFilters })
+      : '';
     const html = `
       <div class="ts2-root">
         ${renderTopBar(m)}
         ${renderTeamGlance(m)}
         ${renderPersonRows(m, { expandedKey: this._expandedKey })}
-        ${this._expandedKey ? renderDetailStub(m, this._expandedKey) : ''}
       </div>
+      ${this._expandedKey ? `<div class="ts2-panel-backdrop" id="ts2-panel-backdrop"></div>${panelHtml}` : ''}
     `;
     this._container.innerHTML = html;
     this._bindEvents();
@@ -207,19 +216,41 @@ export const TeamScanner2 = {
     const root = this._container;
     if (!root) return;
     root.querySelector('#ts2-refresh-btn')?.addEventListener('click', () => this.refresh());
-    // Click по строке → toggle expanded.
+    // Click по строке → открыть/закрыть side-panel.
     root.querySelectorAll('.ts2-row[data-key]').forEach(el => {
       el.addEventListener('click', (e) => {
-        // Игнорируем клики по ссылкам внутри строки.
         if (e.target.closest('a, button')) return;
         const key = el.dataset.key;
         this._expandedKey = (this._expandedKey === key) ? '' : key;
         this._renderFull();
       });
     });
-    root.querySelector('#ts2-detail-close')?.addEventListener('click', () => {
-      this._expandedKey = '';
-      this._renderFull();
+    // V18.1 P5 — close: ✕ button, backdrop click, Esc key.
+    root.querySelector('#ts2-detail-close')?.addEventListener('click', () => this._closePanel());
+    root.querySelector('#ts2-panel-backdrop')?.addEventListener('click', () => this._closePanel());
+    if (this._expandedKey) {
+      // Bind Esc once; remove on close. Используем this._escHandler чтобы
+      // можно было удалить.
+      if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
+      this._escHandler = (e) => { if (e.key === 'Escape') this._closePanel(); };
+      document.addEventListener('keydown', this._escHandler);
+    }
+    // P5 — filter pills внутри panel'и.
+    root.querySelectorAll('.ts2-filter-pill[data-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const f = btn.dataset.filter;
+        this._panelFilters = { ...this._panelFilters, [f]: !this._panelFilters[f] };
+        this._renderFull();
+      });
     });
+  },
+
+  _closePanel() {
+    this._expandedKey = '';
+    if (this._escHandler) {
+      document.removeEventListener('keydown', this._escHandler);
+      this._escHandler = null;
+    }
+    this._renderFull();
   },
 };
