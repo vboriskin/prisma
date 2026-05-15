@@ -20,6 +20,8 @@
    intentionally pass already-sanitised messages.
    ============================================================ */
 
+import { Services } from './app/services.js';
+
 const STORAGE_KEY = 'q2_errors_v1';
 const MAX_ENTRIES = 500;
 
@@ -36,6 +38,32 @@ let _inHook = false;
 // quota fallback halves the log. Without this, the user has no idea half
 // their errors silently disappeared.
 let _quotaWarningShown = false;
+
+// V21 U — debounced batch reporter to server. Берём накопленные за 2 сек
+// errors и шлём одним POST'ом, чтобы не плодить запросы на каждое исключение.
+let _reportQueue = [];
+let _reportTimer = null;
+function _reportToServer(entry) {
+  if (typeof fetch !== 'function' || typeof window === 'undefined') return;
+  _reportQueue.push({
+    msg:    entry.message,
+    level:  entry.level,
+    source: entry.source,
+    at:     new Date(entry.ts).toISOString(),
+  });
+  if (_reportTimer) return;
+  _reportTimer = setTimeout(() => {
+    const batch = _reportQueue.splice(0, 20);
+    _reportTimer = null;
+    if (!batch.length) return;
+    fetch('/api/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ errors: batch }),
+      keepalive: true,
+    }).catch(() => { /* offline / server down — silently skip */ });
+  }, 2000);
+}
 
 function _persist() {
   try {
@@ -180,6 +208,17 @@ export const ErrorsLog = {
     if (_entries.length > MAX_ENTRIES) _entries.length = MAX_ENTRIES;
     _persist();
     _emit();
+    // V21 U (audit-2026-05-03 §E R6) — fire-and-forget repor in background.
+    // Не ждём ответ, не блокируем UI. fetch fail → молча игнорируем (offline,
+    // server down). Только error / warn — info/log не интересны для server-side
+    // metrics.
+    if (entry.level === 'error' || entry.level === 'warn') {
+      _reportToServer(entry);
+      // V22 — также отправляем в /api/telemetry канал для unified analytics
+      // (errors.batch event). Дублирование намеренное: /api/client-error
+      // — legacy alerting, /api/telemetry — usage analytics.
+      try { window.__telemetryPushError?.(entry); } catch (_) {}
+    }
     return entry;
   },
 
@@ -216,4 +255,5 @@ function _formatConsoleArgs(args) {
     .slice(0, 2000);
 }
 
+Services.register('ErrorsLog', ErrorsLog);
 if (typeof window !== 'undefined') window.ErrorsLog = ErrorsLog;

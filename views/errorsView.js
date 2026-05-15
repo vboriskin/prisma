@@ -11,25 +11,26 @@
    ============================================================ */
 
 import { ErrorsLog } from '../errorsLog.js';
+import { Utils } from '../utils.js';
+import { ConfirmDialog } from '../app/uxKit.js';
+import { renderPageHeader } from '../app/prizmaUI.js';
 
 const LEVELS = ['all', 'error', 'warn', 'info'];
 
-function _esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// V21 π7 A2 — локальный `_esc` свёрнут на `Utils.escapeHtml`.
+function _esc(s) { return Utils.escapeHtml(s); }
 
+// V21 π9 — same-day → time only, иначе единый `Utils.fmtDateTime`
+// (audit-2026-05-04 §2). Раньше `toLocaleString('ru')` без options.
 function _fmtTs(ts) {
-  try {
-    const d = new Date(ts);
-    const today = new Date();
-    const sameDay = d.toDateString() === today.toDateString();
-    if (sameDay) return d.toLocaleTimeString('ru');
-    return d.toLocaleString('ru');
-  } catch (_) {
-    return String(ts);
+  if (!ts) return '—';
+  const d = ts instanceof Date ? ts : new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
+  return Utils.fmtDateTime(d);
 }
 
 function _levelLabel(lvl) {
@@ -76,19 +77,25 @@ export const ErrorsView = {
     });
 
     const counts = ErrorsLog.counts();
+    // V21 π3 Ф1 — page-header (eyebrow + h1 + hairline) единым ритмом.
+    // Старый `<h2 class="errlog-title">Ошибки</h2>` снят; счётчики/панель
+    // действий остаются под header'ом — сохраняют функциональность.
+    const headerHtml = renderPageHeader('errors', {
+      sub: 'Журнал runtime-ошибок: что Призма заметила и не смогла обойти.',
+    });
     root.innerHTML = `
+      ${headerHtml}
       <div class="errlog-root view-root">
         <div class="errlog-header">
           <div class="errlog-header-row">
-            <h2 class="errlog-title">Ошибки</h2>
             <span class="errlog-counts">
               <span class="errlog-count-pill errlog-count-error">${counts.error || 0} ошибок</span>
               <span class="errlog-count-pill errlog-count-warn">${counts.warn || 0} предупреждений</span>
               <span class="errlog-count-pill errlog-count-info">${counts.info || 0} info</span>
             </span>
             <div class="errlog-header-actions">
-              <button class="btn btn-sm btn-ghost" id="errlog-export">⤓ Экспорт JSON</button>
-              <button class="btn btn-sm btn-danger" id="errlog-clear">🗑 Очистить</button>
+              <button class="btn btn-sm btn-ghost" id="errlog-export" data-icon="download" data-icon-size="14" aria-label="Экспорт лога ошибок в JSON">Экспорт JSON</button>
+              <button class="btn btn-sm btn-danger" id="errlog-clear" data-icon="trash" data-icon-size="14" aria-label="Очистить журнал ошибок">Очистить</button>
             </div>
           </div>
           <div class="errlog-filters">
@@ -121,7 +128,8 @@ export const ErrorsView = {
       return true;
     });
     if (!filtered.length) {
-      list.innerHTML = `<div class="errlog-empty">${all.length ? 'Нет записей под фильтр.' : 'Записей пока нет — это хорошо ✨'}</div>`;
+      // E1 fix (codebase-03 audit §12 no-emoji) — `✨` убран; calm-state.
+      list.innerHTML = `<div class="errlog-empty">${all.length ? 'Нет записей под фильтр.' : 'Записей пока нет — это хорошо.'}</div>`;
       return;
     }
     list.innerHTML = filtered.map(_renderRow).join('');
@@ -151,8 +159,15 @@ export const ErrorsView = {
     }
 
     // Clear
-    this._root.querySelector('#errlog-clear')?.addEventListener('click', () => {
-      if (!confirm('Очистить весь журнал ошибок? Действие нельзя отменить.')) return;
+    this._root.querySelector('#errlog-clear')?.addEventListener('click', async () => {
+      // V21 Q — native confirm → ConfirmDialog (danger).
+      const ok = await ConfirmDialog.show({
+        title: 'Очистить журнал ошибок?',
+        message: 'Все записанные ошибки и предупреждения будут удалены. Это действие необратимо.',
+        confirmLabel: 'Очистить',
+        danger: true,
+      });
+      if (!ok) return;
       ErrorsLog.clear();
       this.render(); // re-render to refresh counts in header
     });

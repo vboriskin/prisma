@@ -126,21 +126,25 @@ describe('gatherDiagnosticState — shape', () => {
   });
 
   test('incomplete identity список включает u-1 и u-2', () => {
+    // Phase-2 (2026-05-10) — jenkinsUserName добавлен как 5-й identity-канал.
+    // u-1 fixture теперь имеет `jenkinsUserName: 'i.ivanov'` для проверки
+    // что bbLogin остаётся единственным missing полем (как было до Phase-2).
     const employees = [
       { email: 'ivanov.ii@sber.ru', jiraAccountId: 'aaa-bbb-ccc-1234567',
-        bitbucketLogin: '', confluenceAccountId: 'cf-ivanov-id-1' },
+        bitbucketLogin: '', confluenceAccountId: 'cf-ivanov-id-1',
+        jenkinsUserName: 'i.ivanov' },
       // u-2 — нет в реестре вовсе.
     ];
     const s = gatherDiagnosticState({ model: makeModel(), employees });
     assert.equal(s.identity.incomplete.length, 2);
     const u1 = s.identity.incomplete.find(p => p.key === 'u-1');
     const u2 = s.identity.incomplete.find(p => p.key === 'u-2');
-    // u-1: emp найден, нет только bbLogin (cfId есть в employee).
+    // u-1: emp найден, нет только bbLogin (cfId + jenkinsUserName есть в employee).
     assert.deepEqual(u1.missing, ['bitbucketLogin']);
     assert.equal(u1.inRegistry, true);
-    // u-2: emp не найден, нет вообще ничего → все 4 missing + inRegistry=false.
+    // u-2: emp не найден, нет вообще ничего → все 5 missing + inRegistry=false.
     assert.deepEqual(u2.missing.sort(),
-      ['bitbucketLogin', 'confluenceAccountId', 'email', 'jiraAccountId']);
+      ['bitbucketLogin', 'confluenceAccountId', 'email', 'jenkinsUserName', 'jiraAccountId']);
     assert.equal(u2.inRegistry, false);
   });
 
@@ -157,6 +161,56 @@ describe('gatherDiagnosticState — shape', () => {
     // Bearer token redacted.
     assert.match(s.connection.perPkErrors[0].error, /Bearer \*\*\*/);
     assert.doesNotMatch(s.connection.perPkErrors[0].error, /abc123secret/);
+  });
+});
+
+/* ── F7: Stage-5 invariant tests для новых полей — surface coverage ── */
+describe('Stage 5 — новые fields/flags surface', () => {
+  beforeEach(() => _store.clear());
+
+  test('isBlocked фильтрация: уволенные [Х]/[X] исключаются из identity-coverage', () => {
+    const employees = [
+      { fio: 'Иванов И.И.', email: 'ivan@x.ru', jiraAccountId: 'jira1', bitbucketLogin: 'ivan', confluenceAccountId: 'cf1' },
+      // Заблокированный — должен быть отфильтрован, не считаться в coverage.
+      { fio: 'Петров П.П. [Х]', email: 'petr@x.ru', jiraAccountId: 'jira2', bitbucketLogin: '', confluenceAccountId: '' },
+      // Заблокированный с латинским [X].
+      { fio: 'Sidorov S. [X]', email: 'sid@x.ru', jiraAccountId: 'jira3', bitbucketLogin: '', confluenceAccountId: '' },
+    ];
+    const s = gatherDiagnosticState({ model: makeModel(), employees });
+    // bbCfAttribution.blockedExcluded — счётчик отфильтрованных.
+    assert.equal(s.bbCfAttribution.blockedExcluded, 2, 'двое уволенных исключены');
+  });
+
+  test('rawDiag сохраняет surface-флаги: bbDroppedOutOfAllowlist / cfMentionsUnattributed / bigMetricsTimeouts', () => {
+    const rawDiag = {
+      bbAuthorsCount: 3, bbItemsTotal: 10, bbAuthorSlugs: ['a', 'b', 'c'],
+      cfAuthorsCount: 5, cfItemsTotal: 25,
+      zephyrConfigured: true, zephyrAuthorsCount: 0,
+      zephyrTestCasesScanned: 0, zephyrTestRunsScanned: 0, zephyrProjectsResolved: 6,
+      zephyrTriedSummary: { total: 12, byStatus: { '403': 12 }, byType: { 'zephyr-testcase': 6 }, error: 'all-zql-variants-failed (statuses: 403)' },
+      perPk: [],
+      bigMetricsTimeouts: { sprintCommit: true, hotFiles: true },
+      bbDroppedOutOfAllowlist: 200,
+      cfMentionsUnattributed: 47,
+      sigmaErrorsCount: 0,
+    };
+    const s = gatherDiagnosticState({ model: makeModel(), rawDiag });
+    assert.ok(s.sources.rawDiag, 'rawDiag присутствует');
+    assert.equal(s.sources.rawDiag.bbDroppedOutOfAllowlist, 200);
+    assert.equal(s.sources.rawDiag.cfMentionsUnattributed, 47);
+    assert.deepEqual(s.sources.rawDiag.bigMetricsTimeouts, { sprintCommit: true, hotFiles: true });
+  });
+
+  test('zephyr.error из tried-summary surfaced в человекочитаемое warning', () => {
+    const rawDiag = {
+      zephyrConfigured: true,
+      zephyrAuthorsCount: 0, zephyrTestCasesScanned: 0, zephyrTestRunsScanned: 0,
+      zephyrTriedSummary: { error: 'all-zql-variants-failed (statuses: 403)' },
+    };
+    const s = gatherDiagnosticState({ model: makeModel(), rawDiag });
+    // D2: error поле + warning с понятным сообщением.
+    assert.equal(s.sources.zephyr.error, 'all-zql-variants-failed (statuses: 403)');
+    assert.match(s.sources.zephyr.warning, /403/);
   });
 });
 
@@ -425,11 +479,15 @@ describe('computeTzSkew', () => {
     assert.equal(r.skewSuspicious, false);
   });
 
-  test('skewSuspicious=true когда server timestamp очень старый', () => {
-    // 10 минут назад → 600s → > 300s → suspicious.
+  test('unmeasurable=true когда кэш старше 60s (не путаем с tz-skew)', () => {
+    // PR-CJ — старый тест ожидал что 10-минутный кэш = «skew suspicious»,
+    // что было багом: возраст кэша ≠ clock-skew. Теперь возвращаем
+    // `unmeasurable: true` чтобы UI не показывал ложный alarm.
     const fa = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     const r = computeTzSkew({ fetchedAt: fa });
-    assert.equal(r.skewSuspicious, true);
+    assert.equal(r.available, true);
+    assert.equal(r.unmeasurable, true);
+    assert.equal(r.skewSuspicious, undefined);
   });
 
   test('browserTzLabel формата UTC±H', () => {

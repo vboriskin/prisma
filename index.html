@@ -1,46 +1,290 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>СБОФ Планирование</title>
+  <title>Призма</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <meta name="theme-color" content="#0A0A0F" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FAFAF8" media="(prefers-color-scheme: light)">
+  <!-- Волна 1: theme.css ДО styles.css — даёт `--prizma-*` токены, на которые
+       ссылается shim в styles.css:1-100. -->
+  <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="styles.css">
+  <!-- AUDIT_HOLISTIC P1 / Идея 10 — Pz design-system (pz-card / pz-chip /
+       pz-badge / pz-modal). Альтернативный layer поверх существующих
+       *-card / *-chip / *-badge / *-modal — НЕ destructive миграция.
+       См. docs/pz-design-system.md. -->
+  <link rel="stylesheet" href="pz-design-system.css">
+  <!-- Mascot Обсидиан — motion system + reduced-motion + light-theme overrides
+       работают через CSS-переменные --obs-body / --obs-feature и data-theme.
+       См. obsidian/MASCOT_OBSIDIAN.md §13.4, §13.6. -->
+  <link rel="stylesheet" href="obsidian/obsidian.css">
+  <!-- V21 K #92 — apply theme BEFORE first paint, чтобы dark-юзеры
+       не видели FOUC (вспышку светлой темы при загрузке). state.theme
+       применяется позже в ThemeUI.init(), но к этому моменту первый
+       рендер уже успевает мелькнуть в light. -->
+  <script>
+    (function() {
+      try {
+        var raw = localStorage.getItem('q2_settings_v3');
+        var theme = 'light';
+        if (raw) {
+          var s = JSON.parse(raw);
+          if (s && s.theme === 'dark') theme = 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', theme);
+        if (theme === 'dark') {
+          document.addEventListener('DOMContentLoaded', function(){
+            document.body.classList.add('theme-dark');
+          });
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body>
 
-<!-- ===== FIRST-RUN SPLASH ("Привет → Погнали") =====
-     Shown only when localStorage.welcomeShown !== 'true'.
-     Rendered immediately (before any heavy init) so it appears instantly.
-     The wrapper has a few inline styles so it's visible before styles.css parses. -->
-<div id="welcomeOverlay" class="welcome-overlay" style="position:fixed;inset:0;z-index:11000;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-  <!-- Decorative floating gradient blobs (purely visual, GPU-cheap) -->
-  <div class="welcome-blob welcome-blob-1" aria-hidden="true"></div>
-  <div class="welcome-blob welcome-blob-2" aria-hidden="true"></div>
-  <div class="welcome-blob welcome-blob-3" aria-hidden="true"></div>
-  <div class="welcome-content">
-    <h1 class="welcome-title">
-      Привет <span class="welcome-wave" aria-hidden="true">👋</span>
-    </h1>
-    <p class="welcome-subtitle" id="welcomeSubtitle" data-text="Давай разберёмся с твоим планом">
-      <span class="welcome-subtitle-cursor" aria-hidden="true"></span>
-    </p>
+<!-- ===== Mascot Обсидиан — sprite =====
+     Inline'ится один раз в начале body. Все символы (#obs-base, #obs-shell,
+     #obs-favicon и т.д.) доступны через <use href="#…"> во всём приложении.
+     Source: obsidian/obsidian-sprite.svg. См. MASCOT_OBSIDIAN.md §13.11.
+     ============================================== -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true" id="obsidian-sprite">
+  <defs>
+    <!-- v22 mascot-pass — обогащённый символ. Раньше был только body+eyes, и
+         все Tier 1 (emerge/vanish/hibernate) + Living Shape (ls-*) играли
+         «впустую» — keyframes таргетят .obs-blade/edge-l/r/facet-*/ring/bar-*/
+         brow-*/emit-*/return-*/particle/socket, которых не было.
+         Теперь все hooks внутри символа с hidden defaults; CSS keyframes
+         сами активируют нужные элементы через `r:0→`, `opacity:0→`, `width:0→`. -->
+    <symbol id="obs-base" viewBox="-60 -60 120 120" overflow="visible">
+      <!-- ── Tier 1 EMERGE / VANISH transition elements (hidden by default) ── -->
+      <!-- Кольцо света (Emerge phase 5: r=8→50→65, opacity 0→0.4→0; Alert тоже использует) -->
+      <circle class="obs-ring" cx="0" cy="0" r="0" fill="none" stroke="var(--obs-emerge-glow, #fff)" stroke-width="0.6" opacity="0"/>
+      <!-- Световой клинок (Emerge phase 1: vertical line splits) -->
+      <rect class="obs-blade" x="-1.5" y="-50" width="3" height="100" fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <!-- Разлетающиеся рёбра (Emerge phase 2) -->
+      <rect class="obs-edge-l" x="-1.5" y="-50" width="3" height="100" fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <rect class="obs-edge-r" x="-1.5" y="-50" width="3" height="100" fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <!-- 4 грани, слетающиеся к центру (Emerge phase 3, Vanish reverse) -->
+      <polygon class="obs-facet-tl" points="-22,-46 6,-50 -10,-22" fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <polygon class="obs-facet-tr" points="6,-50 28,-22 0,-22"    fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <polygon class="obs-facet-bl" points="-32,-22 -28,12 -10,46" fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
+      <polygon class="obs-facet-br" points="28,-22 18,32 -10,46"   fill="var(--obs-emerge-glow, #fff)" opacity="0"/>
 
-    <!-- Default CTA — shown on truly clean first run -->
+      <!-- ── Тело кристалла (visible default; Emerge keyframes делают opacity 0→1) ── -->
+      <g class="obs-body">
+        <polygon points="-22,-46 6,-50 28,-22 18,32 -10,46 -28,12 -32,-22" fill="var(--obs-body, #fff)"/>
+        <polygon class="obs-body-outline" points="-22,-46 6,-50 28,-22 18,32 -10,46 -28,12 -32,-22" fill="none" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.7" opacity="0.45" stroke-linejoin="round"/>
+        <polygon points="-22,-46 -32,-22 -10,46" fill="var(--obs-feature, #1A1A22)" opacity="0.08"/>
+        <polygon points="6,-50 28,-22 18,32" fill="var(--obs-body, #fff)" opacity="0.04"/>
+        <line x1="-22" y1="-46" x2="-10" y2="46" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.18"/>
+        <line x1="6" y1="-50" x2="28" y2="-22" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.12"/>
+        <line x1="28" y1="-22" x2="-10" y2="46" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.18"/>
+        <line x1="6" y1="-50" x2="18" y2="32" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.12"/>
+        <line x1="-32" y1="-22" x2="18" y2="32" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.4" opacity="0.08"/>
+      </g>
+
+      <!-- ── Глаза (visible default r=1.8; Emerge starts r=0). Двойной class
+           даёт CSS hooks: общий `.obs-eye` для Emerge/Alert/etc, и
+           специализированные `.obs-eye-l/r` для Look/Cur/Wink. ── -->
+      <circle class="obs-eye obs-eye-l" cx="-9" cy="-3" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-eye obs-eye-r" cx="6"  cy="-3" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+
+      <!-- ── Tier 2 ALERT — bars (width=0 → 9 keyframes) ── -->
+      <rect class="obs-bar-l" x="-9.5" y="-3.9" width="0" height="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <rect class="obs-bar-r" x="5.5"  y="-3.9" width="0" height="1.8" fill="var(--obs-feature, #1A1A22)"/>
+
+      <!-- ── Tier 2 CONCERNED / Living ERROR — brows (opacity=0, stroke-dashoffset
+           для error path-draw effect) ── -->
+      <path class="obs-brow-l" d="M -14 -10 L -5 -8" stroke="var(--obs-feature, #1A1A22)" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-dasharray="11" stroke-dashoffset="11" opacity="0"/>
+      <path class="obs-brow-r" d="M 5 -8 L 14 -10"  stroke="var(--obs-feature, #1A1A22)" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-dasharray="11" stroke-dashoffset="11" opacity="0"/>
+
+      <!-- ── Living Shape STREAMING — 4 emit particles (r=0, cx/cy keyframed) ── -->
+      <circle class="obs-emit-1" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-emit-2" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-emit-3" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-emit-4" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+
+      <!-- ── Living Shape COMPLETE — 2 return particles ── -->
+      <circle class="obs-return-1" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-return-2" cx="0" cy="0" r="0" fill="var(--obs-feature, #1A1A22)"/>
+
+      <!-- ── Living Shape TOOL — particle + socket ── -->
+      <circle class="obs-particle" cx="0" cy="-3" r="0" fill="var(--obs-feature, #1A1A22)"/>
+      <circle class="obs-socket" cx="-25" cy="-28" r="0" fill="none" stroke="var(--obs-body, #fff)" stroke-width="0.8" opacity="0"/>
+    </symbol>
+    <symbol id="obs-shell" viewBox="-60 -60 120 120">
+      <polygon points="-22,-46 6,-50 28,-22 18,32 -10,46 -28,12 -32,-22" fill="var(--obs-body, #fff)"/>
+      <polygon class="obs-body-outline" points="-22,-46 6,-50 28,-22 18,32 -10,46 -28,12 -32,-22" fill="none" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.7" opacity="0.45" stroke-linejoin="round"/>
+      <polygon points="-22,-46 -32,-22 -10,46" fill="var(--obs-feature, #1A1A22)" opacity="0.08"/>
+      <polygon points="6,-50 28,-22 18,32" fill="var(--obs-body, #fff)" opacity="0.04"/>
+      <line x1="-22" y1="-46" x2="-10" y2="46" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.18"/>
+      <line x1="6" y1="-50" x2="28" y2="-22" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.12"/>
+      <line x1="28" y1="-22" x2="-10" y2="46" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.18"/>
+      <line x1="6" y1="-50" x2="18" y2="32" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.5" opacity="0.12"/>
+      <line x1="-32" y1="-22" x2="18" y2="32" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.4" opacity="0.08"/>
+    </symbol>
+    <symbol id="obs-base-h" viewBox="-60 -40 120 80">
+      <polygon points="-22,-30 6,-34 28,-6 18,16 -10,30 -28,4 -32,-6" fill="var(--obs-body, #fff)"/>
+      <polygon points="-22,-30 -32,-6 -10,30" fill="var(--obs-feature, #1A1A22)" opacity="0.08"/>
+      <line x1="-22" y1="-30" x2="-10" y2="30" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.4" opacity="0.18"/>
+      <line x1="6" y1="-34" x2="28" y2="-6" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.4" opacity="0.12"/>
+      <line x1="28" y1="-6" x2="-10" y2="30" stroke="var(--obs-feature, #1A1A22)" stroke-width="0.4" opacity="0.18"/>
+      <circle cx="-9" cy="-1" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <circle cx="6" cy="-1" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+    </symbol>
+    <symbol id="obs-favicon" viewBox="-60 -60 120 120">
+      <polygon points="-22,-46 6,-50 28,-22 18,32 -10,46 -28,12 -32,-22" fill="var(--obs-body, #fff)"/>
+      <rect x="-12" y="-4" width="6" height="2.5" fill="var(--obs-feature, #1A1A22)"/>
+      <rect x="3" y="-4" width="6" height="2.5" fill="var(--obs-feature, #1A1A22)"/>
+    </symbol>
+    <symbol id="obs-resting" viewBox="-60 -60 120 120">
+      <use href="#obs-shell"/>
+      <line x1="-13" y1="-3" x2="-5" y2="-3" stroke="var(--obs-feature, #1A1A22)" stroke-width="1.3" stroke-linecap="round"/>
+      <line x1="2" y1="-3" x2="10" y2="-3" stroke="var(--obs-feature, #1A1A22)" stroke-width="1.3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="obs-alert" viewBox="-60 -60 120 120">
+      <use href="#obs-shell"/>
+      <rect x="-14" y="-3.9" width="9" height="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <rect x="2" y="-3.9" width="9" height="1.8" fill="var(--obs-feature, #1A1A22)"/>
+    </symbol>
+    <symbol id="obs-concerned" viewBox="-60 -60 120 120">
+      <use href="#obs-shell"/>
+      <circle cx="-8" cy="-1" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <circle cx="5" cy="-1" r="1.8" fill="var(--obs-feature, #1A1A22)"/>
+      <line x1="-14" y1="0" x2="-5" y2="-6" stroke="var(--obs-feature, #1A1A22)" stroke-width="1.4" stroke-linecap="round"/>
+      <line x1="2" y1="-6" x2="11" y2="0" stroke="var(--obs-feature, #1A1A22)" stroke-width="1.4" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ===== ВОЛНА 2 — Компас splash =====
+     Брендовый splash, играется на каждом F5 (по решению заказчика).
+     EMERGE 0-1000ms → SETTLE 1200-2000ms → tagline 1600-2200ms → hold → EXIT.
+     V21 — длительность сокращена на 1с (5400/5700 → 4400/4700ms).
+     Reduced-motion полностью пропускает.
+     -->
+<div class="prizma-splash" id="prizma-splash" role="status" aria-label="Загрузка Призмы" aria-live="polite">
+  <svg class="prizma-splash-mark" width="96" height="96" viewBox="0 0 120 120" aria-hidden="true">
+    <g transform="translate(60,60)" fill="currentColor">
+      <polygon points="0,-50 4,-4 0,0 -4,-4" class="prizma-splash-ray prizma-splash-ray-main"/>
+      <polygon points="0,50 4,4 0,0 -4,4"    class="prizma-splash-ray prizma-splash-ray-main"/>
+      <polygon points="-50,0 -4,-4 0,0 -4,4" class="prizma-splash-ray prizma-splash-ray-side"/>
+      <polygon points="50,0 4,-4 0,0 4,4"    class="prizma-splash-ray prizma-splash-ray-side"/>
+      <polygon points="-32,-32 -3,-5 0,0 -5,-3" class="prizma-splash-ray prizma-splash-ray-diag"/>
+      <polygon points="32,-32 3,-5 0,0 5,-3"    class="prizma-splash-ray prizma-splash-ray-diag"/>
+      <polygon points="-32,32 -3,5 0,0 -5,3"    class="prizma-splash-ray prizma-splash-ray-diag"/>
+      <polygon points="32,32 3,5 0,0 5,3"       class="prizma-splash-ray prizma-splash-ray-diag"/>
+      <circle r="4" class="prizma-splash-core"/>
+    </g>
+  </svg>
+  <div class="prizma-splash-wordmark">ПРИЗМА</div>
+  <div class="prizma-splash-tagline">КОМПАС ДЛЯ ВАШЕЙ КОМАНДЫ</div>
+  <!-- v22 mascot-pass — отдельный splash-mascot убран. Маскот в углу — это
+       глобальный #obsidian-fab-mascot, который persistent через все экраны
+       (splash/welcome/main/chat). Splash inline-script ниже добавляет
+       obs--emerge на FAB на 1800ms; ObsidianMascot.init проверяет
+       sessionStorage чтобы не повторить Emerge при bootstrap. -->
+</div>
+<script>
+  /* Splash lifecycle — отдельный inline-script чтобы запустить ДО styles.css.
+     Phases: emerge 0-1000ms → wordmark settle 1200-2000ms → tagline 1600-2200ms.
+     V21 — длительность hold-фазы сокращена на 1000ms по запросу:
+     EXIT теперь на 4400ms (было 5400), полное скрытие — 4700ms (было 5700).
+     Tagline всё ещё виден ~2200ms «чисто» + ~2200ms hold = ~4400ms total. */
+  (function() {
+    var splash = document.getElementById('prizma-splash');
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!splash) return;
+    if (reduced) { splash.style.display = 'none'; }
+    else {
+      setTimeout(function() { splash.classList.add('is-done'); }, 4400);
+      setTimeout(function() { splash.style.display = 'none'; }, 4700);
+    }
+    // v22 BUG-FIX — splash inline-script запускается в начале body, ДО того
+    // как FAB element появится в DOM. getElementById возвращал null →
+    // pending не снимался → mascot opacity:0 навсегда. Откладываем FAB
+    // handling в DOMContentLoaded когда вся разметка распарсена.
+    function _initFabAfterDOM() {
+      var SESSION_KEY = 'q2_obsidian_emerged_v1';
+      // На любой reload (F5/Cmd+R/Cmd+Shift+R) играем Emerge заново —
+      // sessionStorage переживает hard reload, поэтому нужно явно сбросить.
+      // navigation.type === 'reload' покрывает все три варианта.
+      try {
+        var navType = performance.getEntriesByType('navigation')[0]?.type;
+        if (navType === 'reload') sessionStorage.removeItem(SESSION_KEY);
+      } catch (_) {}
+      var alreadyEmerged = false;
+      try { alreadyEmerged = sessionStorage.getItem(SESSION_KEY) === '1'; } catch (_) {}
+      var fab = document.getElementById('assistant-fab');
+      var fabMascot = document.getElementById('obsidian-fab-mascot');
+      if (!fab || !fabMascot) return;
+      // Reduced-motion / уже emerged / no-splash — показать FAB сразу в Breathe.
+      if (reduced || alreadyEmerged || !splash) {
+        fab.removeAttribute('data-fab-pending');
+        fabMascot.classList.add('obs--breathe');
+        return;
+      }
+      // First visit + normal motion — Emerge через 1800ms (после settle splash
+      // wordmark + tagline), финал на 4200ms → Breathe + sessionStorage flag.
+      setTimeout(function() {
+        fab.removeAttribute('data-fab-pending');
+        fabMascot.classList.add('obs--emerge', 'obs--once');
+      }, 1800);
+      setTimeout(function() {
+        fabMascot.classList.remove('obs--emerge', 'obs--once');
+        fabMascot.classList.add('obs--breathe');
+        try { sessionStorage.setItem(SESSION_KEY, '1'); } catch (_) {}
+      }, 1800 + 2400);
+    }
+    // FAB handler runs ПОСЛЕ DOM ready (или сразу если уже ready).
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', _initFabAfterDOM);
+    } else {
+      _initFabAfterDOM();
+    }
+  })();
+</script>
+
+<!-- ===== FIRST-RUN WELCOME (Компас) =====
+     Шапка появляется только если localStorage.welcomeShown !== 'true'.
+     Brandbook §1 — слоган «Компас для вашей команды».
+     Без эмодзи, без gradient blobs — Northstar mark + monochrome. -->
+<div id="welcomeOverlay" class="welcome-overlay">
+  <div class="welcome-content">
+    <div class="welcome-mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120">
+        <g transform="translate(60,60)" fill="currentColor">
+          <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+          <polygon points="0,50 4,4 0,0 -4,4"/>
+          <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+          <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+          <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+          <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+          <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+          <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+          <circle r="4"/>
+        </g>
+      </svg>
+    </div>
+    <h1 class="welcome-title">Призма</h1>
+    <p class="welcome-subtitle welcome-subtitle-static">Компас для вашей команды</p>
+
+    <!-- Default CTA — clean first run -->
     <button class="welcome-btn" id="welcomeCtaBtn" type="button">
-      <span class="welcome-btn-text">Погнали</span>
+      <span class="welcome-btn-text">Сверить курс</span>
       <span class="welcome-btn-arrow" aria-hidden="true">→</span>
     </button>
 
-    <!-- "Найдены локальные изменения" — shown only if saved data exists.
-         JS swaps the CTA for this block via .welcome-restore-active. -->
+    <!-- "Найдены локальные изменения" — JS подменяет CTA на этот блок. -->
     <div class="welcome-restore" id="welcomeRestore" hidden>
-      <div class="welcome-restore-icon" aria-hidden="true">💾</div>
-      <div class="welcome-restore-title">Найдены локальные изменения</div>
+      <div class="welcome-restore-title">Найден сохранённый курс</div>
       <div class="welcome-restore-meta" id="welcomeRestoreMeta"></div>
       <div class="welcome-restore-actions">
         <button class="welcome-btn welcome-btn-restore" id="welcomeRestoreYes" type="button">
-          <span class="welcome-btn-text">Восстановить</span>
+          <span class="welcome-btn-text">Продолжить курс</span>
           <span class="welcome-btn-arrow" aria-hidden="true">↻</span>
         </button>
         <button class="welcome-btn welcome-btn-secondary" id="welcomeRestoreNo" type="button">
@@ -67,68 +311,98 @@
      ONBOARDING OVERLAYS (v11)
      ================================================================ -->
 
-<!-- Welcome screen — shown on first run -->
+<!-- Welcome screen — выбор курса при первом запуске.
+     Волна 5: Northstar monochrome, без эмодзи и glow-карточек. -->
 <div id="ob-welcome" class="ob-welcome-overlay hidden">
+  <!-- v22 — отдельный welcome-mascot убран. Маскот в углу — это глобальный
+       #obsidian-fab-mascot, persistent через все экраны без re-mount. -->
   <div class="ob-welcome-box">
-    <button class="ob-welcome-close" id="ob-welcome-close" title="Закрыть">✕</button>
-    <div class="ob-welcome-logo">СБОФ</div>
-    <h1 class="ob-welcome-title">Планировщик релизов</h1>
-    <p class="ob-welcome-sub">Аналитика, риски и AI-поддержка для управления Q2-планом</p>
+    <button class="ob-welcome-close" id="ob-welcome-close" title="Закрыть" aria-label="Закрыть">×</button>
+    <div class="ob-welcome-eyebrow">ПРИЗМА</div>
+    <h1 class="ob-welcome-title">С чего начать курс</h1>
+    <p class="ob-welcome-sub">Выберите ориентир — посмотреть пример, пройти полный тур или сразу подключить свои данные.</p>
     <div class="ob-welcome-cards">
-      <button class="ob-welcome-card ob-card-demo" id="ob-btn-demo">
-        <div class="ob-card-icon">🎬</div>
-        <div class="ob-card-title">Посмотреть демо</div>
-        <div class="ob-card-desc">Загрузим 22 демо-задачи и покажем AI CEO — мощный экран управленческих решений</div>
-        <div class="ob-card-cta">Запустить демо →</div>
+      <button class="ob-welcome-card ob-card-demo" id="ob-btn-demo" type="button">
+        <div class="ob-card-num">1</div>
+        <div class="ob-card-title">Посмотреть пример</div>
+        <div class="ob-card-desc">Загрузим 22 демо-задачи и покажем AI CEO — главный экран управленческих решений.</div>
+        <div class="ob-card-cta">Запустить пример <span aria-hidden="true">→</span></div>
       </button>
-      <button class="ob-welcome-card ob-card-tour" id="ob-btn-tour">
-        <div class="ob-card-icon">🎓</div>
-        <div class="ob-card-title">Пройти обучение</div>
-        <div class="ob-card-desc">Полный тур: шапка, настройки, реестр, гант, AI, интеграции — поэтапно с пояснениями</div>
-        <div class="ob-card-cta">Начать тур →</div>
+      <button class="ob-welcome-card ob-card-tour" id="ob-btn-tour" type="button">
+        <div class="ob-card-num">2</div>
+        <div class="ob-card-title">Пройти полный тур</div>
+        <div class="ob-card-desc">Шапка, настройки, Реестр, Гант, AI, интеграции — поэтапно с пояснениями.</div>
+        <div class="ob-card-cta">Начать тур <span aria-hidden="true">→</span></div>
       </button>
-      <button class="ob-welcome-card ob-card-setup" id="ob-btn-setup">
-        <div class="ob-card-icon">🚀</div>
-        <div class="ob-card-title">Быстро настроить</div>
-        <div class="ob-card-desc">Загрузите свой XLSX или CSV — и сразу работайте с реальными данными</div>
-        <div class="ob-card-cta">Начать работу →</div>
+      <button class="ob-welcome-card ob-card-setup" id="ob-btn-setup" type="button">
+        <div class="ob-card-num">3</div>
+        <div class="ob-card-title">Подключить свои данные</div>
+        <div class="ob-card-desc">Загрузите XLSX или CSV квартала — и сразу работайте с реальным курсом.</div>
+        <div class="ob-card-cta">Загрузить файл <span aria-hidden="true">→</span></div>
       </button>
     </div>
-    <div class="ob-welcome-hint">Нажмите Esc или ✕ чтобы закрыть и разобраться самостоятельно</div>
+    <div class="ob-welcome-hint">Esc или × — закрыть и разобраться самостоятельно</div>
   </div>
 </div>
 
-<!-- Demo loading overlay -->
+<!-- Demo loading overlay. V21 — legacy circular spinner removed; use brand
+     star + breathe + ring per BRAND_BOOK §11. -->
 <div id="ob-loading" class="ob-loading-overlay hidden">
   <div class="ob-loading-box">
-    <div class="ob-loading-spinner"></div>
+    <div class="prizma-loader-page-mark">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <g transform="translate(60,60)" fill="currentColor">
+          <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+          <polygon points="0,50 4,4 0,0 -4,4"/>
+          <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+          <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+          <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+          <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+          <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+          <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+          <circle r="4"/>
+        </g>
+      </svg>
+    </div>
     <div class="ob-loading-text">Загружаем демо-данные…</div>
   </div>
 </div>
 
-<!-- CTA bar: shown after micro-tour ends -->
+<!-- CTA bar: после тура. Волна 5: без эмодзи, в TOV. -->
 <div id="ob-cta-bar" class="ob-cta-bar hidden">
-  <span class="ob-cta-text">🎉 Демо изучено! Готовы работать со своими данными?</span>
-  <button class="ob-cta-btn" id="ob-cta-upload">📂 Загрузить свои данные</button>
-  <button class="ob-cta-close-btn" id="ob-cta-close">✕</button>
+  <span class="ob-cta-text">Пример изучен. Готовы переключиться на свой курс?</span>
+  <button class="ob-cta-btn" id="ob-cta-upload" type="button">Загрузить свои данные →</button>
+  <button class="ob-cta-close-btn" id="ob-cta-close" type="button" aria-label="Закрыть">×</button>
 </div>
 
 <!-- Tour highlight ring (positioned absolutely by JS) -->
 <div id="ob-tour-ring" class="ob-tour-ring hidden"></div>
 
-<!-- "Найдены локальные изменения" — same visual language as the first-run splash -->
-<div id="modal-restore" class="welcome-overlay welcome-overlay-modal hidden" style="position:fixed;inset:0;z-index:10500;display:flex;flex-direction:column;align-items:center;justify-content:center;">
-  <div class="welcome-blob welcome-blob-1" aria-hidden="true"></div>
-  <div class="welcome-blob welcome-blob-2" aria-hidden="true"></div>
-  <div class="welcome-blob welcome-blob-3" aria-hidden="true"></div>
+<!-- "Найден сохранённый курс" — той же визуальной семьи, что welcome-overlay -->
+<div id="modal-restore" class="welcome-overlay welcome-overlay-modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-restore-title">
   <div class="welcome-content">
-    <h1 class="welcome-title">С возвращением <span class="welcome-wave" aria-hidden="true">💾</span></h1>
-    <p class="welcome-subtitle welcome-subtitle-static">Найдены локальные изменения — продолжим?</p>
-    <div class="welcome-restore" style="opacity:1;transform:none;animation:welcome-restore-in .55s cubic-bezier(.2,.85,.35,1.05) 200ms backwards;">
+    <div class="welcome-mark" aria-hidden="true">
+      <svg viewBox="0 0 120 120">
+        <g transform="translate(60,60)" fill="currentColor">
+          <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+          <polygon points="0,50 4,4 0,0 -4,4"/>
+          <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+          <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+          <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+          <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+          <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+          <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+          <circle r="4"/>
+        </g>
+      </svg>
+    </div>
+    <h1 class="welcome-title" id="modal-restore-title">С возвращением</h1>
+    <p class="welcome-subtitle welcome-subtitle-static">Найден сохранённый курс — продолжим?</p>
+    <div class="welcome-restore ix-welcome-restore-instant">
       <div class="welcome-restore-meta" id="modal-restore-meta"></div>
       <div class="welcome-restore-actions">
         <button class="welcome-btn welcome-btn-restore" id="btn-restore-yes" type="button">
-          <span class="welcome-btn-text">Восстановить</span>
+          <span class="welcome-btn-text">Продолжить курс</span>
           <span class="welcome-btn-arrow" aria-hidden="true">↻</span>
         </button>
         <button class="welcome-btn welcome-btn-secondary" id="btn-restore-no" type="button">
@@ -142,17 +416,25 @@
 <!-- V12 audit recommendation #25 — aria-live makes toasts audible to screen
      readers. role=status keeps the alert "polite" (queued, not interruptive)
      so the user finishes their current action before being notified. -->
-<div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+<!-- V21 P — legacy single-toast retired. ToastQueue.show() сам создаёт
+     #toast-queue контейнер и aria-live region; несколько toast'ов
+     складываются столбиком, поддерживается Undo CTA. -->
+<div id="toast-queue" aria-live="polite" aria-atomic="false"></div>
 
 <!-- V17 P8 — `data-owner` помогает Dashboard и AI views избегать конфликтов
      при шаринге одного DOM-узла; см. dashboard.js openKpiModal. -->
-<div id="modal-kpi" class="modal-overlay hidden" data-owner="">
+<div id="modal-kpi" class="modal-overlay hidden" data-owner="" role="dialog" aria-modal="true" aria-labelledby="modal-kpi-title">
   <div class="modal-box modal-box-wide">
     <div class="modal-header">
       <h3 id="modal-kpi-title"></h3>
-      <button class="modal-close-btn" id="modal-kpi-close">✕</button>
+      <button class="modal-close-btn" id="modal-kpi-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div id="modal-kpi-body" style="overflow-y:auto;max-height:60vh"></div>
+    <div id="modal-kpi-body" class="ix-modal-kpi-body"></div>
     <!-- V17 P8 (designer Quick win 1) — KPI-modal перестал быть тупиком.
          Когда Dashboard открывает модал, эта плашка несёт CTA «Открыть в
          реестре с фильтром». Скрывается из CSS когда `data-owner !== "dashboard"`. -->
@@ -163,20 +445,25 @@
 </div>
 
 <!-- V14 (B7): «Завершить» — required actualDoneDate + optional comment -->
-<div id="modal-gantt-complete" class="modal-overlay hidden">
+<div id="modal-gantt-complete" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-complete-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>Завершить задачу</h3>
-      <button class="modal-close-btn" id="modal-gantt-complete-close">✕</button>
+      <h3 id="modal-gantt-complete-title">Завершить задачу</h3>
+      <button class="modal-close-btn" id="modal-gantt-complete-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div id="modal-gantt-complete-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
-      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата фактического завершения <span style="color:#dc2626">*</span></label>
-      <input type="date" id="modal-gantt-complete-date" class="cell-input" style="margin-bottom:12px;">
-      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Комментарий (опционально)</label>
-      <textarea id="modal-gantt-complete-comment" class="cell-input" rows="3" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «закрыто за 3 дня раньше срока»"></textarea>
+    <div class="ix-modal-pad">
+      <div id="modal-gantt-complete-summary" class="modal-text-muted"></div>
+      <label for="modal-gantt-complete-date" class="modal-form-label">Дата фактического завершения <span class="ix-required-mark">*</span></label>
+      <input type="date" id="modal-gantt-complete-date" class="cell-input ix-mb-12">
+      <label class="modal-form-label">Комментарий (опционально)</label>
+      <textarea id="modal-gantt-complete-comment" class="cell-input ix-modal-textarea" rows="3" placeholder="Например: закрыто за 3 дня раньше срока"></textarea>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-complete-cancel">Отмена</button>
       <button class="btn btn-primary btn-sm" id="modal-gantt-complete-ok">Завершить</button>
     </div>
@@ -184,26 +471,31 @@
 </div>
 
 <!-- V14 (B6.2): «Установить даты работ» — start + end -->
-<div id="modal-gantt-dates" class="modal-overlay hidden">
+<div id="modal-gantt-dates" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-dates-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>Даты работ по задаче</h3>
-      <button class="modal-close-btn" id="modal-gantt-dates-close">✕</button>
+      <h3 id="modal-gantt-dates-title">Даты работ по задаче</h3>
+      <button class="modal-close-btn" id="modal-gantt-dates-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div id="modal-gantt-dates-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
-      <div style="display:flex;gap:14px;">
-        <div style="flex:1;">
-          <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата начала</label>
-          <input type="date" id="modal-gantt-dates-start" class="cell-input" style="width:100%;">
+    <div class="ix-modal-pad">
+      <div id="modal-gantt-dates-summary" class="modal-text-muted"></div>
+      <div class="ix-modal-row-flex">
+        <div class="ix-flex-1">
+          <label for="modal-gantt-dates-start" class="modal-form-label">Дата начала</label>
+          <input type="date" id="modal-gantt-dates-start" class="cell-input ix-w-full">
         </div>
-        <div style="flex:1;">
-          <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата завершения</label>
-          <input type="date" id="modal-gantt-dates-end" class="cell-input" style="width:100%;">
+        <div class="ix-flex-1">
+          <label for="modal-gantt-dates-end" class="modal-form-label">Дата завершения</label>
+          <input type="date" id="modal-gantt-dates-end" class="cell-input ix-w-full">
         </div>
       </div>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-dates-cancel">Отмена</button>
       <button class="btn btn-primary btn-sm" id="modal-gantt-dates-ok">Сохранить</button>
     </div>
@@ -211,44 +503,55 @@
 </div>
 
 <!-- V14 (B6.1): «Назначить исполнителя» — picker -->
-<div id="modal-gantt-assign" class="modal-overlay hidden">
+<div id="modal-gantt-assign" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-assign-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>Назначить исполнителя</h3>
-      <button class="modal-close-btn" id="modal-gantt-assign-close">✕</button>
+      <h3 id="modal-gantt-assign-title">Назначить исполнителя</h3>
+      <button class="modal-close-btn" id="modal-gantt-assign-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div id="modal-gantt-assign-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
-      <input type="text" id="modal-gantt-assign-search" class="cell-input" placeholder="Поиск по ФИО…" style="width:100%;margin-bottom:8px;">
-      <div id="modal-gantt-assign-hint" class="modal-text-muted" style="font-size:11.5px;color:var(--text-3);margin-bottom:6px;"></div>
-      <div id="modal-gantt-assign-list" style="max-height:320px;overflow:auto;border:1px solid var(--border-light);border-radius:4px;"></div>
+    <div class="ix-modal-pad">
+      <div id="modal-gantt-assign-summary" class="modal-text-muted"></div>
+      <input type="text" id="modal-gantt-assign-search" class="cell-input ix-modal-search-input" placeholder="Поиск по ФИО…">
+      <div id="modal-gantt-assign-hint" class="modal-text-muted ix-mb-6"></div>
+      <div id="modal-gantt-assign-list" class="ix-assign-list"></div>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-assign-cancel">Отмена</button>
     </div>
   </div>
 </div>
 
 <!-- V14 (B8): bulk-add target-bucket + obligatory comment modal -->
-<div id="modal-gantt-add-target" class="modal-overlay hidden">
+<div id="modal-gantt-add-target" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-add-target-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>В какой колодец добавить?</h3>
-      <button class="modal-close-btn" id="modal-gantt-add-target-close">✕</button>
+      <h3 id="modal-gantt-add-target-title">В какой релиз добавить?</h3>
+      <button class="modal-close-btn" id="modal-gantt-add-target-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div id="modal-gantt-add-target-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
-      <div style="margin-bottom:14px;display:flex;gap:6px;flex-wrap:wrap;" id="modal-gantt-add-target-buckets">
+    <div class="ix-modal-pad">
+      <div id="modal-gantt-add-target-summary" class="modal-text-muted"></div>
+      <fieldset class="ix-bucket-row" id="modal-gantt-add-target-buckets">
+        <legend class="visually-hidden">Колодец назначения</legend>
         <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="backlog" checked> Бэклог</label>
         <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r120">     1.20</label>
         <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r121">     1.21</label>
         <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="r122">     1.22</label>
-        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="overtime"> OT</label>
-      </div>
-      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Комментарий (обязательно)</label>
-      <textarea id="modal-gantt-add-target-comment" class="cell-input" rows="3" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «добавлено по запросу Иванова»"></textarea>
+        <label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="overtime"> Овертайм</label>
+      </fieldset>
+      <label class="modal-form-label">Комментарий (обязательно)</label>
+      <textarea id="modal-gantt-add-target-comment" class="cell-input ix-modal-textarea" rows="3" placeholder="Например: добавлено по запросу Иванова"></textarea>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-add-target-cancel">Отмена</button>
       <button class="btn btn-primary btn-sm" id="modal-gantt-add-target-ok" disabled>Добавить</button>
     </div>
@@ -262,7 +565,7 @@
   <div class="gdt-jump-box">
     <div class="gdt-jump-input-wrap">
       <span class="gdt-jump-prompt">⌘K</span>
-      <input id="gdt-jump-input" class="gdt-jump-input" type="text" autocomplete="off" spellcheck="false" placeholder="Поиск команды или эпика…">
+      <input id="gdt-jump-input" class="gdt-jump-input" type="text" autocomplete="off" spellcheck="false" placeholder="Поиск команды, эпика или задачи (PROJ-1234)…">
       <span class="gdt-jump-hint">Esc</span>
     </div>
     <div id="gdt-jump-results" class="gdt-jump-results"></div>
@@ -276,65 +579,94 @@
 
 <!-- V15 Spine 2026-04-30 — lock-plan modal: date + time pickers, replaces
      the bare `prompt()` flow that looked «убого» on a styled app. -->
-<div id="modal-gantt-lock" class="modal-overlay hidden">
-  <div class="modal-box" style="max-width:440px;">
+<div id="modal-gantt-lock" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-lock-title">
+  <div class="modal-box ix-modal-box-440">
     <div class="modal-header">
-      <h3>🔒 Зафиксировать план</h3>
-      <button class="modal-close-btn" id="modal-gantt-lock-close">✕</button>
+      <h3 id="modal-gantt-lock-title" data-icon="lock" data-icon-size="18">Зафиксировать план</h3>
+      <button class="modal-close-btn" id="modal-gantt-lock-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div class="modal-text-muted" style="font-size:12.5px;color:var(--text-3);margin-bottom:14px;">
+    <div class="ix-modal-pad">
+      <div class="modal-text-muted ix-mb-14">
         После фиксации каждый перенос будет требовать комментарий. Можно зафиксировать задним числом — например, на дату ретро.
       </div>
-      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:12px;">
+      <div class="ix-lock-grid">
         <div>
-          <label for="modal-gantt-lock-date" style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Дата</label>
-          <input id="modal-gantt-lock-date" type="date" class="cell-input" style="width:100%;font-family:inherit;">
+          <label for="modal-gantt-lock-date" class="modal-form-label">Дата</label>
+          <input id="modal-gantt-lock-date" type="date" class="cell-input ix-w-full-inherit">
         </div>
         <div>
-          <label for="modal-gantt-lock-time" style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Время</label>
-          <input id="modal-gantt-lock-time" type="time" class="cell-input" style="width:100%;font-family:inherit;">
+          <label for="modal-gantt-lock-time" class="modal-form-label">Время</label>
+          <input id="modal-gantt-lock-time" type="time" class="cell-input ix-w-full-inherit">
         </div>
       </div>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-lock-cancel">Отмена</button>
       <button class="btn btn-primary btn-sm" id="modal-gantt-lock-ok">Зафиксировать</button>
     </div>
   </div>
 </div>
 
-<div id="modal-gantt-move" class="modal-overlay hidden">
+<div id="modal-gantt-move" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-move-title">
   <div class="modal-box">
     <div class="modal-header">
-      <h3>Перенос задачи требует комментарий</h3>
-      <button class="modal-close-btn" id="modal-gantt-move-close">✕</button>
+      <h3 id="modal-gantt-move-title">Перенос задачи требует комментарий</h3>
+      <button class="modal-close-btn" id="modal-gantt-move-close" type="button" aria-label="Закрыть" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-    <div style="padding:16px 20px;">
-      <div id="modal-gantt-move-summary" class="modal-text-muted" style="margin-bottom:10px;font-size:12.5px;color:var(--text-3)"></div>
-      <label style="display:block;font-size:11.5px;font-weight:600;color:var(--text-3);margin-bottom:4px;">Причина переноса (обязательно)</label>
-      <textarea id="modal-gantt-move-comment" class="cell-input" rows="4" style="width:100%;font-family:inherit;resize:vertical;" placeholder="Например: «риск по 1.20, переехало на 1.21 — синхронизировался с командой»"></textarea>
+    <div class="ix-modal-pad">
+      <div id="modal-gantt-move-summary" class="modal-text-muted"></div>
+      <label class="modal-form-label">Причина переноса (обязательно)</label>
+      <textarea id="modal-gantt-move-comment" class="cell-input ix-modal-textarea" rows="4" placeholder="Например: риск по 1.20, переехало на 1.21 — синхронизировался с командой"></textarea>
     </div>
-    <div style="padding:0 20px 16px 20px;display:flex;gap:8px;justify-content:flex-end;">
+    <div class="modal-footer">
       <button class="btn btn-outline btn-sm" id="modal-gantt-move-cancel">Отмена</button>
       <button class="btn btn-primary btn-sm" id="modal-gantt-move-ok" disabled>Перенести</button>
     </div>
   </div>
 </div>
 
+<!-- V21 L (audit-2026-05-03 §I, Quick win 3) — skip-link для keyboard/screen-reader.
+     Видим только при focus (через CSS), Tab из адресной строки попадает на него
+     первым → Enter → focus прыгает в основную область, минуя topbar и sidebar. -->
+<a class="skip-link" href="#content-area">Перейти к основному содержимому</a>
+
 <header id="topbar">
   <div class="topbar-left">
-    <div class="topbar-brand" id="topbar-brand" role="button" tabindex="0" title="На главную (Дашборд)">
-      <span class="topbar-logo">
-        <svg class="topbar-logo-mark" width="14" height="14" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-          <rect x="6"  y="8"  width="14" height="4" rx="1.5" fill="currentColor"/>
-          <rect x="12" y="14" width="14" height="4" rx="1.5" fill="currentColor"/>
-          <rect x="8"  y="20" width="11" height="4" rx="1.5" fill="currentColor"/>
-        </svg>
-        <span class="topbar-logo-text">СБОФ</span>
-      </span>
-      <span class="topbar-title">Планировщик</span>
-      <span id="topbar-row-count" class="topbar-badge hidden"></span>
+    <!-- Волна 1 — Northstar mark + wordmark.
+         Mark — 8-лучевая звезда (currentColor, breathe-анимация).
+         Wordmark — ПРИЗМА CAPS letter-spacing 4px.
+         module-indicator справа — текущий модуль (Курс / След пути / Команда / Цели / Ритуалы).
+         Раньше здесь был Triad-mark (PR-BE) — снесён по brandbook §12 пункт 6 («не вкладывать в формы»). -->
+    <a class="topbar-brand" id="topbar-brand" href="#dashboard" role="button" tabindex="0" title="На главную (Курс)">
+      <svg class="prizma-mark" width="32" height="32" viewBox="0 0 120 120" role="img" aria-label="Призма" focusable="false">
+        <g transform="translate(60,60)" fill="currentColor">
+          <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+          <polygon points="0,50 4,4 0,0 -4,4"/>
+          <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+          <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+          <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+          <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+          <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+          <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+          <circle r="4"/>
+        </g>
+      </svg>
+      <span class="prizma-wordmark">ПРИЗМА</span>
+      <!-- topbar-row-count убран — legacy «30 задач» badge засорял шапку.
+           Если когда-нибудь нужен счётчик задач — добавить в Filters area, не в brand. -->
+    </a>
+    <div class="topbar-module-indicator" role="status" aria-live="polite" aria-atomic="true" aria-label="Текущий модуль">
+      <span class="topbar-module-label" id="topbar-module-label">КУРС</span>
     </div>
   </div>
   <div class="topbar-actions">
@@ -353,14 +685,17 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
       Демо-режим
     </button>
-    <button class="btn btn-ghost btn-sm" id="btn-toggle-filters" title="Показать / скрыть панель фильтров" aria-expanded="false" aria-controls="global-filters-bar"><span class="filters-chevron">▾</span>Фильтры<span id="topbar-filter-count" class="topbar-filter-count hidden" aria-label="Активных фильтров">0</span></button>
-    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-save" data-tb="save" title="Пересчитать и сохранить всё (Ctrl/Cmd+S)" aria-label="Сохранить всё">
+    <button class="btn btn-ghost btn-sm" id="btn-toggle-filters" title="Показать / скрыть панель фильтров" aria-expanded="false" aria-pressed="false" aria-controls="global-filters-bar"><span class="filters-chevron" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><polyline points="6 9 12 15 18 9"/></svg></span>Фильтры<span id="topbar-filter-count" class="topbar-filter-count hidden" aria-label="Активных фильтров">0</span></button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-save" data-tb="save" title="Сохранить (Ctrl/Cmd+S)" aria-label="Сохранить">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      <!-- V21 Q — dirty-indicator: появляется когда есть несохранённые
+           правки (debounce ещё не сработал). Скрыт по умолчанию. -->
+      <span id="btn-save-dirty-dot" class="btn-save-dirty-dot hidden" role="status" aria-label="Есть несохранённые изменения" title="Есть несохранённые изменения"></span>
     </button>
     <!-- Файлы dropdown — единственная точка для импорта / выгрузки.
          Standalone «Скачать CSV» icon removed; download moved here. -->
     <div class="topbar-dropdown" id="files-dropdown-wrap" data-tb="files">
-      <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-files-dropdown" title="Файлы — импорт / экспорт / очистка" aria-label="Файлы — импорт, экспорт, очистка">
+      <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-files-dropdown" title="Файлы — импорт, экспорт и очистка данных" aria-label="Файлы — импорт, экспорт и очистка данных" aria-haspopup="menu" aria-expanded="false">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
       </button>
       <div class="topbar-dropdown-menu hidden" id="files-dropdown-menu">
@@ -368,28 +703,28 @@
              См. dataStore.js JSONExport / JSONImport. Рекомендуемый для save/restore;
              CSV/XLSX оставлены для просмотра в Excel и обратной совместимости. -->
         <label class="dropdown-item">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
           Импорт JSON
           <input type="file" id="input-json" accept=".json,application/json" class="input-hidden">
         </label>
         <label class="dropdown-item">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
           Импорт XLSX
           <input type="file" id="input-xlsx" accept=".xlsx,.xls" class="input-hidden">
         </label>
         <label class="dropdown-item">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           Импорт CSV
           <input type="file" id="input-csv" accept=".csv" class="input-hidden">
         </label>
         <label class="dropdown-item">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
-          CSV update
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
+          Дополнить из CSV
           <input type="file" id="input-csv-update" accept=".csv" class="input-hidden">
         </label>
         <label class="dropdown-item">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
-          XLSX update
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 11-3.5-7.1"/><polyline points="21 3 21 9 15 9"/></svg>
+          Дополнить из XLSX
           <input type="file" id="input-xlsx-update" accept=".xlsx,.xls" class="input-hidden">
         </label>
         <div class="dropdown-divider"></div>
@@ -412,23 +747,49 @@
         </button>
         <div class="dropdown-divider"></div>
         <button class="dropdown-item dropdown-item-danger" id="btn-clear-storage">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
-          Очистить данные
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          Удалить все данные…
         </button>
       </div>
     </div>
     <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-sim-mode" data-tb="sim" title="Режим симуляции — изменения не сохраняются" aria-label="Режим симуляции" aria-pressed="false">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
     </button>
-    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-theme-toggle" data-tb="theme" title="Переключить тему" aria-label="Переключить тему">
+    <span class="topbar-divider" aria-hidden="true"></span>
+    <!-- AUDIT_HOLISTIC AI1 — «Объясни этот экран». Hotkey `?` глобально, кнопка
+         как hint, что фича есть. Логика — app/explainScreen.js. -->
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-explain-screen" data-tb="explain" data-icon="help-circle" data-icon-size="16" data-tip="Помощь по экрану — кликни любой блок и появится подсказка «Что показывает / Как считается / Что делать». Hotkey: ?" aria-label="Помощь по экрану — режим объяснений" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </button>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-theme-toggle" data-tb="theme" title="Переключить тему" aria-label="Переключить тему" aria-pressed="false">
       <svg id="btn-theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
     <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-app-settings" data-tb="settings" title="Настройки" aria-label="Настройки приложения">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
     </button>
-    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-onboarding" data-tb="onboarding" title="Обучение / Тур по приложению" aria-label="Обучение и тур по приложению">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r="0.5" fill="currentColor"/></svg>
+    <button class="btn btn-ghost btn-sm topbar-icon-btn" id="btn-onboarding" data-tb="onboarding" data-tip="Обучающий тур по приложению — пошаговый walkthrough всех разделов" aria-label="Обучающий тур по приложению">
+      <!-- П10.8 — иконка compass: Северная звезда / brand-метафора ориентира. -->
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
     </button>
+    <!-- AUDIT_HOLISTIC F4 — Notification Center bell.
+         Bell-icon hydrate'ится через `[data-icon="bell"]` (см. app/icons.js).
+         Бейдж непрочитанных + drop-down panel — app/notifyCenter.js. -->
+    <div class="topbar-dropdown" id="prizma-notify-wrap" data-tb="notify">
+      <button class="btn btn-ghost btn-sm topbar-icon-btn"
+              id="prizma-notify-bell"
+              data-icon="bell" data-icon-size="16"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="prizma-notify-panel"
+              aria-label="Уведомления"
+              title="Уведомления"></button>
+      <div class="prizma-notify-panel topbar-dropdown-menu hidden"
+           id="prizma-notify-panel"
+           role="dialog"
+           aria-label="Уведомления"
+           tabindex="-1"></div>
+    </div>
   </div>
 </header>
 
@@ -436,80 +797,219 @@
 
   <nav id="sidebar">
     <div class="sidebar-nav">
-    <button class="nav-item active" data-section="dashboard">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-      <span class="nav-label">Дашборд</span>
-    </button>
-    <button class="nav-item" data-section="registry">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-      <span class="nav-label">Реестр</span>
-    </button>
-    <button class="nav-item" data-section="gantt">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/><line x1="14" y1="14" x2="21" y2="14"/></svg>
-      <span class="nav-label">Гант</span>
-    </button>
-    <button class="nav-item" data-section="kanban">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="14"/><rect x="17" y="3" width="5" height="10"/></svg>
-      <span class="nav-label">Канбан</span>
-    </button>
-    <button class="nav-item" data-section="timeline">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      <span class="nav-label">Таймлайн</span>
-    </button>
-    <button class="nav-item" data-section="podlozhka">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-      <span class="nav-label">Подложка</span>
-    </button>
-    <button class="nav-item" data-section="employees">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-      <span class="nav-label">Сотрудники</span>
-    </button>
-    <button class="nav-item" data-section="summary">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
-      <span class="nav-label">Сводная</span>
-    </button>
-    <button class="nav-item" data-section="metrics">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
-      <span class="nav-label">Метрики</span>
-    </button>
-    <button class="nav-item" data-section="insights">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 00-4 12.7c.6.5 1 1.2 1 2V18h6v-1.3c0-.8.4-1.5 1-2A7 7 0 0012 2z"/></svg>
-      <span class="nav-label">Инсайты</span>
-    </button>
-    <div class="nav-divider"></div>
-    <button class="nav-item" data-section="diagnostics">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span class="nav-label">Диагностика</span>
-    </button>
-    <div class="nav-divider"></div>
-    <button class="nav-item" data-section="actions">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
-      <span class="nav-label">Actions</span>
-    </button>
-    <div class="nav-divider"></div>
-    <button class="nav-item" data-section="ai">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.5 2A2.5 2.5 0 017 4.5v0A2.5 2.5 0 009.5 7h5A2.5 2.5 0 0017 4.5v0A2.5 2.5 0 0014.5 2h-5z"/><path d="M12 7v4"/><path d="M8 11h8"/><path d="M5 21a7 7 0 0114 0"/><circle cx="12" cy="14" r="3"/></svg>
-      <span class="nav-label">AI Анализ</span>
-    </button>
-    <div class="nav-divider"></div>
-    <button class="nav-item" data-section="integrations">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-      <span class="nav-label">Интеграции</span>
-    </button>
-    <button class="nav-item nav-item-ceo" data-section="ai-ceo">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      <span class="nav-label">AI CEO</span>
-    </button>
-    <div class="nav-divider"></div>
-    <button class="nav-item" data-section="history">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>
-      <span class="nav-label">История</span>
-    </button>
-    <button class="nav-item" data-section="errors" title="Журнал ошибок и предупреждений">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span class="nav-label">Ошибки</span>
-      <span class="nav-badge nav-badge-err hidden" id="nav-errors-badge"></span>
-    </button>
+
+    <!-- Волна 1 — Northstar IA: 5 модулей × подразделы.
+         Каждый <section.sidebar-module data-module="..."> содержит:
+         · header с module-icon + label CAPS (клик → defaultSection модуля)
+         · список .nav-item[data-section] (existing классы — drag-n-drop работает) -->
+
+    <section class="sidebar-module" data-module="course">
+      <button class="sidebar-module-head" type="button" data-section="dashboard" title="Курс — главный дашборд">
+        <svg class="sidebar-module-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <g transform="translate(12,12)">
+            <polygon points="0,-9.5 0.7,-0.7 0,0 -0.7,-0.7"/>
+            <polygon points="0,9.5 0.7,0.7 0,0 -0.7,0.7"/>
+            <polygon points="-9.5,0 -0.7,-0.7 0,0 -0.7,0.7" opacity="0.7"/>
+            <polygon points="9.5,0 0.7,-0.7 0,0 0.7,0.7" opacity="0.7"/>
+            <polygon points="-6,-6 -0.5,-0.9 0,0 -0.9,-0.5" opacity="0.45"/>
+            <polygon points="6,-6 0.5,-0.9 0,0 0.9,-0.5" opacity="0.45"/>
+            <polygon points="-6,6 -0.5,0.9 0,0 -0.9,0.5" opacity="0.45"/>
+            <polygon points="6,6 0.5,0.9 0,0 0.9,0.5" opacity="0.45"/>
+            <circle r="0.7"/>
+          </g>
+        </svg>
+        <span class="sidebar-module-label">КУРС</span>
+      </button>
+      <button class="nav-item active" data-section="dashboard">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span class="nav-label">Дашборд</span>
+      </button>
+      <!-- П4-MS Wave 1: «Сводная» удалена, контент свёрнут в Дашборд. -->
+      <button class="nav-item" data-section="metrics">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>
+        <span class="nav-label">Метрики</span>
+      </button>
+      <!-- V21 tabs-consolidation (вариант A): «Инсайты» свёрнуты в Дашборд
+           как room «Сигналы». Nav-item и #section-insights удалены, старый
+           маршрут #insights ремаппится в Nav.goTo. -->
+    </section>
+
+    <section class="sidebar-module" data-module="path">
+      <button class="sidebar-module-head" type="button" data-section="registry" title="След пути — где задачи проходят">
+        <svg class="sidebar-module-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <g transform="translate(12,12)">
+            <polygon points="0,-9.5 0.7,-0.7 0,0 -0.7,-0.7"/>
+            <polygon points="0,9.5 0.7,0.7 0,0 -0.7,0.7"/>
+            <polygon points="-9.5,0 -0.7,-0.7 0,0 -0.7,0.7" opacity="0.7"/>
+            <polygon points="9.5,0 0.7,-0.7 0,0 0.7,0.7" opacity="0.7"/>
+            <circle r="0.7"/>
+            <circle cx="-4" cy="-4" r="0.5" opacity="0.5"/>
+            <circle cx="4" cy="-4" r="0.5" opacity="0.4"/>
+            <circle cx="-4" cy="4" r="0.5" opacity="0.3"/>
+            <circle cx="4" cy="4" r="0.5" opacity="0.25"/>
+          </g>
+        </svg>
+        <span class="sidebar-module-label">СЛЕД ПУТИ</span>
+      </button>
+      <button class="nav-item" data-section="registry">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span class="nav-label">Реестр</span>
+      </button>
+      <button class="nav-item" data-section="gantt">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/><line x1="14" y1="14" x2="21" y2="14"/></svg>
+        <span class="nav-label">Гант</span>
+      </button>
+      <button class="nav-item" data-section="kanban">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="14"/><rect x="17" y="3" width="5" height="10"/></svg>
+        <span class="nav-label">Канбан</span>
+      </button>
+      <button class="nav-item" data-section="timeline">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span class="nav-label">Таймлайн</span>
+      </button>
+      <button class="nav-item" data-section="podlozhka">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span class="nav-label">Подложка</span>
+      </button>
+      <button class="nav-item" data-section="history">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>
+        <span class="nav-label">История</span>
+      </button>
+    </section>
+
+    <section class="sidebar-module" data-module="team">
+      <button class="sidebar-module-head" type="button" data-section="employees" title="Команда — люди и их состояние">
+        <svg class="sidebar-module-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <g transform="translate(12,12)">
+            <polygon points="0,-9.5 0.7,-0.7 0,0 -0.7,-0.7"/>
+            <polygon points="0,9.5 0.7,0.7 0,0 -0.7,0.7"/>
+            <polygon points="-9.5,0 -0.7,-0.7 0,0 -0.7,0.7" opacity="0.7"/>
+            <polygon points="9.5,0 0.7,-0.7 0,0 0.7,0.7" opacity="0.7"/>
+            <circle r="0.7"/>
+            <circle cx="-7" cy="-3" r="0.6" opacity="0.6"/>
+            <circle cx="7" cy="-3" r="0.6" opacity="0.6"/>
+            <circle cx="0" cy="7" r="0.6" opacity="0.6"/>
+          </g>
+        </svg>
+        <span class="sidebar-module-label">КОМАНДА</span>
+      </button>
+      <button class="nav-item" data-section="employees">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        <span class="nav-label">Сотрудники</span>
+      </button>
+      <button class="nav-item" data-section="burnout" title="Сигналы перегрузки — только для тимлидов">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="nav-label">Перегрузка</span>
+      </button>
+      <button class="nav-item" data-section="component-health" title="Здоровье компонентов">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span class="nav-label">Здоровье компонентов</span>
+      </button>
+    </section>
+
+    <section class="sidebar-module" data-module="goals">
+      <button class="sidebar-module-head" type="button" data-section="ai-ceo" title="Цели — квартальные ориентиры">
+        <svg class="sidebar-module-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <g transform="translate(12,12)">
+            <circle r="8" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.3"/>
+            <circle r="5" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.5"/>
+            <polygon points="0,-4 0.5,-0.5 0,0 -0.5,-0.5"/>
+            <polygon points="0,4 0.5,0.5 0,0 -0.5,0.5"/>
+            <polygon points="-4,0 -0.5,-0.5 0,0 -0.5,0.5" opacity="0.7"/>
+            <polygon points="4,0 0.5,-0.5 0,0 0.5,0.5" opacity="0.7"/>
+            <circle r="0.7"/>
+          </g>
+        </svg>
+        <span class="sidebar-module-label">ЦЕЛИ</span>
+      </button>
+      <button class="nav-item nav-item-ceo" data-section="ai-ceo">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span class="nav-label">AI CEO</span>
+      </button>
+      <!-- i3 (codebase-04 audit) — CEO-режим: 1 экран KPI без детализации
+           Ганта. 6 тайлов: at-risk releases, capacity heatmap, dependency
+           hotspots, burn-down per release, today's blockers, plan stability. -->
+      <button class="nav-item nav-item-ceo" data-section="exec">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span class="nav-label">CEO-режим</span>
+      </button>
+      <button class="nav-item" data-section="actions">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+        <span class="nav-label">Действия</span>
+      </button>
+      <button class="nav-item" data-section="ai">
+        <!-- V21 audit 07-ai-analysis §8: «робот-стетоскоп» иконка заменена
+             на брендовую (Вариант A: 8-лучевая звезда + sparkle-маркер AI).
+             Соблюдает BRAND_BOOK §2 «Anatomy» (12.5×/8× лучи, opacity 1.0/0.7/0.45),
+             отделяет AI Анализ от обычной аналитики через sparkle-маркер. -->
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <g transform="translate(11,13)">
+            <polygon points="0,-7 0.6,-0.6 0,0 -0.6,-0.6"/>
+            <polygon points="0,7 0.6,0.6 0,0 -0.6,0.6"/>
+            <polygon points="-7,0 -0.6,-0.6 0,0 -0.6,0.6" opacity="0.7"/>
+            <polygon points="7,0 0.6,-0.6 0,0 0.6,0.6" opacity="0.7"/>
+            <polygon points="-4.5,-4.5 -0.4,-0.4 0,0 -0.4,0.4" opacity="0.45"/>
+            <polygon points="4.5,4.5 0.4,0.4 0,0 0.4,-0.4" opacity="0.45"/>
+            <polygon points="-4.5,4.5 -0.4,0.4 0,0 0.4,0.4" opacity="0.45"/>
+            <polygon points="4.5,-4.5 0.4,-0.4 0,0 -0.4,-0.4" opacity="0.45"/>
+            <circle r="0.8"/>
+          </g>
+          <g transform="translate(19,5)">
+            <polygon points="0,-2.5 0.25,-0.25 0,0 -0.25,-0.25"/>
+            <polygon points="0,2.5 0.25,0.25 0,0 -0.25,0.25"/>
+            <polygon points="-2.5,0 -0.25,-0.25 0,0 -0.25,0.25" opacity="0.7"/>
+            <polygon points="2.5,0 0.25,-0.25 0,0 0.25,0.25" opacity="0.7"/>
+          </g>
+        </svg>
+        <span class="nav-label">AI Анализ</span>
+      </button>
+    </section>
+
+    <section class="sidebar-module" data-module="rituals">
+      <button class="sidebar-module-head" type="button" data-section="est-calibration" title="Ритуалы — регулярные практики">
+        <svg class="sidebar-module-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <g transform="translate(12,12)">
+            <g transform="translate(-4,0)">
+              <polygon points="0,-5 0.4,-0.4 0,0 -0.4,-0.4"/>
+              <polygon points="0,5 0.4,0.4 0,0 -0.4,0.4"/>
+              <polygon points="-5,0 -0.4,-0.4 0,0 -0.4,0.4" opacity="0.7"/>
+              <polygon points="5,0 0.4,-0.4 0,0 0.4,0.4" opacity="0.7"/>
+              <circle r="0.4"/>
+            </g>
+            <g transform="translate(4,0)">
+              <polygon points="0,-5 0.4,-0.4 0,0 -0.4,-0.4"/>
+              <polygon points="0,5 0.4,0.4 0,0 -0.4,0.4"/>
+              <polygon points="-5,0 -0.4,-0.4 0,0 -0.4,0.4" opacity="0.7"/>
+              <polygon points="5,0 0.4,-0.4 0,0 0.4,0.4" opacity="0.7"/>
+              <circle r="0.4"/>
+            </g>
+          </g>
+        </svg>
+        <span class="sidebar-module-label">РИТУАЛЫ</span>
+      </button>
+      <button class="nav-item" data-section="est-calibration" title="Точность оценок — личная точность оценок">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l3-3 4 4 5-5"/></svg>
+        <span class="nav-label">Точность оценок</span>
+      </button>
+      <button class="nav-item" data-section="doc-debt" title="Документация: долги — устаревшие страницы и владельцы">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+        <span class="nav-label">Документация</span>
+      </button>
+      <button class="nav-item" data-section="integrations">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        <span class="nav-label">Интеграции</span>
+      </button>
+      <button class="nav-item" data-section="diagnostics">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="nav-label">Диагностика</span>
+      </button>
+      <button class="nav-item" data-section="errors" title="Журнал ошибок и предупреждений">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="nav-label">Ошибки</span>
+        <span class="nav-badge nav-badge-err hidden" id="nav-errors-badge"></span>
+      </button>
+    </section>
+
     </div><!-- /.sidebar-nav -->
     <!-- V18.1 — sidebar collapse-toggle moved out of topbar (hamburger removed)
          and into the sidebar footer as a double-chevron. Icon rotates 180°
@@ -526,21 +1026,21 @@
     </button>
   </nav>
 
-  <div id="content-area">
+  <main id="content-area" tabindex="-1">
 
     <div id="filters-backdrop" aria-hidden="true"></div>
     <div id="global-filters-bar" role="region" aria-label="Фильтры">
       <div class="filters-row">
         <div class="filter-group">
-          <label class="filter-label">Поиск</label>
+          <label class="filter-label" for="filter-search">Поиск</label>
           <input type="text" id="filter-search" class="filter-input" placeholder="Текст, эпик, задача...">
         </div>
         <div class="filter-group">
-          <label class="filter-label">Команда</label>
+          <label class="filter-label" for="filter-team">Команда</label>
           <select id="filter-team" class="filter-select"><option value="">Все</option></select>
         </div>
         <div class="filter-group">
-          <label class="filter-label">Scope</label>
+          <label class="filter-label" for="filter-scope">Scope</label>
           <select id="filter-scope" class="filter-select">
             <option value="">Все</option>
             <option value="Да">Да</option>
@@ -549,7 +1049,7 @@
           </select>
         </div>
         <div class="filter-group">
-          <label class="filter-label">Релиз</label>
+          <label class="filter-label" for="filter-release">Релиз</label>
           <select id="filter-release" class="filter-select">
             <option value="">Все</option>
             <option value="1.20">1.20</option>
@@ -560,15 +1060,15 @@
           </select>
         </div>
         <div class="filter-group">
-          <label class="filter-label">Тип работ</label>
+          <label class="filter-label" for="filter-worktype">Тип работ</label>
           <select id="filter-worktype" class="filter-select"><option value="">Все</option></select>
         </div>
         <div class="filter-group">
-          <label class="filter-label">Роль</label>
+          <label class="filter-label" for="filter-role">Роль</label>
           <select id="filter-role" class="filter-select"><option value="">Все</option></select>
         </div>
         <div class="filter-group">
-          <label class="filter-label">Исполнитель</label>
+          <label class="filter-label" for="filter-assignee">Исполнитель</label>
           <select id="filter-assignee" class="filter-select"><option value="">Все</option></select>
         </div>
         <div class="filter-toggles">
@@ -621,20 +1121,29 @@
 
     <!-- DASHBOARD -->
     <section id="section-dashboard" class="app-section active">
-      <div class="section-header">
-        <h2>Сводный дашборд</h2>
-      </div>
+      <!-- П4-DASHBOARD: legacy h2 «Сводный дашборд» снят — был тавтологией
+           под Prizma-page-header (eyebrow «КУРС · ДАШБОРД» + h1 «Курс квартала»). -->
       <div id="dashboard-legend" class="view-legend"></div>
-      <div id="dashboard-kpi" class="kpi-grid"></div>
+      <!-- П4-DASHBOARD: action-блок «Что требует курса сегодня» (Wave 3). -->
+      <div id="dashboard-action-block"></div>
+      <!-- V21 tabs-consolidation (вариант A): «Инсайты» поглощены в Дашборд
+           отдельным room «Сигналы». #section-insights удалён, маршрут
+           #insights ремаппится на #dashboard в Nav.goTo. -->
+      <div id="dashboard-signals"></div>
+      <div class="dash-section-eyebrow">КУРС ПО РЕЛИЗАМ</div>
       <div id="dashboard-progress" class="progress-grid"></div>
-      <div id="risks-panel" class="risks-panel"></div>
-      <div id="blocking-detail-card"></div>
-      <div id="release-breakdown" class="release-breakdown-grid"></div>
-      <div id="teams-summary-wrap"></div>
-      <div class="dashboard-tables-grid">
-        <div id="no-release-wrap"></div>
-        <div id="needs-confirm-wrap"></div>
-      </div>
+      <div class="dash-section-eyebrow">СОСТОЯНИЕ КУРСА</div>
+      <div id="dashboard-kpi" class="kpi-grid"></div>
+      <!-- П4-DASHBOARD Wave 4: ниже-fold collapsed-details. blocking-detail-card,
+           teams-summary-wrap, no-release-wrap, needs-confirm-wrap — удалены
+           (path через KPI-modal в Реестр сохраняется; teams-summary переехал
+           в модуль КОМАНДА). -->
+      <div id="risks-panel"></div>
+      <div id="release-breakdown"></div>
+      <!-- V21 audit 4.6 — «Сделано за неделю» (positive feedback). -->
+      <div id="dashboard-weekly-progress"></div>
+      <!-- V21 audit 4.2 — «Перегрузка инженеров» (OT × открытые 1.22). -->
+      <div id="dashboard-overload"></div>
     </section>
 
     <!-- REGISTRY -->
@@ -642,13 +1151,13 @@
       <div class="section-header">
         <h2>Итоговый реестр <span id="registry-count-badge" class="count-badge"></span></h2>
         <div class="section-header-actions">
-          <button class="btn btn-primary btn-sm" id="btn-add-row">+ Строка</button>
-          <button class="btn btn-outline btn-sm btn-undo-clone" id="btn-undo" title="Отменить (Ctrl/Cmd+Z)" disabled>↺ Отменить</button>
-          <button class="btn btn-outline btn-sm btn-redo-clone" id="btn-redo" title="Вернуть (Ctrl/Cmd+Shift+Z / Ctrl+Y)" disabled>↻ Вернуть</button>
-          <button class="btn btn-outline btn-sm" id="btn-toggle-cols">Столбцы</button>
-          <button class="btn btn-outline btn-sm" id="btn-registry-settings">⚙ Настройки</button>
-          <button class="btn btn-outline btn-sm" id="btn-fullscreen-registry" title="Полный экран">⛶</button>
-          <button class="btn btn-outline btn-sm" id="btn-reset-col-order" title="Сбросить порядок столбцов">↺ Порядок</button>
+          <button class="btn btn-primary btn-sm" id="btn-add-row" aria-label="Добавить строку в реестр">+ Строка</button>
+          <button class="btn btn-outline btn-sm btn-undo-clone" id="btn-undo" data-icon="undo" data-icon-size="14" aria-label="Отменить последнее действие" title="Отменить (Ctrl/Cmd+Z)" disabled>Отменить</button>
+          <button class="btn btn-outline btn-sm btn-redo-clone" id="btn-redo" data-icon="redo" data-icon-size="14" aria-label="Вернуть отменённое" title="Вернуть (Ctrl/Cmd+Shift+Z / Ctrl+Y)" disabled>Вернуть</button>
+          <button class="btn btn-outline btn-sm" id="btn-toggle-cols" aria-label="Показать или скрыть столбцы реестра">Столбцы</button>
+          <button class="btn btn-outline btn-sm" id="btn-registry-settings" data-icon="settings" data-icon-size="14" aria-label="Настройки реестра">Настройки</button>
+          <button class="btn btn-outline btn-sm prizma-icon-only-btn" id="btn-fullscreen-registry" data-icon="maximize" data-icon-size="14" title="Полный экран" aria-label="Полный экран реестра"></button>
+          <button class="btn btn-outline btn-sm" id="btn-reset-col-order" data-icon="rotate-cw" data-icon-size="14" aria-label="Сбросить порядок столбцов" title="Сбросить порядок столбцов">Порядок</button>
         </div>
       </div>
       <div id="registry-legend" class="view-legend"></div>
@@ -683,7 +1192,7 @@
           <input id="bulk-assignee-input" class="bulk-input" placeholder="Исполнитель…">
           <button id="bulk-btn-assignee" class="btn btn-sm btn-outline">Назначить исп.</button>
           <div class="bulk-divider"></div>
-          <button id="bulk-btn-done" class="btn btn-sm btn-outline">✓ Сделано</button>
+          <button id="bulk-btn-done" class="btn btn-sm btn-outline" data-icon="check" data-icon-size="14" aria-label="Отметить как сделано">Сделано</button>
           <button id="bulk-btn-clear-release" class="btn btn-sm btn-outline">Убрать из релиза</button>
           <button id="bulk-btn-clear-blocker" class="btn btn-sm btn-outline">Снять блокер</button>
         </div>
@@ -691,7 +1200,21 @@
       </div>
       <div id="registry-table-wrap" class="table-scroll-wrap">
         <div id="registry-empty" class="empty-state hidden">
-          <div class="empty-icon">📂</div>
+          <div class="prizma-empty-glyph" aria-hidden="true">
+            <svg viewBox="0 0 120 120">
+              <g transform="translate(60,60)" fill="currentColor">
+                <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+                <polygon points="0,50 4,4 0,0 -4,4"/>
+                <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+                <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+                <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+                <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+                <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+                <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+                <circle r="4"/>
+              </g>
+            </svg>
+          </div>
           <div class="empty-title">Нет данных</div>
           <div class="empty-hint">Загрузите XLSX или CSV через кнопки в шапке</div>
         </div>
@@ -705,50 +1228,67 @@
     <!-- GANTT -->
     <section id="section-gantt" class="app-section hidden">
       <div class="section-header">
-        <h2>Гант по релизам</h2>
-        <div class="section-header-actions">
+        <!-- Wave1 P-GR §A1 — legacy <h2>Гант по релизам</h2> удалён: тавтология
+             с prizma-h1 (eyebrow «СЛЕД ПУТИ · ГАНТ»). -->
+        <div class="section-header-actions" role="toolbar" aria-label="Действия Ганта">
           <!-- V14: removed «Со стрелками» mode toggle (B2).
                V15: removed solo «Детальный по задачам» button — tab-toggle
-               with one tab is just visual noise. -->
+               with one tab is just visual noise.
 
-          <!-- V14 (B3 + B4 + B5): plan lock + edit mode controls. Visibility
+               Wave1 P-GR §C — toolbar разбит на кластеры PLAN | VIEW | NAV
+               через `.topbar-divider`.
+
+               Wave3 P-GR — `role="toolbar"` + aria-label ("Действия Ганта").
+               P11.3 ранее задал sizing-CSS для divider'ов, но a11y-роль
+               toolbar не было. Теперь screen-reader anonsiruet «Toolbar,
+               Действия Ганта» при попадании фокуса в этот блок. -->
+
+          <!-- ── PLAN cluster ── lock-status + lock/edit/unlock controls.
+               V14 (B3 + B4 + B5): plan lock + edit mode controls. Visibility
                is driven from JS (App.bindGanttPlanLock) to keep state↔DOM
                in sync. -->
           <span id="gantt-lock-status" class="gantt-lock-status hidden"></span>
-          <button class="btn btn-sm btn-outline" id="btn-gantt-lock-plan" title="Зафиксировать план — после фиксации каждый перенос требует комментарий">🔒 Зафиксировать план</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-lock-plan" data-icon="lock" data-icon-size="14" aria-label="Зафиксировать план релиза" title="Зафиксировать план — после фиксации каждый перенос требует комментарий">Зафиксировать план</button>
+          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-edit-mode" aria-label="Включить режим редактирования" title="Включить режим редактирования — переносы временно без комментария (план остаётся зафиксированным)">Редактировать</button>
+          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-unlock-plan" data-icon="unlock" data-icon-size="14" aria-label="Снять фиксацию плана" title="Снять фиксацию плана">Снять фиксацию</button>
+
+          <!-- V21 — spacer toolbar split: занимает free-space, толкает VIEW+NAV кластеры к правому краю. -->
+          <span class="gantt-toolbar-spacer" aria-hidden="true"></span>
+
+          <span class="topbar-divider" data-cluster-label="Вид" aria-hidden="true"></span>
+
+          <!-- ── VIEW cluster ── tips / history / expand / undo-redo. -->
           <!-- V17.1 C8 — «Подсказки по визуализации» переехала из отдельной
-               строки под заголовком сюда, в строку с «Зафиксировать план».
-               Сам блок с подсказками остаётся на старом месте (#gantt-pill-legend),
-               эта кнопка переключает только его collapsed/expanded состояние. -->
-          <button class="btn btn-sm btn-outline" id="btn-gantt-tips-toggle" title="Подсказки по визуализации">Подсказки</button>
+               строки под заголовком сюда. Сам блок с подсказками остаётся
+               на старом месте (#gantt-pill-legend). -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-tips-toggle" title="Как читать Гант" aria-label="Открыть подсказки по визуализации Ганта" aria-controls="gantt-pill-legend" aria-expanded="false">Как читать?</button>
+          <!-- i4 (codebase-04 audit) — Dependency-graph overlay поверх Ганта. -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt-deps" title="Граф зависимостей эпиков" aria-label="Открыть граф зависимостей">Граф зависимостей</button>
           <!-- V17.1 C9 — История изменений Ганта: модалка со всей историей
                операций над колодцами / пилюлями (фильтр по domain=gantt). -->
-          <button class="btn btn-sm btn-outline" id="btn-gantt-history" title="История изменений Ганта">История</button>
-          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-edit-mode" title="Включить режим редактирования — переносы временно без комментария (план остаётся зафиксированным)">✏ Режим редактирования</button>
-          <button class="btn btn-sm btn-outline hidden" id="btn-gantt-unlock-plan" title="Снять фиксацию плана">🔓 Снять фиксацию</button>
-          <!-- V16 (gantt-roadmap #5) — Cmd+K команд / эпиков + density-toggle.
-               Cmd+K opens a Raycast-style palette for jumping to any team
-               or epic; density toggles row height between Regular and
-               Compact (Dense was discarded — would break Spine-pill 2-row
-               layout per designer review). -->
-          <button class="btn btn-sm btn-outline" id="btn-gantt-jump" title="Поиск команд / эпиков (⌘K / Ctrl+K)" style="padding:5px 9px;font-size:13px;font-family:ui-monospace,Menlo,monospace">⌘K</button>
-          <!-- V16 roadmap-2 (A4) — overview-mode zoom toggle. Default mode
-               renders pills + epics + trails; overview reduces every team
-               to a single stacked-bar row for at-a-glance distribution. -->
-          <button class="btn btn-sm btn-outline" id="btn-gantt-mode" title="Режим: Default (детальный) / Overview (одна строка на команду)" style="padding:5px 9px;font-size:13px">▦</button>
-          <button class="btn btn-sm btn-outline" id="btn-gantt-density" title="Плотность строк (Regular / Compact)" style="padding:5px 9px;font-size:14px">⇕</button>
-          <button class="btn btn-sm btn-outline" id="btn-gantt-expand-all" title="Свернуть все команды" style="padding:5px 9px;font-size:14px">⊟</button>
-          <button class="btn btn-sm btn-outline btn-undo-clone" id="btn-undo-gantt" title="Отменить (Ctrl+Z)" style="padding:5px 9px;font-size:16px" disabled>↺</button>
-          <button class="btn btn-sm btn-outline btn-redo-clone" id="btn-redo-gantt" title="Повторить (Ctrl+Shift+Z / Ctrl+Y)" style="padding:5px 9px;font-size:16px" disabled>↻</button>
-          <button class="btn btn-sm btn-outline" id="btn-gantt-fullscreen" title="Полный экран" style="padding:5px 9px;font-size:14px">⛶</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt-history" title="История изменений Ганта" aria-label="Открыть историю изменений Ганта">История</button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt-expand-all" data-icon="minus-square" data-icon-size="14" aria-label="Свернуть/развернуть все команды" title="Свернуть все команды"></button>
+          <button class="btn btn-sm btn-outline btn-undo-clone prizma-icon-only-btn" id="btn-undo-gantt" data-icon="undo" data-icon-size="14" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled></button>
+          <button class="btn btn-sm btn-outline btn-redo-clone prizma-icon-only-btn" id="btn-redo-gantt" data-icon="redo" data-icon-size="14" aria-label="Повторить" title="Повторить (Ctrl+Shift+Z / Ctrl+Y)" disabled></button>
+
+          <span class="topbar-divider" data-cluster-label="Навигация" aria-hidden="true"></span>
+
+          <!-- ── NAV cluster ── jump (Cmd+K), mode, density, fullscreen.
+               V16 (gantt-roadmap #5) — Cmd+K команд / эпиков + density-toggle.
+               V16 roadmap-2 (A4) — overview-mode zoom toggle. -->
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt-jump" data-icon="search" data-icon-size="14" aria-label="Поиск команд и эпиков (Cmd+K)" title="Поиск команд / эпиков (⌘K / Ctrl+K)"></button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt-mode" data-icon="layout-grid" data-icon-size="14" aria-label="Переключить режим: детальный / обзор" title="Режим: Default (детальный) / Overview (одна строка на команду)"></button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt-density" data-icon="chevrons-up-down" data-icon-size="14" aria-label="Плотность строк" title="Плотность: Свободная / Плотная / Минимум"></button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt-fullscreen" data-icon="maximize" data-icon-size="14" title="Полный экран" aria-label="Полный экран Ганта"></button>
         </div>
       </div>
       <!-- V15 Spine 2026-04-30 — collapsible pill-anatomy legend.
            Default collapsed (just a one-line toggle). Filled by
            GanttView._renderPillLegend(); state persists to localStorage. -->
       <div id="gantt-pill-legend" class="gdt-pill-legend"></div>
-      <div id="gantt-filters" class="gantt-filters"></div>
-      <div id="gantt-wrap"></div>
+      <!-- Wave1 P-GR §A2 — `#gantt-filters` контейнер удалён вместе с
+           GanttView.renderFilters() (display:none + всегда пустой). -->
+      <div id="gantt-wrap" role="application" aria-label="Доска Ганта"></div>
       <div id="gantt-legend-extra" class="view-legend"></div>
     </section>
 
@@ -807,19 +1347,29 @@
     </section>
 
     <!-- EMPLOYEES -->
+    <!-- Wave2 — legacy h2 «Сотрудники» снят, был тавтологией с Prizma-page-header
+         (eyebrow «КУРС · СОТРУДНИКИ» + h1 «Сотрудники»). Badge остаётся как
+         dynamic-counter. -->
     <section id="section-employees" class="app-section hidden">
       <div class="section-header">
-        <h2>Сотрудники <span id="employees-count-badge" class="count-badge"></span></h2>
-        <div class="section-header-actions">
-          <button class="btn btn-primary btn-sm" id="btn-add-employee">+ Сотрудник</button>
-          <label class="btn btn-outline btn-sm">XLSX
-            <input type="file" id="input-employees-xlsx" accept=".xlsx,.xls" class="input-hidden">
-          </label>
-          <label class="btn btn-outline btn-sm">CSV
-            <input type="file" id="input-employees-csv" accept=".csv" class="input-hidden">
-          </label>
-          <button class="btn btn-ghost btn-sm" id="btn-employees-template" title="Скачать пустой XLSX-шаблон с нужными колонками">📄 Шаблон</button>
-          <button class="btn btn-danger btn-sm" id="btn-employees-delete-all" title="Удалить всех сотрудников из списка">🗑 Удалить всех</button>
+        <span id="employees-count-badge" class="count-badge"></span>
+        <!-- V21 audit 04-employees §13: action-кнопки сгруппированы (Add /
+             Импорт / Danger), эмодзи 📄 заменена на SVG, danger-кнопка
+             отделена spacer'ом справа. §15: добавлен поиск по ФИО. -->
+        <div class="section-header-actions" role="toolbar" aria-label="Действия со списком сотрудников">
+          <input type="search" id="employees-search" class="employees-search-input" placeholder="Поиск по ФИО…" aria-label="Поиск по ФИО" autocomplete="off">
+          <div class="employees-actions-group" role="group" aria-label="Добавить">
+            <button class="btn btn-primary btn-sm" id="btn-add-employee">+ Сотрудник</button>
+            <label class="btn btn-outline btn-sm">XLSX
+              <input type="file" id="input-employees-xlsx" accept=".xlsx,.xls" class="input-hidden">
+            </label>
+            <label class="btn btn-outline btn-sm">CSV
+              <input type="file" id="input-employees-csv" accept=".csv" class="input-hidden">
+            </label>
+            <button class="btn btn-ghost btn-sm" id="btn-employees-template" data-icon="download" data-icon-size="14" title="Скачать пустой XLSX-шаблон с нужными колонками" aria-label="Скачать шаблон">Шаблон</button>
+          </div>
+          <span class="employees-actions-spacer" aria-hidden="true"></span>
+          <button class="btn btn-danger btn-sm" id="btn-employees-delete-all" data-icon="trash" data-icon-size="14" aria-label="Удалить всех сотрудников" title="Удалить всех сотрудников из списка">Удалить всех</button>
         </div>
       </div>
       <div id="employees-legend" class="view-legend"></div>
@@ -827,31 +1377,37 @@
       <div id="employees-table-wrap" class="data-table-wrap"></div>
     </section>
 
-    <!-- SUMMARY -->
-    <section id="section-summary" class="app-section hidden">
-      <div class="section-header">
-        <h2>Сводная для CEO</h2>
-        <!-- V17.1 G1 — представление «Совсем красиво» удалено вместе с переключателем
-             представлений по запросу пользователя. Осталось одно представление —
-             «Краткая». В app.js bindSummaryMode также упрощена. -->
-      </div>
-      <div id="summary-legend" class="view-legend"></div>
-      <div id="summary-wrap"></div>
-    </section>
+    <!-- SUMMARY — REMOVED П4-MS Wave 1 (audit-2026-05-04/summary-metrics-redesign).
+         Контент свёрнут в Дашборд (action-блок «Что требует курса»). -->
 
-    <!-- METRICS -->
+    <!-- METRICS — П4-MS Wave 5: legacy h2 «Метрики» снят, был тавтологией
+         с Prizma-page-header (eyebrow «КУРС · МЕТРИКИ» + h1 «Метрики»). -->
     <section id="section-metrics" class="app-section hidden">
-      <div class="section-header"><h2>Метрики</h2></div>
       <div id="metrics-legend" class="view-legend"></div>
       <div id="metrics-wrap"></div>
     </section>
 
-    <!-- INSIGHTS -->
-    <section id="section-insights" class="app-section hidden">
-      <div class="section-header"><h2>Инсайты</h2></div>
-      <div id="insights-legend" class="view-legend"></div>
-      <div id="insights-wrap"></div>
+    <!-- INSIGHTS — REMOVED V21 tabs-consolidation (вариант A,
+         audit-2026-05-V21-tabs/02-insights.md). Содержимое свёрнуто
+         в #dashboard-signals (см. DashboardView.renderSignals). -->
+
+    <!-- V21 AO — Estimation calibration (отдельный экран). -->
+    <section id="section-est-calibration" class="app-section hidden">
+      <!-- AUDIT_LAYOUT #27 — pre-mount skeleton, чтобы на slow-net юзер не видел
+           абсолютно пустую секцию до JS-hydratation. render() перепишет innerHTML. -->
+      <div class="pz-section-skeleton" aria-hidden="true">
+        <div class="pz-skel-line" style="width:30%;height:24px;margin-bottom:16px"></div>
+        <div class="pz-skel-line" style="width:60%;height:14px;margin-bottom:8px"></div>
+        <div class="pz-skel-line" style="width:80%;height:14px;margin-bottom:24px"></div>
+        <div class="pz-skel-line" style="width:100%;height:120px;border-radius:8px"></div>
+      </div>
     </section>
+    <!-- V21 AP — Component health card. -->
+    <section id="section-component-health" class="app-section hidden"></section>
+    <!-- V21 AP — Burnout watchtower (manager-only). -->
+    <section id="section-burnout" class="app-section hidden"></section>
+    <!-- V21 AP — Doc-debt console. -->
+    <section id="section-doc-debt" class="app-section hidden"></section>
 
     <!-- JIRA PULSE -->
     <!-- ACTION LAYER -->
@@ -864,11 +1420,11 @@
     </section>
 
     <!-- ACTION LAYER MODAL -->
-    <div id="al-modal" class="modal-overlay hidden">
-      <div class="modal-dialog" style="max-width:520px">
+    <div id="al-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="al-modal-title">
+      <div class="modal-dialog ix-modal-dialog-520">
         <div class="modal-header">
           <h3 class="modal-title" id="al-modal-title">Действие</h3>
-          <button class="modal-close" id="al-modal-cancel">×</button>
+          <button class="modal-close" id="al-modal-cancel" type="button" aria-label="Закрыть" title="Закрыть">×</button>
         </div>
         <div class="modal-body">
           <p id="al-modal-desc" class="al-modal-desc"></p>
@@ -900,9 +1456,10 @@
     </section>
 
     <!-- AI CEO -->
-    <section id="section-ai-ceo" class="app-section hidden">
-      <div id="ceo-root" class="view-root"></div>
-    </section>
+    <!-- V21 audit 05-ai-ceo §1: статичный ceo-root убран — view сама создаёт его через root.innerHTML -->
+    <section id="section-ai-ceo" class="app-section hidden"></section>
+    <!-- i3 — exec view (1-screen KPI). См. views/exec.js. -->
+    <section id="section-exec" class="app-section hidden"></section>
 
     <!-- HISTORY -->
     <section id="section-history" class="app-section hidden"></section>
@@ -910,50 +1467,74 @@
     <!-- ERRORS -->
     <section id="section-errors" class="app-section hidden"></section>
 
-  </div>
+  </main>
 </div>
 
-<!-- V17.1 A1+A2 — moved to bottom-LEFT and redesigned in Spine-pill style:
-     stroke-2 outline (sparkles "AI" glyph), neutral surface with 3px accent
-     stripe-left, mono-tabular badge for unread (future). Аria-label на русском. -->
-<button id="assistant-fab" class="assistant-fab" title="Открыть помощника" aria-label="Открыть помощника по планированию">
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3z"/>
-    <path d="M19 14l.7 1.9L21.5 17l-1.8.7L19 19.5l-.7-1.8L16.5 17l1.8-1.1L19 14z"/>
-    <path d="M5 14l.7 1.9L7.5 17l-1.8.7L5 19.5l-.7-1.8L2.5 17l1.8-1.1L5 14z"/>
-  </svg>
+<!-- Floating-маскот Обсидиан в правом нижнем углу — единый объект-триггер
+     для чата ассистента. См. obsidian/MASCOT_OBSIDIAN.md §13.7.
+     - Emerge один раз за сессию (sessionStorage), потом всегда Breathe.
+     - Hover → Curious. Mouse leave → Breathe.
+     - Клик → открыть chat (existing handler в llmAssistant.bindUI).
+     - Новое сообщение от ассистента когда чат закрыт → Alert (once).
+     - Раньше тут был Northstar 8-pointed glyph — заменён на маскот по §13.10 п.8
+       (маскот СОДЕРЖИТ звезду Призмы внутри, отдельный логотип не нужен). -->
+<!-- v22 — FAB persistent global (z=100000, поверх splash z=99999 и welcome z=9000).
+     Initial data-fab-pending до завершения splash Emerge: body+eyes невидимы
+     через CSS, чтобы Emerge был первым появлением маскота, не «вспышкой
+     готового кристалла» во время splash star/wordmark phase. -->
+<button id="assistant-fab" class="assistant-fab" data-fab-pending="1" title="Открыть помощника" aria-label="Открыть чат с ассистентом">
+  <span id="obsidian-fab-mascot" class="obs assistant-fab-mascot" aria-hidden="true">
+    <svg viewBox="-60 -60 120 120"><use href="#obs-base"/></svg>
+  </span>
 </button>
 
 <!-- V17.1 A5 — англицизмы → русский ("Planning Assistant" / "current view"). -->
-<aside id="assistant-panel" class="assistant-panel hidden" aria-label="Помощник по планированию">
+<aside id="assistant-panel" class="assistant-panel hidden" aria-label="Помощник по планированию" lang="ru">
   <div class="assistant-panel-header">
+    <!-- Обсидиан-аватар ассистента в шапке чата. Декоративный
+         (aria-hidden), смену состояний делает ObsidianMascot.setChatPhase()
+         в зависимости от фазы разговора (см. MASCOT_OBSIDIAN.md §13.6). -->
+    <span id="obsidian-chat-avatar" class="obs obs--breathe assistant-chat-avatar" aria-hidden="true">
+      <svg viewBox="-60 -60 120 120"><use href="#obs-base"/></svg>
+    </span>
     <div class="assistant-title-wrap">
+      <!-- M6+top4 fix (design-02 audit) — caps-eyebrow «PRIZMA · ПОМОЩНИК»
+           над title. Это типографический ДНК-элемент бренда (.prizma-card-eyebrow
+           уже определён в styles.css:538). -->
+      <div class="prizma-card-eyebrow assistant-eyebrow">PRIZMA · ПОМОЩНИК</div>
       <div class="assistant-title">Помощник по планированию</div>
       <div class="assistant-subtitle assistant-subtitle-clickable" id="assistant-context-mode-label" title="Нажмите чтобы сменить режим контекста">Контекст: текущий вид</div>
     </div>
     <div class="assistant-header-actions">
       <!-- Review mode selector -->
-      <select id="chat-review-mode-select" class="chat-review-select" title="Режим обзора">
-        <option value="">👁 Режим</option>
+      <!-- V21 audit 08-chatbot §1: emoji 👁 удалён (Icons в `<option>` не
+           вставить, оставляем чистый текст). -->
+      <select id="chat-review-mode-select" class="chat-review-select" title="Режим обзора" aria-label="Режим обзора">
+        <option value="">Режим</option>
         <option value="ceo">CEO</option>
         <option value="dm">Delivery Manager</option>
         <option value="risk">Risk Officer</option>
         <option value="lead">Team Lead</option>
       </select>
-      <button class="btn btn-ghost btn-xs" id="assistant-btn-settings" title="Настройки LLM">⚙</button>
-      <button class="btn btn-ghost btn-xs" id="assistant-btn-clear" title="Новый диалог (очистить историю)">✦ Новый</button>
+      <button class="btn btn-ghost btn-xs prizma-icon-only-btn" id="assistant-btn-settings" data-icon="settings" data-icon-size="14" aria-label="Настройки LLM" title="Настройки LLM"></button>
+      <!-- top5 fix (design-02 audit §13.10 п.10) — sparkles рядом с маскотом
+           создаёт «двойную искру» (маскот сам несёт звезду). Заменено на
+           plus-icon — нейтральнее семантически («новый» = добавить). -->
+      <button class="btn btn-ghost btn-xs assistant-btn-with-icon" id="assistant-btn-clear" title="Новый диалог (очистить историю)" aria-label="Новый диалог"><span class="assistant-btn-icon" data-icon="plus" data-icon-size="12" aria-hidden="true"></span>Новый</button>
       <!-- V17 P3 (CHAT-7) — `payload` button hidden by default (debug-only).
            Toggle visibility by setting `localStorage.q2_chat_debug = '1'` in
            DevTools, then reload. Audit 2026-05 (art-director #6). -->
       <button class="btn btn-outline btn-xs hidden" id="assistant-btn-preview" title="Показать payload (debug)">payload</button>
-      <button class="btn btn-outline btn-xs" id="assistant-btn-minimize" title="Свернуть">—</button>
-      <button class="btn btn-ghost btn-xs" id="assistant-btn-close" title="Закрыть">✕</button>
+      <!-- V21 audit 08-chatbot §2: «—»/«✕» → SVG icons + aria-label. -->
+      <button class="btn btn-outline btn-xs prizma-icon-only-btn" id="assistant-btn-minimize" data-icon="minus" data-icon-size="14" aria-label="Свернуть помощника" title="Свернуть"></button>
+      <button class="btn btn-ghost btn-xs prizma-icon-only-btn" id="assistant-btn-close" data-icon="x" data-icon-size="14" aria-label="Закрыть помощника" title="Закрыть"></button>
     </div>
   </div>
   <div class="assistant-quick-wrap" id="assistant-quick-wrap">
-    <button class="assistant-quick-toggle" id="assistant-quick-toggle" title="Свернуть / развернуть">
+    <!-- V21 audit 08-chatbot §1/§17: ▾ → Icons.chevron-down + aria-expanded. -->
+    <button class="assistant-quick-toggle" id="assistant-quick-toggle" title="Свернуть / развернуть" aria-controls="assistant-quick-prompts" aria-expanded="true">
       <span class="assistant-quick-title">Быстрые вопросы</span>
-      <span class="assistant-quick-chevron">▾</span>
+      <span class="assistant-quick-chevron" data-icon="chevron-down" data-icon-size="12" aria-hidden="true"></span>
     </button>
     <div id="assistant-quick-prompts" class="assistant-quick-prompts"></div>
   </div>
@@ -962,25 +1543,54 @@
        to a11y users. Audit 2026-05 (designer §7). -->
   <div id="assistant-messages" class="assistant-messages" role="log" aria-live="polite" aria-label="История диалога с ассистентом"></div>
   <div id="assistant-error" class="assistant-error hidden"></div>
+  <!-- V21 BM (audit-04 §G #11, Quick win 6) — Context chip-bar.
+       Показывает что AI «видит»: активный view + filter + selected row.
+       Live-update через LLMAssistant.refreshContextBar() — caller вызывает
+       при смене filter / section / selected. -->
+  <div id="assistant-context-bar" class="assistant-context-bar hidden" aria-label="Контекст для AI"></div>
   <div class="assistant-input-wrap">
-    <textarea id="assistant-input" class="assistant-input" rows="2" placeholder="Спроси по данным... (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+    <textarea id="assistant-input" class="assistant-input" rows="2" aria-label="Сообщение помощнику" placeholder="Спроси по данным... (Enter — отправить, Shift+Enter — новая строка)"></textarea>
     <div class="assistant-input-footer">
       <span id="assistant-payload-status" class="assistant-payload-status hidden"></span>
+      <!-- V21 audit 08-chatbot §1: ⊕/⏹/↑ → Icons + aria-label. -->
       <div class="assistant-send-actions">
-        <button class="btn btn-outline btn-xs" id="assistant-btn-insert-context" title="Вставить JSON контекст в поле ввода">⊕ контекст</button>
-        <button class="btn btn-outline btn-xs hidden" id="assistant-btn-stop">⏹ Стоп</button>
-        <button class="btn btn-primary btn-xs" id="assistant-btn-send">↑ Отправить</button>
+        <button class="btn btn-outline btn-xs assistant-btn-with-icon" id="assistant-btn-insert-context" title="Вставить JSON контекст в поле ввода" aria-label="Вставить JSON контекст"><span class="assistant-btn-icon" data-icon="plus" data-icon-size="12" aria-hidden="true"></span>контекст</button>
+        <button class="btn btn-outline btn-xs hidden assistant-btn-with-icon" id="assistant-btn-stop" aria-label="Остановить генерацию"><span class="assistant-btn-icon" data-icon="square" data-icon-size="12" aria-hidden="true"></span>Стоп</button>
+        <button class="btn btn-primary btn-xs assistant-btn-with-icon" id="assistant-btn-send" aria-label="Отправить сообщение"><span class="assistant-btn-icon" data-icon="send" data-icon-size="12" aria-hidden="true"></span>Отправить</button>
       </div>
     </div>
   </div>
 </aside>
 
 <!-- APP SETTINGS MODAL -->
-<div id="app-settings-modal" class="modal-overlay hidden">
+<div id="app-settings-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="app-settings-title">
   <div class="modal-box modal-box-wide">
     <div class="modal-header">
-      <h3>Настройки</h3>
-      <button class="modal-close-btn" id="app-settings-close">✕</button>
+      <h3 id="app-settings-title">Настройки</h3>
+      <!-- V1.0.1: версия + release-notes trigger в шапке настроек.
+           Hydrate через AppSettings.renderVersionHeader() из app/version.js. -->
+      <div class="app-settings-version-header" data-app-settings-version aria-live="polite"></div>
+      <button class="modal-close-btn" id="app-settings-close" type="button" aria-label="Закрыть настройки" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <!-- V1.0.1 sub-modal: release notes viewer (открывается из шапки). -->
+    <div class="release-notes-overlay hidden" data-release-notes-overlay role="dialog" aria-modal="true" aria-labelledby="release-notes-title">
+      <div class="release-notes-box">
+        <div class="release-notes-header">
+          <h4 id="release-notes-title">Что нового в Призме</h4>
+          <button class="modal-close-btn" type="button" data-release-notes-close aria-label="Закрыть release notes" title="Закрыть">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div class="release-notes-body" data-release-notes-body></div>
+      </div>
     </div>
     <div class="app-settings-tabs">
       <button class="app-settings-tab active" data-tab="interface">Интерфейс</button>
@@ -1045,11 +1655,16 @@
   </div>
 </div>
 
-<div id="llm-settings-modal" class="modal-overlay hidden">
+<div id="llm-settings-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="llm-settings-title">
   <div class="modal-box modal-box-wide llm-settings-box">
     <div class="modal-header">
-      <h3>Настройки LLM</h3>
-      <button class="modal-close-btn" id="llm-settings-close">✕</button>
+      <h3 id="llm-settings-title">Настройки LLM</h3>
+      <button class="modal-close-btn" id="llm-settings-close" type="button" aria-label="Закрыть настройки LLM" title="Закрыть">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
     <div class="llm-settings-grid">
       <label class="llm-field">
@@ -1112,7 +1727,7 @@
         <span>Context mode</span>
         <select id="llm-context-mode" class="filter-select">
           <option value="none">none</option>
-          <option value="summary">summary only</option>
+          <option value="dashboard">dashboard summary</option>
           <option value="currentView">current view</option>
           <option value="fullRegistry">full registry limited</option>
           <option value="custom">custom payload</option>
@@ -1138,7 +1753,7 @@
     <!-- ── Editable intent-based prompts ────────────────────── -->
     <div class="llm-prompts-section" id="llm-prompts-section">
       <div class="llm-prompts-header">
-        <h4>🧠 Промпты по типам команд</h4>
+        <h4>Промпты по типам команд</h4>
         <p class="llm-prompts-hint">Каждой категории чата соответствует свой <b>system prompt</b> и шаблон <b>user prompt</b>. Доступны плейсхолдеры: <code>{{message}}</code> · <code>{{filters}}</code> · <code>{{context}}</code> · <code>{{structuredSuffix}}</code> · <code>{{antiInject}}</code>.</p>
       </div>
       <div id="llm-prompts-list"></div>
@@ -1156,9 +1771,16 @@
   </div>
 </div>
 
-<script src="libs/xlsx.full.min.js"></script>
-<script src="modules/history.js"></script>
-<script src="modules/csv-stream-exporter.js"></script>
+<!-- P3 fix (codebase-02 audit) — xlsx.full.min.js (~952KB) был sync на boot,
+     blocked FCP на 300-800ms. Теперь lazy: грузим только при первом клике
+     на input/import/export-xlsx. Helper window.ensureXLSX() в app.js. -->
+<!-- P12 fix (codebase-02 audit) — defer для legacy scripts. -->
+<script defer src="modules/history.js"></script>
+<script defer src="modules/csv-stream-exporter.js"></script>
 <script type="module" src="app.js"></script>
+
+<!-- V22 → V1.0.1: footer-блок удалён, версия переехала в шапку
+     модалки настроек (см. app/version.js + app/appSettings.js). -->
+
 </body>
 </html>

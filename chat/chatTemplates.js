@@ -21,6 +21,9 @@ function getFiltered() {
 const ALWAYS = [
   { prompt: 'Сделай краткую сводку статуса проекта (CEO-update).', context: 'summary', category: 'overview' },
   { prompt: 'Какие главные риски и блокеры сейчас?', context: 'summary', category: 'risks' },
+  // V22 K-04 (audit-experts-2026-05-15 Zhuravlev killer #10) — Stand-up для тимлида.
+  // Мгновенный rule-based ответ: вчера/сегодня/блокеры/не зашло.
+  { prompt: 'Стенд-ап на сегодня', context: 'summary', category: 'standup' },
 ];
 
 const BY_DATA = [

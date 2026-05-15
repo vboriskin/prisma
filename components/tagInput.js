@@ -5,13 +5,28 @@
 
 import { state } from '../state.js';
 
-// Tag color palette
-export const TAG_PALETTE = ['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0284c7','#db2777','#65a30d','#ea580c','#0891b2','#9333ea','#16a34a'];
-
-export function tagColor(tag) {
-  let h = 0;
+// 2026-05-04 (brandbook §1) — палитра 12-цветной радуги удалена. Заменена
+// на 3 «спокойных» тона из брендбука: Information / Insight / Mist. Тон
+// детерминированно выбирается hash'ом от текста тега — соседние теги в
+// одной ячейке скорее всего получат разные тона (визуальная различимость
+// сохраняется), но без декоративной радуги. Стили — в CSS, через
+// `data-tone="0..2"`-атрибут (легко менять при смене темы).
+// Semantic-сигналы (on-course/drift/off-course) НЕ используются как тон —
+// они означают статус задачи и зарезервированы для контекстов «в курсе» /
+// «дрейф» / «вне курса».
+export const TAG_TONE_COUNT = 3;
+export function tagToneIndex(tag) {
+  // djb2-style + xxHash-style finalize. Без финального mixing-шага простой
+  // djb2 % 3 давал неравномерное распределение (например все теги одной
+  // колонки 1.20 — backend/frontend/тестирование/аналитика — попадали на
+  // тон 0). Финальные xor/умножение перемешивают биты так, чтобы соседние
+  // короткие строки гарантированно расходились по тонам.
+  let h = 5381;
   for (let i = 0; i < tag.length; i++) h = ((h << 5) - h) + tag.charCodeAt(i);
-  return TAG_PALETTE[Math.abs(h) % TAG_PALETTE.length];
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return Math.abs(h) % TAG_TONE_COUNT;
 }
 
 export function getUniqueTagValues(colKey) {
@@ -44,7 +59,7 @@ export function createTagInput(initialTags, onChange, getSuggestions) {
     wrap.innerHTML='';
     tags.forEach((tag,i)=>{
       const item=document.createElement('span'); item.className='tag-item'; item.textContent=tag;
-      const c=tagColor(tag); item.style.cssText=`background:${c}20;color:${c};border:1px solid ${c}40`;
+      item.dataset.tone=String(tagToneIndex(tag));
       const rm=document.createElement('span'); rm.className='tag-remove'; rm.textContent='×';
       rm.addEventListener('click',e=>{ e.stopPropagation(); tags.splice(i,1); renderTags(); if(onChange)onChange(tags.slice()); });
       item.appendChild(rm); wrap.appendChild(item);

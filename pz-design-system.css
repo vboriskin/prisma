@@ -1,0 +1,217 @@
+/* ============================================================
+   pz-design-system.css — AUDIT_HOLISTIC P1 / Идея 10
+   --
+   Базовые классы дизайн-системы Pz: pz-card / pz-chip / pz-badge / pz-modal.
+   Альтернативный layer поверх существующих *-card / *-chip / *-badge / *-modal —
+   НЕ destructive миграция. Существующие классы продолжают работать.
+
+   Контракты (CLAUDE.md / docs/spine-pill.md):
+     · Все цвета через токены `--prizma-*` / `--card` / `--radius` (theme.css + styles.css)
+     · 3px stripe-left для states (data-state) — Spine-pill §3
+     · Без эмодзи, без gradients
+     · Dark/light parity через токены — никаких raw hex окромя rgba для теней
+     · prefers-reduced-motion отключает декоративные анимации
+
+   Migration guide: docs/pz-design-system.md
+   ============================================================ */
+
+/* ── pz-card ──────────────────────────────────────────────────
+   Универсальная surface. Заменяет 120+ уникальных *-card классов.
+   Variants через data-attr:
+     data-elevation="1|2"    — тень (light surface depth)
+     data-state="active|success|warning|danger|insight"  — 3px stripe-left
+     data-density="compact|loose"  — padding scale
+   ─────────────────────────────────────────────────────────── */
+.pz-card {
+  background: var(--card, var(--prizma-bg-elevated));
+  border: 1px solid var(--prizma-border);
+  border-radius: var(--radius, 12px);
+  padding: 16px;
+  color: var(--prizma-text-primary);
+  transition:
+    border-color var(--motion-fast, 140ms) var(--ease-standard, ease),
+    box-shadow var(--motion-fast, 140ms) var(--ease-standard, ease);
+}
+
+.pz-card[data-elevation="1"] { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.pz-card[data-elevation="2"] { box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08); }
+
+/* Spine-pill: 3px stripe-left для states. Никакого filled background. */
+.pz-card[data-state] {
+  position: relative;
+}
+.pz-card[data-state="active"]  { border-left: 3px solid var(--prizma-information); }
+.pz-card[data-state="success"] { border-left: 3px solid var(--prizma-on-course); }
+.pz-card[data-state="warning"] { border-left: 3px solid var(--prizma-drift); }
+.pz-card[data-state="danger"]  { border-left: 3px solid var(--prizma-off-course); }
+.pz-card[data-state="insight"] { border-left: 3px solid var(--prizma-insight); }
+
+.pz-card[data-density="compact"] { padding: 8px 12px; }
+.pz-card[data-density="loose"]   { padding: 24px 32px; }
+
+/* ── pz-chip ──────────────────────────────────────────────────
+   Inline-индикатор. Заменяет 71 уникальный *-chip класс.
+   Variants:
+     data-tone="information|on-course|drift|off-course|insight"
+     data-active="true"  — выбран/нажат
+   ─────────────────────────────────────────────────────────── */
+.pz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--prizma-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition:
+    color var(--motion-fast, 140ms) var(--ease-standard, ease),
+    border-color var(--motion-fast, 140ms) var(--ease-standard, ease),
+    background var(--motion-fast, 140ms) var(--ease-standard, ease);
+}
+
+.pz-chip[data-tone="information"] { color: var(--prizma-information); border-color: rgba(110, 193, 228, 0.3); }
+.pz-chip[data-tone="on-course"]   { color: var(--prizma-on-course);   border-color: rgba(127, 232, 181, 0.3); }
+.pz-chip[data-tone="drift"]       { color: var(--prizma-drift);       border-color: rgba(255, 179, 71, 0.3); }
+.pz-chip[data-tone="off-course"]  { color: var(--prizma-off-course);  border-color: rgba(255, 107, 107, 0.3); }
+.pz-chip[data-tone="insight"]     { color: var(--prizma-insight);     border-color: rgba(176, 132, 204, 0.3); }
+
+.pz-chip[data-active="true"] {
+  background: var(--prizma-bg-tertiary);
+  border-color: currentColor;
+}
+
+/* ── pz-badge ─────────────────────────────────────────────────
+   Маленький numeric/status counter. Заменяет 63 уникальных *-badge.
+   Variants:
+     data-tone="information|off-course"
+     data-pulse="true"  — мягкая пульсация (внимание)
+   ─────────────────────────────────────────────────────────── */
+.pz-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--prizma-text-tertiary);
+  color: var(--prizma-bg);
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.pz-badge[data-tone="information"] { background: var(--prizma-information); color: var(--prizma-bg); }
+.pz-badge[data-tone="off-course"]  { background: var(--prizma-off-course);  color: #ffffff; }
+
+.pz-badge[data-pulse="true"] {
+  animation: pz-badge-pulse 1600ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes pz-badge-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.15); }
+}
+
+/* ── pz-modal ─────────────────────────────────────────────────
+   Overlay + dialog. Заменяет 59 уникальных *-modal.
+   Variants:
+     data-size="sm|lg"
+   Структура:
+     <div class="pz-modal-overlay">
+       <div class="pz-modal" data-size="sm">
+         <h2 class="pz-modal-title">…</h2>
+         <button class="pz-modal-close" aria-label="Закрыть">×</button>
+         <div class="pz-modal-body">…</div>
+       </div>
+     </div>
+   ─────────────────────────────────────────────────────────── */
+.pz-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.6);
+  z-index: var(--z-overlay, 9000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.pz-modal {
+  position: relative;
+  background: var(--card, var(--prizma-bg-elevated));
+  border: 1px solid var(--prizma-border);
+  border-radius: var(--radius-lg, 16px);
+  padding: 32px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
+  z-index: var(--z-modal, 10000);
+  color: var(--prizma-text-primary);
+}
+
+.pz-modal[data-size="sm"] { max-width: 400px; padding: 24px; }
+.pz-modal[data-size="lg"] { max-width: 900px; }
+
+.pz-modal-title {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0 0 16px;
+  color: var(--prizma-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.pz-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--prizma-text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color var(--motion-fast, 140ms) var(--ease-standard, ease),
+    border-color var(--motion-fast, 140ms) var(--ease-standard, ease);
+}
+
+.pz-modal-close:hover,
+.pz-modal-close:focus-visible {
+  color: var(--prizma-text-primary);
+  border-color: var(--prizma-border-strong);
+  outline: none;
+}
+
+.pz-modal-body {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--prizma-text-primary);
+}
+
+/* ── prefers-reduced-motion ──────────────────────────────────
+   Декоративные анимации отключаются в Reduced-Motion.
+   Контракт совпадает со styles.css: transition не убираем (важен
+   для focus-visible feedback), убираем только декоративный pulse.
+   ─────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .pz-badge[data-pulse="true"] {
+    animation: none;
+  }
+}

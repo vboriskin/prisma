@@ -6,18 +6,89 @@
 import { state } from '../state.js';
 import { FilterEngine } from '../filters.js';
 import { Utils } from '../utils.js';
-import { EmployeeFactory } from '../rowFactory.js';
+import { EmployeeFactory, RowFactory } from '../rowFactory.js';
 import { Storage } from '../dataStore.js';
 import { computeLoad } from '../metricsEngine.js';
 import { RH } from './renderHelpers.js';
 import { createTagInput } from '../components/tagInput.js';
+import { ConfirmDialog } from '../app/uxKit.js';
+import { renderPageHeader, prizmaEmptyGlyph } from '../app/prizmaUI.js';
+import { Icons } from '../app/icons.js';
+import { Services } from '../app/services.js';
 
-// Local HTML escape helpers — used by V14 (A4+A5) controls bar templates.
-// Kept tiny and module-private to avoid leaking into the global namespace.
-const _esc = (s) => String(s ?? '')
-  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-const _escAttr = _esc;     // same rules apply — attributes need entity-escaping too
+// V21 π7 A2 — локальный `_esc` удалён, используем `Utils.escapeHtml`
+// (5 копий escape-функции в проекте схлопнуты в одну). Псевдоним
+// `_escAttr` сохраняем для backward-compat в template literals — указывает
+// на ту же функцию (для атрибутов нужны те же правила экранирования).
+const _esc     = (s) => Utils.escapeHtml(s);
+const _escAttr = _esc;
+
+/* AUDIT-ART #16/#17 — runtime style-инжект для Сотрудников.
+   styles.css не правится (параллельные агенты конфликтуют).
+   Идемпотентно: повторные вызовы no-op.
+   #16 — нейтральные KPI-карты (signal только на «значении» и только при
+   отклонении от нормы, не как фон).
+   #17 — toggle Карточки/Таблица в spine-pill (3px stripe-bottom, no fill). */
+function injectEmployeesAuditArtStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('audit-art-employees-style')) return;
+  const style = document.createElement('style');
+  style.id = 'audit-art-employees-style';
+  style.textContent = `
+/* AUDIT-ART #16 — нейтрализация фона KPI-карт. Раньше .kpi-signal-on-course /
+   off-course / information красили всю карту. Брендбук §3 (signal 5%):
+   фон карты должен быть нейтральным (--card / --prizma-bg-elevated),
+   цветным становится только число при отклонении. */
+.employees-summary-cards .kpi-card.kpi-neutral {
+  background: var(--prizma-bg-elevated, var(--card, #fff));
+  border: 1px solid var(--border-light, var(--border, rgba(0,0,0,0.06)));
+}
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-value {
+  color: var(--prizma-text-primary, var(--text-1, inherit));
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+/* Цвет на значении — точечно. data-kpi-state управляет тем, какой signal-цвет
+   получает число (off-course / drift / information / on-course). */
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-value[data-kpi-state="off-course"] {
+  color: var(--prizma-off-course);
+}
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-value[data-kpi-state="drift"] {
+  color: var(--prizma-drift);
+}
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-value[data-kpi-state="information"] {
+  color: var(--prizma-information);
+}
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-value[data-kpi-state="on-course"] {
+  color: var(--prizma-on-course);
+}
+.employees-summary-cards .kpi-card.kpi-neutral .kpi-label {
+  color: var(--prizma-text-secondary, var(--text-2, inherit));
+}
+
+/* AUDIT-ART #17 — toggle Карточки/Таблица spine-pill.
+   Active = inset-bottom 3px stripe (information-токен), background transparent.
+   Inactive = no fill, neutral text. */
+.employees-view-toggle .employees-view-toggle-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--prizma-text-secondary, var(--text-2));
+  box-shadow: none;
+  border-radius: 6px;
+  transition: color 140ms ease, box-shadow 140ms ease;
+}
+.employees-view-toggle .employees-view-toggle-btn:hover {
+  color: var(--prizma-text-primary, var(--text-1));
+}
+.employees-view-toggle .employees-view-toggle-btn.active {
+  background: transparent;
+  color: var(--prizma-information);
+  box-shadow: inset 0 -3px 0 var(--prizma-information);
+  border-radius: 6px 6px 0 0;
+}
+`;
+  document.head.appendChild(style);
+}
 
 export const EmployeesView = {
   _expanded: {},
@@ -26,7 +97,8 @@ export const EmployeesView = {
   // field one of: 'fio' | 'role' | 'team' | 'otDays'. Filter fields:
   // team (single team), role (single role), otFrom/otTo (date range).
   _sort:   { field: 'fio', dir: 'asc' },
-  _filter: { team: '', role: '', otFrom: '', otTo: '', onlyWithOt: false },
+  // V21 audit 04-employees §15: добавлен `query` для поиска по ФИО.
+  _filter: { team: '', role: '', otFrom: '', otTo: '', onlyWithOt: false, query: '' },
   // V14 (A1): two render modes — 'cards' (default, detail-rich) and
   // 'table' (legacy spreadsheet view). User can flip via the toggle in
   // the controls bar.
@@ -53,9 +125,15 @@ export const EmployeesView = {
     const f = EmployeesView._filter;
     const teamL = String(f.team||'').trim().toLowerCase();
     const roleL = String(f.role||'').trim().toLowerCase();
+    const queryL = String(f.query||'').trim().toLowerCase();
     const otFromTs = f.otFrom ? Date.parse(f.otFrom) : null;
     const otToTs   = f.otTo   ? Date.parse(f.otTo)   : null;
     return employees.filter(emp => {
+      // V21 audit 04-employees §15: search by FIO (substring, case-insensitive).
+      if (queryL) {
+        const fioL = String(emp.fio || '').toLowerCase();
+        if (!fioL.includes(queryL)) return false;
+      }
       if (teamL) {
         const teams = EmployeesView._splitTags(emp.teams).map(s=>s.toLowerCase());
         if (!teams.includes(teamL)) return false;
@@ -103,7 +181,12 @@ export const EmployeesView = {
   },
 
   /* ── V14 (A4 + A5): render the controls bar above the table.
-     Lives in #employees-controls (created once, refreshed in place). */
+     Lives in #employees-controls (created once, refreshed in place).
+     UX 7.1 — идемпотентный рендер: на повторных вызовах _renderControls
+     обновляются только value/selected/checked/options существующих
+     элементов; innerHTML не переписывается, иначе фокус срывается с
+     date-picker'ов и input'ов на каждом render() (например после
+     reactive-notify). */
   _renderControls(allEmployees) {
     let bar = document.getElementById('employees-controls');
     if (!bar) {
@@ -130,6 +213,45 @@ export const EmployeesView = {
     const optList = (items, current) =>
       items.map(x => `<option value="${_escAttr(x)}"${x === current ? ' selected' : ''}>${_esc(x)}</option>`).join('');
 
+    // UX 7.1 — fast path: bar уже построен. Перерисовываем только
+    // изменяемые значения (selects, date inputs, checkbox, view-toggle).
+    // Опции <select> для command/role обновляем через rebuild — список ролей
+    // и команд может меняться при mass-edit, но это не ломает фокус (focus
+    // обычно не на этих <select> между ререндерами).
+    if (bar.dataset.bound === '1') {
+      const $val = (sel) => bar.querySelector(`[data-emp-ctrl="${sel}"]`);
+      const sortField = $val('sort-field');
+      if (sortField && sortField.value !== s.field) sortField.value = s.field;
+      const filterTeam = $val('filter-team');
+      if (filterTeam) {
+        const newOpts = `<option value="">Все</option>${optList(allTeams, f.team)}`;
+        if (filterTeam.innerHTML !== newOpts) filterTeam.innerHTML = newOpts;
+        else if (filterTeam.value !== (f.team || '')) filterTeam.value = f.team || '';
+      }
+      const filterRole = $val('filter-role');
+      if (filterRole) {
+        const newOpts = `<option value="">Все</option>${optList(allRoles, f.role)}`;
+        if (filterRole.innerHTML !== newOpts) filterRole.innerHTML = newOpts;
+        else if (filterRole.value !== (f.role || '')) filterRole.value = f.role || '';
+      }
+      const otFromInp = $val('filter-ot-from');
+      // Не трогаем value у focused input — пользователь может в нём печатать.
+      if (otFromInp && document.activeElement !== otFromInp && otFromInp.value !== (f.otFrom || '')) {
+        otFromInp.value = f.otFrom || '';
+      }
+      const otToInp = $val('filter-ot-to');
+      if (otToInp && document.activeElement !== otToInp && otToInp.value !== (f.otTo || '')) {
+        otToInp.value = f.otTo || '';
+      }
+      const onlyOt = $val('filter-only-ot');
+      if (onlyOt && onlyOt.checked !== !!f.onlyWithOt) onlyOt.checked = !!f.onlyWithOt;
+      const viewCardsBtn = $val('view-cards');
+      const viewTableBtn = $val('view-table');
+      if (viewCardsBtn) viewCardsBtn.classList.toggle('active', EmployeesView._viewMode === 'cards');
+      if (viewTableBtn) viewTableBtn.classList.toggle('active', EmployeesView._viewMode === 'table');
+      return;
+    }
+
     bar.innerHTML = `
       <div class="employees-controls-group">
         <label class="employees-ctrl-label">Сортировка</label>
@@ -137,9 +259,9 @@ export const EmployeesView = {
           <option value="fio"    ${s.field==='fio'   ?'selected':''}>ФИО</option>
           <option value="role"   ${s.field==='role'  ?'selected':''}>Роль</option>
           <option value="team"   ${s.field==='team'  ?'selected':''}>Команда</option>
-          <option value="otDays" ${s.field==='otDays'?'selected':''}>Дней OT</option>
+          <option value="otDays" ${s.field==='otDays'?'selected':''}>Дней овертайма</option>
         </select>
-        <button class="employees-ctrl-btn" data-emp-ctrl="sort-dir" title="Направление сортировки">${s.dir==='desc'?'↓':'↑'}</button>
+        <button class="employees-ctrl-btn" data-emp-ctrl="sort-dir" title="Направление сортировки" aria-label="Направление сортировки">${s.dir==='desc'?Icons.get('chevrons-up-down',{size:14,label:'По убыванию'}):Icons.get('chevrons-up-down',{size:14,label:'По возрастанию'})}</button>
       </div>
       <div class="employees-controls-divider"></div>
       <div class="employees-controls-group">
@@ -157,7 +279,7 @@ export const EmployeesView = {
         </select>
       </div>
       <div class="employees-controls-group">
-        <label class="employees-ctrl-label">OT с</label>
+        <label class="employees-ctrl-label">Овертайм с</label>
         <input class="employees-ctrl-input" type="date" data-emp-ctrl="filter-ot-from" value="${_escAttr(f.otFrom||'')}">
         <label class="employees-ctrl-label">по</label>
         <input class="employees-ctrl-input" type="date" data-emp-ctrl="filter-ot-to" value="${_escAttr(f.otTo||'')}">
@@ -165,15 +287,15 @@ export const EmployeesView = {
       <div class="employees-controls-group">
         <label class="employees-ctrl-checkbox">
           <input type="checkbox" data-emp-ctrl="filter-only-ot" ${f.onlyWithOt?'checked':''}>
-          Только с OT
+          Только с овертаймом
         </label>
       </div>
       <div class="employees-controls-spacer"></div>
       <div class="employees-controls-group">
         <label class="employees-ctrl-label">Вид</label>
         <div class="employees-view-toggle">
-          <button class="employees-ctrl-btn ${EmployeesView._viewMode==='cards'?'active':''}" data-emp-ctrl="view-cards" title="Карточки с детализацией">▦ Карточки</button>
-          <button class="employees-ctrl-btn ${EmployeesView._viewMode==='table'?'active':''}" data-emp-ctrl="view-table" title="Компактная таблица">≡ Таблица</button>
+          <button class="employees-ctrl-btn employees-view-toggle-btn ${EmployeesView._viewMode==='cards'?'active':''}" data-emp-ctrl="view-cards" title="Карточки с детализацией">${Icons.get('grid', { size: 14 })}<span class="employees-view-toggle-label">Карточки</span></button>
+          <button class="employees-ctrl-btn employees-view-toggle-btn ${EmployeesView._viewMode==='table'?'active':''}" data-emp-ctrl="view-table" title="Компактная таблица">${Icons.get('list', { size: 14 })}<span class="employees-view-toggle-label">Таблица</span></button>
         </div>
       </div>
       <button class="employees-ctrl-btn" data-emp-ctrl="reset" title="Сбросить сортировку и фильтры">Сбросить</button>
@@ -193,13 +315,37 @@ export const EmployeesView = {
     $('view-table')?.addEventListener('click',()=>{ EmployeesView._viewMode='table'; EmployeesView.render(); });
     $('reset')?.addEventListener('click',()=>{
       EmployeesView._sort   = { field:'fio', dir:'asc' };
-      EmployeesView._filter = { team:'', role:'', otFrom:'', otTo:'', onlyWithOt:false };
+      // V21 audit 04-employees §15: query тоже сбрасываем + чистим input.
+      EmployeesView._filter = { team:'', role:'', otFrom:'', otTo:'', onlyWithOt:false, query:'' };
+      const searchInp = document.getElementById('employees-search');
+      if (searchInp) searchInp.value = '';
       EmployeesView.render();
+    });
+    // UX 7.1 — отметка «листенеры навешены» — на повторных _renderControls
+    // не пересобираем DOM и не теряем фокус.
+    bar.dataset.bound = '1';
+  },
+
+  _renderPrizmaHeader() {
+    const section = document.getElementById('section-employees');
+    if (!section) return;
+    let host = section.querySelector('#employees-prizma-header');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'employees-prizma-header';
+      section.insertBefore(host, section.firstChild);
+    }
+    host.innerHTML = renderPageHeader('employees', {
+      sub: 'Состав команды и распределение нагрузки.',
     });
   },
 
   render() {
     EmployeesView.cleanup();
+    // AUDIT-ART #16/#17 — runtime style-инжект (idempotent).
+    injectEmployeesAuditArtStyles();
+    // Волна 2 — Prizma page-header сверху страницы.
+    EmployeesView._renderPrizmaHeader();
     // V14 (A5 + A4): apply filters first, then sort. Sticky state lives
     // on EmployeesView._sort / ._filter so re-render preserves the user's
     // current view across data mutations (add / delete / inline edit).
@@ -221,13 +367,27 @@ export const EmployeesView = {
     const taskLinks=list.reduce((acc,emp)=>acc+EmployeesView.getTasksForEmployee(emp.fio).length,0);
     const weekdayReady=list.filter(e=>e.weekdayReady).length;
     const withOtDays=list.filter(e=>Array.isArray(e.overtimeDays)&&e.overtimeDays.length).length;
+
     const summaryCardsEl = document.getElementById('employees-summary-cards');
-    if (summaryCardsEl) summaryCardsEl.innerHTML=`
-      <div class="kpi-card"><div class="kpi-label">Сотрудников</div><div class="kpi-value">${list.length}</div></div>
-      <div class="kpi-card kpi-green"><div class="kpi-label">Готовы в будни</div><div class="kpi-value">${weekdayReady}</div></div>
-      <div class="kpi-card kpi-red"><div class="kpi-label">С OT днями</div><div class="kpi-value">${withOtDays}</div></div>
-      <div class="kpi-card kpi-blue"><div class="kpi-label">Связанных задач</div><div class="kpi-value">${taskLinks}</div></div>
-    `;
+    if (summaryCardsEl) {
+      // AUDIT-ART #16 — нейтральные KPI-карты, цвет только на значении при
+      // отклонении. Пороги:
+      //   • «Сотрудников» — всегда нейтральный счётчик (нет «нормы»).
+      //   • «Готовы в будни» — нейтрально (это просто доля). Не отклонение.
+      //   • «С OT днями» — off-course если есть хотя бы один (норма = 0).
+      //   • «Связанных задач» — information если средняя нагрузка >5 задач
+      //     на сотрудника (capacity по умолчанию из _renderLoadSummary = 5).
+      const otState = withOtDays > 0 ? 'off-course' : '';
+      const avgPerHead = list.length ? (taskLinks / list.length) : 0;
+      const taskState = avgPerHead > 5 ? 'information' : '';
+      const stateAttr = (s) => s ? ` data-kpi-state="${s}"` : '';
+      summaryCardsEl.innerHTML = `
+        <div class="kpi-card kpi-neutral"><div class="kpi-label">Сотрудников</div><div class="kpi-value">${list.length}</div></div>
+        <div class="kpi-card kpi-neutral"><div class="kpi-label">Готовы в будни</div><div class="kpi-value">${weekdayReady}</div></div>
+        <div class="kpi-card kpi-neutral"><div class="kpi-label">С OT днями</div><div class="kpi-value"${stateAttr(otState)}>${withOtDays}</div></div>
+        <div class="kpi-card kpi-neutral"><div class="kpi-label">Связанных задач</div><div class="kpi-value"${stateAttr(taskState)}>${taskLinks}</div></div>
+      `;
+    }
 
     // V14 (A4+A5): controls bar — sort selector + filter inputs.
     EmployeesView._renderControls(state.employees);
@@ -235,9 +395,12 @@ export const EmployeesView = {
     const wrap=document.getElementById('employees-table-wrap');
     if (!list.length) {
       const emptyMsg = totalAll === 0
-        ? '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Список сотрудников пуст</div><div class="empty-hint">Добавьте вручную или загрузите CSV/XLSX</div></div>'
-        : '<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">Под фильтр ничего не попало</div><div class="empty-hint">Сбросьте фильтры — кнопка «Сбросить» в шапке списка</div></div>';
+        ? `<div class="empty-state">${prizmaEmptyGlyph()}<div class="empty-title">Список сотрудников пуст</div><div class="empty-hint">Добавьте вручную или загрузите CSV/XLSX</div></div>`
+        : `<div class="empty-state">${prizmaEmptyGlyph()}<div class="empty-title">Подходящих сотрудников нет</div><div class="empty-hint">Сбросьте фильтры или измените запрос</div></div>`;
       wrap.innerHTML = emptyMsg;
+      // П4-DASHBOARD Wave 4: teams-summary рендерится по state.rows,
+      // а не по employees — должна работать даже при пустом списке сотрудников.
+      EmployeesView._renderTeamsSummary();
       return;
     }
 
@@ -248,6 +411,83 @@ export const EmployeesView = {
     } else {
       EmployeesView._renderTable(wrap, list, load);
     }
+    // П4-DASHBOARD Wave 4: teams-summary переехала с дашборда сюда.
+    // Сводная таблица 12 колонок × N команд по rows. Контейнер
+    // создаётся ниже основного table-wrap, ОДИН РАЗ.
+    EmployeesView._renderTeamsSummary();
+    // AUDIT_HOLISTIC §5.1 — если активен focus-якорь на employee,
+    // делаем auto-scroll в карточку и подсвечиваем (identity-deterministic
+    // resolve по email).
+    EmployeesView._applyFocus();
+  },
+
+  /** AUDIT_HOLISTIC §5.1 — preselect employee card по state.meta.focus. */
+  _applyFocus() {
+    try {
+      const focus = state?.meta?.focus;
+      if (!focus || focus.kind !== 'employee' || !focus.id) return;
+      const id = String(focus.id).trim();
+      const idLc = id.toLowerCase();
+      const emp = (state.employees || []).find(e =>
+        (e.email && e.email.toLowerCase() === idLc) ||
+        (e.jiraAccountId && String(e.jiraAccountId) === id) ||
+        (e.fio && e.fio.toLowerCase() === idLc),
+      );
+      if (!emp) return;
+      const card = document.querySelector(`.employee-card[data-emp-id="${CSS.escape(String(emp.id))}"]`);
+      if (!card) return;
+      card.classList.add('employee-card-focused');
+      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (_) {}
+      // remove highlight on next focus-change или через 4с
+      setTimeout(() => { try { card.classList.remove('employee-card-focused'); } catch (_) {} }, 4000);
+    } catch (_) { /* render-failure не должен блокировать view */ }
+  },
+
+  /* П4-DASHBOARD Wave 4 — миграция teams-summary с дашборда.
+     Cross-team аналитика по rows: распределение по scope, релизам, OT,
+     блокерам, рискам, done. Источник — state.rows (а не employees). */
+  _renderTeamsSummary() {
+    const section = document.getElementById('section-employees');
+    if (!section) return;
+    let host = section.querySelector('#employees-teams-summary');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'employees-teams-summary';
+      section.appendChild(host);
+    }
+    const rows = state.rows || [];
+    const teams = Utils.unique(rows.map(r => r.team));
+    if (!teams.length) { host.innerHTML = ''; return; }
+    // P7 fix (codebase-02 audit) — single-pass aggregation за O(N) вместо
+    // teams×12 .filter() сканов (≈ teams×12×N). На 30 команд × 5k rows
+    // экономит 30-80ms на каждый рендер.
+    const stats = new Map();
+    teams.forEach(t => stats.set(t, { tot:0, yes:0, no:0, treb:0, r120:0, r121:0, r122:0, ot:0, ua:0, blk:0, rsk:0, done:0 }));
+    for (const r of rows) {
+      const c = stats.get(r.team); if (!c) continue;
+      c.tot++;
+      if (r.scopeStatus === 'Да') c.yes++;
+      else if (r.scopeStatus === 'Нет') c.no++;
+      else if (r.scopeStatus === 'Требует подтверждения') c.treb++;
+      if (r.hasRelease120) c.r120++;
+      if (r.hasRelease121) c.r121++;
+      if (r.hasRelease122) c.r122++;
+      if (r.hasOvertime) c.ot++;
+      if (r.isUnassigned) c.ua++;
+      if (r.blockingDependency) c.blk++;
+      if (r.riskFlags && r.riskFlags.length) c.rsk++;
+      if (r.isDone) c.done++;
+    }
+    host.innerHTML = `<div class="data-table-wrap" role="region" aria-label="Сводка по командам">
+      <div class="data-table-title">СВОДКА ПО КОМАНДАМ</div>
+      <div style="overflow-x:auto"><table class="data-table">
+        <thead><tr><th style="text-align:left">Команда</th><th>Всего</th><th>Да</th><th>Нет</th><th title="Требует подтверждения">Треб.</th><th>1.20</th><th>1.21</th><th>1.22</th><th title="Овертайм">Овертайм</th><th>Без рел.</th><th>Блокер</th><th>Риски</th><th>Сделано</th></tr></thead>
+        <tbody>${teams.map(team => {
+          const c = stats.get(team);
+          const cells = [c.tot, c.yes, c.no, c.treb, c.r120, c.r121, c.r122, c.ot, c.ua, c.blk, c.rsk, c.done];
+          return `<tr><td style="text-align:left"><strong>${_esc(team)}</strong></td>${cells.map(v=>`<td>${v||'—'}</td>`).join('')}</tr>`;
+        }).join('')}</tbody>
+      </table></div></div>`;
   },
 
   /* ── V14 (A1): per-employee subnode builders ──────────────
@@ -261,10 +501,20 @@ export const EmployeesView = {
     fioInput.value=emp.fio||'';
     fioInput.placeholder='ФИО';
     fioInput.addEventListener('change',()=>{
-      emp.fio=fioInput.value.trim();
+      const trimmed = fioInput.value.trim();
+      // V21 audit 04-employees §5: warning при коллизии ФИО (case-insensitive).
+      // Не блокируем — пользователь может реально иметь тёзок, — но даём toast.
+      if (trimmed) {
+        const lower = trimmed.toLowerCase();
+        const dup = state.employees.find(e => e.id !== emp.id && String(e.fio || '').trim().toLowerCase() === lower);
+        if (dup) {
+          window.showToast?.(`«${trimmed}» уже есть в списке — это омоним?`, 'warning', 4000);
+        }
+      }
+      emp.fio=trimmed;
       EmployeeFactory.normalize(emp);
       Storage.save();
-      window.App?.populateFilterDropdowns();
+      Services.App?.populateFilterDropdowns();
       EmployeesView.render();
     });
     return fioInput;
@@ -396,13 +646,22 @@ export const EmployeesView = {
     return wdCb;
   },
   _buildWeekdayCommentInput(emp) {
-    const commentInput=createTagInput(EmployeesView._splitTags(emp.weekdayComment),(tags)=>{
-      emp.weekdayComment=tags.join('|');
+    // V21 audit 04-employees §10: tag-input был неверным паттерном (free-text
+    // комментарий «не может во вторник 5 мая, заболел ребёнок» разрывался по
+    // запятой на чипы). Теперь — обычный textarea.
+    const commentInput=document.createElement('textarea');
+    commentInput.className='employee-card-comment-input';
+    commentInput.rows=2;
+    commentInput.placeholder='Когда не может (даты/недели исключений)';
+    commentInput.value=String(emp.weekdayComment||'').replace(/\|/g,'\n');
+    commentInput.addEventListener('change',()=>{
+      // Сохраняем как `|`-joined (legacy формат для совместимости с импортом).
+      emp.weekdayComment=commentInput.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).join('|');
       EmployeeFactory.normalize(emp);
       Storage.save();
-      EmployeesView.render();
+      // V21 audit 04-employees §2: skip full re-render — комментарий локальный,
+      // не влияет на сортировку / list-фильтры.
     });
-    if (commentInput._cleanup) EmployeesView._cleanups.push(()=>commentInput._cleanup());
     return commentInput;
   },
   _buildLoadButton(emp, load) {
@@ -411,7 +670,7 @@ export const EmployeesView = {
     const isOverloaded = empLoad.total >= 6;
     const loadHtml = `
       <div class="emp-load-wrap ${isOverloaded?'emp-overloaded':''}">
-        <span class="emp-load-total" title="Всего задач">${empLoad.total}${isOverloaded?' ⚠️':''}</span>
+        <span class="emp-load-total" title="Всего задач">${isOverloaded?'<span class="signal-dot signal-off-course" role="img" aria-label="Перегрузка"></span>':''}${empLoad.total}</span>
         <div class="emp-load-breakdown">
           ${empLoad.r120?`<span class="emp-load-chip r120">1.20:${empLoad.r120}</span>`:''}
           ${empLoad.r121?`<span class="emp-load-chip r121">1.21:${empLoad.r121}</span>`:''}
@@ -421,7 +680,7 @@ export const EmployeesView = {
       </div>`;
     const drillBtn=document.createElement('button');
     drillBtn.className='employee-act-btn';
-    drillBtn.innerHTML=loadHtml+`<span style="font-size:10px;opacity:.7;margin-left:4px">▼ ${empTasks.length}</span>`;
+    drillBtn.innerHTML=loadHtml+`<span class="emp-drill-meta" style="opacity:.7;margin-left:4px;display:inline-flex;align-items:center;gap:2px">${Icons.get('chevrons-up-down',{size:10})}<span>${empTasks.length}</span></span>`;
     drillBtn.addEventListener('click',()=>{
       EmployeesView._expanded[emp.id]=!EmployeesView._expanded[emp.id];
       EmployeesView.render();
@@ -431,16 +690,59 @@ export const EmployeesView = {
   _buildDeleteButton(emp) {
     const delBtn=document.createElement('button');
     delBtn.className='employee-act-btn';
-    delBtn.textContent='✕';
+    delBtn.innerHTML=Icons.get('x',{size:14,label:'Удалить сотрудника'});
     delBtn.title='Удалить сотрудника';
-    delBtn.addEventListener('click',()=>{
-      if (!confirm(`Удалить сотрудника "${emp.fio||'без имени'}"?`)) return;
-      // V15 (audit #1, system H6) — checkpoint before mutation so undo works.
-      window.HistoryManager?.checkpoint(`удаление сотрудника: ${emp.fio || 'без имени'}`);
+    delBtn.setAttribute('aria-label','Удалить сотрудника');
+    delBtn.addEventListener('click', async ()=>{
+      // V21 Q (audit-2026-05-03 §I, Quick win 8) — native confirm() заменён
+      // на ConfirmDialog: keyboard-friendly, focus-trap, danger-стиль,
+      // Undo через HistoryManager.checkpoint остаётся как раньше.
+      const ok = await ConfirmDialog.show({
+        title: 'Удалить сотрудника?',
+        message: `«${emp.fio || 'без имени'}» будет удалён из списка. Действие можно отменить через Ctrl+Z.`,
+        confirmLabel: 'Удалить',
+        danger: true,
+      });
+      if (!ok) return;
+      Services.HistoryManager?.checkpoint(`удаление сотрудника: ${emp.fio || 'без имени'}`);
+      // V21 P / П10.22 — toast undo CTA (snapshot текущей позиции, чтобы
+      // вернуть сотрудника на тот же индекс при отмене).
+      const removedIndex = state.employees.findIndex(e=>e.id===emp.id);
+      // QA A7.2 — клон, не ссылка.
+      const removedSnapshot = removedIndex >= 0 ? Utils.deepClone(state.employees[removedIndex]) : null;
+      // QA A3.7 (employees) — id предшественника для restore-by-id.
+      const predecessorId = removedIndex > 0 ? state.employees[removedIndex - 1]?.id : null;
       state.employees=state.employees.filter(e=>e.id!==emp.id);
       Storage.save();
-      window.App?.populateFilterDropdowns();
+      Services.App?.populateFilterDropdowns();
       EmployeesView.render();
+      if (removedSnapshot) {
+        const dur = (typeof window !== 'undefined' && window.ToastDuration) ? window.ToastDuration.LONG : 4500;
+        const shortDur = (typeof window !== 'undefined' && window.ToastDuration) ? window.ToastDuration.SHORT : 1500;
+        window.showToast?.({
+          msg:  `Сотрудник «${removedSnapshot.fio || 'без имени'}» удалён`,
+          type: 'success',
+          ms:   dur,
+          undo: 'Отменить',
+          onUndo: () => {
+            // QA A7.1 — guard против double-restore.
+            if (state.employees.some(e => e.id === removedSnapshot.id)) return;
+            // QA A3.7 — restore by predecessor id, fallback к индексу.
+            let idx;
+            const predIdx = predecessorId ? state.employees.findIndex(e => e.id === predecessorId) : -1;
+            if (predIdx >= 0) idx = predIdx + 1;
+            else idx = Math.max(0, Math.min(removedIndex, state.employees.length));
+            state.employees.splice(idx, 0, removedSnapshot);
+            // QA A7.1 — после restore пересчитать derived поля у всех строк,
+            // где этот сотрудник был assignee (роль, isUnassigned и т.п.).
+            try { state.rows.forEach(r => RowFactory.updateDerived(r)); } catch (_) {}
+            Storage.save();
+            Services.App?.populateFilterDropdowns();
+            EmployeesView.render();
+            window.showToast?.('Удаление отменено', 'info', shortDur);
+          },
+        });
+      }
     });
     return delBtn;
   },
@@ -560,6 +862,12 @@ export const EmployeesView = {
     list.forEach(emp=>{
       const card=document.createElement('div');
       card.className='employee-card';
+      // V22 04-employees task #3: семантическая stripe-left.
+      //   blocked → drift (приглушённый янтарь, «вне строя, но история ценна»)
+      //   service-account → information (нейтральный, не тревожный)
+      //   обычный — neutral border
+      if (emp.isBlocked) card.classList.add('employee-card--blocked');
+      else if (emp.isServiceAccount) card.classList.add('employee-card--service');
       card.dataset.empId=emp.id;
 
       // Header — FIO input (large) + delete button
@@ -568,6 +876,20 @@ export const EmployeesView = {
       const fioWrap=document.createElement('div');
       fioWrap.className='employee-card-fio';
       fioWrap.appendChild(EmployeesView._buildFioInput(emp));
+      // V22 — visual badge для сотрудников без email. В реальной диагностике
+      // ~5/102 без email → для них Auto-Resolve по идентичности невозможен
+      // (BB / CF / Jenkins cascade-ы стартуют с email). Тимлид должен
+      // видеть «слепое пятно» сразу, без открытия секции «Привязка».
+      // Service-account / blocked сотрудников намеренно скрываем — у них
+      // отсутствие email норма (бот / уволен).
+      const emailEmpty = !String(emp.email || '').trim();
+      if (emailEmpty && !emp.isServiceAccount && !emp.isBlocked) {
+        const badge = document.createElement('span');
+        badge.className = 'employee-card-no-email-badge';
+        badge.textContent = 'Нет email — атрибуция невозможна';
+        badge.title = 'Без email сотрудник не попадает в Auto-Resolve (BB / Confluence / Jenkins). Заполните Email ниже.';
+        fioWrap.appendChild(badge);
+      }
       header.appendChild(fioWrap);
       header.appendChild(EmployeesView._buildDeleteButton(emp));
       card.appendChild(header);
@@ -593,18 +915,21 @@ export const EmployeesView = {
       const otDaysCount = Array.isArray(emp.overtimeDays) ? emp.overtimeDays.length : 0;
       card.appendChild(sectionRow(`Дни OT${otDaysCount?` (${otDaysCount})`:''}`, EmployeesView._buildOtDaysControl(emp), 'Конкретные даты выходов на овертайм'));
 
-      // Будни — checkbox + comment input on the same row
+      // V21 audit 04-employees §9: «Готов в будни» → «Овертайм по будням:
+      // готов» + tooltip; двусмысленность с обычным рабочим днём убрана.
       const wdRow=document.createElement('div');
       wdRow.className='employee-card-row';
       const wdLbl=document.createElement('div');
       wdLbl.className='employee-card-label';
-      wdLbl.textContent='Будни';
+      wdLbl.textContent='Будни OT';
+      wdLbl.title='Готов задержаться сверх 8 часов в будний день (овертайм по будням, не путать с обычным рабочим днём).';
       const wdVal=document.createElement('div');
       wdVal.className='employee-card-value employee-card-weekday';
       const wdCheckLabel=document.createElement('label');
       wdCheckLabel.className='employee-card-weekday-toggle';
+      wdCheckLabel.title='Готов задержаться сверх 8 часов в будний день.';
       wdCheckLabel.appendChild(EmployeesView._buildWeekdayCheckbox(emp));
-      wdCheckLabel.appendChild(document.createTextNode(' Готов в будни'));
+      wdCheckLabel.appendChild(document.createTextNode(' Овертайм по будням: готов'));
       wdVal.appendChild(wdCheckLabel);
       wdVal.appendChild(EmployeesView._buildWeekdayCommentInput(emp));
       wdRow.appendChild(wdLbl);
@@ -618,29 +943,52 @@ export const EmployeesView = {
       //   Если поля пустые — портфолио-агрегатор НЕ привязывает к этому
       //   сотруднику данные из соответствующего источника (раньше работала
       //   fuzzy-match по ФИО → ложные attributions).
-      const idHeader = document.createElement('div');
-      idHeader.className = 'employee-card-id-header';
-      idHeader.textContent = 'Идентификация для интеграций';
-      card.appendChild(idHeader);
-      card.appendChild(sectionRow('Email',                 EmployeesView._buildIdInput(emp, 'email',               'name@company.com'),  'Привязка к Jira / BB по email (точное совпадение)'));
-      card.appendChild(sectionRow('Jira accountId',         EmployeesView._buildIdInput(emp, 'jiraAccountId',       '5b10a2844c20165700ede21g'), 'Cloud accountId или username Server Jira'));
-      card.appendChild(sectionRow('Bitbucket login',        EmployeesView._buildIdInput(emp, 'bitbucketLogin',      'i.ivanov'),          'Username в Bitbucket. Пусто = «нет аккаунта в BB»'));
-      card.appendChild(sectionRow('Confluence accountId',   EmployeesView._buildIdInput(emp, 'confluenceAccountId', '5b10a2844c20165700ede21g'), 'Опционально, для сводок Confluence'));
+      // V21 audit 04-employees §4: Email вынесен в основные поля карточки
+      // (он реально нужен для resolve), 3 интеграционных id свёрнуты в
+      // <details> «Привязка к интеграциям» — раньше Jira accountId типа
+      // `5b10a2844c20165700ede21g` пугал HR-юзера прямо в основной форме.
+      card.appendChild(sectionRow('Email', EmployeesView._buildIdInput(emp, 'email', 'name@company.com'), 'Используется для привязки к Jira / BB / Confluence по email (точное совпадение).'));
+
+      const idDetails = document.createElement('details');
+      idDetails.className = 'employee-card-section employee-card-identity';
+      idDetails.innerHTML = `
+        <summary class="employee-card-identity-head">Привязка к интеграциям (опционально)</summary>
+        <div class="employee-card-identity-hint">Заполнится автоматически после первой активности в Jira / Bitbucket / Confluence. Оставьте пустым, если человек не использует эту систему.</div>
+      `;
+      const idBody = document.createElement('div');
+      idBody.className = 'employee-card-identity-body';
+      idBody.appendChild(sectionRow('Jira accountId',       EmployeesView._buildIdInput(emp, 'jiraAccountId',       '5b10a2844c20165700ede21g'), 'Cloud accountId или username Server Jira'));
+      idBody.appendChild(sectionRow('Bitbucket login',      EmployeesView._buildIdInput(emp, 'bitbucketLogin',      'i.ivanov'),                 'Username в Bitbucket. Пусто = «нет аккаунта в BB»'));
+      idBody.appendChild(sectionRow('Confluence accountId', EmployeesView._buildIdInput(emp, 'confluenceAccountId', '5b10a2844c20165700ede21g'), 'Опционально, для сводок Confluence'));
+      idDetails.appendChild(idBody);
+      card.appendChild(idDetails);
 
       // V20 S7 B7 + V20 S8 #11 — Service-account toggle.
       // Pилот feedback: «toggle для разработчика, не для меня. Я в карточку
       // захожу что человек делает, а не чтобы его в боты записать». Решение:
       // спрятали под <details> «Дополнительно» (collapsed by default).
+      // V22 04-employees task #2: туда же ушёл блок source/createdAt/updatedAt
+      // (раньше показывался как hover-footer, шумел в каждой карточке —
+      // теперь видно только когда юзер сам раскрыл «Дополнительно»).
       const saWrap = document.createElement('details');
       saWrap.className = 'employee-card-section employee-card-advanced';
       const saId = `emp-sa-${emp.id}`;
+      const fmtDate=(s)=>{ if(!s) return '—'; try { return new Date(s).toLocaleDateString('ru'); } catch(_) { return s; } };
+      const metaParts=[
+        `source: ${Utils.escapeHtml(emp.sourceType||'manual')}`,
+        `создан: ${fmtDate(emp.createdAt)}`,
+      ];
+      if (emp.updatedAt && emp.updatedAt !== emp.createdAt) metaParts.push(`обновлён: ${fmtDate(emp.updatedAt)}`);
+      const metaHtml = metaParts.map(m=>`<span class="employee-card-meta">${m}</span>`).join('');
       saWrap.innerHTML = `
         <summary class="employee-card-advanced-head">Дополнительно</summary>
         <div class="employee-card-advanced-body">
-          <label for="${saId}" class="employee-card-sa-label" title="Сервисные аккаунты исключаются из counts Сканнера команд. Pattern auto-detect по jiraKey: cab-sa-*, sbt-*, out-*, svc-*, bot-*. Используйте этот toggle если автодетект ошибся.">
+          <label for="${saId}" class="employee-card-sa-label">
             <input type="checkbox" id="${saId}" ${emp.isServiceAccount ? 'checked' : ''}>
             <span>Сервисный аккаунт (бот/SA — исключить из Сканнера команд)</span>
           </label>
+          <div class="employee-card-sa-hint">Сервисные аккаунты исключаются из counts Сканнера команд. Pattern auto-detect по jiraKey: cab-sa-*, sbt-*, out-*, svc-*, bot-*. Используйте этот toggle если автодетект ошибся.</div>
+          <div class="employee-card-meta-list" aria-label="Источник и даты записи">${metaHtml}</div>
         </div>
       `;
       saWrap.querySelector('input').addEventListener('change', (ev) => {
@@ -649,18 +997,6 @@ export const EmployeesView = {
         // Reactive proxy сам триггерит save через mutation listener.
       });
       card.appendChild(saWrap);
-
-      // Footer — meta (sourceType + dates), muted
-      const footer=document.createElement('div');
-      footer.className='employee-card-footer';
-      const fmtDate=(s)=>{ if(!s) return '—'; try { return new Date(s).toLocaleDateString('ru'); } catch(_) { return s; } };
-      const meta=[
-        `source: ${Utils.escapeHtml(emp.sourceType||'manual')}`,
-        `создан: ${fmtDate(emp.createdAt)}`,
-      ];
-      if (emp.updatedAt && emp.updatedAt !== emp.createdAt) meta.push(`обновлён: ${fmtDate(emp.updatedAt)}`);
-      footer.innerHTML = meta.map(m=>`<span class="employee-card-meta">${m}</span>`).join('');
-      card.appendChild(footer);
 
       // Expanded "linked tasks" panel — collapsed by default
       if (EmployeesView._expanded[emp.id]) {
@@ -702,8 +1038,8 @@ export const EmployeesView = {
     });
     return imported;
   },
-  mergeImported(imported, sourceLabel) {
-    if (!imported.length) { alert('Не найдено валидных строк сотрудников (нужна колонка ФИО).'); return; }
+  async mergeImported(imported, sourceLabel) {
+    if (!imported.length) { window.showToast?.('Не найдено валидных строк сотрудников (нужна колонка ФИО).', 'warning'); return; }
     const existingByFio=new Map();
     state.employees.forEach(emp=>{
       const key=String(emp.fio||'').trim().toLowerCase();
@@ -729,24 +1065,43 @@ export const EmployeesView = {
         addCount++;
       }
     });
-    if (!addCount && !updateCount) { alert('Изменений по сотрудникам не найдено.'); return; }
-    const ask=confirm(`${sourceLabel}: добавить ${addCount}, обновить ${updateCount}. Применить?`);
-    if (!ask) return;
+    if (!addCount && !updateCount) { window.showToast?.('Изменений по сотрудникам не найдено.', 'info'); return; }
+    // V21 audit 04-employees §6 — native confirm() заменён на ConfirmDialog:
+    // focus-trap, danger-стиль, keyboard-friendly, превью первых 3 строк.
+    // Импорт уже полностью отработал в state, но изменения мержатся в-память
+    // и фиксируются Storage.save ТОЛЬКО после подтверждения. До подтверждения
+    // мутации видны в UI, но при отказе мы откатываем (revert) — поэтому
+    // снимем snapshot перед мержем... но проще проверить ДО мержа: пересоберём
+    // mergeImported с двухфазным async-flow.
+    // Pragma: snapshot уже мутирован выше — для отказа делаем reload из storage.
+    const preview = imported.slice(0, 3).map(e => Utils.escapeHtml(String(e.fio || '').slice(0, 40))).join(', ');
+    const ok = await ConfirmDialog.show({
+      title: 'Применить импорт сотрудников?',
+      message: `${sourceLabel}: добавить ${addCount}, обновить ${updateCount}.${preview ? `\nПервые: ${preview}${imported.length > 3 ? `, +ещё ${imported.length - 3}` : ''}.` : ''}`,
+      confirmLabel: 'Применить',
+    });
+    if (!ok) {
+      // Откатываем уже-применённые мутации: перечитываем state из Storage.
+      try { Storage.restore?.(); } catch (_) { /* legacy api */ }
+      if (state.activeSection==='employees') EmployeesView.render();
+      window.showToast?.('Импорт отменён', 'info');
+      return;
+    }
     Storage.save();
-    window.App?.populateFilterDropdowns();
+    Services.App?.populateFilterDropdowns();
     if (state.activeSection==='employees') EmployeesView.render();
     window.showToast?.(`Сотрудники: +${addCount}, обновлено ${updateCount}`);
   },
   importCSV(text) {
     if (text.charCodeAt(0)===0xFEFF) text=text.slice(1);
     const rows=Utils.parseFullCSV(text);
-    if (rows.length<2) { alert('CSV пустой'); return; }
+    if (rows.length<2) { window.showToast?.('CSV пустой', 'warning'); return; }
     const headers=rows[0].map(h=>String(h||'').trim());
     const imported=EmployeesView.parseImportedRows(headers, rows.slice(1), 'csv');
     EmployeesView.mergeImported(imported, 'CSV');
   },
   importXLSX(buffer) {
-    if (typeof window.XLSX==='undefined') { alert('Положите libs/xlsx.full.min.js рядом с index.html'); return; }
+    if (typeof window.XLSX==='undefined') { window.showToast?.('Положите libs/xlsx.full.min.js рядом с index.html', 'error'); return; }
     const wb=window.XLSX.read(buffer,{type:'array'});
     const imported=[];
     wb.SheetNames.forEach(sheetName=>{

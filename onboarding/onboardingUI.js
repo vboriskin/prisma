@@ -9,6 +9,9 @@ import { state }        from '../state.js';
 import { Storage }      from '../dataStore.js';
 import { RiskEngine }   from '../riskEngine.js';
 import { loadDemoData } from './demoData.js';
+import { ConfirmDialog } from '../app/uxKit.js';
+import { Icons }        from '../app/icons.js';
+import { Services }     from '../app/services.js';
 import {
   startOnboarding, completeOnboarding, setOnboardingStep,
   setLastDatasetType, exitDemoMode, enterDemoMode,
@@ -42,6 +45,9 @@ export function initOnboardingUI({ goTo, showToast, notify }) {
 
 /** Show full-screen welcome overlay. */
 export function showWelcomeScreen() {
+  // v22 — никаких отдельных welcome-mascot'ов. Маскот в углу — это
+  // глобальный #obsidian-fab-mascot (persistent через все экраны без
+  // re-mount). Welcome просто показывается поверх; FAB остаётся виден.
   const el = document.getElementById('ob-welcome');
   if (el) el.classList.remove('hidden');
 }
@@ -68,7 +74,13 @@ export async function startDemoFlow() {
       && Array.isArray(window.state?.rows) && window.state.rows.length > 0
       && window.state.rows.some(r => !String(r.id || '').startsWith('demo_'));
     if (hasUserData) {
-      const ok = window.confirm('Загрузить демо-данные? Текущие задачи будут заменены — рекомендуем сначала экспортировать через «Файлы → Скачать JSON».');
+      // V21 Q — ConfirmDialog (warning). Loss of work — пользователь должен явно подтвердить.
+      const ok = await ConfirmDialog.show({
+        title: 'Загрузить демо-данные?',
+        message: 'Текущие задачи будут заменены демо-набором. Рекомендуем сначала экспортировать через «Файлы → Скачать JSON».',
+        confirmLabel: 'Загрузить демо',
+        danger: true,
+      });
       if (!ok) return;
     }
   } catch(_) {}
@@ -111,7 +123,16 @@ export function startSetupFlow() {
 }
 
 /* ---- CEO micro-tour ---- */
+// #5.5 (low) — intro-шаг знакомит юзера с маскотом перед тем, как тот
+// начнёт прыгать между блоками. Без него «звезда» появляется без контекста.
+// selector:null = шаг без highlight-ring, tooltip центрируется на маскоте.
 const CEO_TOUR_STEPS = [
+  {
+    selector: null,
+    title: 'Это Обсидиан',
+    text: 'Маленький наблюдатель Призмы. Дальше он покажет дорогу — следите за ним.',
+    intro: true,
+  },
   {
     selector: '#ceo-hero',
     title: '1 / 3 — Здоровье проекта',
@@ -146,10 +167,12 @@ function _renderTourStep(idx) {
   setOnboardingStep(idx);
   _tourCurrentIdx = idx;
   const step = CEO_TOUR_STEPS[idx];
-  const target = document.querySelector(step.selector);
-  if (!target) { _renderTourStep(idx + 1); return; }
+  // #5.5 — intro-шаг (selector:null) рисуется без target/highlight-ring,
+  // tooltip центрируется через _positionTourTooltip(null, ...).
+  const target = step.selector ? document.querySelector(step.selector) : null;
+  if (step.selector && !target) { _renderTourStep(idx + 1); return; }
 
-  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' });
   requestAnimationFrame(() => requestAnimationFrame(() => {
     _positionTourTooltip(target, step, idx);
   }));
@@ -162,10 +185,12 @@ function _renderTourStep(idx) {
     const reflow = () => {
       if (_tourCurrentIdx < 0 || _tourCurrentIdx >= CEO_TOUR_STEPS.length) return;
       const s = CEO_TOUR_STEPS[_tourCurrentIdx];
-      const t = document.querySelector(s.selector);
-      if (t && document.getElementById('ob-tour-tooltip')) {
-        _positionTourTooltip(t, s, _tourCurrentIdx);
-      }
+      // #5.5 — intro-step (selector:null) центрируется по viewport,
+      // re-anchor для него = пере-центрирование на resize.
+      const t = s.selector ? document.querySelector(s.selector) : null;
+      if (!document.getElementById('ob-tour-tooltip')) return;
+      if (s.selector && !t) return;
+      _positionTourTooltip(t, s, _tourCurrentIdx);
     };
     window.addEventListener('resize', reflow);
     window.addEventListener('scroll', reflow, { passive: true });
@@ -182,7 +207,13 @@ function _positionTourTooltip(target, step, idx) {
   }
 
   const isLast = idx === CEO_TOUR_STEPS.length - 1;
+  // design-01 E fix — маскот в tooltip-туре. Между шагами — ls-move (плывёт),
+  // на landing — Curious 600мс, потом Breathe. Управляется ниже через
+  // ObsidianMascot.setChatPhase на найденном элементе.
   tooltip.innerHTML = `
+    <span class="ob-tour-mascot obs obs--sm obs--breathe" aria-hidden="true">
+      <svg viewBox="-60 -60 120 120"><use href="#obs-base"/></svg>
+    </span>
     <div class="ob-tour-title">${step.title}</div>
     <div class="ob-tour-text">${step.text}</div>
     <div class="ob-tour-actions">
@@ -191,8 +222,30 @@ function _positionTourTooltip(target, step, idx) {
       <button class="ob-tour-btn ob-tour-primary ob-tour-next" data-idx="${idx}">${isLast ? 'Готово ✓' : 'Далее →'}</button>
       <button class="ob-tour-btn ob-tour-skip">Пропустить</button>
     </div>`;
+  // ls-move на каждом step >0 (Curious при первом landing).
+  // #5.5 — на intro-шаге (step.intro) показываем 'surprised' once
+  // (T2 — wide eyes pop), чтобы маскот «представился».
+  setTimeout(() => {
+    const m = tooltip.querySelector('.ob-tour-mascot');
+    if (!m) return;
+    // v22 — hydrate rich SVG для ls-tool/concerned animations.
+    try { Services.ObsidianMascot?.hydrate?.(m); } catch (_) {}
+    if (step.intro) {
+      try {
+        m.classList.add('obs--breathe', 'obs--surprised', 'obs--once');
+        setTimeout(() => m.classList.remove('obs--surprised', 'obs--once'), 1700);
+      } catch (_) {}
+    } else if (idx === 0) {
+      try { Services.ObsidianMascot?.setChatPhase?.('idle', m); } catch (_) {}
+    } else {
+      // IxD-1 fix — §13.7 «шаг онбординга → ls-move». Раньше был 'tool'
+      // (наклон к tool-сокету), что семантически из чат-use-кейса.
+      try { Services.ObsidianMascot?.setChatPhase?.('move', m); } catch (_) {}
+    }
+  }, 50);
 
-  // highlight ring
+  // highlight ring — на intro-шаге (target=null) кольца нет,
+  // tooltip центрируется по viewport.
   let ring = document.getElementById('ob-tour-ring');
   if (!ring) {
     ring = document.createElement('div');
@@ -200,21 +253,32 @@ function _positionTourTooltip(target, step, idx) {
     ring.className = 'ob-tour-ring';
     document.body.appendChild(ring);
   }
-  const r = target.getBoundingClientRect();
-  const pad = 6;
-  ring.style.cssText = `left:${r.left - pad}px;top:${r.top - pad + window.scrollY}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px`;
-  ring.classList.remove('hidden');
+  if (!target) {
+    ring.classList.add('hidden');
+    const tipH = 180;
+    const tipW = 340;
+    const tipLeft = Math.max(12, Math.round((window.innerWidth - tipW) / 2));
+    const tipTop  = Math.max(window.scrollY + 24,
+      window.scrollY + Math.round((window.innerHeight - tipH) / 2));
+    tooltip.style.cssText = `left:${tipLeft}px;top:${tipTop}px`;
+    tooltip.classList.remove('hidden');
+  } else {
+    const r = target.getBoundingClientRect();
+    const pad = 6;
+    ring.style.cssText = `left:${r.left - pad}px;top:${r.top - pad + window.scrollY}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px`;
+    ring.classList.remove('hidden');
 
-  // position tooltip
-  const tipH = 180;
-  let tipTop = r.bottom + window.scrollY + 12;
-  if (tipTop + tipH > window.scrollY + window.innerHeight - 24) {
-    tipTop = r.top + window.scrollY - tipH - 12;
+    // position tooltip
+    const tipH = 180;
+    let tipTop = r.bottom + window.scrollY + 12;
+    if (tipTop + tipH > window.scrollY + window.innerHeight - 24) {
+      tipTop = r.top + window.scrollY - tipH - 12;
+    }
+    tipTop = Math.max(window.scrollY + 8, tipTop);
+    const tipLeft = Math.max(12, Math.min(r.left, window.innerWidth - 340 - 12));
+    tooltip.style.cssText = `left:${tipLeft}px;top:${tipTop}px`;
+    tooltip.classList.remove('hidden');
   }
-  tipTop = Math.max(window.scrollY + 8, tipTop);
-  const tipLeft = Math.max(12, Math.min(r.left, window.innerWidth - 340 - 12));
-  tooltip.style.cssText = `left:${tipLeft}px;top:${tipTop}px`;
-  tooltip.classList.remove('hidden');
 
   // bind buttons
   tooltip.querySelector('.ob-tour-next')?.addEventListener('click', () => {
@@ -283,15 +347,16 @@ export function showPostLoadInsights(rows) {
 /** Inject empty-state placeholder into a container when no data present. */
 export function showEmptyState(container) {
   if (!container) return;
+  // UX скв.4 — эмодзи (📋/🎬/📂) заменены на Lucide-иконки (Icons.get).
   container.innerHTML = `
     <div class="ob-empty-state">
-      <div class="ob-empty-icon">📋</div>
+      <div class="ob-empty-icon">${Icons.get('clipboard', { size: 32 })}</div>
       <div class="ob-empty-title">Данные не загружены</div>
       <div class="ob-empty-sub">Загрузите свой план или посмотрите на демо-данных как работает аналитика</div>
       <div class="ob-empty-actions">
-        <button class="ob-empty-btn ob-empty-btn-primary" id="ob-empty-demo">🎬 Посмотреть демо</button>
+        <button class="ob-empty-btn ob-empty-btn-primary" id="ob-empty-demo">${Icons.get('play-circle', { size: 16 })} Посмотреть демо</button>
         <label class="ob-empty-btn ob-empty-btn-secondary">
-          📂 Загрузить файл
+          ${Icons.get('folder', { size: 16 })} Загрузить файл
           <input type="file" id="ob-empty-file-input" accept=".xlsx,.xls,.csv" class="input-hidden">
         </label>
       </div>
@@ -359,8 +424,8 @@ export function bindWelcomeButtons() {
     // Run after the welcome fade-out so the highlights have a target to point at
     setTimeout(() => {
       try {
-        if (typeof window.Onboarding?.start === 'function') window.Onboarding.start();
-        else if (typeof window.Onboarding?._start === 'function') window.Onboarding._start();
+        if (typeof Services.Onboarding?.start === 'function') Services.Onboarding.start();
+        else if (typeof Services.Onboarding?._start === 'function') Services.Onboarding._start();
       } catch(_) {}
     }, 200);
   });

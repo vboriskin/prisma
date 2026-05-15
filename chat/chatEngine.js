@@ -7,9 +7,16 @@
    Public API:
      ChatEngine.process(text, contextOverride)  — main entry point
      ChatEngine.buildLLMPrompt(intent, params, ctx) — for LLM path
+
+   TODO AUDIT_ARCHITECTURE #16 — `app/llmAssistant.js` (i drugie vneshnie
+   callsite'y) dolzhny import'it' eti funkcii cherez `../chat/index.js`
+   (public facade), a ne napryamuyu iz `../chat/chatEngine.js`. Migraciya
+   postepennaya: snachala perevodyatsya novye callsite'y, potom ratchet'om
+   migrirovat' starye i zapret no-restricted-imports v eslint.
    ============================================================ */
 
 import { state } from '../state.js';
+import { Utils } from '../utils.js';
 import { parseIntent, parseIntentCategory, isRuleBased, INTENTS } from './chatIntentParser.js';
 import { buildContextForIntent } from './chatContextBuilder.js';
 import { parseStructuredFromLLM } from './chatUIRenderer.js';
@@ -21,16 +28,22 @@ import { getPrompt, PROMPTS } from './chatPrompts.js';
 // untouched; activity queries are routed BEFORE parseIntent() classification.
 import { handleActivityQuery } from './chatActivityHandler.js';
 import { classifyActivityIntent } from './chatActivityIntents.js';
+import { Services } from '../app/services.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
 function pct(n, d) { return d ? Math.round(n / d * 100) : 0; }
+// V21 L (audit-2026-05-03 §I, Quick win 1) — делегирует в Utils.plural,
+// сохраняя `${n} ${form}` совместимость для существующих call-sites.
 function plural(n, one, few, many) {
-  const mod10 = n % 10, mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} ${one}`;
-  if ([2,3,4].includes(mod10) && ![12,13,14].includes(mod100)) return `${n} ${few}`;
-  return `${n} ${many}`;
+  return `${n} ${Utils.plural(n, one, few, many)}`;
 }
+// V21 T — shortcut для самых частых форм («задача/задачи/задач»,
+// «блокер/блокера/блокеров»). Сделано чтобы строки в reports'ах не
+// превращались в нечитаемые `plural(n, 'задача','задачи','задач')`.
+const _pl_task    = (n) => plural(n, 'задача', 'задачи', 'задач');
+const _pl_blocker = (n) => plural(n, 'блокер', 'блокера', 'блокеров');
+const _pl_risk    = (n) => plural(n, 'риск', 'риска', 'рисков');
 function relLabel(key) {
   const map = { r120:'1.20', r121:'1.21', r122:'1.22', overtime:'Овертайм', backlog:'Бэклог' };
   return map[key] || key;
@@ -43,19 +56,28 @@ function teamRows(rows, team) {
 
 function buildExecutiveSummaryResponse(ctx) {
   const s = ctx.stats;
-  const text = `## Сводка по проекту\n\n**Всего задач:** ${s.total} · **Сделано:** ${s.done} (${s.donePct}%) · **Блокеры:** ${s.blockers} · **Риски:** ${s.risky}\n\n**Релизные окна:** 1.20 — ${s.r120} задач, 1.21 — ${s.r121}, 1.22 — ${s.r122}, Овертайм — ${s.overtime}\n\n**В скоупе:** ${s.inScope}, без релиза: ${s.unassigned}`;
+  const text = `## Сводка по проекту\n\n**Всего задач:** ${s.total} · **Сделано:** ${s.done} (${s.donePct}%) · **Блокеры:** ${s.blockers} · **Риски:** ${s.risky}\n\n**Релизные окна:** 1.20 — ${_pl_task(s.r120)}, 1.21 — ${s.r121}, 1.22 — ${s.r122}, Овертайм — ${s.overtime}\n\n**В скоупе:** ${s.inScope}, без релиза: ${s.unassigned}`;
 
   const cards = ctx.teams.slice(0, 5).map(t => ({
-    title: t.team, icon: '👥',
-    body: `${t.total} задач · ${t.done} сделано · ${t.blockers} блокеров · ${t.risky} рисков`,
-    badge: t.blockers > 0 ? `${t.blockers} блок.` : (t.done === t.total && t.total > 0 ? '✓' : null),
+    title: t.team, iconKey: 'users',
+    body: `${_pl_task(t.total)} · ${t.done} сделано · ${_pl_blocker(t.blockers)} · ${_pl_risk(t.risky)}`,
+    badge: t.blockers > 0 ? `${t.blockers} блок.` : (t.done === t.total && t.total > 0 ? '' : null),
     badgeColor: t.blockers > 0 ? 'red' : 'green',
   }));
 
+  // F13 fix (chat-04 audit) — actions передают контекст (фильтр блокеров),
+  // если в summary были блокеры/риски. Иначе юзер шёл в чистый Реестр и
+  // снова искал то, что чат уже подсветил.
+  const hasBlockers = s?.blockers > 0;
+  const hasRisks    = s?.risky > 0;
   const actions = [
-    { label: '📋 Открыть реестр', type: 'navigate', payload: { section: 'registry' } },
-    { label: '📊 Перейти к Гант', type: 'navigate', payload: { section: 'gantt' } },
-    { label: '📥 Экспорт сводки', type: 'export_summary', payload: { text: text }, primary: false },
+    hasBlockers
+      ? { label: `Реестр · только блокеры (${s.blockers})`, type: 'apply_filter', payload: { onlyBlocking: true } }
+      : { label: 'Открыть реестр', type: 'navigate', payload: { section: 'registry' } },
+    hasRisks
+      ? { label: `Реестр · только риски (${s.risky})`, type: 'apply_filter', payload: { onlyRisky: true } }
+      : { label: 'Перейти к Гант', type: 'navigate', payload: { section: 'gantt' } },
+    { label: 'Экспорт сводки', type: 'export_summary', payload: { text: text }, primary: false },
   ];
 
   const drilldown = [
@@ -70,11 +92,11 @@ function buildExecutiveSummaryResponse(ctx) {
 function buildReleaseOverviewResponse(ctx) {
   const rel = relLabel(ctx.release);
   const s = ctx.stats;
-  const text = `## Релиз ${rel}\n\n**Задач:** ${s.total} · **Готово:** ${s.done} (${s.donePct}%) · **Блокеры:** ${s.blockers} · **Риски:** ${s.risky}\n\n${s.blockers > 0 ? `⚠️ ${plural(s.blockers,'блокер','блокера','блокеров')} могут задержать релиз.` : '✅ Блокеров нет.'}`;
+  const text = `## Релиз ${rel}\n\n**Задач:** ${s.total} · **Готово:** ${s.done} (${s.donePct}%) · **Блокеры:** ${s.blockers} · **Риски:** ${s.risky}\n\n${s.blockers > 0 ? `${plural(s.blockers,'блокер','блокера','блокеров')} могут задержать релиз.` : 'Блокеров нет.'}`;
 
   const cards = ctx.teams.slice(0, 6).map(t => ({
-    title: t.team, icon: '🏷',
-    body: `${t.total} задач · ${t.done} готово`,
+    title: t.team, iconKey: 'tag',
+    body: `${_pl_task(t.total)} · ${t.done} готово`,
     badge: t.blockers > 0 ? `${t.blockers} блок.` : null,
     badgeColor: 'red',
   }));
@@ -86,8 +108,8 @@ function buildReleaseOverviewResponse(ctx) {
   ];
 
   const actions = [
-    { label: `🔍 Фильтр по ${rel}`, type: 'apply_filter', payload: { release: rel.replace('.',''), noNavigate: false } },
-    { label: '📅 Открыть Гант', type: 'navigate', payload: { section: 'gantt' } },
+    { label: `Фильтр по ${rel}`, type: 'apply_filter', payload: { release: rel.replace('.',''), noNavigate: false } },
+    { label: 'Открыть Гант', type: 'navigate', payload: { section: 'gantt' } },
   ];
 
   return { text, cards, actions, drilldown };
@@ -100,9 +122,9 @@ function buildTeamOverviewResponse(ctx) {
     : `## Обзор команд\n\n**Всего команд:** ${teams.length}`;
 
   const cards = teams.slice(0, 6).map(t => ({
-    title: t.team, icon: '👥',
-    body: `${t.total} задач · ${t.done} готово · ${t.blockers} блок. · ${t.risky} рисков`,
-    badge: t.blockers > 0 ? '⚠' : (pct(t.done, t.total) > 70 ? '✓' : null),
+    title: t.team, iconKey: 'users',
+    body: `${_pl_task(t.total)} · ${t.done} готово · ${_pl_blocker(t.blockers)} · ${_pl_risk(t.risky)}`,
+    badge: t.blockers > 0 ? '' : (pct(t.done, t.total) > 70 ? '' : null),
     badgeColor: t.blockers > 0 ? 'red' : 'green',
   }));
 
@@ -127,7 +149,7 @@ function buildRisksResponse(ctx) {
   const text = `## Риски и блокеры\n\n**Блокеров:** ${s.blockers} · **Рискованных задач:** ${s.risky}\n\n${riskLines ? `### Типы рисков:\n${riskLines}` : ''}`;
 
   const cards = ctx.blockers.slice(0, 4).map(r => ({
-    title: r.epic || r.tasks || '—', icon: '🚫',
+    title: r.epic || r.tasks || '—', iconKey: 'no-symbol',
     body: `${r.team || '—'} · ${(r.riskFlags||[]).join(', ') || 'блокер'}`,
     badge: 'БЛОКЕР', badgeColor: 'red',
   }));
@@ -139,9 +161,9 @@ function buildRisksResponse(ctx) {
   ];
 
   const actions = [
-    { label: '🔍 Только блокеры', type: 'apply_filter', payload: { onlyBlocking: true }, primary: true },
-    { label: '⚠ Только риски',   type: 'apply_filter', payload: { onlyRisky: true } },
-    { label: '✕ Сбросить',        type: 'clear_filters', payload: {} },
+    { label: 'Только блокеры', type: 'apply_filter', payload: { onlyBlocking: true }, primary: true },
+    { label: 'Только риски',   type: 'apply_filter', payload: { onlyRisky: true } },
+    { label: 'Сбросить',        type: 'clear_filters', payload: {} },
   ];
 
   return { text, cards, actions, drilldown };
@@ -149,11 +171,11 @@ function buildRisksResponse(ctx) {
 
 function buildOverloadResponse(ctx) {
   const top5 = (ctx.assignees || []).slice(0, 5);
-  const lines = top5.map(a => `- **${a.name}**: ${a.total} задач (r120:${a.r120}, r121:${a.r121}, r122:${a.r122}${a.blockers ? `, 🚫${a.blockers}` : ''})`).join('\n');
+  const lines = top5.map(a => `- **${a.name}**: ${_pl_task(a.total)} (r120:${a.r120}, r121:${a.r121}, r122:${a.r122}${a.blockers ? `, блокеров: ${a.blockers}` : ''})`).join('\n');
   const text = `## Нагрузка исполнителей\n\n${lines || 'Данных об исполнителях нет.'}`;
 
   const cards = top5.map(a => ({
-    title: a.name, icon: '👤',
+    title: a.name, iconKey: 'user',
     body: `Всего: ${a.total} · 1.20: ${a.r120} · 1.21: ${a.r121} · 1.22: ${a.r122}`,
     badge: a.total > 5 ? 'Высокая' : (a.total > 2 ? 'Средняя' : 'Норма'),
     badgeColor: a.total > 5 ? 'red' : (a.total > 2 ? 'orange' : 'green'),
@@ -174,11 +196,11 @@ function buildMeetingPrepResponse(ctx) {
 
   let agenda = '';
   if (ctx.meetingType === 'grooming') {
-    agenda = `**Повестка груминга:**\n- Бэклог без релиза: ${s.unassigned} задач\n- Разобрать блокеры: ${s.blockers}\n- Уточнить scope: задач "Требует подтверждения"`;
+    agenda = `**Повестка груминга:**\n- Бэклог без релиза: ${_pl_task(s.unassigned)}\n- Разобрать блокеры: ${s.blockers}\n- Уточнить scope: задач "Требует подтверждения"`;
   } else if (ctx.meetingType === 'demo') {
-    agenda = `**Повестка демо:**\n- Готовые задачи: ${s.done}\n- Демонстрируем: ${s.done} фич\n- Следующий релиз: ${s.r121} задач`;
+    agenda = `**Повестка демо:**\n- Готовые задачи: ${s.done}\n- Демонстрируем: ${s.done} фич\n- Следующий релиз: ${_pl_task(s.r121)}`;
   } else if (ctx.meetingType === 'retro') {
-    agenda = `**Повестка ретро:**\n- Что хорошо: ${s.done} задач закрыто\n- Что мешало: ${s.blockers} блокеров\n- Что улучшить: ${s.risky} рисков`;
+    agenda = `**Повестка ретро:**\n- Что хорошо: ${_pl_task(s.done)} закрыто\n- Что мешало: ${_pl_blocker(s.blockers)}\n- Что улучшить: ${_pl_risk(s.risky)}`;
   } else {
     agenda = `**Повестка встречи:**\n- Статус: ${s.done}/${s.total} задач готово\n- Блокеры: ${s.blockers}\n- Риски: ${s.risky}`;
   }
@@ -191,8 +213,8 @@ function buildMeetingPrepResponse(ctx) {
   ];
 
   const actions = [
-    { label: '📋 Открыть реестр',   type: 'navigate', payload: { section: 'registry' } },
-    { label: '📋 Экспорт повестки', type: 'export_summary', payload: { text: `${text}\n\nДата: ${new Date().toLocaleDateString('ru')}` } },
+    { label: 'Открыть реестр',   type: 'navigate', payload: { section: 'registry' } },
+    { label: 'Экспорт повестки', type: 'export_summary', payload: { text: `${text}\n\nДата: ${new Date().toLocaleDateString('ru')}` } },
   ];
 
   return { text, cards: [], actions, drilldown };
@@ -205,7 +227,7 @@ function buildReleaseNotesResponse(ctx) {
   const text = `## Release Notes: ${rel}\n\n**Готово:** ${doneItems.length} задач\n\n${lines || 'Выполненных задач не найдено.'}`;
 
   const actions = [
-    { label: '📥 Скачать release notes', type: 'export_summary',
+    { label: 'Скачать release notes', type: 'export_summary',
       payload: { text: `Release Notes — ${rel}\n${new Date().toLocaleDateString('ru')}\n\n${lines}` }, primary: true },
   ];
 
@@ -236,8 +258,8 @@ function buildAskPlanResponse(ctx) {
   ];
 
   const actions = [
-    { label: '🚫 Показать блокеры', type: 'apply_filter', payload: { onlyBlocking: true }, primary: true },
-    { label: '📥 Экспорт плана', type: 'export_summary',
+    { label: 'Показать блокеры', type: 'apply_filter', payload: { onlyBlocking: true }, primary: true },
+    { label: 'Экспорт плана', type: 'export_summary',
       payload: { text: plan.map(p => `${p.step}. ${p.title}\n   ${p.detail}`).join('\n') } },
   ];
 
@@ -256,8 +278,8 @@ function buildFilterTasksResponse(ctx) {
   const text = `## Фильтрация задач\n\nПрименяю фильтры: ${parts.length ? parts.join(', ') : 'нет параметров'}.\nВидимых задач: ${ctx.visibleCount} из ${ctx.totalCount}.`;
 
   const actions = [
-    { label: '✓ Применить фильтры', type: 'apply_filter', payload: p, primary: true },
-    { label: '✕ Сбросить',           type: 'clear_filters', payload: {} },
+    { label: 'Применить фильтры', type: 'apply_filter', payload: p, primary: true },
+    { label: 'Сбросить',           type: 'clear_filters', payload: {} },
   ];
 
   const drilldown = [
@@ -308,7 +330,7 @@ function buildReviewModeResponse(ctx) {
   const text = `## Режим обзора: ${persona.badge}\n\nКонтекст загружен. Анализирую данные с позиции **${persona.badge}**…`;
 
   const actions = [
-    { label: `🔍 Запустить анализ (${persona.badge})`, type: 'send_prompt',
+    { label: `Запустить анализ (${persona.badge})`, type: 'send_prompt',
       payload: { prompt: persona.prompt }, primary: true },
     { label: '↩ Обычный режим', type: 'set_review_mode', payload: { role: null } },
   ];
@@ -342,7 +364,7 @@ function buildFindTasksResponse(params) {
   const preview5   = matched.slice(0, 5);
   const moreCount  = matched.length - preview5.length;
   const previewLines = preview5.map(r =>
-    `- **${r.epic || r.tasks || '—'}** · ${r.team || '—'}${r.blockingDependency ? ' · 🚫' : ''}${(r.riskFlags||[]).length ? ' · ⚠️' : ''}`
+    `- **${r.epic || r.tasks || '—'}** · ${r.team || '—'}${r.blockingDependency ? ' · _блокер_' : ''}${(r.riskFlags||[]).length ? ' · _риск_' : ''}`
   ).join('\n');
 
   const text = matched.length === 0
@@ -350,10 +372,10 @@ function buildFindTasksResponse(params) {
     : `## Найдено: ${matched.length} из ${total}\n\n**Критерии:** ${filterDesc}\n\n${previewLines}${moreCount > 0 ? `\n- _...и ещё ${moreCount}_` : ''}`;
 
   const actions = matched.length > 0 ? [
-    { label: `🔍 Показать в реестре (${matched.length})`, type: 'apply_filter', payload: filter, primary: true },
-    { label: '✕ Сбросить', type: 'clear_filters', payload: {} },
+    { label: `Показать в реестре (${matched.length})`, type: 'apply_filter', payload: filter, primary: true },
+    { label: 'Сбросить', type: 'clear_filters', payload: {} },
   ] : [
-    { label: '✕ Сбросить фильтры', type: 'clear_filters', payload: {} },
+    { label: 'Сбросить фильтры', type: 'clear_filters', payload: {} },
   ];
 
   const drilldown = [
@@ -431,11 +453,11 @@ function buildDailyReportResponse() {
   const since = ha < 2 ? 'час назад' : ha < 24 ? `${ha} ч. назад` : `${Math.round(ha/24)} дн. назад`;
 
   const diffLines = [];
-  if (d.newlyDone?.length)      diffLines.push(`✅ Закрыто задач: **${d.newlyDone.length}**`);
-  if (d.newlyBlocking?.length)  diffLines.push(`🚫 Новых блокеров: **${d.newlyBlocking.length}**`);
-  if (d.newRisks?.length)       diffLines.push(`⚠️ Новых рисков: **${d.newRisks.length}**`);
+  if (d.newlyDone?.length)      diffLines.push(`Закрыто задач: **${d.newlyDone.length}**`);
+  if (d.newlyBlocking?.length)  diffLines.push(`Новых блокеров: **${d.newlyBlocking.length}**`);
+  if (d.newRisks?.length)       diffLines.push(`Новых рисков: **${d.newRisks.length}**`);
   if (d.releaseChanged?.length) diffLines.push(`🔀 Перенесено между релизами: **${d.releaseChanged.length}**`);
-  if (d.scopeChanged?.length)   diffLines.push(`📋 Изменился scope: **${d.scopeChanged.length}**`);
+  if (d.scopeChanged?.length)   diffLines.push(`Изменился scope: **${d.scopeChanged.length}**`);
   if (d.newRows?.length)        diffLines.push(`➕ Новых задач: **${d.newRows.length}**`);
   if (d.removedRows?.length)    diffLines.push(`➖ Удалено задач: **${d.removedRows.length}**`);
 
@@ -448,20 +470,20 @@ function buildDailyReportResponse() {
   const recBlock = (report.recommendations || []).map((r, i) => `${i+1}. ${r}`).join('\n');
 
   const full = text
-    + (attBlock ? `\n\n### ⚠️ Требует внимания:\n${attBlock}` : '')
-    + (recBlock ? `\n\n### 💡 Рекомендации:\n${recBlock}` : '');
+    + (attBlock ? `\n\n### Требует внимания:\n${attBlock}` : '')
+    + (recBlock ? `\n\n### Рекомендации:\n${recBlock}` : '');
 
   const cards = [];
   if (d.newlyDone?.length) {
     cards.push(...d.newlyDone.slice(0, 3).map(r => ({
-      title: r.epic || r.tasks || '—', icon: '✅',
+      title: r.epic || r.tasks || '—', iconKey: 'check-circle',
       body: `Закрыто · ${r.team || '—'}`,
       badge: 'Готово', badgeColor: 'green',
     })));
   }
   if (d.newlyBlocking?.length) {
     cards.push(...d.newlyBlocking.slice(0, 3).map(r => ({
-      title: r.epic || r.tasks || '—', icon: '🚫',
+      title: r.epic || r.tasks || '—', iconKey: 'no-symbol',
       body: `Новый блокер · ${r.team || '—'}`,
       badge: 'БЛОКЕР', badgeColor: 'red',
     })));
@@ -469,8 +491,8 @@ function buildDailyReportResponse() {
 
   const actions = [
     { label: '📸 Обновить снимок', type: 'take_snapshot', payload: {} },
-    { label: '📋 Реестр',          type: 'navigate',      payload: { section: 'registry' } },
-    { label: '📥 Экспорт отчёта',  type: 'export_summary', payload: { text: full } },
+    { label: 'Реестр',          type: 'navigate',      payload: { section: 'registry' } },
+    { label: 'Экспорт отчёта',  type: 'export_summary', payload: { text: full } },
   ];
 
   const drilldown = [
@@ -480,6 +502,94 @@ function buildDailyReportResponse() {
   ].filter(Boolean);
 
   return { text: full, cards, actions, drilldown };
+}
+
+/**
+ * V22 K-04 (audit-experts-2026-05-15 Zhuravlev killer #10) —
+ * Stand-up Generator. Rule-based, мгновенный (без LLM). Текст для
+ * тимлида: «Вчера / Сегодня / Блокеры / Не зашло».
+ *
+ * Источники:
+ *  · Вчера сделано — `state.rows[].isDone` + `r.doneAt` за последние 24ч
+ *    (если нет doneAt — берём newlyDone из daily-snapshot diff'а).
+ *  · Сегодня в работе — `r.inProgress === true` ИЛИ `r.hasReleaseNNN` без `isDone`.
+ *  · Блокеры — Registry (`r.blockingDependency`) + Scanner blockers (если loaded).
+ *  · «Не зашло» — `r.scopeChanged` к 1.22 или Overtime за последние 7 дней.
+ *
+ * Identity-resolve по `params.team` (если упомянута).
+ */
+function buildStandUpResponse(params = {}) {
+  const allRows = state.rows || [];
+  const team = params.team || null;
+  const rows = team
+    ? allRows.filter(r => String(r.team || '').toLowerCase() === String(team).toLowerCase())
+    : allRows;
+  const teamLabel = team ? `команда «${team}»` : 'весь портфель';
+
+  // ── Вчера: newlyDone (за <24h) ──
+  const cutoff24 = Date.now() - 24 * 3600 * 1000;
+  const doneYesterday = rows.filter(r => {
+    if (!r.isDone) return false;
+    const at = r.doneAt || r.updatedAt;
+    if (!at) return false;
+    const ts = Date.parse(at);
+    return Number.isFinite(ts) && ts >= cutoff24;
+  }).slice(0, 8);
+
+  // ── Сегодня в работе ──
+  const inProgress = rows.filter(r => !r.isDone && (r.inProgress || (r.assignee && (r.hasRelease120 || r.hasRelease121 || r.hasRelease122))));
+  const top = inProgress.slice(0, 8);
+
+  // ── Блокеры (registry) ──
+  const blockers = rows.filter(r => !r.isDone && r.blockingDependency).slice(0, 6);
+
+  // ── «Не зашло» — переносы в OT / 1.22 за неделю ──
+  const cutoff7d = Date.now() - 7 * 24 * 3600 * 1000;
+  const punted = rows.filter(r => {
+    if (r.isDone) return false;
+    if (!r.hasOvertime && !r.hasRelease122) return false;
+    const at = r.updatedAt;
+    if (!at) return false;
+    const ts = Date.parse(at);
+    return Number.isFinite(ts) && ts >= cutoff7d;
+  }).slice(0, 5);
+
+  const lines = [
+    `## Стенд-ап · ${teamLabel}`,
+    '',
+    `**Вчера:** ${doneYesterday.length} закрыто${doneYesterday.length ? ' (' + doneYesterday.map(r => r.epic || r.tasks || '—').slice(0, 3).join(', ') + (doneYesterday.length > 3 ? '…' : '') + ')' : ''}.`,
+    `**Сегодня в работе:** ${top.length}${top.length ? ' · ' + top.map(r => r.epic || r.tasks || '—').slice(0, 3).join(', ') + (top.length > 3 ? '…' : '') : ''}.`,
+    blockers.length
+      ? `**Блокеры:** ${blockers.length}${blockers.length ? ' (' + blockers.map(r => r.epic || r.tasks || '—').slice(0, 3).join(', ') + (blockers.length > 3 ? '…' : '') + ')' : ''}.`
+      : `**Блокеры:** нет.`,
+    punted.length
+      ? `**Не зашло:** ${punted.length} (отложены на 1.22/Овертайм за неделю).`
+      : '',
+  ].filter(Boolean);
+
+  const cards = [
+    { title: 'Закрыто вчера',     value: String(doneYesterday.length), hint: doneYesterday.length ? 'за последние 24 часа' : 'нет завершённых задач' },
+    { title: 'В работе сегодня',  value: String(top.length), hint: 'активных задач' },
+    { title: 'Блокеры',           value: String(blockers.length), hint: blockers.length ? 'требуют внимания' : 'нет открытых блокеров' },
+    { title: 'Перенесено',        value: String(punted.length), hint: 'в 1.22 / Овертайм за 7 дней' },
+  ];
+
+  const actions = [];
+  if (blockers.length) {
+    actions.push({ label: `Только блокеры (${blockers.length})`, type: 'apply_filter', payload: { onlyBlocking: true }, primary: true });
+  }
+  if (team) {
+    actions.push({ label: `Открыть Реестр команды`, type: 'apply_filter', payload: { team } });
+  }
+
+  const drilldown = [
+    blockers.length      && { text: 'Объясни блокеры',      prompt: 'Перечисли каждый блокер с обоснованием.' },
+    punted.length        && { text: 'Что перенесли?',       prompt: 'Объясни почему задачи переносятся в 1.22 / Овертайм.' },
+    doneYesterday.length && { text: 'Кто закрыл задачи?',   prompt: 'Перечисли вчерашние закрытия с исполнителями.' },
+    { text: 'Полный ежедневный отчёт', prompt: 'Сформируй ежедневный отчёт.' },
+  ].filter(Boolean);
+
+  return { text: lines.join('\n'), cards, actions, drilldown };
 }
 
 function buildHistoryResponse(params) {
@@ -510,7 +620,7 @@ function buildHistoryResponse(params) {
   const text = `## История изменений${dateFilter ? ` за ${dateFilter}` : ''}\n\n**Записей:** ${entries.length}\n\n${lines}${moreCount > 0 ? `\n- _...и ещё ${moreCount}_` : ''}`;
 
   const actions = [
-    { label: '📥 Экспорт истории', type: 'export_summary',
+    { label: 'Экспорт истории', type: 'export_summary',
       payload: { text: `История изменений\n\n${lines}` } },
   ];
 
@@ -527,7 +637,7 @@ function buildClearFiltersResponse() {
     text: `## Фильтры сброшены\n\nПоказываю все задачи без ограничений.`,
     cards: [],
     actions: [
-      { label: '✕ Сбросить фильтры', type: 'clear_filters', payload: {}, primary: true },
+      { label: 'Сбросить фильтры', type: 'clear_filters', payload: {}, primary: true },
     ],
     drilldown: [
       { text: 'Показать только блокеры', prompt: 'Показать задачи с блокерами.' },
@@ -551,8 +661,15 @@ function buildConfirmBatchResponse() {
     text: `Применяю: **${pending.label}** (${pending.rowIds?.length} задач)…`,
     cards: [],
     actions: [
-      { label: `✓ Применить (${pending.rowIds?.length})`, type: 'confirm_batch',
-        payload: { batchId: pending.id }, primary: true, autoExecute: true },
+      // L3 fix: убран `autoExecute: true`. Поле — пережиток, реально не
+      // выполняется (`bindActionClicks` игнорирует), но может быть скопировано
+      // LLM в свои ответы и стать auto-click-vector в будущем.
+      { label: `Применить (${pending.rowIds?.length})`, type: 'confirm_batch',
+        payload: { batchId: pending.id }, primary: true },
+      // C15 fix (chat-03 audit §13 reversibility) — парная «Отмена» рядом
+      // с Apply, чтобы юзер мог свернуть preview одним кликом без поиска
+      // drilldown'а. type=cancel_batch уже зарегистрирован в action executor'е.
+      { label: 'Отмена', type: 'cancel_batch', payload: { batchId: pending.id } },
     ],
     drilldown: [],
   };
@@ -567,7 +684,7 @@ function buildCancelBatchResponse() {
     text: `Отменено: ${label}. Никаких изменений не внесено.`,
     cards: [],
     actions: [
-      { label: '📋 Реестр', type: 'navigate', payload: { section: 'registry' } },
+      { label: 'Реестр', type: 'navigate', payload: { section: 'registry' } },
     ],
     drilldown: [
       { text: 'Новый запрос', prompt: 'Что нужно сделать с задачами?' },
@@ -655,7 +772,10 @@ export function process(userText, opts = {}) {
   // userPrompt} pair the LLM path can use directly.
   const activityProbe = classifyActivityIntent(userText);
   if (activityProbe.intent) {
-    const pulseModel = (typeof window !== 'undefined' && window.PortfolioPulse?._model) || null;
+    // F11 fix (chat-04 audit) — public getModel() с fallback на приватное
+    // _model для совместимости с тестами/старыми сборками.
+    const pp = (typeof window !== 'undefined') ? Services.PortfolioPulse : null;
+    const pulseModel = (pp?.getModel?.() ?? pp?._model) || null;
     const result = handleActivityQuery(userText, { pulseModel });
     if (result.needsClarification) {
       opts.onRuleBased?.({
@@ -682,7 +802,17 @@ export function process(userText, opts = {}) {
     // Fallthrough: activity probe matched but handler had nothing → fall to legacy.
   }
 
-  const { intent, params } = parseIntent(userText);
+  let { intent, confidence, params } = parseIntent(userText);
+  // L12 fix (chat-01 audit): low-confidence rule-match → fallback в LLM-маршрут.
+  // Шаблонные ответы при шумном regex-match создают «уверенный мусор», лучше
+  // отдать в LLM с general-категорией. Telemetry для последующего тюнинга rules.
+  if (isRuleBased(intent) && intent !== INTENTS.GENERIC && confidence < 0.6) {
+    if (typeof window !== 'undefined' && window.HistoryLog?.event) {
+      try { window.HistoryLog.event('chat.intent.misroute', { intent, confidence, len: userText.length }); } catch (_) {}
+    }
+    intent = INTENTS.GENERIC;
+    params = {};
+  }
   const ctx = buildContextForIntent(intent, params);
 
   if (isRuleBased(intent)) {
@@ -703,6 +833,7 @@ export function process(userText, opts = {}) {
       case INTENTS.FIND_TASKS:        structured = buildFindTasksResponse(params); break;
       case INTENTS.EXPLAIN:           structured = buildExplainResponse(params); break;
       case INTENTS.DAILY_REPORT:      structured = buildDailyReportResponse(); break;
+      case INTENTS.STAND_UP:          structured = buildStandUpResponse(params); break;  // V22 K-04
       case INTENTS.HISTORY:           structured = buildHistoryResponse(params); break;
       case INTENTS.CLEAR_FILTERS:     structured = buildClearFiltersResponse(); break;
       case INTENTS.CONFIRM_BATCH:     structured = buildConfirmBatchResponse(); break;

@@ -1,5 +1,26 @@
 'use strict';
 /* ============================================================
+   AUDIT_ARCHITECTURE #4 — Reactive vs legacy event-bus.
+
+   PROEKTE SOSUSHCHESTVUYUT DVA mexanizma podpiski na izmeneniya state'a:
+
+   1. Reactive.subscribe (etot fail) — auto-flush. Lyubaya mutation
+      `state.x = y` cherez Proxy => debounced (100ms) notification
+      vsem podpischikam. Reason ne peredaetsya — "chto-to izmenilos'".
+      Ispol'zovat' dlya: Storage.save, App.refreshAll, vidov-listener'ov.
+
+   2. subscribe / notify v state.js — explicit named-event bus
+      ('chat_filter', 'import', 'restore'). Caller dolzhen ruchno
+      vyzvat' notify('reason').
+      Ispol'zovat' dlya: scenarios gde tip sobytiya vazhen.
+
+   PRAVILO: NE ispol'zuyte oba odnovremenno dlya odnogo i togo zhe
+   sobytiya — eto pridet k dvoynoy notifikacii (i double-render).
+   Predpochitayte Reactive dlya novogo koda; legacy notify()
+   ostavlen iz-za sushchestvuyushchix specificheskix podpischikov.
+   ============================================================ */
+
+/* ============================================================
    reactiveStore.js — minimal Proxy-based reactive layer over `state`.
    --
    Goal (audit #6): remove manual `App.refreshAll()` / `Storage.save()`
@@ -33,6 +54,8 @@
    This one is for the "something mutated" auto-flush.
    ============================================================ */
 
+import { Services } from './app/services.js';
+
 const REACTIVE_MARK = Symbol.for('q2.reactive.mark');
 const RAW_TARGET    = Symbol.for('q2.reactive.raw');
 const PROXY_CACHE   = new WeakMap();   // raw object → its proxy
@@ -44,7 +67,11 @@ const PROXY_CACHE   = new WeakMap();   // raw object → its proxy
 let _silentDepth = 0;
 let _flushTimer  = null;
 let _dirty       = false;
-const _DEBOUNCE_MS = 100;
+// P6 fix (codebase-02 audit) — debounce 100ms был слишком агрессивен для
+// bulk-операций: 50 строк × 1 mutate = 50 микро-перерисовок в bursty path.
+// 200ms объединяет всю серию в один render и при этом не ощутим как
+// «задержка» на UI (humanly: <250ms imperceptible).
+const _DEBOUNCE_MS = 200;
 const _subscribers = [];
 
 function _markDirty() {
@@ -68,6 +95,15 @@ function _flushNow() {
     try { fn(); }
     catch (e) { console.warn('[reactiveStore] subscriber threw:', e); }
   }
+  // AUDIT_HOLISTIC P3 — мост в EventBus. Bridge ленивый: если EventBus
+  // ещё не доступен (Node-tests без bus, или bus не загружен) — пропуск.
+  // Имя 'state-changed' стандартизировано в docs/event-bus.md.
+  // Не передаём path/value — реактивный слой не tracks per-property.
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.EventBus) {
+      globalThis.EventBus.emit('state-changed');
+    }
+  } catch (_) { /* defensive — bus failure must not break flush */ }
 }
 
 const _handler = {
@@ -115,11 +151,24 @@ export const Reactive = {
   /** Wrap an object in the reactive Proxy. Idempotent. */
   wrap(obj) { return _wrapObject(obj); },
 
-  /** Run `fn` without firing reactive notifications. Re-entrant. */
+  /** Run `fn` without firing reactive notifications. Re-entrant.
+   *
+   * V21 M (audit-2026-05-03 §B A7) — fix async-in-silent invariant.
+   * Раньше `Reactive.silent(async () => ...)` декрементировал depth
+   * синхронно (по возврату Promise), и async-работа летела ВНЕ silent
+   * guard'а — каждый mutation триггерил debounced flush. Теперь если
+   * `fn()` вернул thenable, держим depth до её resolve/reject.
+   */
   silent(fn) {
     _silentDepth++;
-    try { return fn(); }
-    finally { _silentDepth--; }
+    let r;
+    try { r = fn(); }
+    catch (e) { _silentDepth--; throw e; }
+    if (r && typeof r.then === 'function') {
+      return Promise.resolve(r).finally(() => { _silentDepth--; });
+    }
+    _silentDepth--;
+    return r;
   },
 
   /** Subscribe to "something changed". Returns an unsubscribe function. */
@@ -134,6 +183,14 @@ export const Reactive = {
   /** Cancel any pending debounce and fire subscribers now. */
   flushNow() { _flushNow(); },
 
+  /**
+   * V21 S (audit-2026-05-03 §D F5) — explicitly mark a mutation that
+   * Proxy не видит (Set/Map ops, manual reassign with reused reference,
+   * direct localStorage write that должен инвалидировать subs).
+   * Триггерит дебаунсный flush — те же субы как при обычной мутации.
+   */
+  notifyManual() { _markDirty(); },
+
   /** True if `obj` is currently a reactive Proxy. */
   isReactive(obj) { return !!(obj && obj[REACTIVE_MARK]); },
 
@@ -142,4 +199,5 @@ export const Reactive = {
   _subscriberCount: () => _subscribers.length,
 };
 
+Services.register('Reactive', Reactive);
 if (typeof window !== 'undefined') window.Reactive = Reactive;

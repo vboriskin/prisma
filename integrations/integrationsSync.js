@@ -277,13 +277,19 @@ export async function verifyConfluence() {
  * V20 S4 — Bulk identity resolver.
  *
  * Дёргает `/api/integrations/resolve-identities` с массивом
- * { key, email, fullname? }. Сервер параллельно (конкурентность 5)
+ * { key, email, fullname?, bbLogin? }. Сервер параллельно (конкурентность 12)
  * ищет каждого в BB и CF по email. Возвращает diff-readable массив,
  * который UI отрисует в preview-modal'е.
  *
+ * V22 — `bbLogin` передаётся (если есть) как hint для CF cascade fallback
+ * step #6: direct user-lookup `/rest/api/user?username=<bbLogin>`. На Сбер-
+ * стеке Stash и Confluence обычно живут на одном LDAP, т.е. bb-username
+ * совпадает с cf-username. Помогает там, где CQL/user-search закрыт
+ * scope'ом PAT, а direct user-lookup открыт.
+ *
  * Не мутирует state — это делает caller (через Reactive.silent).
  *
- * @param {Array<{key,email,fullname?}>} items
+ * @param {Array<{key,email,fullname?,bbLogin?}>} items
  * @returns {Promise<{ results, summary, error? }>}
  */
 export async function resolveIdentitiesByEmail(items) {
@@ -294,4 +300,57 @@ export async function resolveIdentitiesByEmail(items) {
   } catch (e) {
     return { results: [], summary: {}, error: e.message || 'сеть' };
   }
+}
+
+/**
+ * V22 B1+B2 — pure mapper: server `resolve-identities` response item →
+ * normalized identity-fields { bb, cf, jenkins } для записи в
+ * state.employees.
+ *
+ * Изолирован от UI/state — pure function чтобы покрыть юнит-тестом
+ * (response-shape volatility: BB Stash возвращает `slug`, CF DC ⇒ `username`,
+ * CF Cloud ⇒ `accountId`). Выносим один раз в одно место — снижает риск
+ * того, что drift в server-response сломает UI без fail'а в test'ах.
+ *
+ * Phase-2 (2026-05-10) — расширен `jenkins` (jenkinsUserName).
+ * Server отдаёт `r.jenkins = { ok, jenkinsUserName, fullName?, error? }`.
+ * Mapper нормализует к `{ ok, name, error }` чтобы UI не зависел от
+ * именования server-side.
+ *
+ * @param {object} r — единичный результат из resolve-identities (`results[i]`)
+ * @returns {{ bb: { ok: boolean, slug: string, error: string|null },
+ *             cf: { ok: boolean, accountId: string, error: string|null },
+ *             jenkins: { ok: boolean, name: string, error: string|null } }}
+ */
+export function mapResolveResultToIdentity(r) {
+  const bb = r?.bb || {};
+  const cf = r?.cf || {};
+  const jk = r?.jenkins || {};
+  return {
+    bb: {
+      ok:    !!bb.ok,
+      slug:  bb.ok ? String(bb.slug || bb.name || '') : '',
+      error: bb.ok ? null : (bb.error || 'не найден'),
+    },
+    cf: {
+      ok:        !!cf.ok,
+      // CF DC отдаёт `username` (LDAP-numeric), Cloud — `accountId`.
+      // Server уже нормализовал в `accountId`, но fallback на username
+      // оставлен на случай server-response drift.
+      accountId: cf.ok ? String(cf.accountId || cf.username || '') : '',
+      error:     cf.ok ? null : (cf.error || 'не найден'),
+      // 2026-05-11 — propagate ambiguousCandidates для preview-UI тёзок.
+      // Server возвращает массив `{ username, displayName }` когда найдено
+      // несколько user'ов с одинаковым ФИО. UI рендерит dropdown, юзер
+      // выбирает правильного, save проставляет username как cfAccountId.
+      ambiguousCandidates: Array.isArray(cf.ambiguousCandidates) ? cf.ambiguousCandidates : null,
+    },
+    jenkins: {
+      ok:    !!jk.ok,
+      // Server отдаёт `jenkinsUserName` (Jenkins user-id, обычно LDAP-numeric
+      // у Сбер-Jenkins). Fallback на `id` — если server-shape сменится.
+      name:  jk.ok ? String(jk.jenkinsUserName || jk.id || jk.name || '') : '',
+      error: jk.ok ? null : (jk.error || 'не найден'),
+    },
+  };
 }

@@ -859,3 +859,252 @@ describe('classifyPerson — V18.1 P3 blocker integration', () => {
     assert.equal(mod.classifyPerson(p), 'watch');
   });
 });
+
+/* ── V20 S10.1 — [X] deactivated filter ───────────────────── */
+
+describe('enrichForScanner2 — фильтр [X] заблокированных', () => {
+  function part(label, over = {}) {
+    return mk({ key: label.replace(/\W+/g, '_').toLowerCase(), label, ...over });
+  }
+
+  test('исключает базовый "Иванов И.И. [X]"', () => {
+    const model = { participants: [part('Иванов И.И. [X]'), part('Петров П.П.')] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 1);
+    assert.equal(model.participants[0].label, 'Петров П.П.');
+    assert.equal(model.deactivatedFilteredOut.length, 1);
+    assert.equal(model.deactivatedFilteredOut[0].label, 'Иванов И.И. [X]');
+  });
+
+  test('ловит кириллическую "х" и нижний регистр', () => {
+    const model = { participants: [
+      part('Сидоров [х]'),
+      part('Кузнецов [x]'),
+      part('Алексеев [Х]'),
+      part('Васильев'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 1);
+    assert.equal(model.participants[0].label, 'Васильев');
+    assert.equal(model.deactivatedFilteredOut.length, 3);
+  });
+
+  test('ловит full-width брэкеты ［X］ и 〔X〕', () => {
+    const model = { participants: [
+      part('Foo ［X］'),
+      part('Bar 〔X〕'),
+      part('Normal'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 1);
+    assert.equal(model.participants[0].label, 'Normal');
+  });
+
+  test('игнорирует trailing whitespace и пробелы внутри скобок', () => {
+    const model = { participants: [
+      part('Foo  [X]  '),
+      part('Bar [ X ]'),
+      part('Baz [X ]'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 0);
+    assert.equal(model.deactivatedFilteredOut.length, 3);
+  });
+
+  test('НЕ ловит [X-MAN], [XO], [X1] (X не последний символ внутри скобок)', () => {
+    const model = { participants: [
+      part('[X-MAN] Petr Ivanov'),
+      part('[XO] User'),
+      part('[X1] System'),
+      part('Petr [X-style]'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 4, 'все 4 должны остаться');
+    assert.equal(model.deactivatedFilteredOut.length, 0);
+  });
+
+  test('НЕ ловит [X] в начале или середине имени', () => {
+    const model = { participants: [
+      part('[X] Some Tool'),
+      part('User [X] Project'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 2, 'оба должны остаться (X не в конце)');
+  });
+
+  test('opts.includeDeactivated=true → не фильтровать', () => {
+    const model = { participants: [part('Иванов [X]'), part('Петров')] };
+    enrichForScanner2(model, null, { includeDeactivated: true });
+    assert.equal(model.participants.length, 2);
+    assert.equal(model.deactivatedFilteredOut.length, 0);
+  });
+
+  test('пустой/невалидный label не падает', () => {
+    const model = { participants: [
+      mk({ key: 'k1', label: '' }),
+      mk({ key: 'k2', label: null }),
+      mk({ key: 'k3' }), // no label at all
+      mk({ key: 'k4', label: 'Normal [X]' }),
+    ] };
+    assert.doesNotThrow(() => enrichForScanner2(model));
+    assert.equal(model.participants.length, 3);
+  });
+
+  test('проверяет также displayName / fullName / name fallback', () => {
+    const model = { participants: [
+      mk({ key: 'a', displayName: 'A [X]' }),
+      mk({ key: 'b', fullName:    'B [X]' }),
+      mk({ key: 'c', name:        'C [X]' }),
+      mk({ key: 'd', label:       'D' }),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 1);
+    assert.equal(model.participants[0].key, 'd');
+  });
+
+  test('S11.1 BUG-5: ловит расширенный суффикс «[X] (уволен 2025...)»', () => {
+    const model = { participants: [
+      part('Иванов И. [X] (уволен 2025-12-31)'),
+      part('Петров [X] (deactivated)'),
+      part('Сидоров [X] 2024'),
+      part('Кузнецов [X] - 31.12.2025'),
+      part('Алексеев'),
+    ] };
+    enrichForScanner2(model);
+    assert.equal(model.participants.length, 1, 'все 4 [X]-варианта должны быть отфильтрованы');
+    assert.equal(model.participants[0].label, 'Алексеев');
+    assert.equal(model.deactivatedFilteredOut.length, 4);
+  });
+
+  test('S11.1 BUG-5: НЕ ловит lookalikes («[X-MAN]», «User [X] manager»)', () => {
+    const model = { participants: [
+      part('[X-MAN] Petr'),         // X не одиночный
+      part('User [X] Senior Eng'),  // длинный текст после, не дата/parens
+    ] };
+    enrichForScanner2(model);
+    // Оба должны остаться (false-positive guard).
+    assert.equal(model.participants.length, 2);
+  });
+});
+
+/* ── V20 S10.6 — Active Sprint Only filter ────────────────── */
+
+describe('enrichForScanner2 — фильтр «только активный спринт»', () => {
+  function mkP(over = {}) {
+    return mk({
+      key: 'u1',
+      timelineToday:     [],
+      timelineYesterday: [],
+      bbItems:           [],
+      cfItems:           [],
+      zephyrTestsCreatedRecent:  [],
+      zephyrTestsExecutedRecent: [],
+      issuesNow:         [],
+      ...over,
+    });
+  }
+
+  test('opts.activeSprintOnly=true → фильтрует timelineToday по issue.key', () => {
+    const model = {
+      spaces: {
+        CORE: { sprintIssues: [{ key: 'CORE-1' }, { key: 'CORE-2' }] },
+      },
+      participants: [mkP({
+        timelineToday: [
+          { at: '2026-05-01T10:00:00Z', issue: { key: 'CORE-1' } }, // active
+          { at: '2026-05-01T11:00:00Z', issue: { key: 'CORE-99' } }, // backlog → out
+          { at: '2026-05-01T12:00:00Z', issue: { key: 'CORE-2' } }, // active
+        ],
+      })],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: true });
+    const p = model.participants[0];
+    assert.equal(p.timelineToday.length, 2);
+    assert.deepEqual(p.timelineToday.map(e => e.issue.key), ['CORE-1', 'CORE-2']);
+  });
+
+  test('фильтрует zephyr/issuesNow по issueKey; bbItems/cfItems НЕ фильтрует', () => {
+    // bbItems не фильтруются: коммиты из repo-walk не имеют issueKey,
+    // фильтрация создавала рассинхрон badge/items («Коммиты без транзишенов» + пустая модалка).
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-1' }] } },
+      participants: [mkP({
+        bbItems: [
+          { issueKey: 'CORE-1', kind: 'commit' },
+          { issueKey: 'CORE-99', kind: 'pr' },
+          { kind: 'commit' }, // сирота — без issueKey — теперь НЕ отбрасывается
+        ],
+        cfItems:           [{ issueKey: 'CORE-1' }, { issueKey: 'CORE-99' }],
+        zephyrTestsCreatedRecent:  [{ slim: { key: 'CORE-1' } }, { slim: { key: 'CORE-X' } }],
+        zephyrTestsExecutedRecent: [{ slim: { key: 'CORE-1' } }],
+        issuesNow:         [{ key: 'CORE-1' }, { key: 'CORE-99' }],
+      })],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: true });
+    const p = model.participants[0];
+    assert.equal(p.bbItems.length, 3, 'bbItems не фильтруются — все 3 сохраняются');
+    assert.equal(p.cfItems.length, 2, 'cfItems не фильтруются — все 2 сохраняются');
+    assert.equal(p.zephyrTestsCreatedRecent.length, 1);
+    assert.equal(p.zephyrTestsExecutedRecent.length, 1);
+    assert.equal(p.issuesNow.length, 1);
+  });
+
+  test('opts.activeSprintOnly=false (default) → не фильтрует', () => {
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-1' }] } },
+      participants: [mkP({
+        timelineToday: [
+          { issue: { key: 'CORE-1' } },
+          { issue: { key: 'CORE-99' } },
+        ],
+      })],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: false });
+    assert.equal(model.participants[0].timelineToday.length, 2);
+  });
+
+  test('fail-open: filter requested но spaces пустой → не фильтруем', () => {
+    const model = {
+      spaces: { CORE: { sprintIssues: [] } }, // нет активных спринтов
+      participants: [mkP({
+        timelineToday: [{ issue: { key: 'CORE-1' } }],
+      })],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: true });
+    assert.equal(model.participants[0].timelineToday.length, 1, 'fail-open');
+    assert.equal(model.scannerV2.activeSprintFilter.requested, true);
+    assert.equal(model.scannerV2.activeSprintFilter.applied,   false);
+  });
+
+  test('multi-pk: задача из CORE остаётся, задача из чужого pk вне спринта — отбрасывается', () => {
+    const model = {
+      spaces: {
+        CORE:  { sprintIssues: [{ key: 'CORE-1' }] },
+        SMECM: { sprintIssues: [{ key: 'SMECM-7' }] },
+      },
+      participants: [mkP({
+        timelineToday: [
+          { issue: { key: 'CORE-1' } },
+          { issue: { key: 'SMECM-7' } },
+          { issue: { key: 'CORE-99' } }, // backlog
+          { issue: { key: 'OTHER-1' } }, // не в спринтах
+        ],
+      })],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: true });
+    const keys = model.participants[0].timelineToday.map(e => e.issue.key).sort();
+    assert.deepEqual(keys, ['CORE-1', 'SMECM-7']);
+  });
+
+  test('заносит metadata в model.scannerV2.activeSprintFilter', () => {
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-1' }, { key: 'CORE-2' }] } },
+      participants: [mkP()],
+    };
+    enrichForScanner2(model, null, { activeSprintOnly: true });
+    const sf = model.scannerV2.activeSprintFilter;
+    assert.equal(sf.requested, true);
+    assert.equal(sf.applied,   true);
+    assert.equal(sf.sprintIssueKeyCount, 2);
+  });
+});

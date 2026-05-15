@@ -29,11 +29,24 @@ function keyForAuthor(name, email) {
   return String(name || email || '').trim().toLowerCase();
 }
 
+/**
+ * QD11: normalize-helper для email на server-side. Гарантирует что
+ * `authors[k].email` всегда lowercased — иначе client'у придётся каждый раз
+ * нормализовать при byEmail.get(), что хрупко.
+ */
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
 function redactSecretsInText(text, maxLen = 200) {
   return String(text == null ? '' : text).slice(0, maxLen)
     .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
     .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
-    .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
+    .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***')
+    // QD16: расширяем regex — у Sber Jira error-bodies содержат `userKey=`,
+    // `accountId=`, `username=` (внутренние идентификаторы), которые могут
+    // утечь в perPk.error в diagnostic'е через _scrubTokensOnly path.
+    .replace(/(userKey|accountId|username|userName|sessionId|cookieId|JSESSIONID)\s*[:=]\s*[^\s,;"&]+/gi, '$1: ***');
 }
 
-module.exports = { makeAuthHeader, keyForAuthor, redactSecretsInText };
+module.exports = { makeAuthHeader, keyForAuthor, redactSecretsInText, normalizeEmail };

@@ -15,11 +15,18 @@ export const INTENTS = {
   WHAT_RISKS:        'what_risks',
   OVERLOAD:          'overload',
   REVIEW_MODE:       'review_mode',
+  // V21 BK (audit-04 §H #1) — Scanner 2.0 интеграция в чат.
+  SCANNER_QUERY:     'scanner_query',
   // Operations
   BATCH_ACTION:      'batch_action',
   FIND_TASKS:        'find_tasks',
   EXPLAIN:           'explain',
   DAILY_REPORT:      'daily_report',
+  // V22 K-04 (audit-experts-2026-05-15 Zhuravlev killer #10) — Stand-up
+  // Generator: 60-секундный текст для тимлида: «вчера/сегодня/блокеры/не
+  // зашло». Rule-based, без LLM — мгновенно. Identity-deterministic resolve
+  // через state.employees + state.actionLog (что закрыто за вчера).
+  STAND_UP:          'stand_up',
   HISTORY:           'history',
   CLEAR_FILTERS:     'clear_filters',
   CONFIRM_BATCH:     'confirm_batch',
@@ -60,6 +67,33 @@ const RULES = [
     extract: (text) => {
       const m = text.match(/1\.(20|21|22)/);
       return { release: m ? `r1${m[1]}` : null };
+    },
+  },
+  // V21 BK (audit-04 §B + §H #1) — Scanner 2.0 query (people/team activity).
+  // Триггерится upon "сканнер", "что делал X", "1:1", "burnout", "off-hours",
+  // "blockers команды Y" — основные scanner-driven queries.
+  {
+    intent: INTENTS.SCANNER_QUERY,
+    patterns: [
+      /сканнер|scanner|sсаннер/i,
+      /что\s+делал[аи]?\s+\S+/i,
+      /как\s+у\s+(тебя|него|неё|нас|команд)/i,
+      /1:1|one.on.one/i,
+      /burnout|выгоран|after.hours|off.hours/i,
+      /(нагрузк|перегруз|загрузк).{0,20}(\S+)/i,
+      /активность\s+\S+/i,
+      /(blocker|блокер).{0,30}команд/i,
+      /кто\s+(пишет|коммит|ревьюит)/i,
+      /топ.{0,10}(reviewer|ревьюер|коммитер)/i,
+    ],
+    extract: (text) => {
+      // Try extract person name (capitalised or "@something") for narrowing.
+      const m = text.match(/\b([А-ЯA-Z][а-яa-z]+(?:\s+[А-ЯA-Z][а-яa-z]+)?)\b/);
+      const ofTeam = text.match(/команд[ыеуа]\s+([A-Za-zЀ-ӿ]+)/i);
+      return {
+        person: m ? m[1] : null,
+        team:   ofTeam ? ofTeam[1] : null,
+      };
     },
   },
   // Release overview
@@ -344,6 +378,29 @@ const RULES = [
     extract: () => ({}),
   },
 
+  // ── STAND-UP (V22 K-04 audit Zhuravlev killer #10) ──
+  // Тимлид утром нажимает «Stand-up» и получает: «Вчера закрыто N (A,B,C).
+  // Сегодня в работе M. Блокеры: X (wait integration), Y (needs review).
+  // Не зашло: Z (отложен на 1.22)». Заменяет 15-минутный standup на 2 минуты.
+  {
+    intent: INTENTS.STAND_UP,
+    patterns: [
+      /stand[\s-]?up/i,
+      /стенд[\s-]?ап/i,
+      /стендап/i,
+      /планёрк[аи]/i,
+      /планерк[аи]/i,
+      /утренн\w+\s+(планёр|летучк|обход)/i,
+      /летучк[аи]/i,
+      /^что\s+(сегодня|на\s+сегодня|у\s+нас)\??$/i,
+    ],
+    extract: (text) => {
+      // Если упомянута команда — извлекаем для targeted stand-up.
+      const teamM = text.match(/команд[аыу]?\s+[«"']?([А-ЯЁA-Z][а-яёa-zA-Z0-9_-]+)[»"']?/i);
+      return teamM ? { team: teamM[1].trim() } : {};
+    },
+  },
+
   // ── HISTORY ──
   {
     intent: INTENTS.HISTORY,
@@ -395,15 +452,31 @@ const RULES = [
  * @param {string} text
  * @returns {{ intent: string, confidence: number, params: object }}
  */
+// L12 fix (chat-01 audit): per-rule confidence based on match-quality —
+// длина матча относительно длины запроса + бонус за literal-anchors
+// («сводка», «ceo», «релиз»). При confidence<0.6 диспетчер должен
+// fallback в LLM-маршрут (см. chatEngine.js).
+function _scoreMatch(text, match) {
+  if (!match) return 0;
+  const matched = match[0] || '';
+  const ratio = Math.min(1, matched.length / Math.max(8, text.length));
+  // Базовый score 0.55-0.95 в зависимости от ratio.
+  let score = 0.55 + ratio * 0.4;
+  // Бонус за literal anchor (без regex-метасимволов в матче, длина >=4).
+  if (/^[\p{L}\d\s.-]{4,}$/u.test(matched.trim())) score += 0.05;
+  return Math.min(0.95, Math.round(score * 100) / 100);
+}
+
 export function parseIntent(text) {
   if (!text || typeof text !== 'string') return { intent: INTENTS.GENERIC, confidence: 0, params: {} };
   const t = text.trim();
   for (const rule of RULES) {
     for (const pattern of rule.patterns) {
-      if (pattern.test(t)) {
+      const m = t.match(pattern);
+      if (m) {
         return {
           intent: rule.intent,
-          confidence: 0.85,
+          confidence: _scoreMatch(t, m),
           params: rule.extract ? rule.extract(t) : {},
         };
       }
@@ -432,6 +505,7 @@ export function isRuleBased(intent) {
     INTENTS.FIND_TASKS,
     INTENTS.EXPLAIN,
     INTENTS.DAILY_REPORT,
+    INTENTS.STAND_UP,        // V22 K-04 — rule-based, мгновенный
     INTENTS.HISTORY,
     INTENTS.CLEAR_FILTERS,
     INTENTS.CONFIRM_BATCH,
@@ -471,6 +545,7 @@ const INTENT_TO_CATEGORY = {
   [INTENTS.MEETING_PREP]:      'report',
   [INTENTS.RELEASE_NOTES]:     'report',
   [INTENTS.DAILY_REPORT]:      'report',
+  [INTENTS.STAND_UP]:          'report',   // V22 K-04
   [INTENTS.GENERIC]:           null,   // fall through to free-text rules
 };
 

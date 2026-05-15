@@ -38,13 +38,28 @@ export function analyseBlackDashboard(raw) {
   // Coverage bars per team — sorted by pct desc, total desc as tiebreak.
   // V13 (15th pass): pass `excluded` through so the renderer can show why
   // some teams are 0/0 (everything got excluded by typed rules).
+  //
+  // Supplement each team with `linkedFromGoals` — count of issues that appear
+  // in goals[].linkedIssues with matching pk (Sigma-side path, independent of
+  // Delta scan). When total=0 (Delta scan missed the team) but goals show tasks
+  // from it, `linkedFromGoals > 0` lets the renderer explain the discrepancy
+  // instead of showing a misleading bare "0/0".
+  const _linkedFromGoalsByPk = {};
+  for (const g of out.goals) {
+    for (const li of (g.linkedIssues || [])) {
+      if (li.notFound) continue;
+      const pk = li.pk || ((li.key || '').split('-')[0] || '—');
+      _linkedFromGoalsByPk[pk] = (_linkedFromGoalsByPk[pk] || 0) + 1;
+    }
+  }
   out.coverageByTeam = out.teamIssues.map(t => ({
-    pk:       t.pk,
-    name:     t.name,
-    total:    t.total,
-    linked:   t.linked,
-    excluded: t.excluded || 0,
-    pct:      t.total ? Math.round((t.linked / t.total) * 100) : 0,
+    pk:             t.pk,
+    name:           t.name,
+    total:          t.total,
+    linked:         t.linked,
+    excluded:       t.excluded || 0,
+    pct:            t.total ? Math.round((t.linked / t.total) * 100) : 0,
+    linkedFromGoals: _linkedFromGoalsByPk[t.pk] || 0,
   })).sort((a, b) => (b.pct - a.pct) || (b.total - a.total));
 
   // Metrics buckets for the «📈 Метрики» tab.

@@ -14,8 +14,13 @@ export const FilterEngine = {
     const roleKey = Array.isArray(f.role) ? f.role.join('|') : (f.role || '');
     const assigneeKey = Array.isArray(f.assignee) ? f.assignee.join('|') : (f.assignee || '');
     const tagKey = Array.isArray(f.tag) ? f.tag.join('|') : (f.tag || '');
+    // F12 fix (codebase-01 audit) — раньше cache_hash зависел от _dataVersion;
+    // если subscriber пропускал invalidate (re-entry guard в app.js:2065),
+    // кэш оставался stale. Добавили `state.rows.length` как fallback fingerprint:
+    // CRUD-операция меняет длину → cache miss даже без _dataVersion bump.
     return [
       state._dataVersion,
+      state.rows.length,
       f.search || '',
       f.team || '',
       f.scope || '',
@@ -101,11 +106,9 @@ export const FilterEngine = {
     state.employees.forEach(e=>{ if(e.fio) s.add(String(e.fio).trim()); });
     return [...s].sort((a,b)=>a.localeCompare(b,'ru'));
   },
-  // V17 P10 (designer §1 + sys-analyst §2) — count of currently active filters
-  // for the topbar badge. Multi-value filters (role/assignee/tag arrays) count
-  // once each regardless of how many values are selected; the badge means
-  // «N filter dimensions are constraining the view» not «N tokens». Used by
-  // App.refreshFilterCountBadge().
+  // V17 P10 / V22 fix (2026-05-10) — counter показывает ЧИСЛО ВЫБРАННЫХ
+  // ЗНАЧЕНИЙ, а не dimensions. Раньше: assignee=[A,B,C] → 1; теперь → 3.
+  // Совпадает с user mental model «1 в badge = 1 выбранный фильтр».
   getActiveCount() {
     const f = state.filters || {};
     let n = 0;
@@ -114,9 +117,9 @@ export const FilterEngine = {
     if (f.scope) n++;
     if (f.release) n++;
     if (f.workType) n++;
-    if (Array.isArray(f.role) ? f.role.length : f.role) n++;
-    if (Array.isArray(f.assignee) ? f.assignee.length : f.assignee) n++;
-    if (Array.isArray(f.tag) ? f.tag.length : f.tag) n++;
+    n += Array.isArray(f.role)     ? f.role.length     : (f.role     ? 1 : 0);
+    n += Array.isArray(f.assignee) ? f.assignee.length : (f.assignee ? 1 : 0);
+    n += Array.isArray(f.tag)      ? f.tag.length      : (f.tag      ? 1 : 0);
     if (f.onlyBlocking) n++;
     if (f.onlyRisky) n++;
     if (f.onlyDone) n++;

@@ -1,5 +1,10 @@
 'use strict';
 /* ============================================================
+   V18 O2 (AUDIT_HOLISTIC O2): Этот модуль обёрнут в `sqlite` backend
+   в `app/storage/StorageRouter.js`. Wrapper нормализует API под
+   StorageInterface (save/load/clear/keys/ready). Прямые вызовы
+   `SQLiteStore.saveRows / getRows` остаются доступны для legacy кода.
+
    SQLite Storage Layer — v11 (experimental, opt-in)
 
    Wraps sql.js (WASM-compiled SQLite). Persists database dumps
@@ -27,6 +32,8 @@
      SQLiteStore.size()                  → number  (bytes of current dump)
      SQLiteStore.runRaw(sql, params?)    → array of objects (debug)
    ============================================================ */
+
+import { Services } from './app/services.js';
 
 const IDB_NAME    = 'q2_sqlite_v1';
 const IDB_STORE   = 'dump';
@@ -548,4 +555,5 @@ export const SQLiteStore = {
   },
 };
 
+Services.register('SQLiteStore', SQLiteStore);
 if (typeof window !== 'undefined') window.SQLiteStore = SQLiteStore;

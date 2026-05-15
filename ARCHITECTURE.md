@@ -1,7 +1,30 @@
-# СБОФ Планировщик — Architecture
+# ARCHITECTURE.md (last full audit: V22 — partial AUDIT_ARCHITECTURE 2026-05-08)
 
-> Текущая версия: **V17.2** (2026-05-01). История V11→V17.2: [`docs/version-history.md`](./docs/version-history.md).
+> **AUDIT_ARCHITECTURE #1 / #3 (2026-05-08):** документ актуализирован. Полный
+> draft replacement лежит в `AUDIT_ARCHITECTURE.md` § Часть Г (готов к копи-пасту).
+> Здесь — только критичные расхождения с реальным кодом исправлены:
+>
+> - **Reactive debounce = 200 ms** (было «100 ms» — устарело после P6 fix)
+> - **server.js = 6486 LOC** (CLAUDE.md говорил «~2.5k» — устарело)
+> - **`BulkEditPanel` вынесен** в `app/bulkEditPanel.js` (V18.1 P9)
+> - **`ALL_LOCALSTORAGE_KEYS` в `constants.js`** — единый реестр localStorage ключей (AUDIT_ARCHITECTURE #21/#22)
+> - **`app/migrations.js`** (V21 W versioned migration runner) подключён
+> - **`server/logger.js`** NDJSON structured logger (V19 E4)
+> - **`pulse/index.js` facade** (V19 D3) — для всех импортов из integrations/
+> - **4-й контракт: Auto-rerender grace 250 ms** (`_AUTO_RERENDER_GRACE_MS`)
+> - **Async-job pattern** теперь используется И для Pulse, И для BlackDashboard (V18 P7) — не «только blackDashboard» как написано ниже
+> - **Operational endpoints** `/health`, `/ready`, `/metrics`, `/metrics/prom` (`server.js:6240+`)
+> - **Cross-tab sync** через `storage` event listener (`app.js:2127`)
+>
+> **Stale-секции помечены ниже** `> **STALE — нуждается в обновлении (V21+)**`.
+>
+> Текущая активная итерация: **V22** (mascot-pass + scanner consolidation).
+> Последний holistic-пасс: [`AUDIT_HOLISTIC.md`](./AUDIT_HOLISTIC.md) (2026-05-07).
+>
+> История V11→V17.2: [`docs/version-history.md`](./docs/version-history.md).
 > LLM-агенту читать сначала [`CLAUDE.md`](./CLAUDE.md), потом этот файл.
+> Каноническая навигация по docs/: [`docs/README.md`](./docs/README.md).
+> Индекс audit-папок: [`docs/audits-index.md`](./docs/audits-index.md).
 
 ## Overview
 
@@ -35,7 +58,7 @@
 | XLSX | `libs/xlsx.full.min.js` (vendored, ~930 KB) |
 | SQLite | `libs/sql-wasm.js` + `sql-wasm.wasm` (vendored, ~50 + 660 KB) |
 | Type checking | JSDoc + `tsc --checkJs` (opt-in per file через `// @ts-check`) |
-| Tests | `node:test` (unit + contract) + samописный testRunner для legacy assertions |
+| Tests | `node:test` (unit + contract) + самописный testRunner для legacy assertions (V18 P12 — план retire'а testRunner). Базы: ~534 unit / 11 contract / 10 e2e. |
 
 ## High-level data flow
 
@@ -196,6 +219,12 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 
 ## Decomposition status (V17)
 
+> **STALE — нуждается в обновлении (V21+).** V18 продолжил decomposition
+> (`audit-2026-05-V18/09-app-decomposition.md`, `10-server-decomposition.md`).
+> Текущие LOC: `app.js` 2.2k, `server.js` 6.6k, `styles.css` 20k, `index.html`
+> 1.7k. Полный список под-модулей `app/*` шире, чем таблица ниже. Точный
+> срез — `wc -l app.js server.js styles.css` + `ls app/`.
+
 `app.js` исторически monolith. Постепенное вынесение:
 
 | Подмодуль | Где живёт |
@@ -213,6 +242,10 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 См. также `audit-2026-04-30/04-architecture-decomposition.md` (ADR).
 
 ## Что retired
+
+> **STALE — нуждается в обновлении (V21+).** Не отражены retired-эпохи
+> V18+ (legacy testRunner частично, V20 fuzzy-name-fallback в Сканнере,
+> 20 funny-loader phrases — кандидаты на удаление по AUDIT_HOLISTIC §6).
 
 | V-версия | Что retired |
 |---|---|

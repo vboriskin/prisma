@@ -21,6 +21,50 @@ let _welcomeHandledRestore = false;
 
 export function welcomeHandledRestore() { return _welcomeHandledRestore; }
 
+/* ── V21 R (audit-2026-05-03 §C B10) per-user rate-limit ── */
+// Стабильный per-tab UUID, который сервер использует как rate-limit
+// бакет вместо чистого IP. За корпоративным NAT это распутывает
+// «один юзер забил квоту на всех». Хранится в localStorage чтобы
+// перезагрузка вкладки не сбрасывала идентичность; в private-tab
+// фолбэк на crypto.randomUUID() per session.
+const CLIENT_ID_KEY = 'sbof_client_id';
+function _ensureClientId() {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_KEY);
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : (Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+      localStorage.setItem(CLIENT_ID_KEY, id);
+    }
+    return id;
+  } catch (_) {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+  }
+}
+const _CLIENT_ID = (typeof window !== 'undefined') ? _ensureClientId() : '';
+
+// Patch global fetch ОДИН раз: для same-origin `/api/*` запросов
+// добавляем X-Client-Id. На остальных запросах — pass-through.
+// Не мешает caller'у задавать свой headers — Headers объект мерж'им.
+if (typeof window !== 'undefined' && typeof fetch === 'function' && !fetch.__sbofPatched) {
+  const _origFetch = fetch.bind(window);
+  const patched = function (input, init = {}) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const isApi = url.startsWith('/api/') || url.startsWith(`${location.origin}/api/`);
+      if (isApi) {
+        const h = new Headers(init.headers || (input && input.headers) || {});
+        if (!h.has('X-Client-Id')) h.set('X-Client-Id', _CLIENT_ID);
+        init = { ...init, headers: h };
+      }
+    } catch (_) {}
+    return _origFetch(input, init);
+  };
+  patched.__sbofPatched = true;
+  window.fetch = patched;
+}
+
 /**
  * @param {object} deps
  * @param {object} deps.Storage

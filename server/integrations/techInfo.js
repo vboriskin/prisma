@@ -117,10 +117,14 @@ function createTechInfo(deps) {
     if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) throw new Error('Bitbucket не настроен');
     const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
     const auth = makeBasicAuthHeader(cfg.bitbucketToken);
+    // V21 Y2 — useCache:false: techInfo держит собственный 10-мин cache на верхнем
+    // уровне (forceRefresh эту cache сбрасывает). Если бы ниже jiraForward тоже
+    // кэшировал — forceRefresh на верхнем не пробивал бы до сети, контракт сломан.
     const r = await jiraForward({
       targetUrl: base + urlPath, method: 'GET',
       headers: { Authorization: auth },
       allowInsecureTls: tls, timeoutMs: TECH_INFO_TIMEOUT_MS,
+      useCache: false,
     });
     if (r.status < 200 || r.status >= 300) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
     try { return JSON.parse(r.text); } catch { throw new Error('Bitbucket: невалидный JSON'); }
@@ -135,6 +139,7 @@ function createTechInfo(deps) {
       targetUrl: base + urlPath, method: 'GET',
       headers: { Authorization: auth },
       allowInsecureTls: tls, timeoutMs: TECH_INFO_TIMEOUT_MS,
+      useCache: false,
     });
     if (r.status < 200 || r.status >= 300) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
     try { return JSON.parse(r.text); } catch { throw new Error('Confluence: невалидный JSON'); }

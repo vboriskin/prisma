@@ -10,12 +10,25 @@ import { FilterEngine } from './filters.js';
 import { Utils, nextId } from './utils.js';
 import { STORAGE_KEY, STORAGE_KEYS, SETTINGS_KEY, SETTINGS_KEYS } from './constants.js';
 import { Reactive } from './reactiveStore.js';
+// V22 (AUDIT_HOLISTIC паттерн 17 / Идея 15) — cross-tab notify после save.
+// `notifyChange` no-op до `CrossTabSync.init()` (вызывается из app.js на
+// DOMContentLoaded), поэтому импорт безопасен и не создаёт side-effects.
+import { CrossTabSync } from './app/crossTabSync.js';
+import { Services } from './app/services.js';
 
 // ============================================================
 // LOCAL STORAGE
 // ============================================================
 
 /**
+ * V18 O2 (AUDIT_HOLISTIC O2) — `Storage` участвует в семействе backend'ов
+ * `app/storage/StorageRouter.js`. Контракт `Storage.save() / load() / clear()`
+ * предоставляет localStorage-канал; обёртка `localBackend` в StorageRouter
+ * нормализует API под `StorageInterface` (см. app/storage/StorageInterface.js).
+ *
+ * НЕ менять сигнатуру `Storage.save()` — это публичный контракт V15+,
+ * вызывается из 100+ мест.
+ *
  * V15 (audit #1, system analyst Critical 1 + fullstack Medium 3) — single
  * source of truth for the SETTINGS_KEY payload shape. Both `Storage.save()`
  * (debounced) and `Storage.flushNow()` (synchronous) MUST use this exact
@@ -39,7 +52,7 @@ function _buildSettingsPayload() {
     ganttMode:        state.ganttMode,
     ganttEpicsWell:   state.ganttEpicsWell,
     podlozhkaMode:    state.podlozhkaMode,
-    summaryMode:      state.summaryMode,
+    // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped: см. state.js + app/migrations.js
     presetsCollapsed: state.presetsCollapsed,
     theme:            state.theme,
     // V14: gantt2* retired (B2 in V14 changelog)
@@ -47,7 +60,31 @@ function _buildSettingsPayload() {
     // that omitting these from save() left them un-persisted across F5.
     planLocked:       state.planLocked,
     ganttEditMode:    state.ganttEditMode,
+    // AUDIT_HOLISTIC F4 — единый центр уведомлений (app/notifyCenter.js).
+    // Persistent FIFO 100, чистится по age 30d при добавлении.
+    notifications:    Array.isArray(state.notifications) ? state.notifications : [],
+    // AUDIT_HOLISTIC P3 + Идея 1 — `state.meta` (user / permissions /
+    // featureFlags / version / lastSeenVersion / lastActiveAt / focus).
+    // См. state.js + app/migrations.js (q2_settings_v3 2→3).
+    meta:             state.meta,
+    // V21 W — settings payload version. Используется Migrations runner для
+    // последовательного up-migrate. Прежний payload не имел version (== 0);
+    // миграция 0→1 стрипает summaryMode (AUDIT_HOLISTIC O3).
+    // 1→2 — добавлено поле notifications (F4 Notification Center).
+    // 2→3 — добавлено поле meta (P3 + Идея 1: user/permissions/flags).
+    version:          3,
   };
+}
+
+// V21 Q (audit-2026-05-03 §H Top-15 #14) — dirty-indicator. Topbar Save
+// button показывает dot пока Storage._t (debounce timer) активен → юзер
+// видит «сохранение pending» вместо догадок. На flushNow / setTimeout
+// finally — гасим.
+function _setDirtyDot(visible) {
+  if (typeof document === 'undefined') return;
+  const dot = document.getElementById('btn-save-dirty-dot');
+  if (!dot) return;
+  dot.classList.toggle('hidden', !visible);
 }
 
 export const Storage = {
@@ -57,6 +94,7 @@ export const Storage = {
     // Bumping the data-version is internal book-keeping; don't let it
     // re-trigger the reactive flush we're already inside.
     Reactive.silent(() => { state._dataVersion++; });
+    _setDirtyDot(true);
     Storage._t=setTimeout(()=>{
       // CRITICAL: the entire body MUST run inside Reactive.silent. Without this,
       // `syncColumnSettings()` rewrites `state.colOrder/colWidths/colVisibility/…`
@@ -74,16 +112,32 @@ export const Storage = {
         // V11: also mirror rows into SQLite when the user enabled that mode.
         // SQLite path is async / debounced internally; we just hand off and forget.
         try {
-          if (window.AppDataStore && window.AppDataStore.mode === 'sqlite') {
-            window.AppDataStore.saveRows(state.rows);
+          if (Services.AppDataStore && Services.AppDataStore.mode === 'sqlite') {
+            Services.AppDataStore.saveRows(state.rows);
           }
         } catch(_) { /* never let storage mirror break the app */ }
-        try {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify(_buildSettingsPayload()));
-        } catch(e){
-          if (e && e.name === 'QuotaExceededError') window.showToast?.('Не удалось сохранить настройки: переполнен localStorage', 'error', 4200);
+        // F11 fix (codebase-01 audit) — settings setItem отдельно через
+        // requestIdleCallback. Это не критичные данные (col-order, theme),
+        // их потеря на F5 в худшем случае откатит UI-state, не данные.
+        // Перенос снимает 50-200ms блок main thread в hot-path Storage.save.
+        const settingsWrite = () => {
+          try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(_buildSettingsPayload()));
+          } catch(e){
+            if (e && e.name === 'QuotaExceededError') window.showToast?.('Курс не сверен · переполнено локальное хранилище', 'error', 4200);
+          }
+        };
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(settingsWrite, { timeout: 1500 });
+        } else {
+          settingsWrite();
         }
       });
+      Storage._t = null;
+      _setDirtyDot(false);
+      // V22 (AUDIT_HOLISTIC паттерн 17) — cross-tab broadcast.
+      // notifyChange — fire-and-forget, не throw'ает; никаких prerequisites.
+      try { CrossTabSync.notifyChange('state'); } catch (_) { /* defensive */ }
     },400);
   },
   saveSetting(k,v) { state[k]=v; Storage.save(); },
@@ -97,6 +151,7 @@ export const Storage = {
     if (!Storage._t) return;
     clearTimeout(Storage._t);
     Storage._t = null;
+    _setDirtyDot(false);
     Reactive.silent(() => {
       try {
         syncColumnSettings();
@@ -105,23 +160,59 @@ export const Storage = {
         if (e && e.name === 'QuotaExceededError') window.showToast?.('Память браузера заполнена — экспортируйте данные в CSV', 'error', 4200);
       }
       try {
-        if (window.AppDataStore && window.AppDataStore.mode === 'sqlite') {
-          window.AppDataStore.saveRows(state.rows);
+        if (Services.AppDataStore && Services.AppDataStore.mode === 'sqlite') {
+          Services.AppDataStore.saveRows(state.rows);
         }
       } catch(_) { /* mirror is best-effort */ }
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(_buildSettingsPayload()));
-      } catch(_) { /* settings save is best-effort */ }
+      } catch(e) {
+        // V21 J #68 — не молчим при quota exceeded в flushNow path.
+        if (e && e.name === 'QuotaExceededError') {
+          window.showToast?.('Курс не сверен · переполнено локальное хранилище', 'error', 4200);
+        }
+      }
     });
+    // V22 (AUDIT_HOLISTIC паттерн 17) — cross-tab broadcast после flushNow тоже.
+    try { CrossTabSync.notifyChange('state'); } catch (_) { /* defensive */ }
   },
   load() {
+    // V21 J #61+#78 — Не молчим при corrupt JSON: пишем в errorsLog +
+    // отдаём индикатор `_corrupted` чтобы caller мог показать toast.
+    // Защищаемся от ситуации «какой-то ключ битый, но другой ОК» — данные
+    // не теряем, но факт corruption фиксируем.
+    let firstCorruption = null;
     for (const key of STORAGE_KEYS) {
       try {
         const raw=localStorage.getItem(key);
         if (!raw) continue;
         const parsed=JSON.parse(raw);
         if (parsed && Array.isArray(parsed.rows)) return parsed;
-      } catch(e){}
+      } catch(e){
+        if (!firstCorruption) firstCorruption = { key, msg: String(e?.message || e).slice(0, 120) };
+      }
+    }
+    if (firstCorruption) {
+      try {
+        if (typeof ErrorsLog !== 'undefined' && ErrorsLog?.add) {
+          // V21 — fix позиционного вызова. ErrorsLog.add ждёт object-form
+          // `{ level, source, message, details? }`. Раньше передавалось
+          // позиционно ('warn', 'msg', {...}) и в журнал писался
+          // `{level:'error', source:'unknown', message:'undefined'}`,
+          // т.е. corruption-warning терялся (audit-2026-05-04 § functional #1).
+          ErrorsLog.add({
+            level:   'warn',
+            source:  'dataStore.load',
+            message: `Хранилище: повреждены данные в ключе ${firstCorruption.key}. Использован пустой план.`,
+            details: { key: firstCorruption.key, msg: firstCorruption.msg },
+          });
+        }
+        // AUDIT_HOLISTIC Идея 14 — Toast.warn (canonical), back-compat на showToast.
+        if (typeof window !== 'undefined') {
+          if (Services.Toast?.warn) Services.Toast.warn('Часть данных повреждена и была сброшена. См. журнал ошибок.');
+          else window.showToast?.('Часть данных повреждена и была сброшена. См. журнал ошибок.', 'warning');
+        }
+      } catch (_) { /* defensive */ }
     }
     return null;
   },
@@ -152,7 +243,7 @@ export const Storage = {
       if (s.ganttMode) state.ganttMode=s.ganttMode;
       if (s.ganttEpicsWell) state.ganttEpicsWell=s.ganttEpicsWell;
       if (s.podlozhkaMode) state.podlozhkaMode=s.podlozhkaMode;
-      if (s.summaryMode) state.summaryMode=s.summaryMode;
+      // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped (см. app/migrations.js).
       if (Object.prototype.hasOwnProperty.call(s,'presetsCollapsed')) state.presetsCollapsed=s.presetsCollapsed;
       if (s.theme) state.theme=s.theme;
       // V14: gantt2* state retired with GanttV2; old persisted entries silently
@@ -160,6 +251,36 @@ export const Storage = {
       // V14 (B3 + B4): plan-lock and gantt edit-mode state.
       if (Object.prototype.hasOwnProperty.call(s,'planLocked'))   state.planLocked    = s.planLocked || null;
       if (Object.prototype.hasOwnProperty.call(s,'ganttEditMode')) state.ganttEditMode = !!s.ganttEditMode;
+      // AUDIT_HOLISTIC F4 — Notification Center: hydrate из SETTINGS_KEY.
+      if (Array.isArray(s.notifications)) state.notifications = s.notifications;
+      // AUDIT_HOLISTIC P3 + Идея 1 — hydrate `state.meta`. Глубокий merge
+      // с дефолтами из state.js: legacy payload без `meta` оставит
+      // дефолтную форму нетронутой; payload с частичным `meta` (только
+      // user) — заполняет user, остальное defaults.
+      if (s.meta && typeof s.meta === 'object') {
+        const m = s.meta;
+        if (m.user && typeof m.user === 'object') {
+          if (typeof m.user.email  === 'string') state.meta.user.email  = m.user.email;
+          if (typeof m.user.name   === 'string') state.meta.user.name   = m.user.name;
+          if (typeof m.user.avatar === 'string') state.meta.user.avatar = m.user.avatar;
+        }
+        if (m.permissions && typeof m.permissions === 'object') {
+          for (const [k, v] of Object.entries(m.permissions)) {
+            if (typeof v === 'boolean') state.meta.permissions[k] = v;
+          }
+        }
+        if (m.featureFlags && typeof m.featureFlags === 'object') {
+          for (const [k, v] of Object.entries(m.featureFlags)) {
+            if (typeof v === 'boolean') state.meta.featureFlags[k] = v;
+          }
+        }
+        if (typeof m.version         === 'string') state.meta.version         = m.version;
+        if (typeof m.lastSeenVersion === 'string') state.meta.lastSeenVersion = m.lastSeenVersion;
+        if (m.lastActiveAt == null || typeof m.lastActiveAt === 'string' || typeof m.lastActiveAt === 'number') {
+          state.meta.lastActiveAt = m.lastActiveAt;
+        }
+        if (m.focus == null || (typeof m.focus === 'object')) state.meta.focus = m.focus;
+      }
       syncColumnSettings();
     });
   },
@@ -222,30 +343,34 @@ export const CSV = {
   BUNDLE_MARKER:    '__Q2BUNDLE__',
   EMPLOYEES_MARKER: '__Q2EMPLOYEES__',     // V14 (A3) — employees inlined as JSON
 
-  // V17 P2 (CRIT-1) — token leak fix: `q2_integrations_v1` REMOVED from
-  // export-bundle. That key holds raw Jira / Bitbucket / Confluence /
-  // Sigma tokens — exporting it as part of CSV/JSON snapshot leaked
-  // them plain-text to anyone the user shared the file with. Import
-  // path was already gated by allowlist; export path was not. Audit
-  // 2026-05 (system analyst, S1).
-  // V17.1 F1 — добавили `q2_integrations_v1` обратно в экспорт. CRIT-1
-  //   beat-down (token leak) полагается на `_scrubSecrets`, который вырезает
-  //   token / authKey / apiKey / password / secret / bearer на любой глубине
-  //   включая сами интеграционные настройки. Project keys / base URLs /
-  //   feature toggles теперь round-trip'ятся в JSON без секретов.
+  // V17 P2 → V17.1 F1 → V21+ — история token-leak фикса.
+  // Текущее решение (по запросу пилот-юзера): токены интеграций и LLM
+  // СОХРАНЯЮТСЯ в bundle при экспорте, чтобы тимлид не вводил их заново
+  // на каждом import. Остальные ключи (chat history, action log, etc.)
+  // продолжают scrub'иться через `_scrubSecrets`.
+  //
+  // ⚠ ВАЖНО: bundle с токенами — это личный backup. Не расшаривать!
+  // UI должен показать warning при export'е (см. _buildSettingsBundle).
   STORAGE_KEYS_FOR_EXPORT: [
     'q2_settings_v3',           // SETTINGS_KEY
-    'q2_llm_settings_v1',       // LLM_SETTINGS_KEY (token field is scrubbed)
-    'q2_integrations_v1',       // V17.1 F1 — restored, secrets are scrubbed
+    'q2_llm_settings_v1',       // LLM_SETTINGS_KEY — токены сохраняются
+    'q2_integrations_v1',       // токены интеграций сохраняются
     'q2_onboarding_v1',         // OB_KEY
     'sbof_app_settings_v1',     // APP_SETTINGS_KEY
-    'q2_llm_conv_v1',           // LLMAssistant.CONV_KEY (chat history)
-    'q2_action_log_v1',         // audit log
+    'q2_llm_conv_v1',           // LLMAssistant.CONV_KEY (chat history) — scrub'ится
+    'q2_action_log_v1',         // audit log — scrub'ится
   ],
 
-  // Defence-in-depth: when any key surfaces in `STORAGE_KEYS_FOR_EXPORT`
-  // we still scrub fields with these names before serialising. Catches
-  // future regressions if a new key with embedded tokens is added.
+  // Ключи где scrub НЕ применяется (токены сохраняются для personal backup).
+  // Если пользователь делится файлом — он осознанно делится credentials.
+  KEYS_PRESERVE_SECRETS: [
+    'q2_integrations_v1',       // jiraToken, sigmaJiraToken, bitbucketToken, confluenceToken
+    'q2_llm_settings_v1',       // GigaChat token, clientId, clientSecret
+  ],
+
+  // Defence-in-depth: scrub применяется только к ключам ВНЕ KEYS_PRESERVE_SECRETS.
+  // Защищает от утечки через chat-history / action-log, где token-shaped строки
+  // могут оказаться случайно (например, юзер вставил Bearer в чат).
   _SECRET_FIELD_NAMES: [
     'token', 'jiratoken', 'bitbuckettoken', 'confluencetoken', 'sigmatoken',
     'gigachatauthkey', 'authkey', 'apikey', 'password', 'secret', 'bearer',
@@ -269,7 +394,8 @@ export const CSV = {
       pinnedCols:state.pinnedCols, rowHeight:state.rowHeight, colLabels:state.colLabels,
       customCols:state.customCols, colTypes:state.colTypes, epicDeps:state.epicDeps,
       ganttMode:state.ganttMode, ganttEpicsWell:state.ganttEpicsWell,
-      podlozhkaMode:state.podlozhkaMode, summaryMode:state.summaryMode, presetsCollapsed:state.presetsCollapsed,
+      // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped.
+      podlozhkaMode:state.podlozhkaMode, presetsCollapsed:state.presetsCollapsed,
       theme:state.theme,
       // V14: gantt2* fields retired (B2)
       simMode:state.simMode, sidebarCollapsed:state.sidebarCollapsed,
@@ -281,15 +407,22 @@ export const CSV = {
       const raw = localStorage.getItem(k);
       if (raw == null) return;
       try {
-        // V17 P2 (CRIT-1) — defence-in-depth: scrub any token-shaped
-        // fields even from allowlisted keys.
         const parsed = JSON.parse(raw);
-        localStorageBundle[k] = CSV._scrubSecrets(parsed);
+        // Для KEYS_PRESERVE_SECRETS токены сохраняются как есть (personal backup).
+        // Для остальных — scrub защищает от случайных утечек в chat/log.
+        localStorageBundle[k] = CSV.KEYS_PRESERVE_SECRETS.includes(k)
+          ? parsed
+          : CSV._scrubSecrets(parsed);
       } catch(_) {
         localStorageBundle[k] = raw;
       }
     });
-    return { stateView, localStorage: localStorageBundle, _exportedAt: new Date().toISOString() };
+    return {
+      stateView,
+      localStorage: localStorageBundle,
+      _exportedAt: new Date().toISOString(),
+      _includesSecrets: true,    // marker для UI чтобы показать warning
+    };
   },
 
   async export() {
@@ -346,8 +479,11 @@ export const CSV = {
   import(text) {
     if (text.charCodeAt(0)===0xFEFF) text=text.slice(1);
     const allRows=Utils.parseFullCSV(text);
-    if (allRows.length<2) { alert('CSV пустой'); return; }
-    window.HistoryManager?.checkpoint('импорт CSV');
+    if (allRows.length<2) {
+      Services.Toast?.error?.('CSV пустой') || window.showToast?.('CSV пустой', 'error', 4000);
+      return;
+    }
+    Services.HistoryManager?.checkpoint('импорт CSV');
     const headers=allRows[0].map(h=>h.trim());
     const newRows=[]; let count=0;
     for (let i=1;i<allRows.length;i++) {
@@ -368,7 +504,7 @@ export const CSV = {
           if (s.ganttMode) state.ganttMode=s.ganttMode;
           if (s.ganttEpicsWell) state.ganttEpicsWell=s.ganttEpicsWell;
           if (s.podlozhkaMode) state.podlozhkaMode=s.podlozhkaMode;
-          if (s.summaryMode) state.summaryMode=s.summaryMode;
+          // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped.
           if (Object.prototype.hasOwnProperty.call(s,'presetsCollapsed')) state.presetsCollapsed=s.presetsCollapsed;
           if (s.theme) state.theme=s.theme;
           // V14: gantt2* state retired (B2) — old export entries silently ignored.
@@ -389,8 +525,8 @@ export const CSV = {
             }
           }
           syncColumnSettings();
-          if (window.App?.applyPresetsCollapsed) window.App.applyPresetsCollapsed();
-          if (window.ThemeUI?.apply) window.ThemeUI.apply();
+          if (Services.App?.applyPresetsCollapsed) Services.App.applyPresetsCollapsed();
+          if (Services.ThemeUI?.apply) Services.ThemeUI.apply();
         } catch(e) {}
         continue;
       }
@@ -461,7 +597,8 @@ export const CSV = {
     // refuse the import explicitly; checkpoint stays for safety so the
     // user can still Ctrl+Z if they did want the wipe.
     if (!newRows.length) {
-      alert('Не найдено валидных строк. Импорт отменён.');
+      Services.Toast?.warning?.('Не найдено валидных строк', { hint: 'Импорт отменён' })
+        || window.showToast?.('Не найдено валидных строк. Импорт отменён.', 'warning', 4000);
       return;
     }
     state.rows=newRows;
@@ -471,15 +608,24 @@ export const CSV = {
     // already on disk before any UI re-render — protects against fast F5.
     Storage.save(); Storage.flushNow();
     notify('import-csv');
-    setTimeout(()=>{ if(state.activeSection==='registry') window.RegistryView?.autoFitColWidths(); }, 120);
+    setTimeout(()=>{ if(state.activeSection==='registry') Services.RegistryView?.autoFitColWidths(); }, 120);
   },
 
-  importUpdate(text) {
+  // UX скв.2 — `importUpdate` стал async, чтобы дождаться ConfirmDialog
+  // перед применением. Caller (app.js bindImports/csvUpdate handler) внутри
+  // FileReader.onload, который не ждёт результата → безопасно.
+  async importUpdate(text) {
     if (text.charCodeAt(0)===0xFEFF) text=text.slice(1);
     const allRows=Utils.parseFullCSV(text);
-    if (allRows.length<2) { alert('CSV пустой'); return; }
+    if (allRows.length<2) {
+      Services.Toast?.error?.('CSV пустой') || window.showToast?.('CSV пустой', 'error', 4000);
+      return;
+    }
     const headers=allRows[0].map(h=>h.trim()).filter(Boolean);
-    if (!headers.length) { alert('Нет заголовков в CSV'); return; }
+    if (!headers.length) {
+      Services.Toast?.error?.('Нет заголовков в CSV') || window.showToast?.('Нет заголовков в CSV', 'error', 4000);
+      return;
+    }
 
     const boolKeys=new Set(['blockingDependency','isDone','dirty','commitToCounterparty']);
     const pipeKeys=new Set(['release120Types','release121Types','release122Types','overtimeTypes']);
@@ -545,14 +691,29 @@ export const CSV = {
       staged.push({ row, changes, changeKeys });
     }
 
-    if (!matched) { alert('Не найдено совпадающих строк для обновления. Нужны id или совпадение team+epic+tasks.'); return; }
-    if (!changed) { alert(`Совпадения найдены (${matched}), но изменений нет.`); return; }
+    if (!matched) {
+      Services.Toast?.warning?.('Не найдено совпадающих строк для обновления', { hint: 'Нужны id или совпадение team+epic+tasks' })
+        || window.showToast?.('Не найдено совпадающих строк для обновления. Нужны id или совпадение team+epic+tasks.', 'warning', 4500);
+      return;
+    }
+    if (!changed) {
+      Services.Toast?.info?.(`Совпадения найдены (${matched}), но изменений нет`)
+        || window.showToast?.(`Совпадения найдены (${matched}), но изменений нет.`, 'info', 3500);
+      return;
+    }
 
-    const preview = `Найдено строк: ${parsed}\nСовпало: ${matched}\nИз них изменится: ${changed}\nБез изменений: ${unchanged}\nНе найдено: ${notFound}\n\nПрименить обновление только изменённых полей?`;
-    if (!confirm(preview)) return;
+    const preview = `Найдено строк: ${parsed}\nСовпало: ${matched}\nИз них изменится: ${changed}\nБез изменений: ${unchanged}\nНе найдено: ${notFound}`;
+    const ok = Services.ConfirmDialog?.show
+      ? await Services.ConfirmDialog.show({
+          title: 'Применить CSV update?',
+          message: `${preview}\n\nПрименить обновление только изменённых полей?`,
+          confirmLabel: 'Применить',
+        })
+      : (typeof window.confirm === 'function' ? window.confirm(`${preview}\n\nПрименить обновление только изменённых полей?`) : true);
+    if (!ok) return;
     // V15 (audit #1, system analyst Medium 4) — checkpoint AFTER user
     // confirms; cancel used to leave a no-op entry on the undo stack.
-    window.HistoryManager?.checkpoint('CSV update');
+    Services.HistoryManager?.checkpoint('CSV update');
 
     staged.forEach(({row,changes})=>{
       Object.entries(changes).forEach(([k,v])=>{ row[k]=v; });
@@ -611,10 +772,12 @@ export const JSONExport = {
       const raw = localStorage.getItem(k);
       if (raw == null) return;
       try {
-        // V17.1 F1 — defence-in-depth: scrub any token-shaped fields on
-        //   JSON-export path too (CSV path already did this in _buildSettingsBundle).
         const parsed = JSON.parse(raw);
-        bundle[k] = CSV._scrubSecrets(parsed);
+        // Токены интеграций / LLM сохраняются (personal backup, см. dataStore.js
+        // CSV.KEYS_PRESERVE_SECRETS). Остальные ключи — scrub'ятся.
+        bundle[k] = CSV.KEYS_PRESERVE_SECRETS.includes(k)
+          ? parsed
+          : CSV._scrubSecrets(parsed);
       } catch (_) { bundle[k] = raw; }
     });
     return {
@@ -627,15 +790,40 @@ export const JSONExport = {
       },
       settings:    stateView,
       bundle,
+      _includesSecrets: true,    // marker для UI
     };
   },
 
-  download() {
+  // UX скв.2 — `download` стал async для ConfirmDialog (token-warning).
+  // Caller — click-handler на btn-export-json, не ждёт результата → ок.
+  async download() {
     if (!state.rows.length && !state.employees.length) {
-      alert('Нет данных для экспорта');
+      Services.Toast?.warning?.('Нет данных для экспорта')
+        || window.showToast?.('Нет данных для экспорта', 'warning', 3000);
       return;
     }
     const snapshot = JSONExport.buildSnapshot();
+    // Bundle содержит токены интеграций / LLM (KEYS_PRESERVE_SECRETS).
+    // Спрашиваем явное подтверждение перед download'ом — иначе файл уйдёт
+    // куда-нибудь в Slack-thread или email и токены утекут.
+    const hasTokens = snapshot._includesSecrets && snapshot.bundle &&
+      Object.keys(snapshot.bundle).some(k => CSV.KEYS_PRESERVE_SECRETS.includes(k) && snapshot.bundle[k]);
+    if (hasTokens) {
+      const tokenWarn =
+        'Файл будет содержать токены интеграций (Jira / Bitbucket / Confluence / Sigma / GigaChat).\n\n' +
+        'Это удобно для personal backup — после импорта не нужно вводить токены заново.\n' +
+        'НО НЕ РАСШАРИВАЙТЕ файл с коллегами / в slack / email — там credentials.\n\n' +
+        'Продолжить экспорт с токенами?';
+      const ok = Services.ConfirmDialog?.show
+        ? await Services.ConfirmDialog.show({
+            title: 'Экспорт с токенами?',
+            message: tokenWarn,
+            confirmLabel: 'Экспортировать',
+            danger: true,
+          })
+        : (typeof window.confirm === 'function' ? window.confirm(tokenWarn) : true);
+      if (!ok) return;
+    }
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -643,7 +831,8 @@ export const JSONExport = {
     a.download = `q2_plan_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    window.showToast?.(`JSON экспортирован: ${state.rows.length} строк, ${state.employees.length} сотрудников`);
+    const tail = hasTokens ? ' (с токенами — личный backup)' : '';
+    window.showToast?.(`JSON экспортирован: ${state.rows.length} строк, ${state.employees.length} сотрудников${tail}`);
   },
 };
 
@@ -666,7 +855,7 @@ export const JSONImport = {
   /** Apply a parsed snapshot to live state. Mirrors CSV.import semantics
    *  (rows replace, employees replace, settings selectively merged). */
   apply(snapshot) {
-    window.HistoryManager?.checkpoint('импорт JSON');
+    Services.HistoryManager?.checkpoint('импорт JSON');
     // Rows — replace.
     const newRows = (snapshot.data.rows || []).map(r => RowFactory.create({ ...r, id: r.id || nextId() }));
     state.rows = newRows;
@@ -691,32 +880,61 @@ export const JSONImport = {
       if (s.ganttMode)     state.ganttMode     = s.ganttMode;
       if (s.ganttEpicsWell) state.ganttEpicsWell = s.ganttEpicsWell;
       if (s.podlozhkaMode)  state.podlozhkaMode  = s.podlozhkaMode;
-      if (s.summaryMode)    state.summaryMode    = s.summaryMode;
+      // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped.
       if (Object.prototype.hasOwnProperty.call(s, 'presetsCollapsed')) state.presetsCollapsed = s.presetsCollapsed;
       if (s.theme) state.theme = s.theme;
       // V14 plan-lock + edit-mode (paired audit#1 fix).
       if (Object.prototype.hasOwnProperty.call(s, 'planLocked'))    state.planLocked    = s.planLocked || null;
       if (Object.prototype.hasOwnProperty.call(s, 'ganttEditMode')) state.ganttEditMode = !!s.ganttEditMode;
     }
-    // Bundle — same allowlist as CSV bundle import (prevents token theft etc.).
+    // Bundle — same allowlist as CSV bundle import (prevents prototype pollution).
     const b = snapshot.bundle || {};
     if (b && typeof b === 'object') {
       let restored = 0, skipped = 0;
+      let integrationsRestored = null;
       for (const [k, v] of Object.entries(b)) {
         if (!JSON_ALLOWED_BUNDLE_KEYS.has(k)) { skipped++; continue; }
         try {
           const value = (typeof v === 'string') ? v : JSON.stringify(v);
           localStorage.setItem(k, value);
+          if (k === 'q2_integrations_v1') {
+            // Сохраняем для sync с сервером ниже.
+            integrationsRestored = (typeof v === 'object') ? v : (() => { try { return JSON.parse(value); } catch(_) { return null; } })();
+          }
           restored++;
         } catch (_) {}
       }
-      if (restored && skipped) {
-        window.showToast?.(`Восстановлено ${restored} групп настроек. ${skipped} пропущено (токены/LLM ключи).`, 'success', 4500);
+      // Sync токенов на сервер (jira_config.json) чтобы integrations работали
+      // сразу после импорта, без необходимости открывать settings и нажимать save.
+      if (integrationsRestored && (integrationsRestored.jiraToken || integrationsRestored.sigmaJiraToken
+                                    || integrationsRestored.bitbucketToken || integrationsRestored.confluenceToken)) {
+        const serverPatch = {};
+        const TOKEN_FIELDS = [
+          'jiraBaseUrl', 'jiraToken', 'jiraProjectKeys',
+          'sigmaJiraBaseUrl', 'sigmaJiraToken', 'sigmaGoalEpicKeys',
+          'bitbucketBaseUrl', 'bitbucketToken', 'bitbucketProjectKeys',
+          'confluenceBaseUrl', 'confluenceToken', 'confluenceSpaceKeys',
+          'allowInsecureTls', 'sinceDate', 'activityWindowHours',
+        ];
+        for (const k of TOKEN_FIELDS) {
+          if (k in integrationsRestored) serverPatch[k] = integrationsRestored[k];
+        }
+        fetch('/api/jira/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(serverPatch),
+        }).catch((e) => {
+          console.warn('[JSONImport] не удалось синхронизировать токены с сервером:', e?.message || e);
+        });
+      }
+      if (restored) {
+        const tail = skipped ? ` (${skipped} пропущено)` : '';
+        window.showToast?.(`Восстановлено ${restored} групп настроек${tail}.`, 'success', 4500);
       }
     }
     syncColumnSettings();
-    if (window.App?.applyPresetsCollapsed) window.App.applyPresetsCollapsed();
-    if (window.ThemeUI?.apply) window.ThemeUI.apply();
+    if (Services.App?.applyPresetsCollapsed) Services.App.applyPresetsCollapsed();
+    if (Services.ThemeUI?.apply) Services.ThemeUI.apply();
     RiskEngine.computeAll();
     Storage.save();
     Storage.flushNow();   // F5-resilience (audit#1)
@@ -725,14 +943,17 @@ export const JSONImport = {
   },
 
   /** Top-level entry — read text + parse + confirm + apply. Errors surface
-   *  via alert() and a one-line ErrorsLog entry. */
-  import(text) {
+   *  via Toast.error and a one-line ErrorsLog entry.
+   *  UX скв.2 — стал async для ConfirmDialog. Caller — FileReader.onload,
+   *  не ждёт результата → безопасно. */
+  async import(text) {
     let snapshot;
     try {
       snapshot = JSONImport.parse(text);
     } catch (e) {
-      alert(`Импорт JSON: ${e.message}`);
-      try { window.ErrorsLog?.add?.({ level: 'error', source: 'JSONImport', message: e.message }); } catch (_) {}
+      Services.Toast?.error?.('Импорт JSON прерван', { hint: e.message })
+        || window.showToast?.(`Импорт JSON: ${e.message}`, 'error', 4500);
+      try { Services.ErrorsLog?.add?.({ level: 'error', source: 'JSONImport', message: e.message }); } catch (_) {}
       return;
     }
     const summary = [
@@ -744,16 +965,25 @@ export const JSONImport = {
       '',
       'Применить импорт? Текущие данные будут заменены (Ctrl+Z для отката).',
     ].join('\n');
-    if (snapshot.$schema && snapshot.$schema !== JSON_SCHEMA) {
-      if (!confirm(`Внимание: схема файла "${snapshot.$schema}" отличается от ожидаемой "${JSON_SCHEMA}". Импорт может работать некорректно.\n\n${summary}`)) return;
-    } else {
-      if (!confirm(summary)) return;
-    }
+    const schemaMismatch = snapshot.$schema && snapshot.$schema !== JSON_SCHEMA;
+    const dlgMessage = schemaMismatch
+      ? `Внимание: схема файла "${snapshot.$schema}" отличается от ожидаемой "${JSON_SCHEMA}". Импорт может работать некорректно.\n\n${summary}`
+      : summary;
+    const ok = Services.ConfirmDialog?.show
+      ? await Services.ConfirmDialog.show({
+          title: schemaMismatch ? 'Импорт JSON (схема не совпадает)' : 'Импорт JSON',
+          message: dlgMessage,
+          confirmLabel: 'Применить',
+          danger: schemaMismatch,
+        })
+      : (typeof window.confirm === 'function' ? window.confirm(dlgMessage) : true);
+    if (!ok) return;
     try {
       JSONImport.apply(snapshot);
     } catch (e) {
-      alert(`Ошибка применения JSON: ${e.message}`);
-      try { window.ErrorsLog?.add?.({ level: 'error', source: 'JSONImport.apply', message: e.message, stack: e.stack }); } catch (_) {}
+      Services.Toast?.error?.('Ошибка применения JSON', { hint: e.message })
+        || window.showToast?.(`Ошибка применения JSON: ${e.message}`, 'error', 4500);
+      try { Services.ErrorsLog?.add?.({ level: 'error', source: 'JSONImport.apply', message: e.message, stack: e.stack }); } catch (_) {}
     }
   },
 };
@@ -763,9 +993,18 @@ export const JSONImport = {
 // ============================================================
 export const XLSXImporter = {
   import(buffer) {
-    if (typeof window.XLSX==='undefined') { alert('Положите libs/xlsx.full.min.js рядом с index.html'); return; }
-    window.HistoryManager?.checkpoint('импорт XLSX');
-    const wb = window.XLSX.read(buffer, {type:'array'});
+    if (typeof window.XLSX==='undefined') {
+      Services.Toast?.error?.('Не удалось загрузить XLSX-парсер', { hint: 'Проверьте файл libs/xlsx.full.min.js рядом с index.html' })
+        || window.showToast?.('Положите libs/xlsx.full.min.js рядом с index.html', 'error', 5000);
+      return;
+    }
+    Services.HistoryManager?.checkpoint('импорт XLSX');
+    // V21 J #71 — `cellDates: true` заставляет XLSX отдавать JS Date вместо
+    // Excel serial number. Это устраняет 1900-leap-bug (Excel ошибочно
+    // считает 1900 leap year → off-by-1 для дат до Mar 1, 1900) и убирает
+    // ручную арифметику serial→Date. `dateNF: 'yyyy-mm-dd'` гарантирует
+    // ISO-формат при дальнейшем `raw:false` rendering.
+    const wb = window.XLSX.read(buffer, {type:'array', cellDates:true, dateNF:'yyyy-mm-dd'});
     const newRows=[], diag={sources:['xlsx'],sheets:wb.SheetNames.slice(),rowsPerSheet:{},detectedColumns:{},missingColumns:{},warnings:[]};
     wb.SheetNames.forEach(sheetName => {
       const ws = wb.Sheets[sheetName];
@@ -814,7 +1053,7 @@ export const XLSXImporter = {
     Storage.save(); Storage.flushNow();
     notify('import-xlsx');
     // Auto-fit columns to new content
-    setTimeout(()=>{ if(state.activeSection==='registry') window.RegistryView?.autoFitColWidths(); }, 120);
+    setTimeout(()=>{ if(state.activeSection==='registry') Services.RegistryView?.autoFitColWidths(); }, 120);
   },
 
   // Headers in the exact order expected by `XLSXImporter.import` — row order
@@ -995,7 +1234,7 @@ export const XLSXImporter = {
       return;
     }
 
-    window.HistoryManager?.checkpoint(`XLSX update: +${added.length} строк`);
+    Services.HistoryManager?.checkpoint(`XLSX update: +${added.length} строк`);
     state.rows.push(...added);
     state.diagnostics = { ...state.diagnostics, registryCount: state.rows.length };
     RiskEngine.computeAll();
@@ -1013,7 +1252,13 @@ export function applyBulkAction(rowIds, actionType, payload={}) {
   const ids = new Set(rowIds);
   const targets = state.rows.filter(r => ids.has(r.id));
   if (!targets.length) return;
-  window.HistoryManager?.checkpoint(`bulk:${actionType}`);
+  Services.HistoryManager?.checkpoint(`bulk:${actionType}`);
+  // QA A3.6 / AS.4 — критично: без Reactive.silent каждое row.x=y
+  // через Proxy триггерит Storage.save+App.refreshAll. На 1000 строк ×
+  // ~4 присваивания = 4000 flush'ей → UI замораживается на 30+ сек.
+  // Один Storage.save() выполняется явно ниже (строка с notify),
+  // вместе с одним refreshAll через notify('bulk-action').
+  Reactive.silent(() => {
   targets.forEach(row => {
     switch (actionType) {
       case 'assign_release': {
@@ -1055,7 +1300,8 @@ export function applyBulkAction(rowIds, actionType, payload={}) {
       }
       case 'mark_done': {
         row.isDone = payload.done !== false;
-        if (row.isDone && !row.doneDate) row.doneDate = new Date().toISOString().slice(0,10);
+        // QA A4.3 — локальная дата, не UTC (см. Utils.localDateString).
+        if (row.isDone && !row.doneDate) row.doneDate = Utils.localDateString();
         row.dirty = true; row.updatedAt = new Date().toISOString();
         break;
       }
@@ -1129,6 +1375,7 @@ export function applyBulkAction(rowIds, actionType, payload={}) {
       }
     }
   });
+  }); // QA A3.6 — конец Reactive.silent блока
   // Log action
   const logEntry = {
     id: Date.now() + Math.random(),
@@ -1138,17 +1385,22 @@ export function applyBulkAction(rowIds, actionType, payload={}) {
     at: new Date().toISOString(),
     simMode: state.simMode,
   };
-  state.actionLog.unshift(logEntry);
-  if (state.actionLog.length > 200) state.actionLog.length = 200;
+  // F4 fix (codebase-01 audit) — лимит был 200, в historyLog.js — 1000.
+  // dataStore.js обрезал общий лог до 200 → удалял ~800 entries историки.
+  // Теперь — единый MAX (1000) и через Reactive.silent (F3 контракт).
+  Reactive.silent(() => {
+    state.actionLog.unshift(logEntry);
+    if (state.actionLog.length > 1000) state.actionLog.length = 1000;
+  });
 
   if (state.simMode) {
-    window.showToast?.(`[Симуляция] ${actionType} применено к ${targets.length} задачам`, 'info');
+    window.showToast?.(`[Симуляция] ${actionType} — ${targets.length} задач`, 'info');
   } else {
     Storage.save();
-    window.showToast?.(`Применено к ${targets.length} задачам`, 'success');
+    window.showToast?.(`Курс скорректирован — ${targets.length} задач`, 'success');
   }
   notify('bulk-action');
-  window.ActionLayer?.renderLog?.();
+  Services.ActionLayer?.renderLog?.();
 }
 
 export function autoAssignRelease(release, overwrite=false) {
@@ -1163,20 +1415,28 @@ export function autoAssignRelease(release, overwrite=false) {
   return candidates.length;
 }
 
+// F1 fix (codebase-01 audit, CLAUDE.md контракт #1) — mass-mutation
+// должна идти в Reactive.silent, иначе на каждой строке Proxy-set триггерит
+// markDirty → debounce → subscriber → Storage.save + App.refreshAll.
+// На 500 строк = 500 мини-сейвов вместо одного финального.
 export function normalizeAssignees() {
-  window.HistoryManager?.checkpoint('normalize_assignees');
+  Services.HistoryManager?.checkpoint('normalize_assignees');
   let count = 0;
-  state.rows.forEach(row => {
-    const raw = row.assignee || '';
-    const norm = raw.trim().replace(/\s+/g,' ');
-    if (norm !== raw) { row.assignee = norm; row.dirty = true; count++; }
+  Reactive.silent(() => {
+    state.rows.forEach(row => {
+      const raw = row.assignee || '';
+      const norm = raw.trim().replace(/\s+/g,' ');
+      if (norm !== raw) { row.assignee = norm; row.dirty = true; count++; }
+    });
   });
   if (count && !state.simMode) Storage.save();
   return count;
 }
 
 export function batchRiskRecompute() {
-  state.rows.forEach(r => { RiskEngine.computeFlags(r); RiskEngine.computeRiskScore(r); });
+  Reactive.silent(() => {
+    state.rows.forEach(r => { RiskEngine.computeFlags(r); RiskEngine.computeRiskScore(r); });
+  });
   if (!state.simMode) Storage.save();
   return state.rows.length;
 }
@@ -1185,7 +1445,13 @@ export function exportSelectedCSV(rowIds) {
   const ids = new Set(rowIds);
   const rows = rowIds.length ? state.rows.filter(r => ids.has(r.id)) : state.rows;
   const cols = getAllCols().filter(c => c.visible);
-  const escape = v => `"${String(v??'').replace(/"/g,'""')}"`;
+  // V21 J #72 — formula-injection guard. ZWSP prefix для `=+-@\t\r`,
+  // потом quote всегда (excel-consistency для legacy callers).
+  const escape = v => {
+    let s = String(v ?? '');
+    if (s && /^[=+\-@\t\r]/.test(s)) s = '​' + s;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
   const header = cols.map(c => escape(c.label)).join(',');
   const lines = rows.map(r => cols.map(c => escape(r[c.key]??'')).join(','));
   const csv = [header, ...lines].join('\n');

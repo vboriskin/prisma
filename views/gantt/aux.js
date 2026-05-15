@@ -22,9 +22,21 @@ import { Utils }       from '../../utils.js';
 import { RowFactory }  from '../../rowFactory.js';
 import { RiskEngine }  from '../../riskEngine.js';
 import { Storage }     from '../../dataStore.js';
+import { FocusTrap }   from '../../app/uxKit.js';
+import { Services }    from '../../app/services.js';
 import {
   SCOPE_OPTIONS, WORK_TYPES, PHASE_COLORS,
+  PHASE_COLOR_TOKENS, PHASE_COLOR_TOKEN_FALLBACK,
 } from '../../constants.js';
+
+/* V21 — общий шаблон close-button SVG (как в статических modal'ах в
+   index.html). Используется в openHistoryModal / openAddEpicModal. */
+const _CLOSE_BTN_HTML = `<button class="modal-close-btn" type="button" aria-label="Закрыть" title="Закрыть" data-close-modal>
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <line x1="18" y1="6" x2="6" y2="18"></line>
+    <line x1="6" y1="6" x2="18" y2="18"></line>
+  </svg>
+</button>`;
 
 /* ────────────────────────────────────────────────────────── */
 /* History modal                                              */
@@ -58,12 +70,13 @@ export function openHistoryModal() {
         </tr>`).join('')
     : `<tr><td colspan="4" class="gdt-hist-empty">Нет записей в истории Ганта</td></tr>`;
   // V17.1.1 — переписано под существующий шаблон (`.modal-box` + inline body padding).
+  // V21 — добавлены role/aria/FocusTrap (раньше отсутствовали — фокус «утекал»).
   const html = `
-    <div class="modal-overlay" id="modal-gantt-history">
+    <div class="modal-overlay" id="modal-gantt-history" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-history-title">
       <div class="modal-box modal-box-wide">
         <div class="modal-header">
-          <h3>История изменений Ганта</h3>
-          <button class="modal-close-btn" data-close-modal>✕</button>
+          <h3 id="modal-gantt-history-title">История изменений Ганта</h3>
+          ${_CLOSE_BTN_HTML}
         </div>
         <div class="ae-modal-body">
           <div class="gdt-hist-meta">Показано записей: ${ganttEntries.length}</div>
@@ -79,7 +92,9 @@ export function openHistoryModal() {
   document.getElementById('modal-gantt-history')?.remove();
   document.body.insertAdjacentHTML('beforeend', html);
   const overlay = document.getElementById('modal-gantt-history');
-  const close = () => overlay?.remove();
+  let detachTrap = null;
+  try { detachTrap = FocusTrap.attach(overlay, { initialFocus: overlay.querySelector('h3') }); } catch (_) {}
+  const close = () => { try { detachTrap?.(); } catch (_) {} overlay?.remove(); };
   overlay?.addEventListener('click', (ev) => { if (ev.target === overlay || ev.target.closest('[data-close-modal]')) close(); });
   document.addEventListener('keydown', function escClose(ev){ if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); } });
 }
@@ -102,11 +117,11 @@ export function openAddEpicModal(presetTeam, opts = {}) {
   const releases = ['1.20','1.21','1.22','overtime'];
   const releaseLabel = { '1.20':'Релиз 1.20', '1.21':'Релиз 1.21', '1.22':'Релиз 1.22', 'overtime':'Овертайм' };
   const html = `
-    <div class="modal-overlay" id="modal-gantt-add-epic">
+    <div class="modal-overlay" id="modal-gantt-add-epic" role="dialog" aria-modal="true" aria-labelledby="modal-gantt-add-epic-title">
       <div class="modal-box modal-box-wide ae-modal-box">
         <div class="modal-header">
-          <h3>Добавить эпик</h3>
-          <button class="modal-close-btn" data-close-modal>✕</button>
+          <h3 id="modal-gantt-add-epic-title">Добавить эпик</h3>
+          ${_CLOSE_BTN_HTML}
         </div>
         <div class="ae-modal-body">
           <div class="form-grid">
@@ -164,7 +179,11 @@ export function openAddEpicModal(presetTeam, opts = {}) {
   document.getElementById('modal-gantt-add-epic')?.remove();
   document.body.insertAdjacentHTML('beforeend', html);
   const overlay = document.getElementById('modal-gantt-add-epic');
-  const close = () => overlay?.remove();
+  // V21 — FocusTrap.attach с initialFocus на «Эпик» input (autofocus уже стоит,
+  // FocusTrap reinforces) — фокус не утечёт за пределы модалки при Tab.
+  let detachTrap = null;
+  try { detachTrap = FocusTrap.attach(overlay, { initialFocus: overlay.querySelector('#ae-epic') }); } catch (_) {}
+  const close = () => { try { detachTrap?.(); } catch (_) {} overlay?.remove(); };
   overlay?.addEventListener('click', (ev) => {
     if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
   });
@@ -187,14 +206,14 @@ export function openAddEpicModal(presetTeam, opts = {}) {
     const seed = { team, epic, category, tags: category, scopeStatus: scope, taskComment: comment, blockingDependency: blocking, dependencies: deps };
     if (release && fieldByRel[release]) seed[fieldByRel[release]] = wts;
     else seed.backlogTypes = wts;
-    window.HistoryManager?.checkpoint?.(`добавить эпик «${epic}» в ${team}`);
+    Services.HistoryManager?.checkpoint?.(`добавить эпик «${epic}» в ${team}`);
     const newRow = RowFactory.create(seed);
     RowFactory.updateDerived(newRow);
     state.rows = [...state.rows, newRow];
     try { RiskEngine.computeAll(); } catch(_) {}
     Storage.save();
     try { window.HistoryLog?.data?.('epic_add', `Добавлен эпик «${epic}» в команду ${team}`, { rowId: newRow.id, team, epic }); } catch(_) {}
-    try { window.App?.populateFilterDropdowns?.(); } catch(_) {}
+    try { Services.App?.populateFilterDropdowns?.(); } catch(_) {}
     close();
     onCreated();
     window.showToast?.(`Эпик «${epic}» добавлен в ${team}`, 'success', 1800);
@@ -215,15 +234,12 @@ export function bindFastTooltip(wrap, boundState) {
   if (boundState) boundState.bound = true;
   let el = null;
   let timer = null;
+  // AUDIT_HOLISTIC O10 — все стили fast-tooltip перенесены в styles.css
+  // (`.gdt-fasttip` rule). Здесь — только element creation + variables.
   const ensureEl = () => {
     if (el) return el;
     el = document.createElement('div');
     el.className = 'gdt-fasttip';
-    el.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;' +
-      'max-width:340px;padding:6px 10px;border-radius:6px;font-size:11px;line-height:1.45;' +
-      'white-space:pre-line;box-shadow:0 4px 14px rgba(0,0,0,.20);' +
-      'background:#1f2937;color:#f3f4f6;' +
-      'transition:opacity .12s';
     document.body.appendChild(el);
     return el;
   };
@@ -232,7 +248,7 @@ export function bindFastTooltip(wrap, boundState) {
     if (!txt) return;
     const node = ensureEl();
     node.textContent = txt;
-    node.style.display = 'block';
+    node.classList.add('is-visible');
     // Position above target, centered. Flip below if it would clip the top.
     const r = target.getBoundingClientRect();
     const tipR = node.getBoundingClientRect();
@@ -240,12 +256,12 @@ export function bindFastTooltip(wrap, boundState) {
     left = Math.max(8, Math.min(left, window.innerWidth - tipR.width - 8));
     let top = Math.round(r.top - tipR.height - 8);
     if (top < 8) top = Math.round(r.bottom + 8);   // flip
-    node.style.left = left + 'px';
-    node.style.top  = top + 'px';
+    node.style.setProperty('--prizma-tip-x', left + 'px');
+    node.style.setProperty('--prizma-tip-y', top + 'px');
   };
   const hide = () => {
     clearTimeout(timer); timer = null;
-    if (el) el.style.display = 'none';
+    if (el) el.classList.remove('is-visible');
   };
   wrap.addEventListener('mouseover', (e) => {
     const t = e.target.closest('[data-tip]');
@@ -314,15 +330,22 @@ export function drawPostponeArrows(wrap) {
   svg.setAttribute('class', 'gdt-arrows-svg');
   svg.setAttribute('width',  sw);
   svg.setAttribute('height', sh);
+  // V21 — стрелки декоративные (информация о переносе уже в pill aria-label
+  // и в trail-chip aria-label); SVG скрываем от screen-reader.
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
   svg.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:50;overflow:visible';
 
-  /* V16 (gantt-roadmap #4) — arrow uses the work-type accent colour. */
+  /* V16 (gantt-roadmap #4) — arrow uses the work-type accent colour.
+     V21 pills refresh — colour берётся из PHASE_COLOR_TOKENS (CSS-var,
+     theme-aware), а stroke/fill ставятся через `style.*` а не через
+     setAttribute, потому что SVG-атрибуты не резолвят `var(...)`. */
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
   svg.appendChild(defs);
   const _markerCache = new Set();
-  const _markerId = (color) => `gdt-ah-${color.replace(/[^a-z0-9]/gi, '')}`;
-  const _ensureMarker = (color) => {
-    const id = _markerId(color);
+  const _slug = (s) => String(s).replace(/[^a-z0-9]/gi, '').slice(0, 32) || 'fallback';
+  const _ensureMarker = (wtKey, colorToken) => {
+    const id = `gdt-ah-${_slug(wtKey)}`;
     if (_markerCache.has(id)) return id;
     _markerCache.add(id);
     const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
@@ -332,7 +355,10 @@ export function drawPostponeArrows(wrap) {
     marker.setAttribute('refX', '5.5');
     marker.setAttribute('refY', '3');
     marker.setAttribute('orient', 'auto');
-    marker.innerHTML = `<polygon points="0 0, 6 3, 0 6" fill="${color}"/>`;
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', '0 0, 6 3, 0 6');
+    poly.style.fill = colorToken;
+    marker.appendChild(poly);
     defs.appendChild(marker);
     return id;
   };
@@ -350,12 +376,12 @@ export function drawPostponeArrows(wrap) {
     const dx = dR.left   - cRect.left + 1;
     const dy = dR.top    + dR.height * 0.5 - cRect.top;
 
-    const wtColor  = (PHASE_COLORS && PHASE_COLORS[wt]) || '#94a3b8';
-    const markerId = _ensureMarker(wtColor);
+    const wtColor  = (PHASE_COLOR_TOKENS && PHASE_COLOR_TOKENS[wt]) || PHASE_COLOR_TOKEN_FALLBACK;
+    const markerId = _ensureMarker(wt || 'fallback', wtColor);
 
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', `M ${sx} ${sy} L ${dx} ${dy}`);
-    path.setAttribute('stroke',           wtColor);
+    path.style.stroke = wtColor;
     path.setAttribute('stroke-width',     '1.2');
     path.setAttribute('stroke-linecap',   'round');
     path.setAttribute('fill',             'none');

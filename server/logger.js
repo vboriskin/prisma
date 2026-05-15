@@ -69,14 +69,58 @@ function _formatPretty(entry) {
   return `${ts} [${level.toUpperCase()}] ${msg}${fields}`;
 }
 
+// V21 BP (audit-05 §E #1, §H #1) — PII / secret scrub перед emit.
+// 152-ФЗ compliance: email/phone/СНИЛС/паспорт + Bearer/Authorization/token
+// маскируются. Применяется ко всему JSON-payload'у рекурсивно.
+const _PII_PATTERNS = [
+  // Bearer / token / api-key / cookie / Authorization / X-API-Key.
+  { re: /(authorization|x-api-key|cookie)\s*[:=]\s*[^\s,;]+/gi, repl: '$1: ***' },
+  { re: /Bearer\s+[A-Za-z0-9\-_=.]+/gi, repl: 'Bearer ***' },
+  { re: /(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, repl: '$1: ***' },
+  // Email.
+  { re: /[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, repl: '[email]' },
+  // СНИЛС: «123-456-789 12».
+  { re: /\b\d{3}-\d{3}-\d{3}\s?\d{2}\b/g, repl: '[snils]' },
+  // Паспорт РФ.
+  { re: /\b\d{4}\s?\d{6}\b/g, repl: '[passport]' },
+  // Phones (best-effort: +7 / 8 / международные).
+  { re: /(?:\+?\d{1,3}[\s\-]?)?\(?\d{3,4}\)?[\s\-]?\d{2,3}[\s\-]?\d{2}[\s\-]?\d{2}/g, repl: '[phone]' },
+];
+const _PII_KEY_DENYLIST = new Set(['displayName', 'fio', 'email', 'phone', 'snils', 'passport']);
+
+function _scrubString(s) {
+  let out = String(s);
+  for (const { re, repl } of _PII_PATTERNS) out = out.replace(re, repl);
+  return out;
+}
+function _scrubValue(v, depth = 0) {
+  if (depth > 6) return '[depth-cap]';
+  if (v == null) return v;
+  if (typeof v === 'string') return _scrubString(v);
+  if (typeof v === 'number' || typeof v === 'boolean') return v;
+  if (Array.isArray(v)) return v.map(x => _scrubValue(x, depth + 1));
+  if (typeof v === 'object') {
+    const out = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (_PII_KEY_DENYLIST.has(k)) {
+        out[k] = '[redacted]';
+        continue;
+      }
+      out[k] = _scrubValue(val, depth + 1);
+    }
+    return out;
+  }
+  return v;
+}
+
 function _emit(level, msg, data) {
   try {
     if (LEVELS[level] < _config.minLevel) return;
     const entry = {
       ts: _ts(),
       level,
-      msg: String(msg ?? ''),
-      ...(data && typeof data === 'object' ? data : {}),
+      msg: _scrubString(String(msg ?? '')),
+      ...(data && typeof data === 'object' ? _scrubValue(data) : {}),
     };
     const line = _config.format === 'pretty'
       ? _formatPretty(entry)

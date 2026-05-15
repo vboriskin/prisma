@@ -43,6 +43,10 @@ const {
   renderError,
   classifyPerson,
   renderMultiTeamView,
+  fmtDuration,
+  renderTeamSwitcher,
+  renderSprintLagBreakdown,
+  renderVelocityComparison,
 } = await import('../../integrations/teamScanner2Renderer.js');
 
 /* ── Test fixtures ───────────────────────────────────────── */
@@ -107,7 +111,7 @@ describe('renderEmployeeDetailPanel — happy path', () => {
   test('возвращает HTML с panel-секциями для существующего участника', () => {
     const model = makeModel({ participants: [makeParticipant()] });
     const html = renderEmployeeDetailPanel(model, 'u1', { filters: { j: true, b: true, c: true, z: true } });
-    assert.match(html, /class="ts2-panel"/);
+    assert.match(html, /class="ts2-panel ts2-panel-modal"/);
     assert.match(html, /Иванов Александр/);
     assert.match(html, /role="dialog"/);
     assert.match(html, /aria-modal="true"/);
@@ -253,7 +257,7 @@ describe('renderTopBar Sprint Goal gauge', () => {
     });
     const html = renderTopBar(model);
     assert.match(html, /ts2-sprint-pace-behind/);
-    assert.match(html, /отстаёт/);
+    assert.match(html, /Дрейф/);
   });
 });
 
@@ -320,8 +324,8 @@ describe('renderMultiTeamView (S4.1)', () => {
     assert.match(html, /60%/);
     assert.match(html, /30%/);
     assert.match(html, /3 orphans/);
-    assert.match(html, /4 WIP/, 'BACKEND total WIP=4');
-    assert.match(html, /1 WIP/, 'FRONTEND total WIP=1');
+    assert.match(html, /4 в пути/, 'BACKEND total WIP=4');
+    assert.match(html, /1 в пути/, 'FRONTEND total WIP=1');
     // Click-handlers через data-team-pk
     assert.match(html, /data-team-pk="BACKEND"/);
     assert.match(html, /data-team-pk="FRONTEND"/);
@@ -379,5 +383,296 @@ describe('HR-language polish (S3.2)', () => {
     const model = makeModel({ participants: [p] });
     const html = renderTeamGlance(model);
     assert.match(html, /1.*стоп/);
+  });
+});
+
+/* ── V20 S10.2 — fmtDuration (часы → дни+часы) ────────────── */
+
+describe('fmtDuration', () => {
+  test('< 24ч → «Nч» (округление целое)', () => {
+    assert.equal(fmtDuration(0),    '0ч');
+    assert.equal(fmtDuration(1),    '1ч');
+    assert.equal(fmtDuration(8.4),  '8ч');
+    assert.equal(fmtDuration(8.6),  '9ч');
+    assert.equal(fmtDuration(23.4), '23ч');
+  });
+
+  test('24..47.99ч → «1д» / «1д Nч»', () => {
+    assert.equal(fmtDuration(24),    '1д');
+    assert.equal(fmtDuration(25),    '1д 1ч');
+    assert.equal(fmtDuration(47.4),  '1д 23ч');
+  });
+
+  test('boundary: 23.99 → «24ч», 24.0 → «1д»', () => {
+    // 23.99 округлится до 24, но всё ещё < 24ч → выходит «24ч»
+    // (acceptable — пользователь увидит то же что было раньше)
+    assert.equal(fmtDuration(23.99), '24ч');
+    assert.equal(fmtDuration(24.0),  '1д');
+  });
+
+  test('кейсы из реального пилота', () => {
+    // 1642ч >= 1000ч → только «Xд» (10ч теряются как шум на масштабе 68 дней).
+    // Pilot complaint был именно про 1642ч — «68д» решает читаемость.
+    assert.equal(fmtDuration(1642), '68д');
+    assert.equal(fmtDuration(168),  '7д');     // ровно неделя
+    assert.equal(fmtDuration(72),   '3д');
+    assert.equal(fmtDuration(48),   '2д');
+    // Ниже 1000ч — показываем часы.
+    assert.equal(fmtDuration(100),  '4д 4ч');
+    assert.equal(fmtDuration(500),  '20д 20ч');
+    assert.equal(fmtDuration(999),  '41д 15ч');
+  });
+
+  test('rem ровно округляется до 24 → days+1', () => {
+    // 47.6 → days=1, rem=Math.round(47.6 - 24) = Math.round(23.6) = 24 → 2д
+    assert.equal(fmtDuration(47.6), '2д');
+  });
+
+  test('≥ 1000ч → только «Xд» (часы теряют смысл)', () => {
+    assert.equal(fmtDuration(1000),  '41д');
+    assert.equal(fmtDuration(2400),  '100д');
+    assert.equal(fmtDuration(8760),  '365д');   // год — clock skew или брошенная задача
+  });
+
+  test('negative / NaN / Infinity → «—» (defensive)', () => {
+    assert.equal(fmtDuration(-1),       '—');
+    assert.equal(fmtDuration(NaN),      '—');
+    assert.equal(fmtDuration(Infinity), '—');
+    assert.equal(fmtDuration(undefined),'—');   // Number(undefined) = NaN
+    // null → Number(null) = 0 → '0ч' (не error). Это OK: legacy data
+    // часто приносит null вместо undefined. defensive «—» оставляем
+    // только для NaN/Infinity/negative.
+    assert.equal(fmtDuration(null),     '0ч');
+  });
+
+  test('строки с числами парсятся через Number()', () => {
+    assert.equal(fmtDuration('30'),     '1д 6ч');
+    assert.equal(fmtDuration('1642'),   '68д');
+    assert.equal(fmtDuration('abc'),    '—');   // Number('abc') = NaN → defensive
+  });
+});
+
+/* ── V20 S10.5 — renderTeamSwitcher ───────────────────────── */
+
+describe('renderTeamSwitcher', () => {
+  test('0 команд → не рендерит ничего', () => {
+    assert.equal(renderTeamSwitcher({ projectKeys: [] }), '');
+    assert.equal(renderTeamSwitcher({}), '');
+    assert.equal(renderTeamSwitcher(null), '');
+  });
+
+  test('S12: 1 команда → рендерит wrapper с search-input но без tabs', () => {
+    const html = renderTeamSwitcher({ projectKeys: ['CORE'] });
+    assert.match(html, /ts2-team-switcher/);
+    assert.doesNotMatch(html, /data-switch-team="CORE"/, 'tabs не нужны при 1 команде');
+    assert.match(html, /ts2-team-search/, 'search input всегда');
+  });
+
+  test('≥ 2 команд → рендерит segmented tabs + кнопку «+ Все»', () => {
+    const html = renderTeamSwitcher({ projectKeys: ['SMECM', 'CORE', 'SMEND'] });
+    assert.match(html, /ts2-team-switcher/);
+    assert.match(html, /role="tablist"/);
+    assert.match(html, /data-switch-team="CORE"/);
+    assert.match(html, /data-switch-team="SMECM"/);
+    assert.match(html, /data-switch-team="SMEND"/);
+    assert.match(html, /data-switch-team="__all__"/);
+  });
+
+  test('сортирует pk alphabetical', () => {
+    const html = renderTeamSwitcher({ projectKeys: ['SMECM', 'CORE', 'AAAA'] });
+    const idxA = html.indexOf('data-switch-team="AAAA"');
+    const idxC = html.indexOf('data-switch-team="CORE"');
+    const idxS = html.indexOf('data-switch-team="SMECM"');
+    assert.ok(idxA < idxC && idxC < idxS, 'expected AAAA < CORE < SMECM');
+  });
+
+  test('активный таб (team mode + matching pk) подсвечивается', () => {
+    const html = renderTeamSwitcher(
+      { projectKeys: ['CORE', 'SMECM'] },
+      { activeView: 'team', activePkFilter: 'CORE' },
+    );
+    // Подсветка через class и aria-selected="true" на CORE.
+    assert.match(html, /ts2-team-tab-active[^"]*"\s+data-switch-team="CORE"/);
+    assert.match(html, /aria-selected="true"\s+title="Переключиться на команду CORE"/);
+  });
+
+  test('multi mode → активна кнопка «+ Все», нет активных pk-tab', () => {
+    const html = renderTeamSwitcher(
+      { projectKeys: ['CORE', 'SMECM'] },
+      { activeView: 'multi', activePkFilter: '' },
+    );
+    assert.match(html, /ts2-team-tab-all ts2-team-tab-active/);
+    // Ни один из pk-табов не должен быть activе.
+    assert.doesNotMatch(html, /data-switch-team="CORE"[^>]*ts2-team-tab-active/);
+  });
+
+  test('team mode без выбранного pk → подсвечивается первый alphabetical как fallback', () => {
+    const html = renderTeamSwitcher(
+      { projectKeys: ['SMECM', 'CORE'] },
+      { activeView: 'team', activePkFilter: '' },
+    );
+    // Первый alphabetical = CORE → должен быть active по fallback.
+    assert.match(html, /ts2-team-tab-active[^"]*"\s+data-switch-team="CORE"/);
+  });
+});
+
+/* ── V20 S10.7 — renderSprintLagBreakdown ─────────────────── */
+
+describe('renderSprintLagBreakdown', () => {
+  test('пустой sprintGoal → не рендерит ничего', () => {
+    assert.equal(renderSprintLagBreakdown(null, {}), '');
+    assert.equal(renderSprintLagBreakdown({ sprints: [] }, {}), '');
+    assert.equal(renderSprintLagBreakdown(undefined, {}), '');
+  });
+
+  test('один спринт + блокеры → рендерит формулу + at-risk список', () => {
+    const sg = {
+      sprints: [{ pk: 'CORE', name: 'CORE Sprint 26', total: 22, done: 14, progressPct: 63.6, idealPct: 73.1, daysLeft: 3, pace: 'behind' }],
+      aggregateProgress: 63.6,
+    };
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-1' }, { key: 'CORE-2' }, { key: 'CORE-3' }] } },
+      participants: [{
+        key: 'u1', label: 'Иванов И.',
+        timelineToday: [], timelineYesterday: [], timelinePrev: [],
+        blockers: [
+          { key: 'CORE-1', dwellHours: 96,  status: 'Code Review', summary: 'Add login' },
+          { key: 'CORE-2', dwellHours: 240, status: 'In Progress', summary: 'Refactor auth' },
+        ],
+      }],
+    };
+    const html = renderSprintLagBreakdown(sg, model);
+    assert.match(html, /Где дрейф\?/);
+    assert.match(html, /Как считается/);
+    assert.match(html, /CORE-1/);
+    assert.match(html, /CORE-2/);
+    // Sorted by dwellHours desc → CORE-2 (240ч) появляется раньше CORE-1 (96ч).
+    const idx1 = html.indexOf('CORE-1');
+    const idx2 = html.indexOf('CORE-2');
+    assert.ok(idx2 > 0 && idx2 < idx1, 'expected CORE-2 (240h) перед CORE-1 (96h)');
+  });
+
+  test('фильтрует at-risk блокеры по active-sprint-keys', () => {
+    const sg = { sprints: [{ pk: 'CORE', name: 'S26', total: 5, done: 2, progressPct: 40, idealPct: 80, daysLeft: 2, pace: 'behind' }] };
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-1' }] } },
+      participants: [{
+        key: 'u1', label: 'A',
+        timelineToday: [], timelineYesterday: [], timelinePrev: [],
+        blockers: [
+          { key: 'CORE-1',  dwellHours: 30, status: 'IP' }, // ✓ в спринте
+          { key: 'CORE-99', dwellHours: 50, status: 'IP' }, // ✗ бэклог — должен исчезнуть
+        ],
+      }],
+    };
+    const html = renderSprintLagBreakdown(sg, model);
+    assert.match(html, /CORE-1/);
+    assert.doesNotMatch(html, /CORE-99/);
+  });
+
+  test('выводит «отстаём на Npp» для pace=behind', () => {
+    const sg = { sprints: [{ pk: 'CORE', name: 'S', total: 22, done: 14, progressPct: 63.6, idealPct: 73.1, daysLeft: 3, pace: 'behind' }] };
+    const html = renderSprintLagBreakdown(sg, { spaces: {}, participants: [] });
+    // 73.1 - 63.6 = 9.5 → «отстаём на 9.5pp»
+    assert.match(html, /отстаём на 9\.5pp/);
+  });
+
+  test('опережает → «опережаем на Npp»', () => {
+    const sg = { sprints: [{ pk: 'CORE', name: 'S', total: 22, done: 18, progressPct: 81.8, idealPct: 60, daysLeft: 5, pace: 'ahead' }] };
+    const html = renderSprintLagBreakdown(sg, { spaces: {}, participants: [] });
+    assert.match(html, /опережаем на/);
+  });
+
+  test('Top-3 stuck people: фильтруется по classifyPerson===\'stop\'', () => {
+    const sg = { sprints: [{ pk: 'CORE', name: 'S', total: 5, done: 1, progressPct: 20, idealPct: 80, daysLeft: 1, pace: 'behind' }] };
+    const stopP = (over) => ({
+      timelineToday: [], timelineYesterday: [], timelinePrev: [],
+      blockers: [{ key: 'CORE-X', dwellHours: 40 }],
+      ...over,
+    });
+    const model = {
+      spaces: { CORE: { sprintIssues: [{ key: 'CORE-X' }] } },
+      participants: [
+        stopP({ key: 'u1', label: 'Stuck-A' }),     // → stop (есть blocker)
+        stopP({ key: 'u2', label: 'Stuck-B', blockers: [{ key: 'CORE-X', dwellHours: 200 }] }),
+        { key: 'u3', label: 'Active', timelineToday: [{ at: '...', issue: { key: 'CORE-X' } }], blockers: [] }, // → moving
+      ],
+    };
+    const html = renderSprintLagBreakdown(sg, model);
+    assert.match(html, /Stuck-A/);
+    assert.match(html, /Stuck-B/);
+    assert.doesNotMatch(html, /Active</); // не должен попасть в stuck-список
+  });
+});
+
+/* ── V20 S11 Z7 — renderVelocityComparison ────────────────── */
+
+describe('renderVelocityComparison', () => {
+  function mkSprint(over) {
+    return { pk: 'A', name: 'Sprint', total: 10, done: 5, progressPct: 50, pace: 'on-track', ...over };
+  }
+
+  test('< 2 команд → не рендерит', () => {
+    assert.equal(renderVelocityComparison({ scannerV2: { sprintGoal: { sprints: [] } } }), '');
+    assert.equal(renderVelocityComparison({ scannerV2: { sprintGoal: { sprints: [mkSprint()] } } }), '');
+  });
+
+  test('bar view (default) — рендерит горизонтальные бары', () => {
+    const model = { scannerV2: { sprintGoal: { sprints: [
+      mkSprint({ pk: 'CORE',  done: 12, total: 22, progressPct: 54.5, pace: 'behind' }),
+      mkSprint({ pk: 'SMECM', done: 8,  total: 15, progressPct: 53,   pace: 'on-track' }),
+    ] } } };
+    const html = renderVelocityComparison(model);
+    assert.match(html, /ts2-velocity-comparison/);
+    assert.match(html, /ts2-vc-bars/);
+    assert.match(html, /CORE/);
+    assert.match(html, /SMECM/);
+    // Sorted desc by done → CORE (12) первый.
+    const idxC = html.indexOf('"ts2-vc-bar-pk">CORE');
+    const idxS = html.indexOf('"ts2-vc-bar-pk">SMECM');
+    assert.ok(idxC < idxS, 'expected CORE раньше SMECM по done');
+  });
+
+  test('leaderboard view — нумерует #1, #2 ...', () => {
+    const model = { scannerV2: { sprintGoal: { sprints: [
+      mkSprint({ pk: 'A', done: 20, progressPct: 80 }),
+      mkSprint({ pk: 'B', done: 10, progressPct: 40 }),
+      mkSprint({ pk: 'C', done: 15, progressPct: 60 }),
+    ] } } };
+    const html = renderVelocityComparison(model, [], { viewMode: 'leaderboard' });
+    assert.match(html, /ts2-vc-leader/);
+    assert.match(html, /#1/);
+    assert.match(html, /#2/);
+    assert.match(html, /#3/);
+    // Sorted desc — A (20) → C (15) → B (10)
+    const idxA = html.indexOf('"ts2-vc-leader-pk">A');
+    const idxC = html.indexOf('"ts2-vc-leader-pk">C');
+    const idxB = html.indexOf('"ts2-vc-leader-pk">B');
+    assert.ok(idxA < idxC && idxC < idxB);
+  });
+
+  test('trend view с history >= 2 → рендерит aggregate sparkline', () => {
+    const model = { scannerV2: { sprintGoal: { sprints: [mkSprint({pk:'A'}), mkSprint({pk:'B'})] } } };
+    const history = [
+      { sprintGoal: { aggregateProgress: 30 } },
+      { sprintGoal: { aggregateProgress: 45 } },
+    ];
+    const html = renderVelocityComparison(model, history, { viewMode: 'trend' });
+    assert.match(html, /ts2-vc-trend-aggregate/);
+    assert.match(html, /Aggregate за 2 дня/);
+  });
+
+  test('trend view с history < 2 → empty-state hint', () => {
+    const model = { scannerV2: { sprintGoal: { sprints: [mkSprint({pk:'A'}), mkSprint({pk:'B'})] } } };
+    const html = renderVelocityComparison(model, [], { viewMode: 'trend' });
+    assert.match(html, /Недостаточно истории/);
+  });
+
+  test('переключатели tabs имеют data-velocity-view', () => {
+    const model = { scannerV2: { sprintGoal: { sprints: [mkSprint({pk:'A'}), mkSprint({pk:'B'})] } } };
+    const html = renderVelocityComparison(model);
+    assert.match(html, /data-velocity-view="bar"/);
+    assert.match(html, /data-velocity-view="leaderboard"/);
+    assert.match(html, /data-velocity-view="trend"/);
   });
 });

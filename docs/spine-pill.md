@@ -122,6 +122,82 @@
 
 Padding / gap / margin должны быть из `4 / 8 / 12 / 16 / 24 / 32`. Не `5 / 7 / 11 / 18`. См. lapses в `audit-2026-05-V17/11-filters-audit.md` art-director §4.
 
+### 9. Inline `style.X = …` → CSS custom-property (AUDIT_HOLISTIC O10)
+
+**Проблема.** `el.style.left = x + 'px'` / `el.style.display = 'none'` / `el.style.opacity = '.4'` ×120+ в `views/gantt.js`, `views/registry.js`, `views/gantt/aux.js`, `integrations/teamScanner2.js`. Inline-style:
+- конкурирует с CSS-rule на той же property (важнее по специфичности → ломает theme-switch);
+- невидим для `prefers-reduced-motion` media-query (`transition` / `transform` ставятся напрямую);
+- невозможно перекрыть из dark-theme или a11y-overrides без `!important` гонки.
+
+**Паттерн миграции.**
+
+```js
+// ❌ Было — inline px
+el.style.left = x + 'px';
+el.style.top  = y + 'px';
+
+// ✅ Стало — custom-property + CSS rule
+el.dataset.pos = '1';
+el.style.setProperty('--prizma-menu-x', x + 'px');
+el.style.setProperty('--prizma-menu-y', y + 'px');
+```
+
+```css
+/* styles.css */
+.registry-ctx-menu[data-pos] {
+  left: var(--prizma-menu-x, 0);
+  top:  var(--prizma-menu-y, 0);
+}
+```
+
+**Bool-видимость → class-toggle.**
+
+```js
+// ❌ Было
+rowEl.style.display = collapsed ? 'none' : 'grid';
+
+// ✅ Стало
+rowEl.classList.toggle('is-team-collapsed', collapsed);
+```
+```css
+.gantt-row.is-team-collapsed { display: none !important; }
+```
+
+**Animation transform → class + custom-properties.**
+
+```js
+// ❌ Было — transform inline, prefers-reduced-motion не работает
+ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.15)`;
+
+// ✅ Стало
+ghost.classList.add('gdt-drop-ghost');
+ghost.style.setProperty('--prizma-ghost-tx', dx + 'px');
+ghost.style.setProperty('--prizma-ghost-ty', dy + 'px');
+```
+```css
+.gdt-drop-ghost {
+  transform: translate(var(--prizma-ghost-tx, 0), var(--prizma-ghost-ty, 0)) scale(var(--prizma-ghost-scale, 1));
+}
+@media (prefers-reduced-motion: reduce) {
+  .gdt-drop-ghost { transform: none; transition: none; }
+}
+```
+
+**Когда оставить inline-style.**
+- `setProperty('--prizma-…', …)` — это единственная допустимая форма «динамической записи».
+- One-shot ghost-элементы для flight-animation, где css-text задаётся целиком при создании (см. `gantt.js#dragend → ghost.style.cssText`); их CSS-rule всё равно бесполезен (элемент уничтожается через 700 ms).
+- `style.cssText = '…'` с комментарием «WHY-not-class» — допустимо для legacy details-элементов, но новые callsite'ы должны идти через class.
+
+**Lint.** `eslint-rules/no-inline-style.js` (stub, warn-only) ловит `el.style.<prop> = …` для `width / height / left / top / right / bottom / color / background / opacity / transform / display / minWidth / maxWidth`. `setProperty('--prizma-*', …)` — не считается. Override через `// eslint-disable-next-line no-inline-style` с пояснением.
+
+**Затронуто в первом pass'е (после AUDIT_HOLISTIC O10):**
+- `views/registry.js` — column-resize live width (×3 callsite), sticky-pin-left, ctx-menu position, `.cell-input width:100%` снят (уже в .cell-input rule), textarea autosize → `--prizma-textarea-h` (≈8 замен).
+- `views/gantt.js` — team-collapse display-toggle (1), pill drag-opacity (2), ctx-menu position (2), drop-ghost transform (1) (≈6 замен).
+- `views/gantt/aux.js` — fast-tooltip позиция и видимость переехали в `.gdt-fasttip` rule (≈4 замены).
+- `styles.css` — добавлены 10 правил под секцией «AUDIT_HOLISTIC O10».
+
+Остаётся ~20 inline-style sites (см. `grep -rnE 'style\.(width|height|left|top|right|bottom|color|background|opacity|transform|display)\s*=' views/ integrations/`) для phase-2.
+
 ## Анти-паттерны (обновляемый список)
 
 | Анти-паттерн | Найдено в | Решение |

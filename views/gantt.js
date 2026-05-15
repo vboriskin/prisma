@@ -7,15 +7,19 @@ import { state } from '../state.js';
 import { FilterEngine } from '../filters.js';
 import { Utils } from '../utils.js';
 import { RowFactory } from '../rowFactory.js';
-import { RiskEngine } from '../riskEngine.js';
+import { Icons } from '../app/icons.js';
 import { Storage } from '../dataStore.js';
+// V22 G-07 (audit-experts-2026-05-15) — dead imports purge:
+// RiskEngine, RH, SCOPE_OPTIONS, RELEASE_WINDOWS, GANTT_RELEASE_WINDOWS,
+// GANTT_TIMELINE_START, GANTT_TIMELINE_END, GANTT_DAY_PX,
+// GANTT_RELEASE_BOUNDS, PHASE_SHORT — none of them были использованы в коде
+// (только в самой строке import). Перепроверено через grep по имени.
 import {
-  SCOPE_OPTIONS, RELEASE_WINDOWS, GANTT_RELEASE_WINDOWS,
-  GANTT_TIMELINE_START, GANTT_TIMELINE_END, GANTT_DAY_PX,
-  GANTT_RELEASE_BOUNDS, PHASE_ORDER, PHASE_COLORS, PHASE_SHORT,
-  WORK_TYPES,
+  PHASE_ORDER, PHASE_COLORS,
+  PHASE_COLOR_TOKENS, PHASE_COLOR_TOKEN_FALLBACK,
+  WORK_TYPES, GANTT_COL_LABELS,
 } from '../constants.js';
-import { RH } from './renderHelpers.js';
+import { GANTT_LEGEND } from './gantt/legendContent.js';
 // V18.3 B1 (partial split) — 4 self-contained method'а вынесены в aux.
 import {
   openHistoryModal as _auxHistoryModal,
@@ -23,6 +27,22 @@ import {
   bindFastTooltip as _auxBindFastTooltip,
   drawPostponeArrows as _auxDrawPostponeArrows,
 } from './gantt/aux.js';
+import { renderPageHeader, prizmaEmptyGlyph } from '../app/prizmaUI.js';
+import { Services } from '../app/services.js';
+
+/** Волна 3 — общий helper для prizma-page-header в section'ах. */
+function _injectPrizmaHeader(sectionId, prizmaSectionKey, sub) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const hostId = sectionId + '-prizma-header';
+  let host = section.querySelector('#' + hostId);
+  if (!host) {
+    host = document.createElement('div');
+    host.id = hostId;
+    section.insertBefore(host, section.firstChild);
+  }
+  host.innerHTML = renderPageHeader(prizmaSectionKey, sub ? { sub } : {});
+}
 
 // V17.1 C11+C12 — единый плюрализатор для русских окончаний.
 // Пример: pl(1, ['задача','задачи','задач']) → 'задача', pl(3,…) → 'задачи',
@@ -35,7 +55,12 @@ function pl(n, forms) {
   if (b === 1) return forms[0];
   return forms[2];
 }
-const TASK_FORMS = ['задача', 'задачи', 'задач'];
+// V22 G-10 (audit-experts-2026-05-15 Vrba S0-2) — «N задач» создавал
+// иллюзию что показано N Jira-тикетов, тогда как реально это N **типов
+// работ** (BE/FE/QA) в составе эпика, не отдельные тикеты. Переименовано
+// на честное «N типов работ» — терминологически совпадает с CLAUDE.md
+// доменным глоссарием («N задач у эпика = типы работ»).
+const TASK_FORMS = ['тип работ', 'типа работ', 'типов работ'];
 const EPIC_FORMS = ['эпик', 'эпика', 'эпиков'];
 
 // V17.1 C4 — длинный русский формат «20 апреля – 17 мая» для подзаголовка
@@ -54,7 +79,9 @@ function formatLongRange(sub) {
 }
 
 export const GanttView = {
-  gf:{ team:'',scope:'',onlyBlocking:false,onlyNoRelease:false,onlyRisky:false },
+  // Wave1 P-GR §B4 — приватный фильтр-state `gf` удалён: единственным
+  // потребителем был `getRows()`, фильтры жили в `FilterEngine`, а локальный
+  // `gf` всегда оставался initial-defaults (никаких сеттеров не было).
   _cancelTransientInteractions: null,
   _clearTransientInteractions() {
     if (typeof GanttView._cancelTransientInteractions === 'function') {
@@ -62,11 +89,261 @@ export const GanttView = {
     }
     GanttView._cancelTransientInteractions = null;
   },
+  // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
+  // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
+  // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
+  // переехать в styles.css или откатить.
+  _auditArtInjectStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('audit-art-gantt-style')) return;
+    const css = `
+/* AUDIT-ART #12 — team-rail: rainbow hash-color → нейтральный 1px grey.
+   Identity команды теперь несёт monogram (см. .audit-art-team-mono),
+   color != identity. */
+.v16-team-rail.audit-art-team-rail {
+  background: var(--prizma-border-strong, var(--prizma-text-tertiary, #94a3b8)) !important;
+  width: 1px !important;
+  border-radius: 0 !important;
+}
+
+/* AUDIT-ART #12 — team-monogram: 2-letter chip рядом с названием команды.
+   Tabular-nums + spine eyebrow (10px CAPS, letter-spacing). */
+.audit-art-team-mono {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 18px;
+  padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  color: var(--prizma-text-secondary, var(--text-2));
+  background: transparent;
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* AUDIT-ART #13 — capacity sparkline: пять баров → нейтральные grey.
+   Только overload-bar остаётся signal-цветом (off-course красный).
+   Раньше каждый bucket красился в свой signal-цвет (information/on-course/
+   drift/off-course/text-tertiary) — «свет от ёлки», 5 цветов всегда. */
+.v16-spark-bar-backlog,
+.v16-spark-bar-r120,
+.v16-spark-bar-r121,
+.v16-spark-bar-r122,
+.v16-spark-bar-overtime {
+  background: var(--prizma-text-tertiary, #94a3b8) !important;
+  opacity: .55;
+}
+.v16-spark-bar-overload {
+  background: var(--prizma-off-course, #C13838) !important;
+  opacity: 1;
+}
+
+/* ===========================================================
+   V22 audit-experts-2026-05-15 — patch-stack для Ганта.
+   Все правила помечены тегом V22-G-<N> чтобы было легко
+   tracking / откатить per-issue.
+   =========================================================== */
+
+/* V22-G-11 — Dependency badge на эпик-строке.
+   Inline-индикатор «← N зависимостей / → N блокирующих» с минимальной
+   визуальной нагрузкой. Линии через весь Гант на 200 эпиков превращаются
+   в кашу — поэтому компактный chip с tooltip-ом + click → dep-graph. */
+.v16-epic-deps-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 4px; height: 14px;
+  background: transparent;
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 3px;
+  color: var(--prizma-text-secondary, var(--text-2));
+  font: 500 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  letter-spacing: .2px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: border-color .12s, color .12s;
+}
+.v16-epic-deps-badge:hover {
+  border-color: var(--prizma-information, #4f46e5);
+  color: var(--prizma-information, #4f46e5);
+}
+.v16-epic-deps-badge:focus-visible {
+  outline: 2px solid var(--prizma-information, #4f46e5);
+  outline-offset: 1px;
+}
+.v16-epic-deps-in,
+.v16-epic-deps-out {
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+.v16-epic-deps-in  { color: var(--prizma-drift,    #B07B1A); } /* зависит от чего-то — амбер (риск ждать) */
+.v16-epic-deps-out { color: var(--prizma-off-course,#C13838); } /* блокирует других — красный */
+
+/* V22-G-09 — Time-axis (today-маркер) внутри активной release-колонки.
+   Раньше: «окно 1.21» — без понимания «когда дедлайн? мы внутри или вышли?»
+   Теперь: для bucket-cell с .gantt-col-today добавляется vertical-line
+   маркер today на пропорциональной позиции внутри окна. */
+.gantt-bucket-today-marker {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: var(--prizma-information, #4f46e5);
+  opacity: .55;
+  pointer-events: none;
+  z-index: 1;
+}
+.gantt-bucket-today-marker::after {
+  content: '';
+  position: absolute;
+  top: -2px; left: -2px;
+  width: 5px; height: 5px;
+  background: var(--prizma-information, #4f46e5);
+  border-radius: 50%;
+}
+.gantt-window-r120,
+.gantt-window-r121,
+.gantt-window-r122,
+.gantt-window-overtime {
+  position: relative; /* чтобы абсолютный today-маркер позиционировался */
+}
+
+/* V22-G-15 — Toolbar visual hierarchy.
+   Primary actions (Зафиксировать план, Снять фиксацию) — outline + текст.
+   Secondary (История, Граф зависимостей, Как читать) — outline + текст.
+   Tertiary / utility (Undo, Redo, Свернуть, Полный экран) — icon-only,
+   зрительно слабее (opacity .8 + бордер ghost). NAV-кластер (Поиск,
+   Режим, Плотность, Полный экран) — все icon-only ghost, в самом правом
+   конце. Это уже задано через prizma-icon-only-btn — мы дополнительно
+   делаем visual-weight унифицированным. */
+.section-header-actions .btn.prizma-icon-only-btn {
+  opacity: .82;
+  border-color: var(--prizma-border, var(--border));
+}
+.section-header-actions .btn.prizma-icon-only-btn:hover {
+  opacity: 1;
+}
+.section-header-actions .topbar-divider {
+  /* eyebrow-label кластера: «Вид» / «Навигация» — уже есть data-cluster-label,
+     просто чуть приглушаем чтобы не конкурировал с кнопками */
+  opacity: .65;
+}
+
+/* V22-G-17 — Один шрифт на строку эпика.
+   Раньше: имя эпика (16px/800) + счётчик (24px/300) — два разных шрифта,
+   глаз не знал куда смотреть. Теперь иерархия СТРОЙКО по weight и opacity. */
+.v16-epic-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+.v16-epic-sub {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  opacity: .72; /* «легче» родителя — иерархия через прозрачность, не размер */
+}
+.v16-epic-meta {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+/* V22-G-18 — font-size scale в Ганте теперь 4 размера вместо 11:
+     12px (счётчики, бейджы, мелочь — tnum)
+     13px (имя эпика, имя пилла)
+     14px (заголовки секций, кластер-лейблы)
+     11px (caps eyebrow / spine-caption)
+   Здесь объявляем как custom-properties для override-стека. */
+.section-header-actions {
+  --gdt-size-mono: 12px;
+  --gdt-size-base: 13px;
+  --gdt-size-head: 14px;
+  --gdt-size-caps: 11px;
+}
+
+/* V22-G-20 — Заголовок Ганта: убираем конкурирующие цветовые каналы.
+   Раньше: 6 каналов (фон, полоска, шрифт цвета, иконки, бейдж, бордер).
+   Теперь: 2 канала — neutral-фон + один accent цвет (information) только
+   на active элементах. Все decorative окраски (border, icon, badge) сведены
+   в один neutral grey. */
+#section-gantt .section-header-actions .btn {
+  background: var(--prizma-bg-elevated, #fff);
+  color: var(--prizma-text-primary, var(--text-1));
+  border-color: var(--prizma-border, var(--border));
+}
+#section-gantt .section-header-actions .btn[aria-expanded="true"],
+#section-gantt .section-header-actions .btn.is-active {
+  /* единственный accent-канал — для активного состояния */
+  border-color: var(--prizma-information, #4f46e5);
+  color: var(--prizma-information, #4f46e5);
+}
+
+/* V22-G-21 — Pill: возвращаем к Spine «один канал = одно сообщение».
+   Раньше пилл нёс 8 визуальных каналов одновременно. Spine-доктрина
+   допускает: 3px stripe-left + один текстовый бейдж. Прочее (тень,
+   двойной фон, доп. бордер, gradient) — убираем. См. также G-22 ниже. */
+.gantt-type-pill {
+  /* убираем double-shadow ring — единственный bordering сигнал = stripe-left.
+     Это закрывает G-21 + G-22 (box-shadow as visual border) сразу. */
+  box-shadow: none !important;
+  border-top: 1px solid transparent;
+  border-right: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  /* stripe-left уже задан через border-left: 3px solid var(--pill-stripe) */
+}
+.gantt-type-pill:hover {
+  /* hover «усиление stripe» БЕЗ ring */
+  box-shadow: none !important;
+  background: var(--prizma-bg-tertiary, var(--prizma-bg-elevated));
+  border-left-width: 4px; /* stripe чуть шире на hover — единственный feedback-канал */
+}
+/* Pill row-2 (meta): WCAG-fix (см. также Birman C3). Раньше 9.5px на
+   light-theme давал contrast 4.32:1 (требуется 4.5:1). Теперь 10.5px
+   + усиленный text-color → выше порога. */
+.gdt-pill-row-2 {
+  font-size: 10.5px;
+  color: var(--prizma-text-secondary, var(--text-2));
+}
+
+/* V22 X-02 / K-03 — focused-row подсветка при focus-changed эпика.
+   2.4 сек pulse-highlight (через transient class) — даёт визуальный
+   anchor когда юзер пришёл в Гант через action-chip чата или
+   dependency-graph. */
+.gantt-row.gantt-row-focused {
+  background: rgba(79, 70, 229, 0.10) !important;
+  animation: gantt-row-focus-pulse 2.4s ease-out;
+}
+@keyframes gantt-row-focus-pulse {
+  0%   { background: rgba(79, 70, 229, 0.28); }
+  100% { background: rgba(79, 70, 229, 0.0); }
+}
+
+/* V22-G-22 — box-shadow as border → real border.
+   Раньше у .gantt-type-pill стоял box-shadow: 0 0 0 1px var(--prizma-border) —
+   это тень функционально работала как бордер, нарушая Spine no-shadows
+   doctrine. Заменено на правильный border (см. G-21 выше) или удалено
+   совсем (для pill — оставляем только stripe). */
+`;
+    const styleEl = document.createElement('style');
+    styleEl.id = 'audit-art-gantt-style';
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  },
   render() {
+    // F10 fix (codebase-01) + sj3 (codebase-05) — отметить рендер для guard'а.
+    try { Services.App?.markRenderedNow?.(); } catch (_) {}
+    /* AUDIT-ART #11/#12/#13 — runtime CSS-overrides поверх styles.css (без
+       прямых правок styles.css во избежание merge-conflict'ов). Инжектим
+       один раз; идемпотентно. */
+    GanttView._auditArtInjectStyles();
+    _injectPrizmaHeader('section-gantt', 'gantt');
     GanttView.applyMode();            // V16 roadmap-2 (A4) — restore overview/default
     GanttView.applyDensity();         // V16 #5 — restore persisted density before chart paints
     GanttView.renderPillLegend();
-    GanttView.renderFilters();
+    // Wave1 P-GR §B5/§B6 — GanttView.renderFilters() удалён вместе с DOM-узлом
+    // `#gantt-filters` (см. index.html). Раньше метод был no-op, оставшийся
+    // от старого фильтр-бара.
     GanttView.renderChart();
     GanttView.bindFullscreen();
     GanttView.bindExpandCollapse();
@@ -115,15 +392,29 @@ export const GanttView = {
       list.forEach((p, i) => { p.tabIndex = (i === 0) ? 0 : -1; });
     };
     setupRoving();
-    // Re-establish baseline after every renderChart() rebuild.
-    const _origRender = GanttView.renderChart;
-    if (!GanttView._kbWrappedRender) {
-      GanttView._kbWrappedRender = true;
-      GanttView.renderChart = function (...args) {
-        const r = _origRender.apply(this, args);
-        try { setupRoving(); } catch (_) {}
-        return r;
-      };
+    // V22 G-03 (audit-experts-2026-05-15 Demin C3) — раньше:
+    //   GanttView.renderChart = function(...args) { _orig(args); setupRoving(); }
+    // monkey-patch перекрывал метод объекта-namespace. После HMR/тестов это
+    // ломалось (cached reference). Решение: подписка на EventBus-событие
+    // 'gantt-rendered', которое GanttView эмитит в конце своего renderChart().
+    // Идемпотентно: флаг _kbRovingSubscribed защищает от двойной подписки.
+    if (!GanttView._kbRovingSubscribed) {
+      GanttView._kbRovingSubscribed = true;
+      try {
+        const bus = (typeof globalThis !== 'undefined') ? globalThis.EventBus : null;
+        if (bus && typeof bus.on === 'function') {
+          bus.on('gantt-rendered', () => {
+            try { setupRoving(); } catch (_) {}
+          });
+        } else {
+          // Fallback: subscribe to Reactive flush. Дешевле monkey-patch'а.
+          if (typeof globalThis !== 'undefined' && globalThis.Reactive?.subscribe) {
+            globalThis.Reactive.subscribe(() => {
+              try { setupRoving(); } catch (_) {}
+            });
+          }
+        }
+      } catch (_) { /* defensive */ }
     }
 
     wrap.addEventListener('focusin', (e) => {
@@ -185,11 +476,14 @@ export const GanttView = {
     const btn = document.getElementById('btn-gantt-mode');
     if (!btn || btn._gdtModeBound) return;
     btn._gdtModeBound = true;
+    // V21 — initial aria-pressed sync с текущим режимом.
+    btn.setAttribute('aria-pressed', GanttView._dtMode === 'overview' ? 'true' : 'false');
     btn.addEventListener('click', () => {
       const next = GanttView._dtMode === 'overview' ? 'default' : 'overview';
       GanttView._dtMode = next;
       document.body.dataset.gdtMode = next;
       try { localStorage.setItem('q2_gantt_mode_v16', next); } catch (_) {}
+      btn.setAttribute('aria-pressed', next === 'overview' ? 'true' : 'false');
       btn.title = next === 'overview'
         ? 'Режим: Overview (клик → Default)'
         : 'Режим: Default (клик → Overview)';
@@ -226,15 +520,15 @@ export const GanttView = {
       });
     }
   },
-  /** V16 (gantt-roadmap #5) — density toggle. Two states: «regular» (the
-   *  default Spine-pill 2-row layout, ~44 px rows) and «compact» (~32 px,
-   *  meta-row hidden). Persisted to localStorage. Dense (24 px) was
-   *  rejected by review — would break the Spine pill's two-row anatomy. */
+  /** V16 (gantt-roadmap #5) + V21 pills refresh — density toggle. Three
+   *  states cycle: «regular» (Spine-pill 2-row, ~44 px) → «compact» (~32 px,
+   *  meta-row hidden) → «minimal» (~22 px, единственная строка name+glyph,
+   *  для overview-mode на больших проектах). Persisted to localStorage. */
   applyDensity() {
     let mode = 'regular';
     try {
       const saved = localStorage.getItem('q2_gantt_density_v16');
-      if (saved === 'compact' || saved === 'regular') mode = saved;
+      if (saved === 'compact' || saved === 'regular' || saved === 'minimal') mode = saved;
     } catch (_) {}
     document.body.dataset.gdtDensity = mode;
   },
@@ -242,18 +536,23 @@ export const GanttView = {
     const btn = document.getElementById('btn-gantt-density');
     if (!btn || btn._gdtDensityBound) return;
     btn._gdtDensityBound = true;
+    const NEXT = { regular: 'compact', compact: 'minimal', minimal: 'regular' };
+    const LABEL = { regular: 'Regular', compact: 'Compact', minimal: 'Minimal' };
     btn.addEventListener('click', () => {
       // V16 roadmap-2 (B4) — preserve scroll anchor: density attribute
       // change reflows row heights, but our anchor read still works
       // because team-header positions update synchronously.
       GanttView._withScrollAnchor(() => {
-        const next = document.body.dataset.gdtDensity === 'compact' ? 'regular' : 'compact';
+        const cur  = document.body.dataset.gdtDensity || 'regular';
+        const next = NEXT[cur] || 'regular';
         document.body.dataset.gdtDensity = next;
         try { localStorage.setItem('q2_gantt_density_v16', next); } catch (_) {}
-        btn.title = next === 'compact'
-          ? 'Плотность: Compact (клик → Regular)'
-          : 'Плотность: Regular (клик → Compact)';
-        window.showToast?.(`Плотность: ${next === 'compact' ? 'Compact' : 'Regular'}`, 'info', 1400);
+        btn.title = `Плотность: ${LABEL[next]} (клик → ${LABEL[NEXT[next]]})`;
+        // V21 — sync aria-label с current density для screen-reader.
+        // 3-state cycle не позволяет boolean aria-pressed; полное состояние
+        // в aria-label.
+        btn.setAttribute('aria-label', `Плотность строк: ${LABEL[next]}`);
+        window.showToast?.(`Плотность: ${LABEL[next]}`, 'info', 1400);
       });
     });
   },
@@ -263,6 +562,14 @@ export const GanttView = {
   bindJumpPalette() {
     if (GanttView._jumpBound) return;
     GanttView._jumpBound = true;
+    // V21 — detect platform для корректного отображения хоткея (⌘K на macOS,
+    // Ctrl+K на Windows/Linux). Палитра имеет один статический prompt в
+    // index.html — обновляем его при первом bind.
+    try {
+      const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || '');
+      const promptEl = document.querySelector('.gdt-jump-prompt');
+      if (promptEl) promptEl.textContent = isMac ? '⌘K' : 'Ctrl+K';
+    } catch (_) {}
     document.getElementById('btn-gantt-jump')?.addEventListener('click', () => GanttView.openJumpPalette());
     document.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K' || e.key === 'л' || e.key === 'Л')) {
@@ -292,6 +599,13 @@ export const GanttView = {
     const input   = document.getElementById('gdt-jump-input');
     const results = document.getElementById('gdt-jump-results');
     if (!overlay || !input || !results) return;
+    // Wave3 P-GR — local `esc` shorthand. Pre-Wave3 the function referenced
+    // a free `esc` identifier that was only ever resolvable via global scope
+    // (Utils.escapeHtml never lived on `window`); the bug was inert because
+    // the only code path reaching it required `state.rows.length > 0`. Now
+    // that the task-by-id branch can render with empty state, we need a
+    // proper local binding so `esc(tag)` doesn't ReferenceError.
+    const esc = (s) => Utils.escapeHtml(s == null ? '' : String(s));
 
     // Build the searchable index every open — cheap, and keeps it fresh
     // after edits / imports without any subscribe wiring.
@@ -308,6 +622,20 @@ export const GanttView = {
     }
 
     let active = 0;
+    // Wave3 P-GR — task-by-id helper: матчит Jira-tag pattern (PROJ-123).
+    // Если текст в палитре похож на тег — приоритетно ищем row, у которого
+    // в `tasks` поле есть совпадение, и при выборе скроллим к строке.
+    const TAG_RE = /^([A-Z][A-Z0-9]*)-?(\d+)$/i;
+    const _searchTaskById = (query) => {
+      const m = String(query || '').trim().match(TAG_RE);
+      if (!m) return null;
+      const tag = `${m[1].toUpperCase()}-${m[2]}`;
+      for (const row of (state.rows || [])) {
+        const haystack = String(row.tasks || '').toUpperCase();
+        if (haystack.includes(tag)) return { row, tag };
+      }
+      return { row: null, tag };
+    };
     const norm = (s) => String(s || '').toLowerCase();
     const score = (item, q) => {
       if (!q) return 1;
@@ -322,7 +650,40 @@ export const GanttView = {
       return i === q.length ? 5 : 0;
     };
     const renderResults = () => {
+      const qRaw = String(input.value || '').trim();
       const q = norm(input.value).trim();
+
+      // Wave3 P-GR — task-by-id режим. Если запрос == Jira-tag, отдельная
+      // ветка: показываем 1 item «Задача PROJ-1234 в строке X» (если
+      // нашли) или fallback «не найдена в текущих строках».
+      const tagHit = _searchTaskById(qRaw);
+      if (tagHit) {
+        const { row, tag } = tagHit;
+        if (row) {
+          const taskItem = {
+            kind: 'task',
+            label: tag,
+            sub: row.epic || row.team || '—',
+            key: teamKeyFn(row.team || ''),
+            rowId: row.id,
+          };
+          if (active >= 1) active = 0;
+          results.innerHTML = `
+            <div class="gdt-jump-item${active === 0 ? ' is-active' : ''}" data-idx="0" data-kind="task" data-key="${esc(taskItem.key)}" data-row-id="${esc(taskItem.rowId || '')}">
+              <span class="gdt-jump-kind gdt-jump-kind-task">task</span>
+              <span class="gdt-jump-label">${esc(taskItem.label)}</span>
+              <span class="gdt-jump-sub">${esc(taskItem.sub)}</span>
+            </div>`;
+          results._items = [taskItem];
+          return;
+        }
+        // Tag-shape, но не нашли в state.rows — показываем явный fallback.
+        results.innerHTML = `<div class="gdt-jump-empty">Задача ${esc(tag)} не найдена в текущих строках</div>`;
+        results._items = [];
+        active = 0;
+        return;
+      }
+
       const ranked = items
         .map(it => ({ it, s: score(it, q) }))
         .filter(x => x.s > 0)
@@ -365,14 +726,24 @@ export const GanttView = {
         let target = null;
         if (it.kind === 'team') {
           target = wrap.querySelector(`.gantt-team-header[data-team-key="${cssEscape(it.key)}"]`);
-        } else if (it.kind === 'epic' && it.rowId) {
+        } else if ((it.kind === 'epic' || it.kind === 'task') && it.rowId) {
+          // Wave3 P-GR — `task` kind reuses epic-row resolution: row is
+          // the parent of all per-pill children, scroll-anchor совпадает.
           target = wrap.querySelector(`.gantt-row[data-row-id="${cssEscape(it.rowId)}"]`)
                 || wrap.querySelector(`.gantt-cell[data-row-id="${cssEscape(it.rowId)}"]`)?.parentElement;
         }
         if (target?.scrollIntoView) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          target.classList.add('gdt-jump-pulse');
-          setTimeout(() => target.classList.remove('gdt-jump-pulse'), 1400);
+          // Wave3 P-GR — для task-by-id используем явный highlight-class
+          // (gantt-row-highlight) поверх gdt-jump-pulse, чтобы CSS-анимация
+          // была "выраженнее" (8px box-shadow вместо короткого pulse).
+          if (it.kind === 'task') {
+            target.classList.add('gantt-row-highlight');
+            setTimeout(() => target.classList.remove('gantt-row-highlight'), 1600);
+          } else {
+            target.classList.add('gdt-jump-pulse');
+            setTimeout(() => target.classList.remove('gdt-jump-pulse'), 1400);
+          }
         }
       });
     };
@@ -418,51 +789,51 @@ export const GanttView = {
       openState = localStorage.getItem(STORAGE_KEY) === '1';
     } catch (_) { /* private mode → default collapsed */ }
 
+    const T = GANTT_LEGEND;
     const fullLegendHtml = `
       <div class="gdt-pill-legend-body">
         <div class="gdt-pill-legend-section gdt-pill-legend-anatomy">
-          <div class="gdt-pill-legend-title">Пилюля задачи</div>
+          <div class="gdt-pill-legend-title">${T.sectionTitle.anatomy}</div>
           <div class="gdt-pill-legend-items">
             <span class="gdt-pill-legend-demo">
               <span class="gdt-pill-legend-stripe"></span>
               <span class="gdt-pill-legend-demo-body">
                 <span class="gdt-pill-legend-demo-row1">
-                  <span class="gdt-pill-legend-demo-name">BE-модель</span>
+                  <span class="gdt-pill-legend-demo-name">${T.anatomy.demoName}</span>
                   <span class="gdt-pill-legend-demo-state-active"></span>
                   <span class="gdt-pill-legend-demo-cmt"></span>
                 </span>
-                <span class="gdt-pill-legend-demo-row2">Иванов · 01.05—15.05</span>
+                <span class="gdt-pill-legend-demo-row2">${T.anatomy.demoMeta}</span>
               </span>
             </span>
-            <span class="gdt-pill-legend-meta">слева: цвет = тип работы · справа: статус-точка и маркер коммента · снизу: исполнитель и период</span>
+            <span class="gdt-pill-legend-meta">${T.anatomy.description}</span>
           </div>
         </div>
         <div class="gdt-pill-legend-section">
-          <div class="gdt-pill-legend-title">Колодцы (цвет полосы)</div>
+          <div class="gdt-pill-legend-title">${T.sectionTitle.buckets}</div>
           <div class="gdt-pill-legend-items">
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:#4f46e5"></span> Релиз 1.20</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:#059669"></span> Релиз 1.21</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:#d97706"></span> Релиз 1.22</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:#dc2626"></span> Овертайм</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:var(--release-r120-color)"></span> ${T.bucket.r120}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:var(--release-r121-color)"></span> ${T.bucket.r121}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:var(--release-r122-color)"></span> ${T.bucket.r122}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-stripe-sample" style="background:var(--release-ot-color)"></span> ${T.bucket.ot}</span>
           </div>
         </div>
         <div class="gdt-pill-legend-section">
-          <div class="gdt-pill-legend-title">Состояния</div>
+          <div class="gdt-pill-legend-title">${T.sectionTitle.states}</div>
           <div class="gdt-pill-legend-items">
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-active"></span> В работе</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-done">✓</span> Завершено (название перечёркнуто)</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-unplanned"></span> Не запланирована (пунктирные стрипа и кружок, italic)</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-cmt-square gdt-pill-legend-cmt-transfer"></span> Перенос с комментарием (наведи на пилюлю)</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-cmt-square gdt-pill-legend-cmt-add"></span> Добавлено в зафиксированный план</span>
-            <span class="gdt-pill-legend-item gdt-pill-legend-meta">На «не запланированной» пилюле маркеры становятся контурными того же цвета</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-active"></span> ${T.state.active}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-done">✓</span> ${T.state.done}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-state gdt-pill-legend-state-unplanned"></span> ${T.state.unplanned}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-cmt-square gdt-pill-legend-cmt-transfer"></span> ${T.state.transferComment}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-cmt-square gdt-pill-legend-cmt-add"></span> ${T.state.addedAfterLock}</span>
           </div>
         </div>
         <div class="gdt-pill-legend-section">
-          <div class="gdt-pill-legend-title">Переносы</div>
+          <div class="gdt-pill-legend-title">${T.sectionTitle.transfers}</div>
           <div class="gdt-pill-legend-items">
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-icon">↗</span> Откуда перенесли</span>
-            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-icon">↘</span> Куда перенесли</span>
-            <span class="gdt-pill-legend-item gdt-pill-legend-meta">Каждая строка-переноса = одно действие; история сохраняется</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-icon">↗</span> ${T.transfer.from}</span>
+            <span class="gdt-pill-legend-item"><span class="gdt-pill-legend-icon">↘</span> ${T.transfer.to}</span>
+            <span class="gdt-pill-legend-item gdt-pill-legend-meta">${T.transfer.meta}</span>
           </div>
         </div>
       </div>`;
@@ -483,10 +854,14 @@ export const GanttView = {
         const content = host.querySelector('.gdt-pill-legend-content');
         if (content) content.dataset.open = next ? '1' : '0';
         sectionToggle.classList.toggle('active', next);
+        // V21 — sync aria-expanded для disclosure-pattern (screen-reader
+        // понимает «open / closed» состояние подсказки-блока).
+        sectionToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
         try { localStorage.setItem(STORAGE_KEY, next ? '1' : '0'); } catch (_) {}
       });
       // initial active-class sync
       sectionToggle.classList.toggle('active', openState);
+      sectionToggle.setAttribute('aria-expanded', openState ? 'true' : 'false');
     }
     // V17.1 C9 — History modal: shows action log filtered to gantt-related
     // entries. Idempotent guard prevents stacking listeners on every render.
@@ -494,6 +869,14 @@ export const GanttView = {
     if (histBtn && !histBtn._gdtHistBound) {
       histBtn._gdtHistBound = true;
       histBtn.addEventListener('click', () => GanttView._openHistoryModal());
+    }
+    // i4 (codebase-04 audit) — dependency-graph overlay.
+    const depsBtn = document.getElementById('btn-gantt-deps');
+    if (depsBtn && !depsBtn._gdtDepsBound) {
+      depsBtn._gdtDepsBound = true;
+      depsBtn.addEventListener('click', () => {
+        try { Services.DependencyGraphView?.toggle?.(); } catch (_) {}
+      });
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -515,7 +898,8 @@ export const GanttView = {
     const section = document.getElementById('section-gantt');
     const toggle = () => {
       const on = section.classList.toggle('gdt-fullscreen');
-      btn.textContent = on ? '✕ Выйти' : '⛶';
+      // E4 fix (codebase-03 audit) — glyph-only → текст без unicode-glyph.
+      btn.textContent = on ? 'Выйти' : 'Развернуть';
       btn.title = on ? 'Выйти из полного экрана' : 'Полный экран';
       GanttView._dtColWidths = {};
       GanttView.renderChart();
@@ -542,20 +926,61 @@ export const GanttView = {
       });
     });
   },
-  renderFilters() {
-    const el = document.getElementById('gantt-filters');
-    if (el) { el.innerHTML = ''; el.style.display = 'none'; }
-  },
+  // Wave1 P-GR §B5 — `renderFilters()` удалён (DOM-узел `#gantt-filters`
+  // больше не существует, см. index.html и §B4 про `gf`).
   getRows() {
-    let rows=FilterEngine.getFiltered(); const f=GanttView.gf;
-    if(f.team)rows=rows.filter(r=>r.team===f.team);
-    if(f.scope)rows=rows.filter(r=>r.scopeStatus===f.scope);
-    if(f.onlyBlocking)rows=rows.filter(r=>r.blockingDependency);
-    if(f.onlyNoRelease)rows=rows.filter(r=>r.isUnassigned);
-    if(f.onlyRisky)rows=rows.filter(r=>r.riskFlags&&r.riskFlags.length);
-    return rows;
+    // Wave1 P-GR §B4 — секция фильтров поверх FilterEngine удалена: локальный
+    // `gf` всегда был initial-defaults, поэтому все ветки сводились к no-op.
+    return FilterEngine.getFiltered();
+  },
+  /**
+   * V22 G-04 (audit-experts-2026-05-15 Demin H1) — coalesce multiple
+   * renderChart() calls within one microtask/tick into a single full
+   * rebuild. Раньше при каждой пользовательской мутации (move + revert +
+   * checkpoint + update + state-flush + Reactive notify) renderChart()
+   * вызывался 3-5 раз подряд, каждый раз rebuild всей таблицы 200 строк.
+   *
+   * Этот wrapper:
+   *  · если уже scheduled — no-op;
+   *  · через rAF делает один реальный _renderChartImmediate;
+   *  · `flushRenderChart()` для тестов / синхронных путей.
+   *
+   * Vanilla код, без runtime cost когда вызовов мало.
+   */
+  _renderChartRaf: 0,
+  _renderChartScheduled: false,
+  scheduleRenderChart() {
+    if (GanttView._renderChartScheduled) return;
+    GanttView._renderChartScheduled = true;
+    const fn = () => {
+      GanttView._renderChartScheduled = false;
+      GanttView._renderChartRaf = 0;
+      try { GanttView._renderChartImmediate(); } catch (e) { console.warn('[Gantt] renderChart threw:', e); }
+    };
+    if (typeof requestAnimationFrame === 'function') {
+      GanttView._renderChartRaf = requestAnimationFrame(fn);
+    } else {
+      GanttView._renderChartRaf = setTimeout(fn, 16);
+    }
+  },
+  flushRenderChart() {
+    if (!GanttView._renderChartScheduled) return;
+    if (GanttView._renderChartRaf) {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(GanttView._renderChartRaf);
+      else clearTimeout(GanttView._renderChartRaf);
+      GanttView._renderChartRaf = 0;
+    }
+    GanttView._renderChartScheduled = false;
+    GanttView._renderChartImmediate();
   },
   renderChart() {
+    // V22 G-04 — публичный API остаётся прежним; делегируем в coalescer.
+    // Любой синхронный код, который ожидал что после renderChart() DOM
+    // ОЧЕНЬ скоро обновится — должен дождаться следующего rAF либо
+    // явно вызвать GanttView.flushRenderChart().
+    GanttView.scheduleRenderChart();
+  },
+  _renderChartImmediate() {
     GanttView._clearTransientInteractions();
     if (GanttView._docTipListener) {
       document.removeEventListener('mousemove', GanttView._docTipListener);
@@ -590,7 +1015,7 @@ export const GanttView = {
     const wrap=document.getElementById('gantt-wrap');
     if (wrap) { wrap.style.display=''; }
     const rows=GanttView.getRows();
-    if (!rows.length){wrap.innerHTML='<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-title">Нет данных</div></div>';return;}
+    if (!rows.length){wrap.innerHTML=`<div class="empty-state">${prizmaEmptyGlyph()}<div class="empty-title">План пуст</div><div class="empty-sub">Загрузите XLSX или включите демо-данные, чтобы увидеть курс квартала.</div></div>`;return;}
     // V17.1 C1 — backlog header label removed (was «Бэклог»). Колодец остаётся,
     //   но текст заголовка / подзаголовка скрыт — пользовательский запрос.
     // V17.1 C4 — date sub теперь рендерится длинным русским форматом
@@ -598,7 +1023,7 @@ export const GanttView = {
     //   `sub` оставляем в исходном `DD.MM–DD.MM` потому что parser today-pill
     //   завязан на этот формат.
     const cols=[
-      {key:'backlog',label:'',sub:'',cls:'gantt-window-backlog'},
+      {key:'backlog',label:'Бэклог',sub:'ещё не запланировано',cls:'gantt-window-backlog'},
       {key:'r120',label:'1.20',sub:'20.04–17.05',cls:'gantt-window-r120'},
       {key:'r121',label:'1.21',sub:'18.05–14.06',cls:'gantt-window-r121'},
       {key:'r122',label:'1.22',sub:'15.06–14.07',cls:'gantt-window-r122'},
@@ -613,28 +1038,15 @@ export const GanttView = {
     /* ---- helpers ---- */
     const esc = Utils.escapeHtml;
     const toTags = v => String(v||'').split(/[|,]/).map(s=>s.trim()).filter(Boolean);
-    const wtEmoji = wt => {
-      const x = String(wt||'').trim().toLowerCase();
-      if (!x) return '🧩';
-      if (x.includes('бизнес аналит')) return '📈';
-      if (x.includes('аналит')) return '📊';
-      if (x.includes('backend')||x.includes('бэкенд')||x.includes('разработ')) return '💻';
-      if (x.includes('frontend')||x.includes('фронт')) return '🖥️';
-      if (x.includes('qa')||x.includes('тест')) return '🧪';
-      if (x.includes('внедр')) return '🚀';
-      if (x.includes('миграц')) return '🗃️';
-      if (x.includes('стабилиз')) return '🧯';
-      if (x.includes('хотфикс')||x.includes('hotfix')) return '🚑';
-      if (x.includes('интеграц')) return '🔌';
-      if (x.includes('документ')) return '📝';
-      return '🧩';
-    };
+    // V21 Wave-3 — emoji-prefix для типов работ удалён по брендбуку.
+    // Категория уже выводится текстом, дублирующий эмодзи не нужен.
+    const wtEmoji = () => '';
 
     /* ---- field maps ---- */
     const hasMap    = {backlog:'isUnassigned',r120:'hasRelease120',r121:'hasRelease121',r122:'hasRelease122',overtime:'hasOvertime'};
     const tfMap     = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
     const colKeyMap = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
-    const COL_LABEL_MAP = { backlog:'Бэклог', r120:'1.20', r121:'1.21', r122:'1.22', overtime:'OT' };
+    const COL_LABEL_MAP = GANTT_COL_LABELS;
 
     /* V15 Spine redesign 2026-04-30 — emoji-prefix helpers retired
        (avatar circle, 📅, 📬). Pill content is now a two-row layout:
@@ -694,6 +1106,14 @@ export const GanttView = {
     // source cell. Used by both the context-menu "Перенести в …" action and
     // cross-cell drag-and-drop (#5/#8/#9/#12).
     const moveWtBetweenCols = (row, wt, srcCol, dstCol, opts = {}) => {
+      // V22 G-02 (audit-experts-2026-05-15 Demin C2) — все мутации идут
+      // через ПЕРЕСОЗДАНИЕ массива (spread + reassign), а не через
+      // push/splice на proxy-wrapped reference. Push/splice на прокси
+      // ТЕХНИЧЕСКИ триггерит set-trap (Array.prototype.push internally
+      // does set on index + length), но reassign-pattern: (а) явнее
+      // выражает интент «массив обновился», (б) защищён от случаев когда
+      // raw-array извлекли через RAW_TARGET, (в) совместим с будущей
+      // оптимизацией PROXY_CACHE.
       const srcField = colKeyMap[srcCol];
       const dstField = colKeyMap[dstCol];
       if (srcField && Array.isArray(row[srcField])) {
@@ -701,18 +1121,16 @@ export const GanttView = {
       }
       if (dstField) {
         const existing = Array.isArray(row[dstField]) ? row[dstField] : [];
-        if (!existing.includes(wt)) existing.push(wt);
-        row[dstField] = existing;
+        row[dstField] = existing.includes(wt) ? existing : [...existing, wt];
       }
       const at = new Date().toISOString();
-      if (!Array.isArray(row.ganttArrows)) row.ganttArrows = [];
       // V15 (1.4.2): preserve full history of moves. Earlier we filtered out
       // any prior arrow for the same `wt` ("pill can only have ONE current
       // move-trail") — that erased the trail when the user moved a pill
       // through several columns (1.20 → 1.21 → 1.22 left only the last hop
       // visible). Now we append every move; renderer surfaces each as its
       // own sub-row so the chain reads naturally top-to-bottom.
-      row.ganttArrows.push({ wt, srcCol, dstCol, at });
+      row.ganttArrows = [...(Array.isArray(row.ganttArrows) ? row.ganttArrows : []), { wt, srcCol, dstCol, at }];
       // V14 (B5): if a comment was supplied (plan-locked move), append to
       // the row's transfer-comment trail. Each entry stores enough context
       // to be useful later: timestamp, what moved, src/dst, free-form text.
@@ -723,12 +1141,11 @@ export const GanttView = {
       // produce zero `transferComments`, breaking compliance use-case.
       const planLocked = !!(state.planLocked);
       const editModeOn = !!(state.ganttEditMode);
+      const existingComments = Array.isArray(row.transferComments) ? row.transferComments : [];
       if (opts.comment) {
-        if (!Array.isArray(row.transferComments)) row.transferComments = [];
-        row.transferComments.push({ at, wt, from: srcCol, to: dstCol, text: String(opts.comment) });
+        row.transferComments = [...existingComments, { at, wt, from: srcCol, to: dstCol, text: String(opts.comment) }];
       } else if (planLocked && editModeOn) {
-        if (!Array.isArray(row.transferComments)) row.transferComments = [];
-        row.transferComments.push({ at, wt, from: srcCol, to: dstCol, text: '[edit-mode]' });
+        row.transferComments = [...existingComments, { at, wt, from: srcCol, to: dstCol, text: '[edit-mode]' }];
       }
       row.dirty = true;
       row.updatedAt = at;
@@ -745,13 +1162,13 @@ export const GanttView = {
       const a = arrows[idx];
       const srcField = colKeyMap[a.srcCol];
       const dstField = colKeyMap[a.dstCol];
+      // V22 G-02 — spread-pattern для consistency с moveWtBetweenCols.
       if (dstField && Array.isArray(row[dstField])) {
         row[dstField] = row[dstField].filter(t => t !== wt);
       }
       if (srcField) {
         const existing = Array.isArray(row[srcField]) ? row[srcField] : [];
-        if (!existing.includes(wt)) existing.push(wt);
-        row[srcField] = existing;
+        row[srcField] = existing.includes(wt) ? existing : [...existing, wt];
       }
       row.ganttArrows = arrows.filter((_, i) => i !== idx);
       row.dirty = true;
@@ -768,6 +1185,10 @@ export const GanttView = {
     const lwDefault  = Math.max(220, Math.min(420, Math.round(wrapW * 0.18)));
     // '_label' key stores user-resized label-column width
     if (!GanttView._dtColWidths['_label']) GanttView._dtColWidths['_label'] = lwDefault;
+    // V21 — Бэклог по умолчанию 160px (user request, 2026-05-07).
+    // 1.20/1.21/1.22/Овертайм продолжают расти по 1fr — это активные релизы,
+    // им нужна пропорциональная ширина под bars. Бэклог визуально вторичен.
+    if (!GanttView._dtColWidths['backlog']) GanttView._dtColWidths['backlog'] = 160;
     const getLW      = () => GanttView._dtColWidths['_label'] || lwDefault;
     const defaultCw  = Math.max(200, Math.floor((wrapW - getLW()) / cols.length));
     const getW       = key => GanttView._dtColWidths[key] || defaultCw;
@@ -790,6 +1211,23 @@ export const GanttView = {
     let body = '';
     const teams   = Utils.unique(rows.map(r => r.team));
     const teamKey = t => t.replace(/[^a-zA-Zа-яА-ЯёЁъЪ0-9]/g,'_');
+
+    /* V22 G-05 (audit-experts-2026-05-15 Demin H2) — precompute Map<team→rows[]>.
+       Раньше hot-path был O(N×M):
+         teams.forEach(team => {
+           const teamRows = rows.filter(r => r.team === team);   // O(N)
+           ...
+         });
+       На 100 команд × 200 rows = 20 000 итераций КАЖДЫЙ renderChart().
+       Теперь — один проход (O(N)) для построения Map, затем .get() за O(1)
+       при обходе teams. */
+    const rowsByTeam = new Map();
+    for (const r of rows) {
+      const t = r.team;
+      const list = rowsByTeam.get(t);
+      if (list) list.push(r);
+      else rowsByTeam.set(t, [r]);
+    }
 
     /* V16 roadmap-2 (S3) — capacity load-distribution sparkline. We
        precompute (a) per-team per-bucket counts and (b) the global max so
@@ -875,26 +1313,31 @@ export const GanttView = {
       });
     });
 
-    /* V16 (gantt-roadmap #1) — Linear-style team headers.
-       Stable HSL hue per team via FNV-1a-ish hash → 3px rail on the left of
-       the row, identifying the team across the gantt without colour-coding
-       pills (pills already use type-of-work colour). Used in the new
-       team-header HTML below. */
-    const teamHue = (s) => {
-      let h = 2166136261;
-      const str = String(s || '');
-      for (let i = 0; i < str.length; i++) {
-        h ^= str.charCodeAt(i);
-        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
-      }
-      return h % 360;
+    /* AUDIT-ART #12 — team identity via 2-letter monogram + neutral grey rail.
+       Раньше rail красился `hsl(hash, 58%, 52%)` — на 6+ командах получалась
+       радуга, color = identity (нарушение брендбука §3 «5% signal»). Решение:
+       rail остаётся 1px нейтральным `var(--prizma-border-strong)`, identity
+       команды несёт monogram (две первые буквы) рядом с названием. */
+    const teamMonogram = (s) => {
+      const str = String(s || '').trim();
+      if (!str) return '—';
+      // Берём по первой букве каждого слова (макс. 2): «Платежи Веб» → «ПВ»;
+      // «Backend» → «BA» (первые 2 буквы если одно слово).
+      const parts = str.split(/[\s\-_]+/).filter(Boolean);
+      const mono = parts.length > 1
+        ? (parts[0][0] + parts[1][0])
+        : parts[0].slice(0, 2);
+      return mono.toUpperCase();
     };
 
     teams.forEach(team => {
-      const teamRows = rows.filter(r => r.team === team);
+      // V22 G-05 — было `rows.filter(...)`; теперь pre-bucketed Map за O(1).
+      const teamRows = rowsByTeam.get(team) || [];
       const tk       = teamKey(team);
       const isHidden = GanttView._dtHiddenTeams.has(tk);
-      const hue      = teamHue(team);
+      /* AUDIT-ART #12 — `teamHue` retired (hash-color rainbow). Identity
+         теперь несёт monogram, rail остаётся нейтральным. */
+      const tMono    = teamMonogram(team);
 
       // V16 team-header: full-row sticky-feeling block, 3px coloured rail
       // (hash-hue per team), name 14px/600, total-task count + per-bucket
@@ -915,7 +1358,7 @@ export const GanttView = {
         const overload = v > OVERLOAD_THRESHOLD;
         return `<span class="v16-spark-bar v16-spark-bar-${esc(k)}${overload ? ' v16-spark-bar-overload' : ''}${v === 0 ? ' v16-spark-bar-empty' : ''}"
           style="height:${heightPct.toFixed(0)}%"
-          title="${esc(k === 'backlog' ? 'Бэклог' : k === 'r120' ? '1.20' : k === 'r121' ? '1.21' : k === 'r122' ? '1.22' : 'OT')}: ${v}${overload ? ' · перегруз' : ''}"
+          title="${esc(GANTT_COL_LABELS[k] || k)}: ${v}${overload ? ' · перегруз' : ''}"
           aria-label="${v}"></span>`;
       }).join('');
       const sparkHtml = `<span class="v16-team-spark${overloadCount ? ' v16-team-spark-overload' : ''}" aria-label="Загрузка по колодцам">${sparkBars}</span>`;
@@ -931,7 +1374,9 @@ export const GanttView = {
           const wtEntries = Object.entries(wtMap).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
           const wtTotal   = wtEntries.reduce((s, [, n]) => s + n, 0);
           const segs = wtEntries.map(([wt, n]) => {
-            const color = (PHASE_COLORS && PHASE_COLORS[wt]) || '#9ca3af';
+            /* AUDIT-ART #11 — theme-aware var-token вместо hardcoded hex.
+               PHASE_COLORS остаётся только в standalone-export (см. constants.js). */
+            const color = (PHASE_COLOR_TOKENS && PHASE_COLOR_TOKENS[wt]) || PHASE_COLOR_TOKEN_FALLBACK;
             const widthPct = (n / wtTotal) * 100;
             return `<span class="gdt-overview-seg" style="background:${color};width:${widthPct.toFixed(2)}%" title="${esc(wt)}: ${n}"></span>`;
           }).join('');
@@ -954,11 +1399,12 @@ export const GanttView = {
       }).join('');
 
       body += `<div class="gantt-team-header gdt-grid-row v16-team-row${_isOverview ? ' gdt-overview-row' : ''}" data-team-key="${esc(tk)}" style="display:grid;grid-template-columns:${makeGT()}">
-        <span class="v16-team-rail" style="background:hsl(${hue},58%,52%)" aria-hidden="true"></span>
+        <span class="v16-team-rail audit-art-team-rail" aria-hidden="true"></span>
         <div class="gantt-team-header-cell gdt-team-label v16-team-label">
           ${_isOverview
-            ? `<span class="gdt-overview-chev">▸</span>`
-            : `<button class="gantt-team-vis-btn" data-team-key="${esc(tk)}" title="Скрыть/показать строки команды">${isHidden?'▸':'▾'}</button>`}
+            ? `<span class="gdt-overview-chev">${Services.Icons?.get?.('chevron-right', { size: 12 }) || ''}</span>`
+            : `<button type="button" class="gantt-team-vis-btn" data-team-key="${esc(tk)}" data-team-name="${esc(team||'—')}" title="Скрыть/показать строки команды" aria-label="${isHidden?'Развернуть команду':'Свернуть команду'}" aria-expanded="${isHidden ? 'false' : 'true'}">${Services.Icons?.get?.(isHidden?'chevron-right':'chevron-down', { size: 12 }) || ''}</button>`}
+          <span class="audit-art-team-mono" aria-hidden="true">${esc(tMono)}</span>
           <strong class="gdt-team-name v16-team-name">${esc(team||'—')}</strong>
           <!-- V17.1 C12 — заголовок столбца Эпик: «N эпиков» с правильным
                окончанием через pl(). Каждая строка под team-row = один эпик. -->
@@ -1001,12 +1447,43 @@ export const GanttView = {
         for (const [t, n] of Object.entries(_wtTally)) {
           if (n > _domCount) { _domCount = n; _domWt = t; }
         }
-        const _epicStripeColor = (PHASE_COLORS && PHASE_COLORS[_domWt]) || '#6b7280';
+        /* AUDIT-ART #11 — epic-row left-stripe через theme-aware var-token,
+           PHASE_COLORS остался ТОЛЬКО в HTML-export (см. constants.js). */
+        const _epicStripeColor = (PHASE_COLOR_TOKENS && PHASE_COLOR_TOKENS[_domWt]) || PHASE_COLOR_TOKEN_FALLBACK;
         const _totalWorks = Object.values(_wtTally).reduce((n, v) => n + v, 0);
         const _moveCount  = Array.isArray(row.ganttArrows) ? row.ganttArrows.length : 0;
-        // V17.1 C11 — «N работ» → «N задач» через pl(). Также корректное
-        // окончание для «переносов» (работало частично — pl универсальнее).
+        // V22 G-10 (audit-experts-2026-05-15 Vrba S0-2) — счётчик отражает
+        // КОЛИЧЕСТВО ТИПОВ РАБОТ (BE/FE/QA), а не Jira-тикетов. Раньше
+        // отображалось «N задач» что путало PM-ов: они интерпретировали
+        // число как ticket-count и принимали решения по неверной величине.
         const _epicMeta   = `${_totalWorks} ${pl(_totalWorks, TASK_FORMS)}${_moveCount ? ' · ' + _moveCount + ' ' + pl(_moveCount, ['перенос','переноса','переносов']) : ''}`;
+        // V22 G-11 (audit-experts-2026-05-15 Vrba S0-3) — visualise epic
+        // dependencies in the meta line: `_depsOut` = эпики, ОТ которых
+        // зависит этот (он стрелочкой влево «← N»), `_depsIn` = эпики,
+        // которые зависят ОТ него («→ N»). Линии-через-весь-Гант на
+        // 50–200 эпиков превращаются в кашу — поэтому даём компактный
+        // inline-индикатор с tooltip'ом + click → раскрытие dep-graph.
+        // Источник: `state.epicDeps` (Map<from, to>): `from` зависит от `to`.
+        const _epicKey = String(row.epic || row.tasks || '').trim();
+        let _depsOut = 0, _depsIn = 0;
+        let _depsOutList = [], _depsInList = [];
+        if (_epicKey && state.epicDeps) {
+          const deps = state.epicDeps;
+          // Этот эпик зависит от другого — depKey ↦ ourKey: ищем where key === _epicKey
+          const out = deps[_epicKey];
+          if (out) { _depsOut = 1; _depsOutList.push(String(out)); }
+          // Этот эпик блокирует других — entries where value === _epicKey
+          for (const [from, to] of Object.entries(deps)) {
+            if (String(to) === _epicKey) { _depsIn++; _depsInList.push(String(from)); }
+          }
+        }
+        const _depsTooltip = [
+          _depsOut ? `Зависит от: ${_depsOutList.join(', ')}` : '',
+          _depsIn  ? `Блокирует: ${_depsInList.slice(0, 5).join(', ')}${_depsIn > 5 ? '…' : ''}` : '',
+        ].filter(Boolean).join('\n');
+        const _depsBadge = (_depsOut || _depsIn)
+          ? `<button type="button" class="v16-epic-deps-badge" data-epic-key="${esc(_epicKey)}" data-tip="${esc(_depsTooltip)}" aria-label="Зависимости эпика: ${_depsOut ? 'зависит от ' + _depsOut : ''}${_depsOut && _depsIn ? ', ' : ''}${_depsIn ? 'блокирует ' + _depsIn : ''}" title="Открыть граф зависимостей">${_depsOut ? `<span class="v16-epic-deps-in">←${_depsOut}</span>` : ''}${_depsIn ? `<span class="v16-epic-deps-out">→${_depsIn}</span>` : ''}</button>`
+          : '';
         const assignees    = toTags(row.assignee);
         const hasAssignee  = assignees.length > 0;
         const assigneeText = hasAssignee ? assignees.join(', ') : 'без исполнителя';
@@ -1018,7 +1495,7 @@ export const GanttView = {
         const up = row.unplannedPills || {};
         const pillUnplanned = (colKey, wt) => !!up[`${colKey}__${wt}`];
         // Labels for ghost-marker (kept in sync with NEXT_RELEASE/COL_LABEL below)
-        const _GHOST_COL_LABEL = { backlog:'Бэклог', r120:'1.20', r121:'1.21', r122:'1.22', overtime:'OT' };
+        const _GHOST_COL_LABEL = GANTT_COL_LABELS;
         // V15 (1.4): inline ghost-pills in cells were retired — every move
         // is now rendered as its own dedicated sub-row beneath the parent
         // epic row, so the «↗ ghost» and the destination marker sit on the
@@ -1096,6 +1573,7 @@ export const GanttView = {
 
           const cmtMarker = cmt && cmt.text
             ? `<span class="gdt-pill-cmt-marker ${addCmt ? 'gdt-pill-cmt-add' : 'gdt-pill-cmt-transfer'}"
+                role="img" aria-label="${esc(`${addCmt ? 'Добавлено в зафиксированный план' : 'Перенесено'} — есть комментарий`)}"
                 data-tip="${esc(`${addCmt ? 'Добавлено' : 'Перенесено'}${cmt.at ? ' ' + fmtMoveDate(cmt.at) : ''}\nКомментарий: ${cmt.text}`)}"></span>`
             : '';
 
@@ -1115,12 +1593,17 @@ export const GanttView = {
             ? `<span class="gdt-pill-meta">${metaText}</span>`
             : '<span class="gdt-pill-meta gdt-pill-meta-empty">—</span>';
 
-          // Tooltip — full ФИО list + period + comment if present.
+          // Tooltip — full ФИО list + period + comment if present + status.
+          // V21 — status-постфикс в aria-label/tooltip: state-glyph (●/✓/○) сам
+          // по себе декоративный (`::before`), screen-reader его не читает.
+          // Добавляем явный текст состояния в aria-label, чтобы статус был
+          // доступен AT-пользователям.
           const tipFio    = pillAssg.length ? pillAssg.join(', ') : 'без исполнителя';
           const tipParts  = [`${wt} — ${tipFio}`];
           if (period) tipParts.push(`Период: ${row.workStartDate} → ${row.workEndDate}`);
           if (cmt && cmt.text) tipParts.push(`${addCmt ? 'Добавлено' : 'Перенесено'}${cmt.at ? ' ' + fmtMoveDate(cmt.at) : ''}: ${cmt.text}`);
-          if (isUnplanned) tipParts.push('Не запланирована');
+          const statusText = isDone ? 'Завершено' : isUnplanned ? 'Не запланирована' : isInProgress ? 'В работе' : 'Не начата';
+          tipParts.push(`Статус: ${statusText}`);
 
           const dc = isDone      ? ' gdt-pill-done'      : '';
           const uc = isUnplanned ? ' gdt-pill-unplanned' : '';
@@ -1226,6 +1709,7 @@ export const GanttView = {
             <div class="v16-epic-name gantt-row-label-name">${esc(epicText)}</div>
             <div class="v16-epic-sub gantt-row-label-sub">
               <span class="v16-epic-meta">${esc(_epicMeta)}</span>
+              ${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' + _depsBadge : ''}
               ${cats.length ? '<span class="v16-epic-cat-sep">·</span>' : ''}
               <span class="v16-epic-cats">${catHtml}</span>
             </div>
@@ -1278,31 +1762,38 @@ export const GanttView = {
           // hairline. Total height ~20 px instead of 26+. Arrow stroke
           // colour switches to the work-type accent (handled in
           // drawPostponeArrows below).
+          const _srcLabel = _GHOST_COL_LABEL[a.srcCol] || a.srcCol;
+          const _dstLabel = _GHOST_COL_LABEL[a.dstCol] || a.dstCol;
+          // V21 — расширенные tooltip и aria-label с полной траекторией:
+          // «BE: 1.20 → 1.21 · 12.04». Раньше src показывал только wt+date,
+          // dst — только destination, без полной картины переноса. Также
+          // tabindex=0 + role=img + aria-label для клавиатурного юзера.
+          const _trailFullText = `${a.wt}: ${_srcLabel} → ${_dstLabel}${dt ? ' · ' + dt : ''}`;
           const trailCells = cols.map(col => {
             if (col.key === a.srcCol) {
               return `<div class="gantt-cell ${col.cls} gdt-trail-cell" data-col="${esc(col.key)}" data-row-id="${esc(row.id)}">
                 <span class="gantt-type-pill gantt-pill-ghost gdt-trail-src"
+                  tabindex="0" role="img" aria-label="${esc('Перенос (откуда): ' + _trailFullText)}"
                   data-wt="${esc(a.wt)}" data-row-id="${esc(row.id)}"
                   data-src-col="${esc(a.srcCol)}" data-dst-col="${esc(a.dstCol)}"
                   data-arrow-at="${esc(a.at || '')}"
-                  data-tip="↗ ${esc(a.wt)} перенесено${dt ? ' ' + dt : ''}">${cmtIcon}<span class="gdt-trail-arrow">↗</span>${dt ? `<span class="gdt-trail-date">${esc(dt)}</span>` : ''}</span>
+                  data-tip="${esc('↗ Перенесено отсюда: ' + _trailFullText)}">${cmtIcon}<span class="gdt-trail-arrow">↗</span>${dt ? `<span class="gdt-trail-date">${esc(dt)}</span>` : ''}</span>
               </div>`;
             }
             if (col.key === a.dstCol) {
               return `<div class="gantt-cell ${col.cls} gdt-trail-cell" data-col="${esc(col.key)}" data-row-id="${esc(row.id)}">
                 <span class="gantt-type-pill gantt-pill-ghost gdt-trail-dst"
+                  tabindex="0" role="img" aria-label="${esc('Перенос (куда): ' + _trailFullText)}"
                   data-wt="${esc(a.wt)}" data-row-id="${esc(row.id)}"
                   data-src-col="${esc(a.srcCol)}" data-dst-col="${esc(a.dstCol)}"
                   data-arrow-at="${esc(a.at || '')}"
-                  data-tip="↘ ${esc(a.wt)} прибыло в ${esc(_GHOST_COL_LABEL[a.dstCol] || a.dstCol)}${dt ? ' ' + dt : ''}"><span class="gdt-trail-arrow">↘</span></span>
+                  data-tip="${esc('↘ Перенесено сюда: ' + _trailFullText)}"><span class="gdt-trail-arrow">↘</span></span>
               </div>`;
             }
             return `<div class="gantt-cell ${col.cls} gdt-trail-cell gdt-trail-empty" data-col="${esc(col.key)}"></div>`;
           }).join('');
           body += `<div class="gantt-row gantt-row-trail gdt-grid-row" data-team-key="${esc(tk)}" data-arrow-at="${esc(a.at || '')}" style="display:${isHidden?'none':'grid'};grid-template-columns:${makeGT()}">
-            <div class="gantt-row-label gdt-trail-label">
-              <span class="gdt-trail-l-connector" aria-hidden="true"></span>
-            </div>${trailCells}</div>`;
+            <div class="gantt-row-label gdt-trail-label"></div>${trailCells}</div>`;
         });
       });
     });
@@ -1322,22 +1813,59 @@ export const GanttView = {
         // agnostic — the spread of a release window is what matters).
         const today = new Date();
         const todayLabel = `${String(today.getDate()).padStart(2,'0')}.${String(today.getMonth()+1).padStart(2,'0')}`;
-        const isCurrent = (() => {
-          if (!c.sub) return false;
+        // V22 G-09 (audit-experts-2026-05-15 Vrba S0-1) — расширяем расчёт:
+        // вместе с булевым isCurrent теперь возвращаем и pct (0..100) для
+        // позиции today-маркера внутри окна. Раньше: внутри bucket'а не
+        // было понимания «когда дедлайн? мы внутри или вышли?». Теперь:
+        // вертикальная линия на пропорциональной позиции + tooltip.
+        const _bounds = (() => {
+          if (!c.sub) return null;
           const m = c.sub.match(/^(\d{2})\.(\d{2})\D+(\d{2})\.(\d{2})/);
-          if (!m) return false;
+          if (!m) return null;
           const [, sd, sm, ed, em] = m;
-          // Compare as month*100+day so cross-month ranges work correctly.
-          const start = parseInt(sm, 10) * 100 + parseInt(sd, 10);
-          const end   = parseInt(em, 10) * 100 + parseInt(ed, 10);
-          const now   = (today.getMonth() + 1) * 100 + today.getDate();
+          return {
+            start: parseInt(sm, 10) * 100 + parseInt(sd, 10),
+            end:   parseInt(em, 10) * 100 + parseInt(ed, 10),
+            now:   (today.getMonth() + 1) * 100 + today.getDate(),
+          };
+        })();
+        const isCurrent = (() => {
+          if (!_bounds) return false;
+          const { start, end, now } = _bounds;
+          // QA A4.2 — year-rollover guard. Релиз-окно может пересекать 31.12 →
+          // 01.01 (например 28.12–15.01). Тогда start>end, и обычная проверка
+          // `now>=start && now<=end` для now=102 (02.01) даёт false, хотя
+          // мы внутри окна. Раскрываем как (now>=start) || (now<=end).
+          if (start > end) return now >= start || now <= end;
           return now >= start && now <= end;
+        })();
+        // V22 G-09 — pct позиции today внутри окна. Считается ТОЛЬКО для
+        // активного bucket'а. Если today вне окна (overtime / backlog
+        // headers, или релиз ещё не наступил) — pct=null, маркер не рисуем.
+        const todayPct = (() => {
+          if (!isCurrent || !_bounds) return null;
+          const { start, end, now } = _bounds;
+          // Year-rollover: разворачиваем шкалу как (start..366 + 1..end)
+          if (start > end) {
+            const totalDays = (1231 - start) + end;
+            const elapsed   = now >= start ? (now - start) : (1231 - start + now);
+            return Math.max(0, Math.min(100, (elapsed / totalDays) * 100));
+          }
+          if (end === start) return 50;
+          return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
         })();
         // V16 roadmap-2 (B5) — simplify today-pill: drop the DD.MM duplicate
         // (the date is already in the meta-line right above + the inset-
         // accent border already says «THIS column is today»).
         const todayPill = isCurrent
           ? `<span class="gdt-rail-today" title="Сегодня ${esc(todayLabel)}">сегодня</span>`
+          : '';
+        // V22 G-09 — вертикальная линия today внутри активного bucket'а.
+        // Position абсолютная относительно `.gantt-header-col` (у которого
+        // style="position:relative"). Линия высотой через весь header,
+        // в позиции todayPct%. Tooltip: «N% окна пройдено».
+        const todayMarker = (todayPct !== null)
+          ? `<span class="gantt-bucket-today-marker" style="left:${todayPct.toFixed(1)}%" title="Сегодня — пройдено ${todayPct.toFixed(0)}% окна"></span>`
           : '';
         // V17.1 C4 — render long Russian range («20 апреля – 17 мая»);
         // c.sub оставляем DD.MM–DD.MM выше для today-pill parser.
@@ -1361,15 +1889,17 @@ export const GanttView = {
           : '';
         // V16 roadmap-2 (B1) — distribution sparkline above the header.
         // 4 px-tall stacked bar, segments coloured by work-type from the
-        // canonical PHASE_COLORS palette. Empty bucket → no bar. Tooltip
-        // on each segment names the work-type and count.
+        // canonical PHASE_COLOR_TOKENS palette (theme-aware). Empty bucket →
+        // no bar. Tooltip on each segment names the work-type and count.
+        // AUDIT-ART #11 — switched from PHASE_COLORS hex to var-tokens; hex
+        // fallback PHASE_COLORS остался ТОЛЬКО в standalone-export.
         const _mix = colWtMix[c.key] || {};
         const _mixEntries = Object.entries(_mix).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
         const _mixTotal   = _mixEntries.reduce((s, [, n]) => s + n, 0);
         const distSpark = _mixTotal
           ? `<div class="gdt-rail-dist" aria-label="Распределение типов работ в колодце">
               ${_mixEntries.map(([wt, n]) => {
-                const color = (PHASE_COLORS && PHASE_COLORS[wt]) || '#9ca3af';
+                const color = (PHASE_COLOR_TOKENS && PHASE_COLOR_TOKENS[wt]) || PHASE_COLOR_TOKEN_FALLBACK;
                 const widthPct = (n / _mixTotal) * 100;
                 return `<span class="gdt-rail-dist-seg" style="background:${color};width:${widthPct.toFixed(2)}%" title="${esc(wt)}: ${n}"></span>`;
               }).join('')}
@@ -1377,19 +1907,38 @@ export const GanttView = {
           : '';
         return `<div class="gantt-header-col${isCurrent ? ' gdt-rail-current' : ''}" data-col="${esc(c.key)}" style="position:relative">
           ${distSpark}
+          ${todayMarker}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
           <div class="gdt-resize-handle" data-col-key="${esc(c.key)}" title="Потяните чтобы изменить ширину"></div>
         </div>`;
       }).join('');
     const header = `<div class="gantt-header gdt-header gdt-grid-row" style="display:grid;grid-template-columns:${gt}">${headerCols}</div>`;
     const legend = `<div class="gantt-legend">
-      ${[['#6b7280','Бэклог'],['#4f46e5','1.20'],['#059669','1.21'],['#d97706','1.22'],['#dc2626','OT']].map(([c,l])=>`<div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:${c}"></div>${l}</div>`).join('')}
+      ${[['var(--release-none-color)','Бэклог'],['var(--release-r120-color)','1.20'],['var(--release-r121-color)','1.21'],['var(--release-r122-color)','1.22'],['var(--release-ot-color)','OT']].map(([c,l])=>`<div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:${c}"></div>${l}</div>`).join('')}
     </div>`;
 
+    // V21 anti-jitter — заморозить высоту wrap'а на момент rebuild'а.
+    // Без этого `wrap.innerHTML = ...` коллапсит контейнер в height:0 на
+    // один кадр (между innerHTML-write и layout), контент ниже подскакивает
+    // вверх и возвращается → визуально «дёргание как при обновлении».
+    // Удерживаем прежнюю высоту через min-height и отпускаем когда новый
+    // DOM уже разложился: rAF когда вкладка видима + setTimeout как фолбек
+    // на случай скрытой вкладки (rAF тогда тротлится). Не учитывает
+    // уменьшение количества рядов — высота сожмётся естественно через тик;
+    // для drop-сценариев (главный источник дёрганья) количество рядов не
+    // меняется.
+    const _prevHeight = wrap.offsetHeight;
+    if (_prevHeight > 0) wrap.style.minHeight = _prevHeight + 'px';
     wrap.innerHTML = `<div class="gantt-container gdt-container">${header}<div class="gantt-body">${body}</div>${legend}</div>`;
     // #2: do NOT force overflow:visible — that killed the horizontal scrollbar
     //   on #gantt-wrap (defined as overflow-x:auto in styles.css). Let CSS win.
     wrap.style.overflow = '';
+    if (_prevHeight > 0) {
+      let _released = false;
+      const _release = () => { if (_released) return; _released = true; wrap.style.minHeight = ''; };
+      requestAnimationFrame(_release);
+      setTimeout(_release, 50);
+    }
     // #7: restore the scroll position captured by renderChart() before
     //   re-rendering. Prevents the page jumping to the top + smooth-scroll
     //   "дёргание" effect after every pill action (move / delete / drag-drop /
@@ -1437,14 +1986,23 @@ export const GanttView = {
     // ~100 ms-delayed re-render. Without this, the second render would
     // wipe out the scroll restoration above and the user would see the
     // Gantt blink + jump to top after every drag/delete.
-    try { window.App?.markRenderedNow?.(); } catch(_) {}
+    try { Services.App?.markRenderedNow?.(); } catch(_) {}
 
-    /* update expand/collapse-all button icon */
+    /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
+       вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
+       через Icons.get() чтобы не оставлять нативный текст-символ в кнопке). */
     const ecBtn = document.getElementById('btn-gantt-expand-all');
     if (ecBtn) {
       const anyVisible = teams.some(t => !GanttView._dtHiddenTeams?.has(teamKey(t)));
-      ecBtn.textContent = anyVisible ? '⊟' : '⊞';
-      ecBtn.title       = anyVisible ? 'Свернуть все команды' : 'Развернуть все команды';
+      const iconName   = anyVisible ? 'minus-square' : 'plus-square';
+      const label      = anyVisible ? 'Свернуть все команды' : 'Развернуть все команды';
+      ecBtn.title       = label;
+      ecBtn.setAttribute('aria-label', label);
+      try {
+        ecBtn.innerHTML = Services.Icons?.get?.(iconName, { size: 14, label }) || '';
+      } catch (_) {
+        ecBtn.textContent = '';
+      }
     }
 
     /* ---- helper: update all grid rows to new column widths ---- */
@@ -1461,10 +2019,22 @@ export const GanttView = {
         const nowHidden = !GanttView._dtHiddenTeams.has(tk2);
         if (nowHidden) GanttView._dtHiddenTeams.add(tk2);
         else           GanttView._dtHiddenTeams.delete(tk2);
+        // AUDIT_HOLISTIC O10 — toggle класса вместо прямого style.display.
+        // Класс `.is-team-collapsed` определён в styles.css и не борется
+        // с `body[data-gdt-density]` правилами на той же property.
         wrap.querySelectorAll('.gantt-row').forEach(rowEl => {
-          if (rowEl.dataset.teamKey === tk2) rowEl.style.display = nowHidden ? 'none' : 'grid';
+          if (rowEl.dataset.teamKey === tk2) rowEl.classList.toggle('is-team-collapsed', nowHidden);
         });
-        btn.textContent = nowHidden ? '▸' : '▾';
+        btn.innerHTML = Services.Icons?.get?.(nowHidden ? 'chevron-right' : 'chevron-down', { size: 12 }) || '';
+        // Wave3 P-GR — sync a11y state with collapse-state. `<button>` уже
+        // handles Enter/Space via native click; нам остаётся только
+        // следить за aria-expanded + aria-label. Имя команды и счётчик
+        // эпиков сохранены в data-team-name + соседнем .v16-team-total
+        // для обогащённого aria-label в screen-reader.
+        const teamName = btn.dataset.teamName || tk2;
+        const epicCount = btn.parentElement?.querySelector('.v16-team-total')?.textContent || '';
+        btn.setAttribute('aria-expanded', nowHidden ? 'false' : 'true');
+        btn.setAttribute('aria-label', nowHidden ? 'Развернуть команду' : 'Свернуть команду');
       });
     });
 
@@ -1474,6 +2044,16 @@ export const GanttView = {
         e.stopPropagation();
         const teamName = btn.dataset.team || '';
         GanttView._openAddEpicModal(teamName);
+      });
+    });
+
+    /* V22 G-11 (audit-experts-2026-05-15 Vrba S0-3) — click на dep-badge
+       открывает граф зависимостей. Тултип уже даёт «зависит от / блокирует»
+       список текстом (через `data-tip` + bindFastTooltip). */
+    wrap.querySelectorAll('.v16-epic-deps-badge').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        try { Services.DependencyGraphView?.open?.(); } catch (_) {}
       });
     });
 
@@ -1510,9 +2090,11 @@ export const GanttView = {
         e.dataTransfer.setData('rowId',  pill.dataset.rowId);
         e.dataTransfer.setData('srcCol', pill.dataset.srcCol);
         e.dataTransfer.setData('wt',     pill.dataset.wt);
-        pill.style.opacity = '.4';
+        // AUDIT_HOLISTIC O10 — class-toggle вместо style.opacity, чтобы
+        // правило могло быть отключено через prefers-reduced-motion.
+        pill.classList.add('is-dragging');
       });
-      pill.addEventListener('dragend', () => { pill.style.opacity = ''; });
+      pill.addEventListener('dragend', () => { pill.classList.remove('is-dragging'); });
     });
     // Per-cell DnD: works because the per-pill dragstart above sets dataTransfer
     // entries (rowId, srcCol, wt). On drop, route through moveWtBetweenCols so
@@ -1522,6 +2104,12 @@ export const GanttView = {
       cell.addEventListener('dragover',  e => { e.preventDefault(); cell.classList.add('gantt-cell-dragover'); });
       cell.addEventListener('dragleave', ()  => cell.classList.remove('gantt-cell-dragover'));
       cell.addEventListener('drop', async e => {
+        // QA A4.6 — глобальный try/finally вокруг async drop-handler.
+        // Без него любой неожиданный throw (renderChart, moveWtBetweenCols,
+        // hook-эвент) превращался в Unhandled Promise Rejection, при этом
+        // классы `gantt-cell-dragover` могли остаться на сёстрах cell
+        // (например, при ошибке в requireMoveComment до их сброса).
+        try {
         e.preventDefault();
         cell.classList.remove('gantt-cell-dragover');
         const rowId  = e.dataTransfer.getData('rowId');
@@ -1529,13 +2117,30 @@ export const GanttView = {
         const wt     = e.dataTransfer.getData('wt');
         const dstCol = cell.dataset.col;
         if (!rowId || !wt) return;
+        // P10.27 — Brand §9 motion: helper для reject Pulse (off-course).
+        // Source pill ещё в DOM (renderChart не вызывался при early return),
+        // навешиваем класс на 800ms — совпадает с длиной prizma-drop-reject.
+        const flagRejectedPill = () => {
+          try {
+            const _esc = (s) => (window.CSS?.escape ? CSS.escape(String(s)) : String(s));
+            const srcPill = wrap.querySelector(
+              `.gantt-type-pill[data-row-id="${_esc(rowId)}"][data-src-col="${_esc(srcCol)}"][data-wt="${_esc(wt)}"]`
+            );
+            if (!srcPill) return;
+            srcPill.classList.add('drop-rejected');
+            setTimeout(() => srcPill.classList.remove('drop-rejected'), 800);
+          } catch (_) { /* мотион не критичен для логики переноса */ }
+        };
         // V16 roadmap-2 (B7) — explicit feedback instead of silent no-op.
+        // UX 4.1 — унифицировано через window.Toast.warning (blocked drop).
         if (cell.dataset.rowId && cell.dataset.rowId !== rowId) {
-          window.showToast?.('Нельзя переносить задачу между разными эпиками', 'warning', 2400);
+          Services.Toast?.warning?.('Не тот эпик — перенесите внутри своего', { ms: 2400 });
+          flagRejectedPill();
           return;
         }
         if (srcCol === dstCol) {
-          window.showToast?.('Задача уже в этом колодце', 'info', 1400);
+          Services.Toast?.warning?.('Задача уже здесь', { ms: 1400 });
+          flagRejectedPill();
           return;
         }
         // V15 (audit#1, QA Critical 4): drop fired AFTER user navigated
@@ -1549,21 +2154,22 @@ export const GanttView = {
         // row.transferComments[] inside moveWtBetweenCols.
         let moveComment = '';
         try {
-          const res = await window.App?.requireMoveComment?.({
+          const res = await Services.App?.requireMoveComment?.({
             rowKey: (row.epic || row.tasks || '(без эпика)'),
             srcCol: COL_LABEL[srcCol], dstCol: COL_LABEL[dstCol], wt,
           });
           if (res === null) {
             // V15 (audit#1, QA H2): explicit feedback so user knows it was cancelled.
-            window.showToast?.('Перенос отменён', 'info', 1500);
+            // UX 4.1 — унифицировано через window.Toast.info (cancelled drop).
+            Services.Toast?.info?.('Перенос отменён', { ms: 1500 });
             return;
           }
           moveComment = res || '';
         } catch (e2) {
           // V15 (audit#1, QA H3): don't fall through silently — that defeats
           // the V14 (B5) plan-lock contract. Surface + abort.
-          window.showToast?.('Не удалось показать диалог комментария — перенос отменён', 'error', 3000);
-          try { window.ErrorsLog?.add?.({ level:'error', source:'GanttView.drop', message:'requireMoveComment threw', stack: e2?.stack || String(e2) }); } catch(_){}
+          window.showToast?.('Не удалось открыть форму комментария. Попробуйте ещё раз', 'error', 3000);
+          try { Services.ErrorsLog?.add?.({ level:'error', source:'GanttView.drop', message:'requireMoveComment threw', stack: e2?.stack || String(e2) }); } catch(_){}
           return;
         }
         // V15 (audit#1, fullstack Critical 4): re-resolve row by id after
@@ -1574,11 +2180,261 @@ export const GanttView = {
           window.showToast?.('Задача больше не существует — перенос отменён', 'warning', 2400);
           return;
         }
-        window.HistoryManager?.checkpoint(`перенести ${wt}: ${COL_LABEL[srcCol]} → ${COL_LABEL[dstCol]}`);
+        Services.HistoryManager?.checkpoint(`перенести ${wt}: ${COL_LABEL[srcCol]} → ${COL_LABEL[dstCol]}`);
         moveWtBetweenCols(fresh, wt, srcCol, dstCol, { comment: moveComment });
         GanttView.renderChart();
+        // P10.27 — Brand §9 Align-feedback после успешного перемещения.
+        // renderChart() пересобрал DOM — навешиваем класс на новый pill в
+        // dstCol через rAF чтобы дождаться layout. 600ms = длина анимации
+        // prizma-drop-align.
+        requestAnimationFrame(() => {
+          try {
+            const _esc = (s) => (window.CSS?.escape ? CSS.escape(String(s)) : String(s));
+            const newPill = document.querySelector(
+              `.gantt-type-pill[data-row-id="${_esc(rowId)}"][data-src-col="${_esc(dstCol)}"][data-wt="${_esc(wt)}"]`
+            );
+            if (!newPill) return;
+            newPill.classList.add('drop-aligned');
+            setTimeout(() => newPill.classList.remove('drop-aligned'), 600);
+          } catch (_) { /* мотион не критичен для логики */ }
+        });
+        } catch (e2) {
+          // QA A4.6 — surface ошибку юзеру + log, не уходим в Unhandled.
+          try { window.showToast?.('Не удалось перенести задачу', 'error', 2400); } catch (_) {}
+          try { Services.ErrorsLog?.add?.({ level:'error', source:'GanttView.drop', message:'drop handler crashed', stack: e2?.stack || String(e2) }); } catch (_) {}
+        } finally {
+          // Подчищаем все осиротевшие dragover-классы на случай, если
+          // throw произошёл до очистки соседних cell'ов.
+          try { wrap.querySelectorAll('.gantt-cell-dragover').forEach(c => c.classList.remove('gantt-cell-dragover')); } catch (_) {}
+        }
       });
     });
+
+    /* ── П10.25 Keyboard-DnD (WCAG 2.5.7 AAA) ───────────────────────────
+       Двух-шаговая модель для пользователей без мыши:
+         Enter/Space → выбрать pill → стрелки ←/→ → перемещение между колодцами
+         в той же строке → Enter/Space → drop. Esc → отмена.
+       Re-use существующего drop-handler API: `moveWtBetweenCols` + те же
+       guards (cross-epic, same-col, plan-locked → requireMoveComment) что у
+       mouse drop. НЕ дублируем валидацию.                                    */
+    const _ensureLiveRegion = () => {
+      let live = document.getElementById('gantt-kb-live');
+      if (!live) {
+        live = document.createElement('div');
+        live.id = 'gantt-kb-live';
+        live.className = 'visually-hidden';
+        live.setAttribute('aria-live', 'polite');
+        live.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(live);
+      }
+      return live;
+    };
+    const _announce = (msg) => {
+      try {
+        const live = _ensureLiveRegion();
+        // Очищаем сначала — иначе AT не зачитает идентичное сообщение повторно.
+        live.textContent = '';
+        // Микро-задержка через rAF чтобы AT гарантированно зафиксировал
+        // очистку перед записью нового текста.
+        requestAnimationFrame(() => { live.textContent = String(msg || ''); });
+      } catch (_) { /* SR-only, не критично */ }
+    };
+
+    let _kbDrag = null; // { pill, srcRow, srcCol, srcWt, targetCol }
+
+    const _kbCellsForRow = (rowId) => {
+      const _esc = (s) => (window.CSS?.escape ? CSS.escape(String(s)) : String(s));
+      return Array.from(wrap.querySelectorAll(
+        `.gantt-cell[data-col][data-row-id="${_esc(rowId)}"]`
+      ));
+    };
+
+    const _clearKbTargets = () => {
+      wrap.querySelectorAll('.gantt-cell.kb-drag-target')
+        .forEach(c => c.classList.remove('kb-drag-target'));
+    };
+
+    const _highlightKbTarget = (cell) => {
+      _clearKbTargets();
+      if (cell) cell.classList.add('kb-drag-target');
+    };
+
+    const _startKbDrag = (pill) => {
+      if (_kbDrag) return;
+      const srcRow = pill.dataset.rowId;
+      const srcCol = pill.dataset.srcCol;
+      const srcWt  = pill.dataset.wt;
+      if (!srcRow || !srcCol || !srcWt) return;
+      _kbDrag = { pill, srcRow, srcCol, srcWt, targetCol: srcCol };
+      pill.classList.add('kb-drag-active');
+      pill.setAttribute('aria-grabbed', 'true');
+      const cells = _kbCellsForRow(srcRow);
+      const startCell = cells.find(c => c.dataset.col === srcCol) || null;
+      _highlightKbTarget(startCell);
+      _announce(`Задача ${srcWt} выбрана. Используйте стрелки влево и вправо для выбора колодца. Enter — переместить, Esc — отмена.`);
+    };
+
+    const _moveKbDrag = (dir) => {
+      if (!_kbDrag) return;
+      const cells = _kbCellsForRow(_kbDrag.srcRow);
+      if (!cells.length) return;
+      const curIdx = cells.findIndex(c => c.dataset.col === _kbDrag.targetCol);
+      let nextIdx = (curIdx < 0 ? 0 : curIdx) + dir;
+      if (nextIdx < 0) nextIdx = 0;
+      if (nextIdx >= cells.length) nextIdx = cells.length - 1;
+      if (nextIdx === curIdx) return;
+      const nextCell = cells[nextIdx];
+      _kbDrag.targetCol = nextCell.dataset.col;
+      _highlightKbTarget(nextCell);
+      const label = COL_LABEL_MAP[_kbDrag.targetCol] || _kbDrag.targetCol;
+      _announce(`Колодец ${label}`);
+    };
+
+    const _cleanupKbDragVisuals = () => {
+      if (_kbDrag?.pill) {
+        try {
+          _kbDrag.pill.classList.remove('kb-drag-active');
+          _kbDrag.pill.setAttribute('aria-grabbed', 'false');
+        } catch (_) {}
+      }
+      _clearKbTargets();
+    };
+
+    const _cancelKbDrag = () => {
+      if (!_kbDrag) return;
+      _cleanupKbDragVisuals();
+      _announce('Перемещение отменено');
+      _kbDrag = null;
+    };
+
+    /* Имитирует ту же логику что mouse-drop (см. cell.addEventListener('drop', …)
+       выше): cross-epic guard → same-col guard → activeSection guard →
+       requireMoveComment → moveWtBetweenCols → renderChart. НЕ дублирует
+       валидацию: использует те же ветки и те же тосты. */
+    const _executeDrop = async (srcRowId, srcWt, srcCol, dstCol) => {
+      // cross-epic guard: pills всегда привязаны к одной строке (`data-row-id`),
+      // поэтому строкой target == srcRowId — это инвариант UI, для kb-DnD
+      // поддерживается через `_kbCellsForRow(srcRow)`. Дополнительная
+      // проверка здесь — paranoia.
+      if (!srcRowId || !srcWt || !srcCol || !dstCol) return false;
+      if (srcCol === dstCol) {
+        // UX 4.1 — унифицировано через window.Toast.warning (blocked drop).
+        Services.Toast?.warning?.('Задача уже здесь', { ms: 1400 });
+        return false;
+      }
+      if (state.activeSection && state.activeSection !== 'gantt') return false;
+      const row = state.rows.find(r => r.id === srcRowId);
+      if (!row) return false;
+      let moveComment = '';
+      try {
+        const res = await Services.App?.requireMoveComment?.({
+          rowKey: (row.epic || row.tasks || '(без эпика)'),
+          srcCol: COL_LABEL_MAP[srcCol] || srcCol,
+          dstCol: COL_LABEL_MAP[dstCol] || dstCol,
+          wt: srcWt,
+        });
+        if (res === null) {
+          // UX 4.1 — унифицировано через window.Toast.info (cancelled drop).
+          Services.Toast?.info?.('Перенос отменён', { ms: 1500 });
+          return false;
+        }
+        moveComment = res || '';
+      } catch (e2) {
+        window.showToast?.('Не удалось открыть форму комментария. Попробуйте ещё раз', 'error', 3000);
+        try { Services.ErrorsLog?.add?.({ level:'error', source:'GanttView.kbDrop', message:'requireMoveComment threw', stack: e2?.stack || String(e2) }); } catch(_) {}
+        return false;
+      }
+      const fresh = state.rows.find(r => r.id === srcRowId);
+      if (!fresh) {
+        window.showToast?.('Задача больше не существует — перенос отменён', 'warning', 2400);
+        return false;
+      }
+      Services.HistoryManager?.checkpoint(`перенести ${srcWt}: ${COL_LABEL_MAP[srcCol]} → ${COL_LABEL_MAP[dstCol]}`);
+      moveWtBetweenCols(fresh, srcWt, srcCol, dstCol, { comment: moveComment });
+      GanttView.renderChart();
+      // Align-feedback: pill пересоздан после renderChart() — навешиваем
+      // .drop-aligned на новый pill в dstCol через rAF.
+      requestAnimationFrame(() => {
+        try {
+          const _esc = (s) => (window.CSS?.escape ? CSS.escape(String(s)) : String(s));
+          const newPill = document.querySelector(
+            `.gantt-type-pill[data-row-id="${_esc(srcRowId)}"][data-src-col="${_esc(dstCol)}"][data-wt="${_esc(srcWt)}"]`
+          );
+          if (!newPill) return;
+          newPill.classList.add('drop-aligned');
+          setTimeout(() => newPill.classList.remove('drop-aligned'), 600);
+        } catch (_) { /* мотион не критичен */ }
+      });
+      return true;
+    };
+
+    const _commitKbDrag = async () => {
+      if (!_kbDrag) return;
+      const { srcRow, srcWt, srcCol, targetCol } = _kbDrag;
+      // Сбрасываем визуальное состояние сейчас — DOM всё равно перерисуется
+      // через renderChart(), а пользователь не должен видеть «зависший»
+      // outline пока ждёт modal-комментария.
+      _cleanupKbDragVisuals();
+      const captured = _kbDrag;
+      _kbDrag = null;
+      const ok = await _executeDrop(srcRow, srcWt, srcCol, targetCol);
+      if (ok) {
+        const dstLabel = COL_LABEL_MAP[targetCol] || targetCol;
+        _announce(`Задача ${captured.srcWt} перемещена в колодец ${dstLabel}`);
+      } else {
+        // Если drop отклонён (напр. same-col, cross-section, отменённый
+        // комментарий) — pill остаётся в исходном колодце, фокус возвращаем
+        // на исходный pill чтобы пользователь мог попробовать снова.
+        try { captured.pill?.focus?.({ preventScroll: true }); } catch (_) {}
+      }
+    };
+
+    const _attachKeyboardDnD = (pill) => {
+      if (pill.dataset.kbBound) return;
+      pill.dataset.kbBound = '1';
+      // Базовый ARIA для skipped-mouse пользователей. tabindex="-1" уже стоит
+      // в HTML (roving-tabindex from bindKeyboardNav); role/aria-label —
+      // дополняем. aria-grabbed="false" по умолчанию.
+      if (!pill.hasAttribute('role')) pill.setAttribute('role', 'button');
+      if (!pill.hasAttribute('aria-grabbed')) pill.setAttribute('aria-grabbed', 'false');
+      pill.addEventListener('keydown', (e) => {
+        // Не реагируем когда фокус внутри input/textarea (не должно случиться,
+        // но guard на случай вложенных editable child'ов в будущем).
+        if (e.target?.matches?.('input, textarea, select')) return;
+        if (!_kbDrag) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            // Останавливаем bubble: иначе wrap-level keydown
+            // (bindKeyboardNav) на Enter откроет contextmenu.
+            e.stopPropagation();
+            _startKbDrag(pill);
+          }
+        } else if (_kbDrag.pill === pill) {
+          if (e.key === 'ArrowRight') {
+            e.preventDefault(); e.stopPropagation();
+            _moveKbDrag(+1);
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault(); e.stopPropagation();
+            _moveKbDrag(-1);
+          } else if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault(); e.stopPropagation();
+            _commitKbDrag();
+          } else if (e.key === 'Escape') {
+            e.preventDefault(); e.stopPropagation();
+            _cancelKbDrag();
+          }
+        }
+      });
+      // blur во время активного перетаскивания → отмена (иначе пользователь
+      // потеряет визуальный контекст).
+      pill.addEventListener('blur', () => {
+        if (_kbDrag && _kbDrag.pill === pill) {
+          _cancelKbDrag();
+        }
+      });
+    };
+
+    wrap.querySelectorAll('.gantt-type-pill[draggable]').forEach(_attachKeyboardDnD);
 
     /* ---- backlog "+" picker ---- */
     const removeAddPicker = () => document.getElementById('gdt-add-picker')?.remove();
@@ -1611,7 +2467,7 @@ export const GanttView = {
         const available = [...allDataTypes].filter(Boolean).sort((a,b)=>a.localeCompare(b,'ru'));
 
         if (!available.length) {
-          window.showToast?.('В системе нет типов задач', 'info', 1800);
+          window.showToast?.('Не настроены типы задач. Откройте Настройки → Типы работ', 'info', 2400);
           return;
         }
 
@@ -1649,22 +2505,29 @@ export const GanttView = {
           // ALWAYS required for a bulk-add since adding work mid-plan is
           // a tracked decision.
           const summary = `${(row.epic || row.tasks || '(без эпика)')}: добавить ${selected.length} тип(ов): ${selected.slice(0,3).join(', ')}${selected.length>3?'…':''}`;
-          const choice = await window.App?.openGanttAddTargetModal?.({ summary });
+          const choice = await Services.App?.openGanttAddTargetModal?.({ summary });
           if (!choice) return;     // cancelled
           const { bucket, comment } = choice;
-          window.HistoryManager?.checkpoint(`добавить ${selected.length} тип(ов) в ${COL_LABEL[bucket] || bucket}`);
+          Services.HistoryManager?.checkpoint(`добавить ${selected.length} тип(ов) в ${COL_LABEL[bucket] || bucket}`);
           const dstField = colKeyMap[bucket];
           if (dstField) {
-            if (!Array.isArray(row[dstField])) row[dstField] = [];
-            selected.forEach(t => { if (!row[dstField].includes(t)) row[dstField].push(t); });
+            // V22 G-02 (audit-experts-2026-05-15 Demin C2) — spread-pattern.
+            // Раньше: `row[dstField].push(t)` в forEach. Теперь — один
+            // reassign с deduped list. Преимущество: один set-trigger на
+            // batch, а не N (batched-debounce у Reactive всё равно сольёт,
+            // но семантически чище).
+            const current = Array.isArray(row[dstField]) ? row[dstField] : [];
+            const toAdd = selected.filter(t => !current.includes(t));
+            if (toAdd.length) row[dstField] = [...current, ...toAdd];
           }
           // V14 (B5/B8): record the action in transferComments so the trail
           // is uniform regardless of how a pill landed in a bucket.
           const at = new Date().toISOString();
-          if (!Array.isArray(row.transferComments)) row.transferComments = [];
-          selected.forEach(t => {
-            row.transferComments.push({ at, wt: t, from: '+', to: bucket, text: comment });
-          });
+          const existingComments = Array.isArray(row.transferComments) ? row.transferComments : [];
+          row.transferComments = [
+            ...existingComments,
+            ...selected.map(t => ({ at, wt: t, from: '+', to: bucket, text: comment })),
+          ];
           row.dirty = true;
           row.updatedAt = at;
           RowFactory.updateDerived(row);
@@ -1731,9 +2594,38 @@ export const GanttView = {
 
     /* ---- context menu: per-pill done + перенос в след релиз ---- */
     const NEXT_RELEASE  = { backlog:'r120', r120:'r121', r121:'r122', r122:'overtime' };
-    const COL_LABEL     = { backlog:'Бэклог', r120:'1.20', r121:'1.21', r122:'1.22', overtime:'OT' };
+    const COL_LABEL     = GANTT_COL_LABELS;
 
     const removeCtxMenu = () => document.getElementById('gdt-ctx-menu')?.remove();
+
+    // V22 X-02 / K-03 (audit-experts-2026-05-15 Selvadurai #1) —
+    // production call-site #2: при клике (НЕ ctx-menu) на pill устанавливаем
+    // Focus на эпик. Сканнер реагирует через EventBus 'focus-changed'
+    // (app.js:701 уже подписан). Чат при следующем prompt'е получит этот
+    // focus в state.meta.focus и LLM узнает «этот пользователь интересуется
+    // эпиком X». Прерывистый pattern: фокус ставим ТОЛЬКО на простой
+    // left-click (без drag, без modifier'ов). Drag-and-drop / ctx-menu /
+    // shift-click — отдельные жесты, focus НЕ ставим.
+    if (!wrap._focusClickBound) {
+      wrap._focusClickBound = true;
+      wrap.addEventListener('click', e => {
+        if (e.button !== 0) return;                   // left only
+        if (e.shiftKey || e.metaKey || e.ctrlKey) return;
+        if (e.defaultPrevented) return;
+        const pill = e.target.closest('.gantt-type-pill[data-row-id]');
+        if (!pill) return;
+        const rowId = pill.dataset.rowId;
+        const row = state.rows.find(r => r.id === rowId);
+        const epicKey = row?.epic || row?.tasks || '';
+        if (!epicKey) return;
+        try {
+          (Services.Focus || globalThis.Focus)?.set?.({
+            kind: 'epic', id: epicKey, source: 'gantt',
+          });
+        } catch (_) {}
+      }, { capture: false });
+    }
+
     wrap.addEventListener('contextmenu', e => {
       const pill = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!pill) return;
@@ -1782,6 +2674,12 @@ export const GanttView = {
       const menu = document.createElement('div');
       menu.id = 'gdt-ctx-menu';
       menu.className = 'gdt-ctx-menu';
+      // Wave3 P-GR — a11y: role="menu" + tabindex для arrow-nav. Клавиши
+      // ↑/↓/Esc/Enter обрабатываются ниже (после append). При закрытии
+      // фокус возвращается на pill, открывший меню.
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('tabindex', '-1');
+      const _ctxReturnFocusEl = pill;
       // V15 Spine 2026-04-30 — provisional position; the real bounds-fix
       // happens AFTER innerHTML+append, when we know the actual menu size.
       // The hardcoded `-240` reserve was wrong: we added new items («▶ В
@@ -1849,16 +2747,15 @@ export const GanttView = {
 
           <div class="gdt-ctx-section">
             <div class="gdt-ctx-section-head">Параметры</div>
+            ${/* E4 fix (codebase-03 audit) — glyph-only `✎`/`+`/`✕` заменены
+                 на Icons.* SVG для соответствия §3 line-glyph hygiene. */ ''}
             ${_row('', 'assign',
               _assigneesForPill ? `<span class="gdt-ctx-value">${Utils.escapeHtml(_assigneesForPill)}</span>` : 'Назначить исполнителя',
-              _assigneesForPill ? '✎' : '+')}
-            ${/* V17.1 C7 — «Снять исполнителя» появляется только когда у пилюли
-                 уже назначен исполнитель. Удаляет назначение через тот же
-                 mechanism что 'assign' (через empty value). */ ''}
-            ${_assigneesForPill ? _row('gdt-ctx-item-subtle', 'unassign', 'Снять назначение', '✕') : ''}
+              _assigneesForPill ? Icons.get('pencil', { size: 12 }) : Icons.get('plus', { size: 12 }))}
+            ${_assigneesForPill ? _row('gdt-ctx-item-subtle', 'unassign', 'Снять назначение', Icons.get('x', { size: 12 })) : ''}
             ${_row('', 'set-dates',
               _datesLabel ? `<span class="gdt-ctx-value">${_datesLabel}</span>` : 'Установить даты работ',
-              _datesLabel ? '✎' : '+')}
+              _datesLabel ? Icons.get('pencil', { size: 12 }) : Icons.get('plus', { size: 12 }))}
           </div>
 
           <div class="gdt-ctx-section gdt-ctx-section-danger">
@@ -1866,6 +2763,17 @@ export const GanttView = {
           </div>
         `;
       document.body.appendChild(menu);
+
+      // Wave3 P-GR — пометить все items role="menuitem" и сделать
+      // focusable. Disabled / section-head / title / glyph-узлы исключаем.
+      const _ctxFocusables = () => Array.from(menu.querySelectorAll(
+        '.gdt-ctx-item:not(.gdt-ctx-item-disabled)'
+      ));
+      _ctxFocusables().forEach((it) => {
+        it.setAttribute('role', 'menuitem');
+        it.setAttribute('tabindex', '-1');
+      });
+      // Initial focus — на первый menuitem (после layout-clamp, ниже).
 
       // Now that the menu is in the DOM, measure it and clamp to viewport.
       // 8 px breathing-room from each viewport edge. If the menu would
@@ -1885,9 +2793,69 @@ export const GanttView = {
           const flipped = e.clientY - mr.height;
           top = flipped >= PAD ? flipped : Math.max(PAD, vh - mr.height - PAD);
         }
-        menu.style.left = left + 'px';
-        menu.style.top  = top  + 'px';
+        // AUDIT_HOLISTIC O10 — позиция через CSS custom-property.
+        menu.dataset.pos = '1';
+        menu.style.setProperty('--prizma-menu-x', left + 'px');
+        menu.style.setProperty('--prizma-menu-y', top  + 'px');
         menu.style.visibility = 'visible';
+      }
+
+      // Wave3 P-GR — focus first menuitem + arrow-nav + Esc + return-focus.
+      {
+        const items = _ctxFocusables();
+        if (items.length) {
+          requestAnimationFrame(() => { try { items[0].focus(); } catch (_) {} });
+        }
+        const onCtxKey = (ev) => {
+          const its = _ctxFocusables();
+          if (!its.length) return;
+          const cur = document.activeElement;
+          const idx = its.indexOf(cur);
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            ev.stopPropagation();
+            removeCtxMenu();
+            try { _ctxReturnFocusEl?.focus({ preventScroll: false }); } catch (_) {}
+            return;
+          }
+          if (ev.key === 'ArrowDown') {
+            ev.preventDefault();
+            const next = its[(idx >= 0 ? idx + 1 : 0) % its.length] || its[0];
+            try { next.focus(); } catch (_) {}
+            return;
+          }
+          if (ev.key === 'ArrowUp') {
+            ev.preventDefault();
+            const prev = its[(idx > 0 ? idx - 1 : its.length - 1)] || its[its.length - 1];
+            try { prev.focus(); } catch (_) {}
+            return;
+          }
+          if (ev.key === 'Home') {
+            ev.preventDefault();
+            try { its[0].focus(); } catch (_) {}
+            return;
+          }
+          if (ev.key === 'End') {
+            ev.preventDefault();
+            try { its[its.length - 1].focus(); } catch (_) {}
+            return;
+          }
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            const target = cur && cur.matches?.('.gdt-ctx-item') ? cur : null;
+            if (target) {
+              ev.preventDefault();
+              target.click();
+            }
+          }
+        };
+        menu.addEventListener('keydown', onCtxKey);
+        // Wrap removeCtxMenu via observer-on-remove? Простее: переопределить
+        // через MutationObserver не нужно — все existing call-sites
+        // вызывают removeCtxMenu() и не возвращают focus. Делегируем
+        // return-focus в onOutside / Escape; click-on-item уже сам по
+        // себе перенесёт focus на следующий interactive (renderChart()
+        // перерисует pill, focus всё равно потеряется — это OK для
+        // действия-завершения).
       }
 
       menu.addEventListener('click', ev => {
@@ -1895,7 +2863,7 @@ export const GanttView = {
         if (!action) return;
 
         if (action === 'undone') {
-          window.HistoryManager?.checkpoint(`вернуть ${wt}`);
+          Services.HistoryManager?.checkpoint(`вернуть ${wt}`);
           if (row.donePills) delete row.donePills[doneKey];
           row.dirty = true;
           Storage.save();
@@ -1905,7 +2873,7 @@ export const GanttView = {
         }
         // V15 (1.1) — toggle «Не запланирована» flag per-pill.
         if (action === 'unplan' || action === 'plan') {
-          window.HistoryManager?.checkpoint(action === 'unplan' ? `снять с плана ${wt}` : `вернуть в план ${wt}`);
+          Services.HistoryManager?.checkpoint(action === 'unplan' ? `снять с плана ${wt}` : `вернуть в план ${wt}`);
           if (!row.unplannedPills) row.unplannedPills = {};
           if (action === 'unplan') row.unplannedPills[doneKey] = { at: new Date().toISOString() };
           else                     delete row.unplannedPills[doneKey];
@@ -1922,7 +2890,7 @@ export const GanttView = {
         // them to «В работе» explicitly. Mirrors the unplan/plan pair so
         // history-log + checkpoint stay symmetrical.
         if (action === 'start-work' || action === 'stop-work') {
-          window.HistoryManager?.checkpoint(action === 'start-work' ? `в работу: ${wt}` : `вернуть в to do: ${wt}`);
+          Services.HistoryManager?.checkpoint(action === 'start-work' ? `в работу: ${wt}` : `вернуть в to do: ${wt}`);
           if (!row.inProgressPills) row.inProgressPills = {};
           if (action === 'start-work') row.inProgressPills[doneKey] = { at: new Date().toISOString() };
           else                          delete row.inProgressPills[doneKey];
@@ -1943,11 +2911,11 @@ export const GanttView = {
           // mirror the latest pill-completion for spreadsheet-style access.
           removeCtxMenu();
           (async () => {
-            const result = await window.App?.openGanttCompleteModal?.({
+            const result = await Services.App?.openGanttCompleteModal?.({
               summary: `${(row.epic || row.tasks || '(без эпика)')} · ${wt} · ${COL_LABEL[srcCol]}`,
             });
             if (!result) return;     // cancelled
-            window.HistoryManager?.checkpoint(`завершить ${wt}`);
+            Services.HistoryManager?.checkpoint(`завершить ${wt}`);
             if (!row.donePills) row.donePills = {};
             row.donePills[doneKey] = { at: result.date, comment: result.comment, ts: new Date().toISOString() };
             row.actualDoneDate = result.date;
@@ -1965,13 +2933,13 @@ export const GanttView = {
           // V14 (B6.2): row-level work-period override.
           removeCtxMenu();
           (async () => {
-            const result = await window.App?.openGanttDatesModal?.({
+            const result = await Services.App?.openGanttDatesModal?.({
               summary: `${(row.epic || row.tasks || '(без эпика)')} · ${wt}`,
               start: row.workStartDate || '',
               end:   row.workEndDate   || '',
             });
             if (!result) return;
-            window.HistoryManager?.checkpoint(`установить даты работ`);
+            Services.HistoryManager?.checkpoint(`установить даты работ`);
             row.workStartDate = result.start;
             row.workEndDate   = result.end;
             row.dirty = true;
@@ -1993,13 +2961,13 @@ export const GanttView = {
           removeCtxMenu();
           (async () => {
             const taskTags = String(row.tags || '').split(/[|,]/).map(s=>s.trim()).filter(Boolean);
-            const result = await window.App?.openGanttAssignModal?.({
+            const result = await Services.App?.openGanttAssignModal?.({
               summary: `${(row.epic || row.tasks || '(без эпика)')} · ${wt} · ${COL_LABEL[srcCol]}`,
               taskTags,
               requireOtDays: srcCol === 'overtime',
             });
             if (!result) return;
-            window.HistoryManager?.checkpoint(`назначить ${result.fio || 'исполнителя'} на ${wt}`);
+            Services.HistoryManager?.checkpoint(`назначить ${result.fio || 'исполнителя'} на ${wt}`);
             if (!row.assigneePills || typeof row.assigneePills !== 'object') row.assigneePills = {};
             row.assigneePills[`${srcCol}__${wt}`] = result.fio;
             row.assignedAt = new Date().toISOString();
@@ -2007,7 +2975,7 @@ export const GanttView = {
             row.updatedAt = row.assignedAt;
             RowFactory.updateDerived(row);
             Storage.save();
-            window.App?.populateFilterDropdowns?.();
+            Services.App?.populateFilterDropdowns?.();
             GanttView.renderChart();
             window.showToast?.(`Назначен ${result.fio} на «${wt}»`,'success',1800);
             try { window.HistoryLog?.gantt?.('assign_pill', `Назначен ${result.fio} на ${wt} в ${srcCol}`, { rowId: row.id, empId: result.id, fio: result.fio, col: srcCol, wt }); } catch(_) {}
@@ -2019,7 +2987,7 @@ export const GanttView = {
         // row.assigneePills (и пишет '' в legacy row.assignee если pills нет).
         if (action === 'unassign') {
           const pillKey = `${srcCol}__${wt}`;
-          window.HistoryManager?.checkpoint(`снять назначение на ${wt}`);
+          Services.HistoryManager?.checkpoint(`снять назначение на ${wt}`);
           if (row.assigneePills && typeof row.assigneePills === 'object' && row.assigneePills[pillKey]) {
             const prev = row.assigneePills[pillKey];
             delete row.assigneePills[pillKey];
@@ -2046,7 +3014,7 @@ export const GanttView = {
         }
 
         if (action === 'delete') {
-          window.HistoryManager?.checkpoint(`удалить ${wt} из ${COL_LABEL[srcCol]}`);
+          Services.HistoryManager?.checkpoint(`удалить ${wt} из ${COL_LABEL[srcCol]}`);
           if (fieldKey && Array.isArray(row[fieldKey])) {
             row[fieldKey] = row[fieldKey].filter(t => t !== wt);
           }
@@ -2073,7 +3041,7 @@ export const GanttView = {
         if (action === 'undo-move') {
           // V15 (audit#1, system H7): checkpoint so the «убрать след
           // переноса» action is reversible like all other gantt mutations.
-          window.HistoryManager?.checkpoint('убрать след переноса');
+          Services.HistoryManager?.checkpoint('убрать след переноса');
           if (Array.isArray(row.ganttArrows)) {
             row.ganttArrows = row.ganttArrows.filter(a => !(a.wt === wt && a.srcCol === srcCol));
           }
@@ -2088,7 +3056,7 @@ export const GanttView = {
           if (!fieldKey || idxInCol < 0) { removeCtxMenu(); return; }
           const targetIdx = action === 'move-left' ? idxInCol - 1 : idxInCol + 1;
           if (targetIdx < 0 || targetIdx >= arr.length) { removeCtxMenu(); return; }
-          window.HistoryManager?.checkpoint(`переставить ${wt}`);
+          Services.HistoryManager?.checkpoint(`переставить ${wt}`);
           [arr[idxInCol], arr[targetIdx]] = [arr[targetIdx], arr[idxInCol]];
           row[fieldKey] = arr;
           row.dirty = true;
@@ -2110,18 +3078,19 @@ export const GanttView = {
           (async () => {
             let moveComment = '';
             try {
-              const res = await window.App?.requireMoveComment?.({
+              const res = await Services.App?.requireMoveComment?.({
                 rowKey: (row.epic || row.tasks || '(без эпика)'),
                 srcCol: COL_LABEL[srcCol], dstCol: COL_LABEL[nextCol], wt,
               });
               if (res === null) {
-                window.showToast?.('Перенос отменён', 'info', 1500);
+                // UX 4.1 — унифицировано через window.Toast.info (cancelled drop).
+                Services.Toast?.info?.('Перенос отменён', { ms: 1500 });
                 return;
               }
               moveComment = res || '';
             } catch (e2) {
-              window.showToast?.('Не удалось показать диалог комментария — перенос отменён', 'error', 3000);
-              try { window.ErrorsLog?.add?.({ level:'error', source:'GanttView.move-next', message:'requireMoveComment threw', stack: e2?.stack || String(e2) }); } catch(_){}
+              window.showToast?.('Не удалось открыть форму комментария. Попробуйте ещё раз', 'error', 3000);
+              try { Services.ErrorsLog?.add?.({ level:'error', source:'GanttView.move-next', message:'requireMoveComment threw', stack: e2?.stack || String(e2) }); } catch(_){}
               return;
             }
             // Re-resolve row by id after await — state.rows could have been
@@ -2131,7 +3100,7 @@ export const GanttView = {
               window.showToast?.('Задача больше не существует — перенос отменён', 'warning', 2400);
               return;
             }
-            window.HistoryManager?.checkpoint(`перенести ${wt}: ${COL_LABEL[srcCol]} → ${COL_LABEL[nextCol]}`);
+            Services.HistoryManager?.checkpoint(`перенести ${wt}: ${COL_LABEL[srcCol]} → ${COL_LABEL[nextCol]}`);
 
             // ── Visual flight animation ──────────────────────────
             const srcCell = wrap.querySelector(`.gantt-cell[data-col="${srcCol}"][data-row-id="${fresh.id}"]`);
@@ -2150,27 +3119,63 @@ export const GanttView = {
                 box-shadow:0 4px 16px rgba(0,0,0,.25);
               `;
               document.body.appendChild(ghost);
+              // AUDIT_HOLISTIC O10 — transform через CSS custom-properties;
+              // правило `.gdt-drop-ghost` уважает prefers-reduced-motion.
+              ghost.classList.add('gdt-drop-ghost');
               requestAnimationFrame(() => {
                 const dx = endRect.left + endRect.width/2  - (startRect.left + startRect.width/2);
                 const dy = endRect.top  + endRect.height/2 - (startRect.top  + startRect.height/2);
-                ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.15)`;
+                ghost.style.setProperty('--prizma-ghost-tx', dx + 'px');
+                ghost.style.setProperty('--prizma-ghost-ty', dy + 'px');
+                ghost.style.setProperty('--prizma-ghost-scale', '1.15');
                 ghost.style.boxShadow = '0 8px 24px rgba(79,70,229,.4)';
               });
               dstCell.classList.add('gantt-cell-receiving');
               setTimeout(() => dstCell.classList.remove('gantt-cell-receiving'), 900);
-              setTimeout(() => ghost.remove(), 700);
-            }
+              // V22 G-08 (audit-experts-2026-05-15 Demin H7) — раньше
+              //   setTimeout(() => ghost.remove(), 700)
+              //   setTimeout(() => GanttView.renderChart(), 700)
+              // Magic-number 700 совпадал с CSS `transition: transform .65s` —
+              // если дизайнер менял длительность, удаление/ре-рендер летел
+              // в пустоту (раньше) или с дрожанием (позже). Заменяем на
+              // транзишн-event: ghost удаляется и Гант перерендеривается
+              // ТОЧНО когда анимация транзишна завершилась. Fallback
+              // setTimeout(1200) защищает от случая когда transitionend
+              // не выстрелит (reduced-motion / display:none во время полёта).
+              let _animDone = false;
+              const _finish = () => {
+                if (_animDone) return;
+                _animDone = true;
+                try { ghost.remove(); } catch (_) {}
+                try { GanttView.renderChart(); } catch (_) {}
+              };
+              ghost.addEventListener('transitionend', (ev) => {
+                // Слушаем только основной transform — а не вложенные box-shadow
+                // / opacity transitions, иначе finish сработает на первом из них.
+                if (ev.propertyName === 'transform') _finish();
+              }, { once: false });
+              // Defensive fallback: если по какой-то причине transitionend
+              // не выстрелил (reduced-motion, hidden tab, browser bug) —
+              // через 1.2s всё равно вычищаем (анимация ≤ .65s + headroom).
+              setTimeout(_finish, 1200);
 
-            // ── Mutate via shared helper (records timestamped arrow). ──
-            moveWtBetweenCols(fresh, wt, srcCol, nextCol, { comment: moveComment });
-            setTimeout(() => GanttView.renderChart(), 700);
+              // Mutate via shared helper (records timestamped arrow). Сама
+              // мутация делается СРАЗУ — не ждём анимации. renderChart()
+              // отложен до transitionend (см. _finish выше).
+              moveWtBetweenCols(fresh, wt, srcCol, nextCol, { comment: moveComment });
+            } else {
+              // Если визуальной анимации не было (например, ячейка не нашлась
+              // в DOM) — просто мутируем и сразу перерисовываем.
+              moveWtBetweenCols(fresh, wt, srcCol, nextCol, { comment: moveComment });
+              GanttView.renderChart();
+            }
           })();
           return;
         }
 
         // #6: revert a previously-moved pill back to its original cell.
         if (action === 'revert-move') {
-          window.HistoryManager?.checkpoint(`вернуть ${wt} обратно`);
+          Services.HistoryManager?.checkpoint(`вернуть ${wt} обратно`);
           const reverted = revertMove(row, wt, srcCol);
           removeCtxMenu();
           GanttView.renderChart();
@@ -2184,7 +3189,16 @@ export const GanttView = {
       });
 
       const onOutside = ev => {
-        if (!menu.contains(ev.target)) { removeCtxMenu(); document.removeEventListener('click', onOutside, true); }
+        if (!menu.contains(ev.target)) {
+          removeCtxMenu();
+          document.removeEventListener('click', onOutside, true);
+          // Wave3 P-GR — если outside-click был по другому focusable
+          // (например, чтобы открыть другое меню) — не воруем focus.
+          // Возвращаем на pill только если active элемент потерян (body).
+          if (document.activeElement === document.body) {
+            try { _ctxReturnFocusEl?.focus?.({ preventScroll: true }); } catch (_) {}
+          }
+        }
       };
       setTimeout(() => document.addEventListener('click', onOutside, true), 0);
     });
@@ -2255,10 +3269,15 @@ export const GanttView = {
       const fromIdx = arr.indexOf(_dragData.wt);
       const toIdx   = arr.indexOf(target.dataset.wt);
       if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-      window.HistoryManager?.checkpoint(`переставить ${_dragData.wt}`);
-      arr.splice(fromIdx, 1);
-      arr.splice(toIdx, 0, _dragData.wt);
-      row[fieldKey] = arr;
+      Services.HistoryManager?.checkpoint(`переставить ${_dragData.wt}`);
+      // V22 G-02 (audit-experts-2026-05-15 Demin C2) — splice → reassign
+      // через перестроенный массив. Раньше: arr.splice + reassign того же
+      // arr. После splice на proxy-wrapped массиве `arr` уже модифицирован,
+      // reassign — no-op (prev === rawValue). Теперь явно: новый массив.
+      const next = [...arr];
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, _dragData.wt);
+      row[fieldKey] = next;
       row.dirty = true;
       Storage.save();
       _dragData = null;
@@ -2282,12 +3301,21 @@ export const GanttView = {
     //   pixel-координаты. Идемпотентно: если уже привязан к этому wrap'у —
     //   skip. Debounce через RAF чтобы не дёргать на каждом пикселе.
     if (!wrap._gdtArrowsResizeObserver && typeof ResizeObserver !== 'undefined') {
+      // TECH 4.2 — scrollEnd-style debounce 50 ms. Раньше cancelAnimationFrame
+      // + rAF гасил только intra-frame burst'ы; multi-frame resize (drag
+      // sidebar / window resize) триггерил drawPostponeArrows на каждом frame.
+      // Теперь копим entries за 50 ms и обрабатываем только финальное состояние.
       let _roRaf = 0;
-      const ro = new ResizeObserver(() => {
+      let _roTimer = 0;
+      const flush = () => {
         cancelAnimationFrame(_roRaf);
         _roRaf = requestAnimationFrame(() => {
           try { GanttView.drawPostponeArrows(wrap); } catch(_) {}
         });
+      };
+      const ro = new ResizeObserver(() => {
+        clearTimeout(_roTimer);
+        _roTimer = setTimeout(flush, 50);
       });
       ro.observe(wrap);
       wrap._gdtArrowsResizeObserver = ro;
@@ -2297,6 +3325,16 @@ export const GanttView = {
     // Idempotent — wrap-level delegation survives every renderChart() since
     // we re-use the same `#gantt-wrap` node.
     GanttView.bindFastTooltip(wrap);
+
+    // V22 G-03 (audit-experts-2026-05-15 Demin C3) + G-08 (Demin H7) —
+    // эмитим 'gantt-rendered' для подписчиков (keyboard-nav setupRoving,
+    // dependency-arrows, post-render hooks). Раньше эти подписки делались
+    // через monkey-patch GanttView.renderChart — заменено на EventBus.
+    try {
+      if (typeof globalThis !== 'undefined' && globalThis.EventBus?.emit) {
+        globalThis.EventBus.emit('gantt-rendered');
+      }
+    } catch (_) { /* defensive */ }
   },
   /** Lightweight body-attached tooltip — replaces native `title=` (which
    *  has a ~1.5 s delay browsers don't expose any API to shorten). 200 ms

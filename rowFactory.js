@@ -104,6 +104,12 @@ export const EmployeeFactory = {
       //   интеграции» — портфолио-агрегатор просто не привязывает к нему
       //   данные из соответствующего источника.
       email: '',
+      // QD4: дополнительные email-aliases (work + personal, или old/new
+      // адреса при reorg). Используется в attribution когда BB-author keyed
+      // по personal@gmail.com, а emp.email = work@sber.ru. Pipe-separated
+      // в storage. Применяется вместе с основным email — emp matchится
+      // если ЛЮБОЙ из них совпал.
+      aliasEmails: '',
       jiraAccountId: '',
       bitbucketLogin: '',
       confluenceAccountId: '',
@@ -116,6 +122,11 @@ export const EmployeeFactory = {
       // Этим достигается: явный override `true` или `false` через `ov`
       // переживает normalize, не перетирается auto-detect'ом.
       isServiceAccount: null,
+      // Заблокированный сотрудник (уволен / вне штата). В Сбер-реестре
+      // помечается суффиксом [Х]/[X]/[В]/[B] в ФИО. Авто-детект по regex
+      // в normalize(). Исключается из identity-coverage / BB-CF-attribution
+      // / любых counts «без bbLogin» — иначе мёртвые души портят метрики.
+      isBlocked: null,
       sourceType: 'manual',
       createdAt: now,
       updatedAt: now,
@@ -125,6 +136,14 @@ export const EmployeeFactory = {
     return emp;
   },
   normalize(emp) {
+    // TECH кр.2 — memoize normalize: 60s cache. EmployeeFactory.create вызывает
+    // normalize при каждом load + restore + auto-create. Если объект уже
+    // нормализован недавно и fio не менялся — skip полный pass. Гард-проверка
+    // на наличие fio + _normalizedAt чтобы свеже-созданные / только что
+    // импортированные emp всё равно прошли полный normalize.
+    if (emp.fio && emp._normalizedAt && (Date.now() - emp._normalizedAt) < 60000) {
+      return;
+    }
     emp.fio = String(emp.fio || '').trim();
     emp.roles = String(emp.roles || '').split(/[|,]/).map(s=>s.trim()).filter(Boolean).join('|');
     emp.teams = String(emp.teams || '').split(/[|,]/).map(s=>s.trim()).filter(Boolean).join('|');
@@ -133,17 +152,46 @@ export const EmployeeFactory = {
     emp.weekdayReady = Utils.toBool(emp.weekdayReady,false);
     emp.weekdayComment = String(emp.weekdayComment || '').split(/[|,]/).map(s=>s.trim()).filter(Boolean).join('|');
     // V17.2 I1a — identity-поля: trim + lowercase email, остальные trim only.
+    // F4: jiraAccountId тоже lowercase'им — иначе один и тот же сотрудник
+    // импортированный с разным регистром (`JIRAUSER123` vs `jirauser123`)
+    // создаёт дубль employee при следующих pulse-job'ах. Старые записи
+    // мигрируют автоматически — normalize() прогоняется при каждой загрузке.
     emp.email               = String(emp.email               || '').trim().toLowerCase();
-    emp.jiraAccountId       = String(emp.jiraAccountId       || '').trim();
-    emp.bitbucketLogin      = String(emp.bitbucketLogin      || '').trim();
-    emp.confluenceAccountId = String(emp.confluenceAccountId || '').trim();
+    emp.jiraAccountId       = String(emp.jiraAccountId       || '').trim().toLowerCase();
+    emp.bitbucketLogin      = String(emp.bitbucketLogin      || '').trim().toLowerCase();
+    emp.confluenceAccountId = String(emp.confluenceAccountId || '').trim().toLowerCase();
+    // QD4: aliasEmails — pipe/comma-separated, lowercased, deduped, без основного.
+    {
+      const raw = String(emp.aliasEmails || '').split(/[|,]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      const main = emp.email;
+      const set = new Set(raw.filter(e => e !== main));
+      emp.aliasEmails = [...set].join('|');
+    }
     // V20 S4 — service-account auto-detect (если не выставлено вручную).
     //   Если в БД есть явный override (true/false) — не трогаем.
     //   Иначе (null / undefined) — определяем по pattern.
     if (emp.isServiceAccount == null) {
       emp.isServiceAccount = EmployeeFactory.detectServiceAccount(emp);
     }
+    // TECH 17.5 — кэш detectBlocked по fio. При изменении fio (restore /
+    // ручное переименование) — re-detect, иначе skip regex.
+    if (emp.isBlocked == null || emp._blockedFor !== emp.fio) {
+      emp.isBlocked = EmployeeFactory.detectBlocked(emp);
+      emp._blockedFor = emp.fio;
+    }
     emp.updatedAt = new Date().toISOString();
+    emp._normalizedAt = Date.now();
+  },
+
+  /**
+   * Заблокированные пользователи помечаются в ФИО суффиксом [Х]/[X]/[В]/[B].
+   * Примеры: «Иванов И.И. [Х]», «Петров П.П.[X]», «Сидоров С.С. [В]».
+   * Возвращает true если такой маркер есть.
+   */
+  detectBlocked(emp) {
+    const fio = String(emp.fio || '');
+    if (!fio) return false;
+    return /\[\s*[ХXВB]\s*\]/i.test(fio);
   },
 
   /**
@@ -168,6 +216,40 @@ export const EmployeeFactory = {
     // Pattern 3 — общие имена ботов (issue-managment, sbbol etc.) — точный список,
     // не fuzzy-substring чтобы не зацепить настоящих людей.
     if (/^(sbt-issue-managment-user|sbt-sbbol|cab-sa-jira\d+)$/i.test(key)) return true;
+    return false;
+  },
+
+  /**
+   * V21 ghost-detect (diagnostic 2026-05-07) — auto-created employees
+   * без identity-полей и без ФИО. Это «призраки» в реестре: попали через
+   * auto-create из Jira participants (S5.1), но displayName был пустой
+   * или равнялся accountId, а email/bb/cf не подтянулись.
+   *
+   * Критерии (все одновременно):
+   *   1) inRegistry (есть в state.employees) — auto-create уже произошёл
+   *   2) НЕТ ни одного identity-канала: !email && !bitbucketLogin && !confluenceAccountId
+   *   3) ФИО пустой ИЛИ совпадает с jiraAccountId/key (factory fallback)
+   *   4) НЕ service-account (там критерии другие)
+   *   5) НЕ blocked (с [Х]/[X] — это уволенные, у них могут быть пустые поля)
+   *
+   * Используется в Сканнере для исключения из counts + UI-фильтра.
+   */
+  detectGhost(emp) {
+    if (!emp) return false;
+    if (emp.isServiceAccount) return false;
+    if (emp.isBlocked) return false;
+    const hasAnyIdentity = !!(
+      String(emp.email || '').trim() ||
+      String(emp.bitbucketLogin || '').trim() ||
+      String(emp.confluenceAccountId || '').trim()
+    );
+    if (hasAnyIdentity) return false;
+    const fio = String(emp.fio || '').trim();
+    const accountId = String(emp.jiraAccountId || emp.jiraKey || emp.id || '').trim();
+    // ФИО пустое ИЛИ совпадает с techkey (factory вернула fallback) →
+    // это auto-created без mapping.
+    if (!fio) return true;
+    if (fio.toLowerCase() === accountId.toLowerCase()) return true;
     return false;
   },
 };

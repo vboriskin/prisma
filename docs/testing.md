@@ -1,13 +1,22 @@
 # Testing
 
-Текущая база: **534 unit + 11 contract + 10 e2e + ~104 testRunner = 659+ tests**.
+Текущая база: **534 unit + 11 contract + 10 e2e + 104 testRunner = 659+ tests**.
+
+> **V18 P12 status (AUDIT_HOLISTIC O1, phase-1)**: миграция `testRunner.js`
+> → `node:test` начата. 15 тестов RiskEngine уже мигрировано в
+> `tests/unit/legacy/riskEngine.test.js` параллельно legacy (legacy
+> остаётся в `npm test` до окончания миграции). План:
+> [`audit-2026-05-V18/holistic-O1-test-migration.md`](../audit-2026-05-V18/holistic-O1-test-migration.md).
+>
+> **Новые тесты — ТОЛЬКО через `node:test` в `tests/unit/`**, никогда не
+> добавляй в `testRunner.js` (он retire'тся в фазе 3).
 
 ## 4 уровня
 
 | Уровень | Где | Раннер | Сколько | Когда писать |
 |---|---|---|---|---|
-| testRunner | `testRunner.js` (root) + спец-`.test.js` файлы | самописный | ~104 | **legacy** — миграция на node:test, новые не пишем |
-| Unit (node:test) | `tests/unit/*.test.js` | `node --test` | 534 | большинство новых тестов |
+| testRunner (legacy) | `testRunner.js` (root) | самописный | 104 | **freeze** — мигрируется в `tests/unit/legacy/` через `node:test`, новые писать ЗАПРЕЩЕНО |
+| Unit (node:test) | `tests/unit/**/*.test.js` (включая `legacy/` для мигрированных) | `node --test` | 534 + 15 (мигрировано) | большинство новых тестов |
 | Contract | `contractTest.js` (root) | самописный (поднимает fake-Jira + real `server.js`) | 11 | `/api/integrations/*` поведенческие тесты |
 | e2e | `e2eTest.js` (root) | самописный (puppeteer? scripted DOM?) | 10 | smoke полного user-flow |
 
@@ -15,6 +24,7 @@
 
 ```bash
 npm test                    # testRunner + unit + contract (без e2e)
+npm run test:legacy         # только legacy testRunner (deprecated, миграция в процессе)
 npm run test:unit           # только node --test для unit (быстро)
 npm run test:contract       # ВНИМАНИЕ: путь в package.json указывает на tests/contract/** — пустая папка
                             # Правильный contract test = `node contractTest.js`
@@ -120,11 +130,33 @@ try {
 
 Если когда-то понадобится «настоящий» e2e (Playwright / Puppeteer) — это отдельный backlog item, текущий `e2eTest.js` оставить как smoke.
 
-## testRunner — legacy
+## testRunner — legacy (миграция V18 P12 → V19)
 
-`testRunner.js` (~900 строк) — самописный runner. Один большой файл с inline-тестами. Существует исторически. Постепенная миграция на `node:test` идёт; новые тесты — только `tests/unit/*.test.js`.
+`testRunner.js` (~900 строк) — самописный runner. Один большой файл с
+inline-mirror'ами доменной логики (RiskEngine, FilterEngine, DependencyEngine,
+MetricsEngine, safeHtml, reactiveStore). Существует исторически.
 
-Не удалять — пока 104 теста живут только там. Когда мигрируем — удалим всё разом.
+**Статус V18 P12**: фаза-1 миграции запущена. См.
+[`audit-2026-05-V18/holistic-O1-test-migration.md`](../audit-2026-05-V18/holistic-O1-test-migration.md).
+
+| Группа в testRunner | Тестов | Мигрировано? | Файл node:test |
+|---|---|---|---|
+| RiskEngine — computeFlags + computeRiskScore | 15 | **YES** (V18 P12) | `tests/unit/legacy/riskEngine.test.js` |
+| toBool | 12 | планируется V18 P13 | — |
+| safeHtml | 11 | планируется V18 P13 | — |
+| MetricsEngine — computeProgress + computeLoad | 22 | планируется V18 P13 | — |
+| FilterEngine — applyFilters + filter | 27 | dedup audit нужен (см. `tests/unit/filterEngine.test.js`) | — |
+| DependencyEngine — cycle detection | 8 | переписать против `detectCycles` | — |
+| reactiveStore — basic semantics | 9 | dedup audit нужен (см. `tests/unit/reactiveStore.test.js`) | — |
+| **Σ** | **104** | **15 / 104** | |
+
+Не удалять файл — пока 89 тестов живут только там. Удаление = фаза 3 после
+полной миграции и 7-дневного зелёного прогона.
+
+**Контракт**: `node testRunner.js` остаётся 104/0 до фазы 3.
+
+`npm run test:legacy` — alias для запуска только legacy testRunner отдельно
+(полезно при отладке миграции).
 
 ## Покрытие
 

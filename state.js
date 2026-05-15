@@ -43,7 +43,10 @@ const _rawState = {
   timelineMode: 'summary',
   podlozhkaGroup: 'team',
   podlozhkaMode: 'summary',
-  summaryMode: 'brief',
+  // П4-MS Wave 1: Сводная удалена (audit-2026-05-04/summary-metrics-redesign).
+  // V21 W (AUDIT_HOLISTIC O3) — `summaryMode` field полностью удалён.
+  // Миграция стрипает поле из старых q2_settings_v3 payload'ов
+  // (см. app/migrations.js, key=q2_settings_v3, 0→1).
   presetsCollapsed: false,
   theme: 'light',
   colVisibility: {},
@@ -61,6 +64,45 @@ const _rawState = {
   simMode: false,
   bulkSelected: new Set(),
   actionLog: [],
+  // AUDIT_HOLISTIC F4 — единый центр уведомлений (app/notifyCenter.js).
+  // Persistent FIFO-список (cap 100), пишется через Reactive proxy →
+  // SETTINGS_KEY (см. dataStore._buildSettingsPayload + loadSettings).
+  // Записи: { id, kind, title, body, actor, ts, severity, read,
+  //           actionUrl, actionLabel }.
+  notifications: [],
+  // AUDIT_HOLISTIC P3 + Идея 1 — единый context-объект для:
+  //   · идентификации текущего пользователя (email — primary identity,
+  //     CLAUDE.md контракт #2);
+  //   · permissions matrix (LLM S1: до этого любой клик мог удалить
+  //     блокеры всем — теперь Permissions.guard);
+  //   · feature flags (P5 — позволяет «выключить feature X у всех»);
+  //   · version-tracking для «Что нового» onboarding (MASCOT I5);
+  //   · `focus` — узкий контекст «утра тимлида» (последний просмотренный
+  //     эпик/команда/период), который читают разные view'и.
+  // Реактивен на тех же правилах, что весь `state` — мутации
+  // `state.meta.user.email = '...'` идут через Proxy → debounced flush →
+  // SETTINGS_KEY. Mass-mutation (например, hydrate из payload) ОБЯЗАН
+  // быть в `Reactive.silent`.
+  meta: {
+    user:        { email: '', name: '', avatar: '' },
+    permissions: {
+      canBulkEdit:      true,
+      canChangeScope:   true,
+      canMarkDone:      true,
+      canExport:        true,
+      canEditEmployees: false,
+    },
+    featureFlags: {
+      ai:            true,
+      mascotMood:    true,
+      notifications: true,
+      explainScreen: true,
+    },
+    version:         '17.0.0',
+    lastSeenVersion: '',
+    lastActiveAt:    null,
+    focus:           null,    // { kind, id, period } — для сценария «Утро тимлида»
+  },
 };
 REGISTRY_COLS.forEach(c => { _rawState.colVisibility[c.key] = c.visible; });
 
@@ -172,7 +214,27 @@ export function syncColumnSettings() {
   state.epicDeps=deps;
 }
 
-// Subscribe/notify mechanism for cross-module communication
+/**
+ * AUDIT_ARCHITECTURE #4 — Legacy event-bus (subscribe/notify by reason).
+ *
+ * Eto staraya named-event shina dlya kross-modul'noy kommunikacii. Ona
+ * sushchestvuet ryadom s Reactive (reactiveStore.js) i imeet drugoe
+ * naznachenie:
+ *
+ *   · subscribe(fn) zdes' — slushaet IMENOVANNYE sobytiya
+ *     ('chat_filter', 'import', 'restore', ...) kotorye nuzhno YAVNO
+ *     emit'it' cherez notify('reason').
+ *   · Reactive.subscribe(fn) v reactiveStore.js — auto-flush na lyubuyu
+ *     mutation state'a (debounced); reason ne peredaetsya.
+ *
+ * REKOMENDACIYA: dlya NOVOGO koda predpochitayte Reactive.subscribe.
+ * Ostavlennyy zdes' API ispol'zuyte tol'ko esli vam DEYSTVITEL'NO
+ * nuzhno znat' tip sobytiya (chat-filter izmenilsya / impotirovan novyy
+ * dataset / vosstanovlena snapshot).
+ *
+ * NE ISPOLZUYTE oba mexanizma odnovremenno dlya odnogo i togo zhe sobytiya
+ * — eto privedet k dvoynoy notifikacii i, kak sledstvie, double-render.
+ */
 const _listeners = [];
 export function subscribe(fn) {
   _listeners.push(fn);

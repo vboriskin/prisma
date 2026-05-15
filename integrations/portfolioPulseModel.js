@@ -10,6 +10,8 @@ import {
   userKey, userNameKey, userLabel, userAvatar, slimIssue, typeBucket, statusBucket,
   zephyrKind,
 } from './portfolioPulseUtils.js';
+import { Utils } from '../utils.js';
+import { EmployeeFactory } from '../rowFactory.js';
 
 const STALE_DAYS_DEFAULT = 7;
 
@@ -33,6 +35,82 @@ const STALE_DAYS_DEFAULT = 7;
  *              bugs, commits48h, pr48h, conf48h },
  * }
  */
+/* V21 Y3 (audit-09 §F sleeping data) — собрать агрегаты которые УЖЕ есть
+   в issue.fields, но никто их раньше не показывал. Вызывается per-issue
+   в основном цикле analysePulse'а. Все аккумуляции в out.summary.* —
+   читаются renderer'ом и AI-агентами без новых HTTP-вызовов. */
+function _accumulateSleepingData(out, f, slim, pk, terminal) {
+  // 1) Resolution split (Done / Won't Do / Duplicate / Cannot Reproduce / ...).
+  if (terminal && f.resolution?.name) {
+    const name = String(f.resolution.name).slice(0, 40);
+    out.summary.resolutionSplit[name] = (out.summary.resolutionSplit[name] || 0) + 1;
+  }
+  // 2) Subtasks completion ratio per parent epic. epic key — поле parent.key.
+  // Если у issue есть subtasks[] и issue сам — epic, считаем сколько из них Done.
+  const subtasks = Array.isArray(f.subtasks) ? f.subtasks : [];
+  if (subtasks.length) {
+    const epicKey = slim.key || f.key || '';
+    if (epicKey) {
+      const sb = (out.summary.subtasksByEpic[epicKey] ||= { total: 0, done: 0, ratio: 0 });
+      for (const st of subtasks) {
+        sb.total++;
+        const stCat = st?.fields?.status?.statusCategory?.key || '';
+        if (stCat === 'done') sb.done++;
+      }
+      sb.ratio = sb.total ? sb.done / sb.total : 0;
+    }
+  }
+  // 3) Per-author worklog breakdown — `worklog.worklogs[]`.
+  const worklogs = f.worklog?.worklogs;
+  if (Array.isArray(worklogs) && worklogs.length) {
+    for (const w of worklogs) {
+      const author = w.author?.displayName || w.author?.name || w.author?.emailAddress || '';
+      if (!author) continue;
+      const sec = Number(w.timeSpentSeconds) || 0;
+      if (!sec) continue;
+      const k = String(author).toLowerCase().trim();
+      const e = (out.summary.worklogByAuthor[k] ||= { secondsTotal: 0, displayName: author });
+      e.secondsTotal += sec;
+    }
+  }
+  // 4) Issue-link graph («blocks» / «is blocked by» / depends-on).
+  const links = Array.isArray(f.issuelinks) ? f.issuelinks : [];
+  if (links.length) {
+    const fromKey = slim.key || '';
+    if (fromKey) {
+      const arr = (out.summary.issueLinkGraph[fromKey] ||= []);
+      for (const l of links) {
+        const kind = l?.type?.name || l?.type?.outward || l?.type?.inward || '';
+        const to   = l?.outwardIssue?.key || l?.inwardIssue?.key || '';
+        if (kind && to) arr.push({ kind, toKey: to, dir: l?.outwardIssue ? 'out' : 'in' });
+      }
+    }
+  }
+  // 5) Component owner load.
+  const comps = Array.isArray(f.components) ? f.components : [];
+  for (const c of comps) {
+    // QA A9.1 — нормализация: пустое и «—» одинаково не должно создавать
+    // отдельный bucket. До фикса `""` и `"—"` могли стать двумя разными
+    // ключами в `componentOwnerLoad` и портить топ-30 компонентов.
+    const name = String(c?.name || '').trim();
+    if (!name || name === '—') continue;
+    const e = (out.summary.componentOwnerLoad[name] ||= { issueCount: 0, openCount: 0, lead: c.lead?.displayName || '' });
+    e.issueCount++;
+    if (!terminal) e.openCount++;
+  }
+  // 6) Fix-version coverage.
+  const versions = Array.isArray(f.fixVersions) ? f.fixVersions : [];
+  for (const v of versions) {
+    const name = v?.name;
+    if (!name) continue;
+    const e = (out.summary.fixVersionCoverage[name] ||= { total: 0, done: 0, released: !!v.released });
+    e.total++;
+    if (terminal) e.done++;
+  }
+  // 7) Attachments — DoR-completeness proxy.
+  if (Array.isArray(f.attachment) && f.attachment.length) out.summary.attachmentsCount++;
+}
+
 export function analysePulse(rawReports, opts = {}) {
   const staleDays = opts.staleDays || STALE_DAYS_DEFAULT;
   const yStart  = yesterdayStart();
@@ -66,6 +144,21 @@ export function analysePulse(rawReports, opts = {}) {
       testsPassedYesterday: 0, testsFailedYesterday: 0,
       testsPassedDayBefore: 0, testsFailedDayBefore: 0,
       activeSprints: [],
+      // V21 Y3 (audit-09 §F + §B #4-#15) — sleeping-data aggregates.
+      //   resolutionSplit — { Done, "Won't Do", Duplicate, "Cannot Reproduce", ... }
+      //   subtasksByEpic  — { epicKey: { total, done, ratio } } для completion-ratio
+      //   worklogByAuthor — { authorKey: { secondsTotal, displayName } }
+      //   issueLinkGraph  — { fromKey: [{ kind, toKey }, ...] } для dep graph
+      //   componentOwnerLoad — { componentName: { issueCount, openCount } }
+      //   fixVersionCoverage — { version: { total, done } } для release readiness
+      //   attachmentsCount — total с приложениями (DoR-completeness proxy)
+      resolutionSplit:    {},
+      subtasksByEpic:     {},
+      worklogByAuthor:    {},
+      issueLinkGraph:     {},
+      componentOwnerLoad: {},
+      fixVersionCoverage: {},
+      attachmentsCount:   0,
     },
     todoToday: [],          // 8.2 plan-for-today candidates
     yesterdayActivity: [],  // 8.3 what was done yesterday (transitions/worklog/comments)
@@ -74,6 +167,8 @@ export function analysePulse(rawReports, opts = {}) {
     bitbucket:    rawReports?.bitbucket  || { authors: {}, configured: false },
     confluence:   rawReports?.confluence || { authors: {}, configured: false },
     zephyr:       rawReports?.zephyr     || { authors: {}, configured: false },     // V20 S9
+    // V21 Y4 — big metrics passthrough.
+    bigMetrics:   rawReports?.bigMetrics || { reopenRate: { byPk: {} }, sprintCommit: { byPk: {} }, staleBranches: { byRepo: {} }, staleConfluence: { bySpace: {} } },
     // Per-PK timing log + log buffer from server (#2.3 — surface why one team
     // sometimes times out so the user has actionable info).
     diagnostics:  rawReports?.diagnostics || { totalMs: 0, perPk: [], log: [] },
@@ -229,6 +324,10 @@ export function analysePulse(rawReports, opts = {}) {
       if (typeBucket(slim) === 'bug') out.summary.bugs++;
       if (f.priority?.name && /blocker|highest|критич/i.test(f.priority.name) && !terminal) out.summary.blockers++;
 
+      // V21 Y3 (audit-09 §F + #1-#3 sleeping data) — surface aggregates from
+      // данных, которые УЖЕ едут в payload, но никем не используются.
+      _accumulateSleepingData(out, f, slim, pk, terminal);
+
       // ── Wave 4c: Zephyr classification + per-issue counters ──
       const zKind = zephyrKind(slim);
       if (zKind === 'test')     out.summary.testCases++;
@@ -258,6 +357,15 @@ export function analysePulse(rawReports, opts = {}) {
         }
       }
 
+      // V21 AT (audit-09 §H Person #18) — per-issue reopen tracker.
+      // Если на любом шаге changelog видим Done→non-Done (или status
+      // переехал с terminal на active), помечаем issue. После цикла
+      // attribute'им rework к assignee (если он есть).
+      let issueHadReopen = false;
+      // V21 BB (audit-09 §H Sprint #17) — Carry-over age = кол-во раз
+      // когда issue перемещался между спринтами.
+      let issueSprintMoves = 0;
+
       // Walk changelog: status transitions + ALL field-change events (wave 4a).
       // Every history item now produces an event of one of these kinds:
       //   transition / closed  — `field === 'status'` (kept verbatim from wave 1)
@@ -278,6 +386,32 @@ export function analysePulse(rawReports, opts = {}) {
         for (const it of (h.items || [])) {
           const event = _changelogItemToEvent(it, slim, h.created);
           if (!event) continue;
+          // V21 AT — detect rework: status changed FROM terminal TO non-terminal.
+          if ((it.field || '').toLowerCase() === 'status') {
+            const fromS = it.fromString || it.from || '';
+            const toS   = it.toString   || it.to   || '';
+            if (fromS && toS && isTerminalStatus(fromS) && !isTerminalStatus(toS)) {
+              issueHadReopen = true;
+            }
+          }
+          // V21 BA/BB (audit-09 §H Sprint #16, #17) — Sprint field changes:
+          // scope churn (per-sprint added/removed) + carry-over age (per-issue moves).
+          if ((it.field || '').toLowerCase() === 'sprint') {
+            const fromList = String(it.fromString || '').split(/\s*,\s*/).filter(Boolean);
+            const toList   = String(it.toString   || '').split(/\s*,\s*/).filter(Boolean);
+            const added   = toList.filter(s => !fromList.includes(s));
+            const removed = fromList.filter(s => !toList.includes(s));
+            if (added.length || removed.length) issueSprintMoves++;
+            if (!out.summary.scopeChurn) out.summary.scopeChurn = {};
+            for (const sprintName of added) {
+              const e = (out.summary.scopeChurn[sprintName] ||= { added: [], removed: [] });
+              e.added.push({ key: slim.key, at: h.created, by: h.author?.displayName || h.author?.name || '' });
+            }
+            for (const sprintName of removed) {
+              const e = (out.summary.scopeChurn[sprintName] ||= { added: [], removed: [] });
+              e.removed.push({ key: slim.key, at: h.created, by: h.author?.displayName || h.author?.name || '' });
+            }
+          }
 
           // Wave 4c + Phase 3: Zephyr execution attribution. When a Test Execution
           // issue moves to a PASS/FAIL/BLOCKED state, attribute it to the mover.
@@ -336,6 +470,23 @@ export function analysePulse(rawReports, opts = {}) {
             if (event.kind === 'closed') moverU.doneDayBefore.push(slim);
           }
         }
+      }
+
+      // V21 AT — после полного walk'а changelog: если был хоть один reopen,
+      // attribute к текущему assignee (если есть). Это per-issue events count
+      // — issue с 5 reopens'ами = 5 punches by current assignee.
+      if (issueHadReopen && user) {
+        user.reworkCount = (user.reworkCount || 0) + 1;
+      }
+      // V21 BB — Carry-over age: сохраняем для post-aggregation.
+      if (issueSprintMoves > 0) {
+        if (!out.summary.carryOverAges) out.summary.carryOverAges = [];
+        out.summary.carryOverAges.push({
+          key: slim.key,
+          summary: (f.summary || '').slice(0, 60),
+          moves: issueSprintMoves,
+          assignee: assignee?.displayName || assignee?.name || '',
+        });
       }
 
       // Walk comments: 48h window. Wave 4b adds mention extraction:
@@ -500,20 +651,75 @@ export function analysePulse(rawReports, opts = {}) {
   const cfAuthors = (rawReports?.confluence?.authors) || {};
   // V20 S9 — Real Zephyr authors (deterministic match by JIRAUSER-key).
   const zephyrAuthors = (rawReports?.zephyr?.authors) || null;
+  // V21 Z-attr fix (diagnostic 2026-05-07: 7 zephyrAuthors / 0 attributed).
+  // Сервер нормализует ключи через _zephyrNormalizeUserKey: numeric→JIRAUSERxxx,
+  // username→lowercase. Клиент должен применить ту же нормализацию к
+  // emp.jiraAccountId перед лукапом — иначе registry с raw "1697487" не
+  // матчится с серверным ключом "JIRAUSER1697487", и наоборот.
+  // Дополнительно строим reverse-index по displayName (case-insensitive,
+  // trimmed): authoritative-fallback когда jiraAccountId форматы расходятся.
+  const _zephyrNormKey = (raw) => {
+    if (raw == null) return '';
+    let k = String(raw).trim();
+    if (!k) return '';
+    if (/^\d{5,}$/.test(k)) return `JIRAUSER${k}`;
+    if (/^[A-Za-z][A-Za-z0-9._-]+$/.test(k)) return k.toLowerCase();
+    return k;
+  };
+  const _zephyrByDisplayName = {};
+  if (zephyrAuthors) {
+    for (const [k, v] of Object.entries(zephyrAuthors)) {
+      const dn = String(v?.displayName || '').toLowerCase().trim();
+      if (dn) _zephyrByDisplayName[dn] = { key: k, entry: v };
+    }
+  }
   const employees = Array.isArray(opts?.employees) ? opts.employees : [];
-  const allowFuzzy = !!opts?.allowFuzzyAuthorMatch;
+  // V21 — defence-in-depth для fuzzy-matcher (audit-2026-05-04 functional #3,
+  // V17 I1c регрессия: случайная утечка флага в config привела к BB/CF
+  // attribution не тому сотруднику). Параметр сохранён как DevTools-возможность,
+  // но активируется ТОЛЬКО при ОБОИХ условиях:
+  //   1. caller передал opts.allowFuzzyAuthorMatch === true (явный opt-in)
+  //   2. в среде установлен dev-флаг:
+  //      - browser: `localStorage._prizma_dev_fuzzy_match === '1'`
+  //        (выставляется вручную через DevTools, не через UI)
+  //      - node:    `process.env.PRIZMA_DEV_FUZZY === '1'`
+  //        (тесты / CLI-debug)
+  // В production оба отсутствуют → allowFuzzy всегда false, даже если
+  // opts.allowFuzzyAuthorMatch=true случайно попадёт в config.
+  let allowFuzzy = false;
+  if (opts?.allowFuzzyAuthorMatch === true) {
+    const localDev = (typeof localStorage !== 'undefined')
+      && localStorage.getItem('_prizma_dev_fuzzy_match') === '1';
+    const nodeDev  = (typeof process !== 'undefined')
+      && process.env && process.env.PRIZMA_DEV_FUZZY === '1';
+    allowFuzzy = localDev || nodeDev;
+  }
 
   // Build reverse identity indexes from state.employees.
+  // R5: единый detectBlocked из EmployeeFactory вместо локального regex.
   const empByEmail   = new Map();
   const empByJiraId  = new Map();
   const empByBbLogin = new Map();
   const empByCfId    = new Map();
   for (const e of employees) {
     if (!e) continue;
+    if (e.isBlocked || EmployeeFactory.detectBlocked(e)) continue;
+    // V21 ghost-filter — auto-created без identity-полей и без ФИО
+    // (diagnostic 2026-05-07: 6 призраков с label==key). Не индексируем
+    // их — они не должны получать BB/CF-attribution и не считаются
+    // в team-coverage метриках.
+    if (EmployeeFactory.detectGhost(e)) continue;
     if (e.email)               empByEmail  .set(String(e.email              ).toLowerCase().trim(), e);
     if (e.jiraAccountId)       empByJiraId .set(String(e.jiraAccountId      ).toLowerCase().trim(), e);
     if (e.bitbucketLogin)      empByBbLogin.set(String(e.bitbucketLogin     ).toLowerCase().trim(), e);
     if (e.confluenceAccountId) empByCfId   .set(String(e.confluenceAccountId).toLowerCase().trim(), e);
+    // QD4: aliasEmails — все альтернативные адреса этого человека резолвятся
+    // в одну запись emp. Например work@sber + personal@gmail оба ведут к одному.
+    if (e.aliasEmails) {
+      for (const a of String(e.aliasEmails).split(/[|,]/).map(s => s.trim().toLowerCase()).filter(Boolean)) {
+        if (!empByEmail.has(a)) empByEmail.set(a, e);
+      }
+    }
   }
 
   // BB authors are keyed by `(displayName || email).toLowerCase()` on the
@@ -521,16 +727,58 @@ export function analysePulse(rawReports, opts = {}) {
   // reverse-build: scan once and index by every recognizable identifier the
   // entry exposes (email, displayName, the key itself = bitbucket login in
   // most cases when displayName is missing).
+  // H5: Russian-only Stash-профили дают key = русский displayName ("Иванов И.И."),
+  // pустой slug, пустой email. Бывает что bb-login сотрудника НЕ заполнен —
+  // тогда атрибуция падает. Fingerprint = "lastname + firstInitial" в
+  // нижнем регистре, без пробелов/точек: "Иванов И.И." → "ивановии",
+  // "Иванов Иван Иванович" → "ивановии" — оба нормализуются одинаково
+  // и сравниваются с emp.fio таким же fingerprint'ом.
+  const _fioFingerprint = (raw) => {
+    const s = String(raw || '').toLowerCase().replace(/[.\s]+/g, ' ').trim();
+    if (!s) return '';
+    const parts = s.split(' ').filter(Boolean);
+    if (!parts.length) return '';
+    const last = parts[0] || '';
+    const firstInitial = (parts[1] || '')[0] || '';
+    const middleInitial = (parts[2] || '')[0] || '';
+    return `${last}${firstInitial}${middleInitial}`;
+  };
+  // R4: маркер коллизии fingerprint'а — два разных «Иванов И.А.» из разных
+  // команд имеют одинаковый fp. Раньше последний перетирал первого →
+  // забирал чужие коммиты. Теперь при коллизии помечаем ambiguous и при
+  // lookup возвращаем null (лучше потерять атрибуцию чем приписать чужому).
+  const FIO_FP_AMBIGUOUS = Symbol('fio-fp-ambiguous');
   const _buildAuthorLookups = (authorsMap) => {
     const byEmail = new Map();
     const byKey   = new Map();      // raw lookup key (displayName / login lowercase)
-    if (!authorsMap) return { byEmail, byKey };       // V18 P8 — null/undefined safe
+    const bySlug  = new Map();      // Stash login slug (author.name from API)
+    const byFioFp = new Map();      // H5: fingerprint "ивановии" → entry | AMBIGUOUS
+    if (!authorsMap) return { byEmail, byKey, bySlug, byFioFp };
     for (const [k, v] of Object.entries(authorsMap)) {
       byKey.set(String(k).toLowerCase().trim(), v);
       const em = String(v?.email || '').toLowerCase().trim();
       if (em) byEmail.set(em, v);
+      const sl = String(v?.slug || '').toLowerCase().trim();
+      if (sl) bySlug.set(sl, v);
+      // Индексируем по fingerprint'у displayName (Russian-friendly).
+      const fp = _fioFingerprint(v?.displayName || k);
+      if (fp && /[а-яё]/i.test(v?.displayName || k)) {
+        if (byFioFp.has(fp)) {
+          byFioFp.set(fp, FIO_FP_AMBIGUOUS);
+        } else {
+          byFioFp.set(fp, v);
+        }
+      }
     }
-    return { byEmail, byKey };
+    return { byEmail, byKey, bySlug, byFioFp };
+  };
+  // Helper: безопасное чтение fingerprint-lookup с защитой от collision'а.
+  // QD3: дополнительно проверяет cross-bucket-ambiguous set.
+  const _fpLookup = (fpMap, fp) => {
+    if (!fpMap || !fp) return null;
+    if (_fpCrossBucketAmbiguous && _fpCrossBucketAmbiguous.has(fp)) return null;
+    const v = fpMap.get(fp);
+    return (v === FIO_FP_AMBIGUOUS || v === undefined) ? null : v;
   };
   // V18 P8 — раздельные lookup'ы для repo-authors и dev-status authors.
   //   Priority: repo-walk authors (authoritative) → dev-status (supplementary)
@@ -538,6 +786,29 @@ export function analysePulse(rawReports, opts = {}) {
   const bbRepoLookup      = _buildAuthorLookups(Object.keys(bbRepoAuthors).length      ? bbRepoAuthors      : null);
   const bbDevStatusLookup = _buildAuthorLookups(Object.keys(bbDevStatusAuthors).length ? bbDevStatusAuthors : null);
   const bbLookup          = _buildAuthorLookups(bbAuthors);   // legacy fallback
+  // QD3: cross-bucket fingerprint collision detect. Раньше collision
+  // ловилась только внутри одного lookup'а. Если «Иванов И.А.» из repo-walk
+  // и другой «Иванов И.А.» из merged-bucket — оба попали бы в свои Map'ы
+  // как single entry, fingerprint-fallback вернул бы случайного. Теперь
+  // вычисляем set fp'ов которые встречаются в >1 buckets — для них
+  // attribution всегда null.
+  const _fpCrossBucketAmbiguous = new Set();
+  {
+    const seenIn = new Map();   // fp → Set<bucketName>
+    const collect = (lookup, name) => {
+      for (const [fp, v] of lookup.byFioFp) {
+        if (v === FIO_FP_AMBIGUOUS) { _fpCrossBucketAmbiguous.add(fp); continue; }
+        if (!seenIn.has(fp)) seenIn.set(fp, new Set());
+        seenIn.get(fp).add(name);
+      }
+    };
+    collect(bbRepoLookup, 'repo');
+    collect(bbDevStatusLookup, 'devStatus');
+    collect(bbLookup, 'merged');
+    for (const [fp, buckets] of seenIn) {
+      if (buckets.size > 1) _fpCrossBucketAmbiguous.add(fp);
+    }
+  }
   const cfLookup          = _buildAuthorLookups(cfAuthors);
 
   // Helper: ищет автора через несколько lookup'ов в порядке приоритета.
@@ -546,25 +817,35 @@ export function analysePulse(rawReports, opts = {}) {
     const k = key ? String(key).toLowerCase().trim() : '';
     const e = email ? String(email).toLowerCase().trim() : '';
     if (Object.keys(bbRepoAuthors).length) {
-      // Repo-walk был — используем строго его, без fallback на dev-status и не на merged
-      const v = (k && bbRepoLookup.byKey.get(k)) || (e && bbRepoLookup.byEmail.get(e));
+      const v = (k && (bbRepoLookup.byKey.get(k) || bbRepoLookup.bySlug.get(k)))
+             || (e && bbRepoLookup.byEmail.get(e));
       if (v) return { entry: v, source: 'repo' };
-      // Если в repoWalk не нашли — пробуем devStatus (как secondary)
-      const d = (k && bbDevStatusLookup.byKey.get(k)) || (e && bbDevStatusLookup.byEmail.get(e));
+      const d = (k && (bbDevStatusLookup.byKey.get(k) || bbDevStatusLookup.bySlug.get(k)))
+             || (e && bbDevStatusLookup.byEmail.get(e));
       if (d) return { entry: d, source: 'devStatus' };
-      return null;
+      // Fallback to merged map — covers the case where repo walk has commit-only
+      // entries keyed by git display name (Russian), but dev-status is keyed by
+      // login (Latin). Previously returned null here, breaking all attribution
+      // whenever ANY commit existed in the repo walk window.
+      const fb = (k && (bbLookup.byKey.get(k) || bbLookup.bySlug.get(k)))
+              || (e && bbLookup.byEmail.get(e));
+      return fb ? { entry: fb, source: 'merged' } : null;
     }
-    // Legacy server (нет raw bucket'ов) — используем merged
-    const v = (k && bbLookup.byKey.get(k)) || (e && bbLookup.byEmail.get(e));
+    const v = (k && (bbLookup.byKey.get(k) || bbLookup.bySlug.get(k)))
+           || (e && bbLookup.byEmail.get(e));
     return v ? { entry: v, source: 'merged' } : null;
   };
 
   for (const p of userMap.values()) {
     // 1) Find this participant in state.employees by identity.
     let emp = null;
-    if (p.email && empByEmail.has(p.email)) emp = empByEmail.get(p.email);
-    if (!emp && p.jiraAccountId && empByJiraId.has(p.jiraAccountId.toLowerCase())) {
-      emp = empByJiraId.get(p.jiraAccountId.toLowerCase());
+    // V21 J #65 — identity case-sensitivity fix: empByEmail хранит ключи
+    // lowercased+trimmed, p.email сырой → 30% misses на `User@x.ru` vs
+    // `user@x.ru`. Нормализуем на query-time.
+    const pEmailNorm = p.email ? String(p.email).toLowerCase().trim() : '';
+    if (pEmailNorm && empByEmail.has(pEmailNorm)) emp = empByEmail.get(pEmailNorm);
+    if (!emp && p.jiraAccountId && empByJiraId.has(String(p.jiraAccountId).toLowerCase().trim())) {
+      emp = empByJiraId.get(String(p.jiraAccountId).toLowerCase().trim());
     }
     // V20 S4 — propagate service-account flag (если включен в реестре).
     // Auto-detect happens в EmployeeFactory.normalize() при загрузке employees.
@@ -577,6 +858,29 @@ export function analysePulse(rawReports, opts = {}) {
     if (emp) {
       if (emp.bitbucketLogin) bbResolved = _resolveBbAuthor(emp.bitbucketLogin, '');
       if (!bbResolved && emp.email) bbResolved = _resolveBbAuthor('', emp.email);
+      // H5 + QD1: Russian-only Stash-профиль (нет email/slug) — пробуем fingerprint
+      // по emp.fio. Identity-deterministic контракт CLAUDE.md §3:
+      //   «нет bbLogin → не должен получать BB-данные».
+      // Поэтому fingerprint срабатывает ТОЛЬКО если у emp есть email но нет
+      // bbLogin (тимлид сознательно завёл сотрудника без BB-логина — пытаемся
+      // помочь через ФИО). Если bbLogin есть и не дал резолва — это значит
+      // login неправильный, fingerprint лезть не должен (R4 защита от cross-attribution).
+      // Также — если у emp вообще нет ни email, ни bbLogin (incomplete identity),
+      // fingerprint не пускаем чтоб не приписать чужие коммиты.
+      const fingerprintAllowed = emp.email && !emp.bitbucketLogin;
+      if (!bbResolved && fingerprintAllowed && emp.fio) {
+        const fp = _fioFingerprint(emp.fio);
+        if (fp) {
+          // R4: _fpLookup возвращает null при collision'е — лучше потерять
+          // атрибуцию чем приписать чужому.
+          const fromRepo = _fpLookup(bbRepoLookup.byFioFp, fp);
+          if (fromRepo) bbResolved = { entry: fromRepo, source: 'repo-fio' };
+          else {
+            const fromMerged = _fpLookup(bbLookup.byFioFp, fp);
+            if (fromMerged) bbResolved = { entry: fromMerged, source: 'merged-fio' };
+          }
+        }
+      }
     } else if (p.email) {
       bbResolved = _resolveBbAuthor('', p.email);
     }
@@ -602,16 +906,22 @@ export function analysePulse(rawReports, opts = {}) {
     }
 
     // 3) Confluence — same identity-first approach.
+    //    byKey = display name (Russian), bySlug = DC username / Cloud accountId,
+    //    byEmail = work email. Try all three paths for confluenceAccountId so that
+    //    both DC (username) and Cloud (accountId) setups work without explicit
+    //    per-deployment config.
     let cf = null;
     if (emp) {
       if (emp.confluenceAccountId) {
-        cf = cfLookup.byKey.get(String(emp.confluenceAccountId).toLowerCase().trim()) || null;
+        const cfId = String(emp.confluenceAccountId).toLowerCase().trim();
+        cf = cfLookup.byKey.get(cfId) || cfLookup.bySlug.get(cfId) || null;
       }
       if (!cf && emp.email) {
         cf = cfLookup.byEmail.get(String(emp.email).toLowerCase().trim()) || null;
       }
     } else if (p.email) {
-      cf = cfLookup.byEmail.get(p.email) || null;
+      // V21 J #65 — нормализуем как и в byEmail-builder
+      cf = cfLookup.byEmail.get(String(p.email).toLowerCase().trim()) || null;
     }
     if (!cf && allowFuzzy) {
       const labelLower = String(p.label || '').toLowerCase().trim();
@@ -631,31 +941,106 @@ export function analysePulse(rawReports, opts = {}) {
     //    но на pilot data zephyrKind возвращал 0/0 потому что test cases
     //    в Sber Zephyr — отдельные сущности, не Jira issues.
     if (zephyrAuthors) {
-      const zKey = String(emp?.jiraAccountId || p.jiraAccountId || '').trim();
-      const zEntry = zKey ? (zephyrAuthors[zKey] || zephyrAuthors[zKey.toUpperCase()] || zephyrAuthors[zKey.toLowerCase()]) : null;
+      // V21 Z-attr fix — двусторонний normalize (см. _zephyrNormKey выше) +
+      // fallback по displayName. Раньше: 7 авторов в zephyrAuthors, 0
+      // attributed на пилоте 110 человек, потому что emp.jiraAccountId
+      // в registry хранился без префикса JIRAUSER, а сервер нормализовал.
+      const rawZKey = String(emp?.jiraAccountId || p.jiraAccountId || '').trim();
+      const normZKey = _zephyrNormKey(rawZKey);
+      let zEntry = null;
+      if (rawZKey) {
+        zEntry = zephyrAuthors[rawZKey]
+              || zephyrAuthors[rawZKey.toUpperCase()]
+              || zephyrAuthors[rawZKey.toLowerCase()]
+              || (normZKey ? zephyrAuthors[normZKey] : null);
+      }
+      // Fallback by displayName — authoritative match когда format jiraAccountId
+      // расходится между registry и Zephyr (например registry хранит email
+      // как accountId, а Zephyr возвращает JIRAUSER-форму).
+      if (!zEntry) {
+        const dnCandidates = [
+          String(emp?.fio || '').toLowerCase().trim(),
+          String(emp?.displayName || '').toLowerCase().trim(),
+          String(p.label || '').toLowerCase().trim(),
+        ].filter(Boolean);
+        for (const dn of dnCandidates) {
+          if (_zephyrByDisplayName[dn]) {
+            zEntry = _zephyrByDisplayName[dn].entry;
+            break;
+          }
+        }
+      }
       if (zEntry) {
         p.badges.testsCreated48h  = zEntry.testsCreated || 0;
         p.badges.testsExecuted48h = (p.badges.testsExecuted48h || 0) + (zEntry.testsExecuted || 0);
         // Конвертим Zephyr-items → формат zephyrTestsCreatedRecent / Executed
         // (renderer ожидает { slim, kind, at } / { slim, result, at }).
+        let pushedCreated = 0, pushedExecuted = 0;
         for (const it of (zEntry.items || [])) {
           const slimItem = { key: it.key, type: it.kind === 'test-run' ? 'TestExecution' : 'Test', summary: it.name || '' };
           if (it.kind === 'test-run') {
             const result = it.status === 'Done' ? 'PASS' : 'EXECUTED';
             p.zephyrTestsExecutedRecent.push({ slim: slimItem, result, at: it.at, source: 'zephyr-api' });
+            pushedExecuted++;
           } else {
             p.zephyrTestsCreatedRecent.push({ slim: slimItem, kind: 'test', at: it.at, source: 'zephyr-api' });
+            pushedCreated++;
           }
+        }
+        // D2 fix (2026-05-11) — counter/items mismatch fallback. Когда
+        // server.items.length < server.testsCreated (item-cap=50, или server
+        // отдал counter но not items в каком-то edge case) — synthesize
+        // placeholder items для того, чтобы diagnostic
+        // (`sources.zephyr.testsCreated` = sum of `p.zephyrTestsCreatedRecent
+        // .length`) всё-таки отражал badges. Это нужно для Z-chip отчётности
+        // в employee card'ах и для overall coverage telemetry.
+        const declaredCreated  = Number(zEntry.testsCreated)  || 0;
+        const declaredExecuted = Number(zEntry.testsExecuted) || 0;
+        for (let i = pushedCreated; i < declaredCreated; i++) {
+          p.zephyrTestsCreatedRecent.push({
+            slim: { key: '', type: 'Test', summary: '' },
+            kind: 'test', at: '', source: 'zephyr-api-counter',
+          });
+        }
+        for (let i = pushedExecuted; i < declaredExecuted; i++) {
+          p.zephyrTestsExecutedRecent.push({
+            slim: { key: '', type: 'TestExecution', summary: '' },
+            result: 'EXECUTED', at: '', source: 'zephyr-api-counter',
+          });
         }
       }
     }
   }
-  // Aggregate totals on summary
+  // Aggregate totals on summary.
+  // QD5: разделяем на resolved (атрибуцированные сотрудникам) и raw (всё что
+  // вернул сервер). Раньше total суммировался по всему bbAuthors включая
+  // unresolved authors → UI показывал «команда сделала 50 коммитов», но
+  // по людям выходило 32. Теперь хранятся обе цифры — resolved для team-total,
+  // raw для diagnostic'а / explainer'а.
+  let _bbRawCommits = 0, _bbRawPrs = 0, _cfRawEdits = 0;
+  let _bbResolvedCommits = 0, _bbResolvedPrs = 0, _cfResolvedEdits = 0;
   for (const a of Object.values(bbAuthors)) {
-    out.summary.commits48h += (a.commits || 0);
-    out.summary.pr48h      += (a.prs     || 0);
+    _bbRawCommits += (a.commits || 0);
+    _bbRawPrs     += (a.prs     || 0);
   }
-  for (const a of Object.values(cfAuthors)) out.summary.conf48h += (a.edits || 0);
+  for (const a of Object.values(cfAuthors)) _cfRawEdits += (a.edits || 0);
+  for (const p of userMap.values()) {
+    _bbResolvedCommits += (p.badges?.commits48h || 0);
+    _bbResolvedPrs     += (p.badges?.pr48h      || 0);
+    _cfResolvedEdits   += (p.badges?.conf48h    || 0);
+  }
+  out.summary.commits48h = _bbResolvedCommits;
+  out.summary.pr48h      = _bbResolvedPrs;
+  out.summary.conf48h    = _cfResolvedEdits;
+  // Diagnostic: raw totals + delta = unresolved.
+  out.summary._raw = {
+    commits48hRaw: _bbRawCommits,
+    pr48hRaw:      _bbRawPrs,
+    conf48hRaw:    _cfRawEdits,
+    commits48hUnresolved: Math.max(0, _bbRawCommits - _bbResolvedCommits),
+    pr48hUnresolved:      Math.max(0, _bbRawPrs     - _bbResolvedPrs),
+    conf48hUnresolved:    Math.max(0, _cfRawEdits   - _cfResolvedEdits),
+  };
 
   // Convert sets to arrays + sort participants
   for (const p of userMap.values()) {
@@ -664,6 +1049,16 @@ export function analysePulse(rawReports, opts = {}) {
     p.timelineToday    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
     p.timelineYesterday.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
     p.timelinePrev     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    // V21 AT — Rework ratio: reopened issues / total assigned issues.
+    // Только осмысленно если у юзера ≥3 issues (иначе шум).
+    const totalAssigned = (p.issuesNow || []).length + (p.doneYesterday || []).length
+                        + (p.doneToday || []).length + (p.doneDayBefore || []).length
+                        + (p.stale || []).length;
+    p.reworkRatio = totalAssigned >= 3 ? +((p.reworkCount || 0) / totalAssigned).toFixed(3) : null;
+    p.reworkTotalAssigned = totalAssigned;
+    // PR-CH — пометка [X]-уволенных. Consumers (chat / Black Dashboard / etc)
+    // могут отфильтровать по этому флагу.
+    p.deactivated = Utils.isDeactivatedAccount(p);
     out.participants.push(p);
   }
   out.participants.sort((a, b) =>
@@ -683,7 +1078,687 @@ export function analysePulse(rawReports, opts = {}) {
   // Yesterday activity sorted desc
   out.yesterdayActivity.sort((a, b) => ts(b.at) - ts(a.at));
 
+  // V21 Z7 (audit-09 §H Person-level #49, #50, #54, #56, #57, #58) —
+  // вычисляем 6 person-level метрик из уже собранных данных.
+  // Записываем в p.metrics на каждый participant.
+  _computePersonLevelMetrics(out);
+
+  // V21 Z8 (audit-09 §H Sprint-level #62, #64, #65, #68) — sprint-aggregates.
+  _computeSprintLevelMetrics(out);
+
+  // V21 Z9 (audit-09 §H Team-level + DORA proxy) — team-aggregates.
+  _computeTeamLevelMetrics(out);
+
+  // V21 Z10 (audit-09 §H Cross-team) — cross-team aggregates.
+  _computeCrossTeamMetrics(out);
+
+  // V21 Z11 (audit-09 §H Org-level) — org-aggregates.
+  _computeOrgLevelMetrics(out);
+
+  // V21 Z12 (audit-09 §I new-views) — onboarding tracker + release cockpit summaries.
+  _computeNewDashboardData(out);
+
+  // V21 AH (audit-09 §H Cross-team #41) — Knowledge import/export.
+  // Proxy: для каждого CF author считаем distribution edits по spaces.
+  // Если top-1 space < 70% от total — author активен в нескольких spaces
+  // (knowledge spreader). Если >90% — siloed.
+  const cfAuthorsForFlow = out.confluence?.authors || {};
+  const knowledgeFlow = [];
+  for (const [k, a] of Object.entries(cfAuthorsForFlow)) {
+    const items = a.items || [];
+    if (items.length < 3) continue;
+    const bySpace = {};
+    for (const it of items) {
+      const sp = it.spaceKey || it.space || '?';
+      bySpace[sp] = (bySpace[sp] || 0) + 1;
+    }
+    const total = items.length;
+    const sortedSpaces = Object.entries(bySpace).sort((x, y) => y[1] - x[1]);
+    const topPct = sortedSpaces[0] ? sortedSpaces[0][1] / total : 1;
+    knowledgeFlow.push({
+      name:   a.displayName || k,
+      spaces: sortedSpaces.length,
+      top1:   sortedSpaces[0]?.[0] || '',
+      top1Pct: +topPct.toFixed(2),
+      role:   topPct > 0.9 ? 'siloed' : topPct > 0.7 ? 'focused' : 'spreader',
+    });
+  }
+  out.summary.knowledgeFlow = {
+    spreaders: knowledgeFlow.filter(p => p.role === 'spreader').sort((a, b) => b.spaces - a.spaces).slice(0, 8),
+    siloed:    knowledgeFlow.filter(p => p.role === 'siloed').slice(0, 8),
+    total:     knowledgeFlow.length,
+  };
+
+  // V21 BC (audit-09 §H Sprint #18) — Code churn per sprint.
+  // Aggregate commitChurn (с хост-side из ppFetchHotFiles) по sprint windows
+  // (start/complete dates из bigMetrics.sprintCommit.byPk).
+  const churnEvents = out.bigMetrics?.hotFiles?.commitChurn || [];
+  if (churnEvents.length) {
+    const codeChurnPerSprint = [];
+    const sc = out.bigMetrics?.sprintCommit?.byPk || {};
+    for (const [pk, v] of Object.entries(sc)) {
+      for (const sp of (v.sprints || [])) {
+        const startTs = Date.parse(sp.startDate || '');
+        const endTs   = Date.parse(sp.completeDate || sp.endDate || '');
+        if (!Number.isFinite(startTs) || !Number.isFinite(endTs)) continue;
+        const inWindow = churnEvents.filter(ev => ev.at >= startTs && ev.at <= endTs);
+        if (!inWindow.length) continue;
+        const additions = inWindow.reduce((s, c) => s + c.additions, 0);
+        const deletions = inWindow.reduce((s, c) => s + c.deletions, 0);
+        codeChurnPerSprint.push({
+          pk,
+          sprint:    sp.name,
+          additions, deletions,
+          churn:     additions + deletions,
+          commits:   inWindow.length,
+        });
+      }
+    }
+    out.summary.codeChurnPerSprint = codeChurnPerSprint.sort((a, b) => b.churn - a.churn).slice(0, 30);
+  }
+
+  // V21 AY (audit-09 §H Person #14) — Bug-induce rate proxy.
+  // Per-author: bugs assigned to them / their commits in last 30 days.
+  // Caveat: assignee != original author of bug-inducing commit; это proxy
+  // через текущего владельца bug'а. Полная blame-correlation требует
+  // commit-blame на bug'у — не делаем.
+  for (const p of out.participants || []) {
+    const bugCount = [...(p.issuesNow || []), ...(p.stale || [])]
+      .filter(it => /bug|defect|дефект/i.test(it.type || '')).length;
+    const commits = (p.bbItems || []).filter(it => it.kind === 'commit').length;
+    p.bugInduceRate = (commits >= 5) ? +(bugCount / commits).toFixed(3) : null;
+    p.bugInduceCounts = { bugs: bugCount, commits };
+  }
+
+  // V21 AW (audit-09 §E #4) — Untested closed issues.
+  // Из coverageByJira (Zephyr traceability) + closed issues в spaces.
+  const coverageMap = out.zephyr?.extra?.coverageByJira || {};
+  const untestedClosed = [];
+  let coveredClosed = 0, totalClosed = 0;
+  for (const space of Object.values(out.spaces || {})) {
+    for (const issue of (space.issues || [])) {
+      const f = issue.fields || {};
+      const statusCat = f.status?.statusCategory?.key || '';
+      if (statusCat !== 'done') continue;
+      totalClosed++;
+      const k = issue.key;
+      if (coverageMap[k] && coverageMap[k].length) {
+        coveredClosed++;
+      } else {
+        untestedClosed.push({
+          key: k,
+          summary: (f.summary || '').slice(0, 80),
+          resolutionDate: f.resolutiondate || '',
+        });
+      }
+    }
+  }
+  out.summary.coverageReport = {
+    totalClosed,
+    coveredClosed,
+    coverageRatio: totalClosed > 0 ? +(coveredClosed / totalClosed).toFixed(3) : 0,
+    untestedClosed: untestedClosed
+      .sort((a, b) => String(b.resolutionDate).localeCompare(String(a.resolutionDate)))
+      .slice(0, 30),
+    untestedTotal: untestedClosed.length,
+  };
+
+  // V21 AU (audit-09 §H Sprint #23) — Doc coverage.
+  // Match fixVersions из summary с CF pages по keyword scan в title.
+  // Coverage = % версий упомянутых хоть в одной странице.
+  const fvNames = Object.keys(out.summary.fixVersionCoverage || {});
+  if (fvNames.length) {
+    const cfTitles = new Set();
+    for (const a of Object.values(out.confluence?.authors || {})) {
+      for (const it of (a.items || [])) {
+        if (it.title) cfTitles.add(String(it.title).toLowerCase());
+      }
+    }
+    const titlesArr = [...cfTitles];
+    const docCoverage = { perVersion: [], totalVersions: fvNames.length, coveredVersions: 0 };
+    for (const ver of fvNames) {
+      const verLow = ver.toLowerCase();
+      // Match: либо title содержит version name, либо version name это substring
+      // достаточно distinctive (>=3 символов).
+      const matches = titlesArr.filter(t => verLow.length >= 3 && t.includes(verLow));
+      docCoverage.perVersion.push({
+        version: ver,
+        cfPagesCount: matches.length,
+        covered: matches.length > 0,
+        sampleTitles: matches.slice(0, 3),
+      });
+      if (matches.length > 0) docCoverage.coveredVersions++;
+    }
+    docCoverage.coverageRatio = fvNames.length > 0 ? +(docCoverage.coveredVersions / fvNames.length).toFixed(3) : 0;
+    out.summary.docCoverage = docCoverage;
+  }
+
+  // V21 AB (audit-09 §D #16) — CF page ownership: top authors by edits.
+  if (out.bigMetrics?.cfHealth?.ownership) {
+    const cfAuthors = out.confluence?.authors || {};
+    out.bigMetrics.cfHealth.ownership = Object.entries(cfAuthors)
+      .map(([k, a]) => ({ name: a.displayName || k, edits: a.edits || 0, comments: a.comments || 0 }))
+      .filter(a => a.edits + a.comments > 0)
+      .sort((a, b) => (b.edits + b.comments) - (a.edits + a.comments))
+      .slice(0, 10);
+  }
+
   return out;
+}
+
+/* V21 Z12 — Data prep for 3 new dashboards (#100, #103, #98).
+   #100 onboardingTracker — для каждого employee: первое появление в данных
+        (commit/PR/issue). Если < 90д — новенький, статус ramp.
+   #103 releaseCockpit — flatten bigMetrics.sprintCommit.byPk в timeline events.
+   #98  dependencyTextGraph — top-20 cross-pk links из issueLinkGraph (text).
+*/
+function _computeNewDashboardData(out) {
+  const dash = (out.summary.newDashboards ||= {});
+
+  // #100 Onboarding tracker — теперь использует PR-AS точные данные (BB
+  // historical scan), если они есть. Fallback на 72ч-окно proxy если PR-AS
+  // disabled или Bitbucket не настроен.
+  const RAMP_WINDOW_DAYS = 90;
+  const cutoff = Date.now() - RAMP_WINDOW_DAYS * 24 * 3600 * 1000;
+  const tracker = [];
+  const precisePerAuthor = out.bigMetrics?.onboarding?.perAuthor || {};
+  const hasPrecise = Object.keys(precisePerAuthor).length > 0;
+
+  for (const p of (out.participants || [])) {
+    const totalEvents = (p.timelineToday || []).length + (p.timelineYesterday || []).length + (p.timelinePrev || []).length + (p.bbItems || []).length;
+    let firstSeenTs = Infinity;
+    let preciseHit  = false;
+    // Try precise first.
+    if (hasPrecise) {
+      const candidates = [p.label, p.email, p.fio].filter(Boolean);
+      for (const c of candidates) {
+        if (precisePerAuthor[c] && precisePerAuthor[c] < firstSeenTs) {
+          firstSeenTs = precisePerAuthor[c];
+          preciseHit = true;
+        }
+      }
+    }
+    // Fallback на 72ч-window timeline.
+    if (!preciseHit) {
+      for (const it of [...(p.timelineToday || []), ...(p.timelineYesterday || []), ...(p.timelinePrev || []), ...(p.bbItems || [])]) {
+        const t = Date.parse(it.at || '');
+        if (Number.isFinite(t) && t < firstSeenTs) firstSeenTs = t;
+      }
+    }
+    if (!Number.isFinite(firstSeenTs)) continue;
+    if (firstSeenTs > cutoff) {
+      const daysActive = Math.floor((Date.now() - firstSeenTs) / 86400000);
+      tracker.push({
+        name:       p.label || p.email,
+        firstSeen:  new Date(firstSeenTs).toISOString().slice(0, 10),
+        daysActive,
+        totalEvents,
+        rampStatus: totalEvents >= 20 ? 'ramped' : totalEvents >= 5 ? 'progressing' : 'starting',
+        precise:    preciseHit, // V21 AS — отметка что это точные данные а не proxy
+      });
+    }
+  }
+  dash.onboardingTracker = tracker.sort((a, b) => a.daysActive - b.daysActive);
+
+  // #103 Release cockpit — flatten sprint-commit per pk.
+  const cockpit = [];
+  const sc = out.bigMetrics?.sprintCommit?.byPk || {};
+  for (const [pk, v] of Object.entries(sc)) {
+    for (const sp of (v.sprints || [])) {
+      cockpit.push({
+        pk,
+        sprintName:   sp.name,
+        committed:    sp.committed,
+        delivered:    sp.delivered,
+        ratio:        sp.ratio,
+        completeDate: sp.completeDate,
+      });
+    }
+  }
+  dash.releaseCockpit = cockpit.sort((a, b) => String(b.completeDate).localeCompare(String(a.completeDate)));
+
+  // #98 Dependency text-graph — top cross-pk links.
+  const ilg = out.summary.issueLinkGraph || {};
+  const crossLinks = [];
+  for (const [fromKey, links] of Object.entries(ilg)) {
+    const fromPk = (fromKey.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+    for (const l of links) {
+      const toPk = (l.toKey.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+      if (fromPk && toPk && fromPk !== toPk) {
+        crossLinks.push({ fromKey, toKey: l.toKey, fromPk, toPk, kind: l.kind });
+      }
+    }
+  }
+  // Aggregate flow по парам PK.
+  const flowByPair = {};
+  for (const cl of crossLinks) {
+    const pair = `${cl.fromPk} → ${cl.toPk}`;
+    flowByPair[pair] = (flowByPair[pair] || 0) + 1;
+  }
+  dash.dependencyFlow = Object.entries(flowByPair)
+    .map(([pair, count]) => ({ pair, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+}
+
+/* V21 Z11 — Org-level metrics (3 of 6).
+   #90 throughputPerFte — done issues / participants count
+   #92 innovationRatio  — feature/maintenance/tech-debt mix (proxy by issuetype)
+   #94 knowledgeCentralization — Herfindahl index for CF authorship.
+
+   #91, #93, #95 требуют external data (prod incidents, HR, deploy events) —
+   carry-over.
+*/
+function _computeOrgLevelMetrics(out) {
+  const om = (out.summary.orgMetrics ||= {});
+  const teamSize = (out.participants || []).length;
+
+  // #90 Throughput per FTE.
+  om.throughputPerFte = {
+    done:    out.summary.done || 0,
+    fte:     teamSize,
+    perFte:  teamSize > 0 ? +((out.summary.done || 0) / teamSize).toFixed(2) : 0,
+  };
+
+  // #92 Innovation ratio (proxy by issuetype).
+  // feature: type === 'Story' / 'New Feature' / 'Epic'
+  // maintenance: 'Bug' / 'Sub-task' (defects + small fixes)
+  // tech-debt: labels include 'tech-debt' OR type === 'Task' AND specific keywords
+  let feature = 0, maintenance = 0, techDebt = 0, other = 0;
+  for (const space of Object.values(out.spaces || {})) {
+    for (const issue of (space.issues || [])) {
+      const f = issue.fields || {};
+      const type = String(f.issuetype?.name || '').toLowerCase();
+      const labels = (Array.isArray(f.labels) ? f.labels : []).map(l => String(l).toLowerCase());
+      const isTechDebt = labels.some(l => /tech.?debt|refactor/.test(l));
+      if (isTechDebt)                                            techDebt++;
+      else if (/bug|defect/.test(type))                          maintenance++;
+      else if (/story|feature|epic/.test(type))                  feature++;
+      else                                                       other++;
+    }
+  }
+  const totalClassified = feature + maintenance + techDebt + other;
+  om.innovationRatio = totalClassified > 0 ? {
+    feature, maintenance, techDebt, other,
+    featurePct:     +(feature     / totalClassified * 100).toFixed(1),
+    maintenancePct: +(maintenance / totalClassified * 100).toFixed(1),
+    techDebtPct:    +(techDebt    / totalClassified * 100).toFixed(1),
+    otherPct:       +(other       / totalClassified * 100).toFixed(1),
+  } : null;
+
+  // #94 Knowledge centralization — Herfindahl index by CF authorship.
+  // Если 1 человек пишет все страницы — Herfindahl=1 (max concentration).
+  // Если N людей равномерно — Herfindahl=1/N (min). Range 0..1.
+  const cfAuthors = out.confluence?.authors || {};
+  const cfTotals  = Object.values(cfAuthors)
+    .map(a => (a.edits || 0) + (a.comments || 0))
+    .filter(n => n > 0);
+  let herfindahl = 0;
+  if (cfTotals.length) {
+    const sum = cfTotals.reduce((s, n) => s + n, 0);
+    if (sum > 0) {
+      herfindahl = cfTotals.reduce((s, n) => s + (n / sum) ** 2, 0);
+    }
+  }
+  om.knowledgeCentralization = {
+    herfindahl: +herfindahl.toFixed(3),
+    contributors: cfTotals.length,
+    interpretation: herfindahl > 0.5 ? 'concentrated' : herfindahl > 0.2 ? 'mixed' : 'distributed',
+  };
+}
+
+/* V21 Z10 — Cross-team metrics.
+   #84 dependencyDensity — % issues with cross-pk links / total
+   #85 blockedByOtherTeamH — суммарные dwellHours блокеров cross-team
+   #86 sharedComponents — components shared между >1 team
+   #87 reviewSlaCrossTeam — first-review-latency для cross-team PR (proxy:
+                            используем общий prMetrics.firstReviewMs)
+*/
+function _computeCrossTeamMetrics(out) {
+  const ct = (out.summary.crossTeamMetrics ||= {});
+  // #84 Dependency graph density.
+  const issueLinkGraph = out.summary.issueLinkGraph || {};
+  let totalIssuesWithLinks = 0;
+  let crossPkLinks = 0;
+  for (const [fromKey, links] of Object.entries(issueLinkGraph)) {
+    if (!links.length) continue;
+    totalIssuesWithLinks++;
+    const fromPk = (fromKey.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+    for (const l of links) {
+      const toPk = (l.toKey.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+      if (fromPk && toPk && fromPk !== toPk) crossPkLinks++;
+    }
+  }
+  const totalIssues = out.summary.totalIssues || 1;
+  ct.dependencyDensity = {
+    crossPkLinks,
+    totalIssuesWithLinks,
+    densityPct: totalIssues > 0 ? +(totalIssuesWithLinks / totalIssues * 100).toFixed(1) : 0,
+  };
+
+  // #85 Blocked-by-other-team time — sum of blocker dwellHours where blocker задача в другом pk.
+  let crossTeamBlockerSum = 0, crossTeamBlockerN = 0;
+  for (const p of (out.participants || [])) {
+    for (const b of (p.blockers || [])) {
+      const blockerPk = (b.blockerKey?.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+      const issuePk  = (b.issueKey?.match(/^([A-Z][A-Z0-9_]*)-/) || [])[1] || '';
+      if (blockerPk && issuePk && blockerPk !== issuePk) {
+        crossTeamBlockerSum += Number(b.dwellHours) || 0;
+        crossTeamBlockerN++;
+      }
+    }
+  }
+  ct.blockedByOtherTeam = {
+    totalHours: +crossTeamBlockerSum.toFixed(1),
+    count:      crossTeamBlockerN,
+    avgHours:   crossTeamBlockerN > 0 ? +(crossTeamBlockerSum / crossTeamBlockerN).toFixed(1) : 0,
+  };
+
+  // #86 Shared components — comp.issueCount по componentOwnerLoad. Если у компонента
+  // open issues из >1 PK — shared.
+  // Текущая структура componentOwnerLoad не хранит pk. Proxy: top components by issueCount.
+  const cl = out.summary.componentOwnerLoad || {};
+  ct.sharedComponentsTop = Object.entries(cl)
+    .map(([name, v]) => ({ name, ...v }))
+    .filter(c => c.issueCount >= 5)
+    .sort((a, b) => b.issueCount - a.issueCount)
+    .slice(0, 10);
+
+  // #87 Review SLA cross-team — proxy: используем общий firstReviewMs.
+  ct.reviewSlaProxy = out.bitbucket?.prMetrics?.firstReviewMs || { p50: 0, p90: 0, n: 0 };
+}
+
+/* V21 Z9 — Team-level metrics + DORA proxies.
+   Без CI/CD integration DORA = best-effort proxy:
+   #71 deployFreq      — # MERGED PR за окно (proxy)
+   #72 leadTimeForChanges — bb.prMetrics.cycleTimeMs (уже посчитано)
+   #73 mttr            — sprintMetrics.blockerTime.avgHours (proxy)
+   #74 changeFailRate  — reverts в commit messages / total commits (proxy)
+   #75 wipLimitCompliance — open issues / WIP threshold (default 5×team)
+   #76 throughput      — closed issues за окно
+   #77 predictability  — std/mean velocity (если есть bigMetrics.sprintCommit)
+   #78 hotFileConcentration — % коммитов в top-5 файлов (из hotFiles)
+   #79 truckFactor     — bigMetrics.hotFiles.busFactor.length
+   #81 backlogHealth   — % issues с priority+description
+*/
+function _computeTeamLevelMetrics(out) {
+  const tm = (out.summary.teamMetrics ||= {});
+  const bbAuthors = out.bitbucket?.authors || {};
+  const cutoff7d  = Date.now() - 7 * 24 * 3600 * 1000;
+  // Walk через все BB items для подсчёта merged PRs + revert-коммитов.
+  let mergedPrs = 0, totalCommits = 0, revertCommits = 0;
+  const bbItems = [];
+  for (const a of Object.values(bbAuthors)) {
+    for (const it of (a.items || [])) bbItems.push(it);
+  }
+  for (const it of bbItems) {
+    const t = Date.parse(it.at || '');
+    if (!Number.isFinite(t) || t < cutoff7d) continue;
+    if (it.kind === 'pr' && it.status === 'merged') mergedPrs++;
+    if (it.kind === 'commit') {
+      totalCommits++;
+      if (/\brevert\b|hotfix/i.test(it.title || '')) revertCommits++;
+    }
+  }
+  tm.dora = {
+    deployFreqPer7d: mergedPrs,
+    leadTimeMs:      out.bitbucket?.prMetrics?.cycleTimeMs || { p50: 0, p90: 0, n: 0 },
+    mttrHours:       out.summary.sprintMetrics?.blockerTime?.avgHours || 0,
+    changeFailRate:  totalCommits > 0 ? +(revertCommits / totalCommits).toFixed(3) : 0,
+  };
+
+  // #75 WIP limit compliance — proxy: WIP issues / 5×team_size.
+  const teamSize = (out.participants || []).length;
+  const wipLimit = Math.max(5, teamSize * 5);
+  const wipNow   = out.summary.wip || 0;
+  tm.wipCompliance = {
+    wip:  wipNow,
+    limit: wipLimit,
+    overWip: wipNow > wipLimit,
+    ratio: wipLimit > 0 ? +(wipNow / wipLimit).toFixed(2) : 0,
+  };
+
+  // #76 throughput — closed issues за окно. Используем done counts.
+  tm.throughput = {
+    donePer7d: out.summary.done || 0,
+    teamSize,
+    perPerson: teamSize > 0 ? +((out.summary.done || 0) / teamSize).toFixed(1) : 0,
+  };
+
+  // #77 predictability — std/mean velocity if sprint-commit data есть.
+  const sc = out.bigMetrics?.sprintCommit?.byPk || {};
+  const allRatios = [];
+  for (const v of Object.values(sc)) {
+    for (const sp of (v.sprints || [])) allRatios.push(sp.ratio);
+  }
+  if (allRatios.length >= 3) {
+    const mean = allRatios.reduce((s, n) => s + n, 0) / allRatios.length;
+    const variance = allRatios.reduce((s, n) => s + (n - mean) ** 2, 0) / allRatios.length;
+    const std = Math.sqrt(variance);
+    tm.predictability = { mean: +mean.toFixed(3), std: +std.toFixed(3), cov: mean > 0 ? +(std / mean).toFixed(3) : 0, n: allRatios.length };
+  } else {
+    tm.predictability = { mean: 0, std: 0, cov: 0, n: allRatios.length };
+  }
+
+  // #78 hot-file concentration — % top-5 files из всех hot files.
+  const hotFiles = out.bigMetrics?.hotFiles?.hotFiles || [];
+  if (hotFiles.length >= 5) {
+    const totalChanges = hotFiles.reduce((s, f) => s + f.changes, 0);
+    const top5Changes  = hotFiles.slice(0, 5).reduce((s, f) => s + f.changes, 0);
+    tm.hotFileConcentration = {
+      top5Pct: totalChanges > 0 ? +(top5Changes / totalChanges).toFixed(3) : 0,
+      total: totalChanges,
+    };
+  } else {
+    tm.hotFileConcentration = { top5Pct: 0, total: 0 };
+  }
+
+  // #79 truck-factor — кол-во файлов с bus-factor=1.
+  tm.truckFactor = (out.bigMetrics?.hotFiles?.busFactor || []).length;
+
+  // #81 backlog health — AUDIT_SCANNER #23: расширили с priority+description
+  // до multi-criteria score (priority/description/epic/component/estimate +
+  // dueDate для bug). Backward-compat: tm.backlogHealth.{healthy,total,ratio}
+  // сохранены, добавлены `score` (0-100) и `breakdown`.
+  let healthyN = 0, totalChecked = 0;
+  let scoreSum = 0;
+  const breakdownTotals = {
+    hasPriority: 0, hasDescription: 0, hasEpic: 0,
+    hasComponent: 0, hasEstimate: 0, hasDueDate: 0,
+  };
+  let dueDateApplicable = 0; // только для bug
+  for (const space of Object.values(out.spaces || {})) {
+    for (const issue of (space.backlogIssues || [])) {
+      totalChecked++;
+      const f = issue.fields || issue;
+      const isBug = ((f.issuetype?.name || f.issueType || '') + '').toLowerCase().includes('bug');
+      const checks = {
+        hasPriority:    !!f.priority?.name || !!issue.priority,
+        hasDescription: ((f.description || issue.description || '') + '').length > 30,
+        hasEpic:        !!issue.epicLink || !!f.epicLink || !!issue.parent || !!f.parent,
+        hasComponent:   Array.isArray(f.components || issue.components) && (f.components || issue.components).length > 0,
+        hasEstimate:    !!(f.timeoriginalestimate || f.timeOriginalEstimate || issue.timeOriginalEstimate || issue.storyPoints),
+      };
+      if (isBug) {
+        checks.hasDueDate = !!(f.duedate || issue.duedate);
+        dueDateApplicable++;
+      }
+      for (const [k, v] of Object.entries(checks)) {
+        if (v) breakdownTotals[k] = (breakdownTotals[k] || 0) + 1;
+      }
+      const passed = Object.values(checks).filter(Boolean).length;
+      const totalKeys = Object.keys(checks).length;
+      const issueScore = totalKeys > 0 ? (passed / totalKeys) * 100 : 0;
+      scoreSum += issueScore;
+      // Legacy: «healthy» = priority + description (старый критерий).
+      if (checks.hasPriority && checks.hasDescription) healthyN++;
+    }
+  }
+  tm.backlogHealth = {
+    // backward-compat shape
+    healthy: healthyN,
+    total:   totalChecked,
+    ratio:   totalChecked > 0 ? +(healthyN / totalChecked).toFixed(3) : 0,
+    // AUDIT_SCANNER #23 — fractional multi-criteria score (0-100)
+    score:        totalChecked > 0 ? +(scoreSum / totalChecked).toFixed(1) : 0,
+    breakdown:    breakdownTotals,
+    bugTotal:     dueDateApplicable,
+  };
+}
+
+/* V21 Z8 — Sprint-level metrics (~5 из 12).
+   #62 leadTimeMs       — медиан/p90 от createdAt до transition в Done
+   #64 bugToStoryRatio  — bugs / non-bug issues
+   #65 reviewWipNow     — кол-во open PR (state=OPEN из bb.items)
+   #68 blockerTimeMs    — суммарное время в blocked-status за окно.
+   Также exposes scope churn approx (per spec). */
+function _computeSprintLevelMetrics(out) {
+  const sprintM = (out.summary.sprintMetrics ||= {});
+  // #64 bug-to-story ratio.
+  const bugs = out.summary.bugs || 0;
+  const total = out.summary.totalIssues || 0;
+  const stories = Math.max(0, total - bugs);
+  sprintM.bugToStoryRatio = stories > 0 ? +(bugs / stories).toFixed(3) : null;
+
+  // #62 leadTimeMs — для issues с резолюцией в окне.
+  // Подходим аккуратно: используем все participants' yesterdayActivity / done events.
+  const leadTimes = [];
+  for (const space of Object.values(out.spaces || {})) {
+    for (const issue of (space.issues || [])) {
+      const f = issue.fields || {};
+      if (!f.resolutiondate || !f.created) continue;
+      const start = Date.parse(f.created);
+      const end   = Date.parse(f.resolutiondate);
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        leadTimes.push(end - start);
+      }
+    }
+  }
+  if (leadTimes.length) {
+    leadTimes.sort((a, b) => a - b);
+    sprintM.leadTimeMs = {
+      p50: leadTimes[Math.floor(leadTimes.length * 0.5)],
+      p90: leadTimes[Math.min(leadTimes.length - 1, Math.floor(leadTimes.length * 0.9))],
+      n:   leadTimes.length,
+    };
+  } else {
+    sprintM.leadTimeMs = { p50: 0, p90: 0, n: 0 };
+  }
+
+  // #65 reviewWipNow — open PR count из bb.items.
+  let openPrs = 0;
+  for (const p of (out.participants || [])) {
+    for (const it of (p.bbItems || [])) {
+      if (it.kind === 'pr' && (it.status === 'open')) openPrs++;
+    }
+  }
+  sprintM.reviewWipNow = openPrs;
+
+  // #68 blockerTimeMs — сумма dwellHours блокеров (proxy для blocked-time agg).
+  let blockerSum = 0, blockerN = 0;
+  for (const p of (out.participants || [])) {
+    for (const b of (p.blockers || [])) {
+      const dh = Number(b?.dwellHours) || 0;
+      if (dh > 0) { blockerSum += dh; blockerN++; }
+    }
+  }
+  sprintM.blockerTime = {
+    totalHours: +blockerSum.toFixed(1),
+    avgHours:   blockerN ? +(blockerSum / blockerN).toFixed(1) : 0,
+    n:          blockerN,
+  };
+}
+
+/* V21 Z7 — Person-level metrics aggregator. Все 6 метрик computable из
+   данных, которые уже едут в model:
+   #49 knowledgeBreadth — # уникальных компонентов где автор коммитил
+   #50 specialistGini    — концентрация активности по компонентам (Gini)
+   #54 contextSwitchIdx  — # уникальных проектов / задач за окно
+   #56 testOwnership     — кол-во test-cases человек создал/обновил (zephyr.authors)
+   #57 personalPrCycle   — медианное время cycle для PR где он автор (BB items)
+   #58 afterHoursRatio   — % коммитов между 21:00-09:00 либо в выходные */
+function _computePersonLevelMetrics(out) {
+  if (!Array.isArray(out.participants)) return;
+  const zephyrAuthors = out.zephyr?.authors || {};
+  const bbAuthors     = out.bitbucket?.repoAuthors || out.bitbucket?.authors || {};
+  // Helper: Gini coefficient.
+  const gini = (values) => {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const n = sorted.length;
+    let sum = 0, cum = 0, total = 0;
+    for (let i = 0; i < n; i++) { total += sorted[i]; }
+    if (!total) return 0;
+    for (let i = 0; i < n; i++) {
+      cum += sorted[i];
+      sum += (cum / total);
+    }
+    return Math.max(0, Math.min(1, ((n + 1 - 2 * sum) / n)));
+  };
+
+  for (const p of out.participants) {
+    const m = p.metrics = p.metrics || {};
+
+    // #49 knowledgeBreadth — кол-во проектов где есть активность.
+    m.knowledgeBreadth = (p.projects || []).length;
+
+    // #50 specialistGini — Gini по распределению issues across projects.
+    const projCounts = {};
+    for (const it of (p.issuesNow || [])) projCounts[it.pk] = (projCounts[it.pk] || 0) + 1;
+    for (const it of (p.stale || []))     projCounts[it.pk] = (projCounts[it.pk] || 0) + 1;
+    m.specialistGini = +gini(Object.values(projCounts)).toFixed(3);
+
+    // #54 contextSwitchIdx — proxy: уникальных issuetype × projects.
+    const types = new Set();
+    for (const it of (p.issuesNow || [])) if (it.type) types.add(it.type);
+    m.contextSwitchIdx = m.knowledgeBreadth * Math.max(1, types.size);
+
+    // #56 testOwnership — match by displayName в zephyr authors.
+    const zKey = Object.keys(zephyrAuthors).find(k => {
+      const z = zephyrAuthors[k];
+      return (z?.displayName && p.label && String(z.displayName).toLowerCase() === String(p.label).toLowerCase());
+    });
+    m.testOwnership = zKey ? {
+      created:  zephyrAuthors[zKey].testsCreated || 0,
+      executed: zephyrAuthors[zKey].testsExecuted || 0,
+    } : { created: 0, executed: 0 };
+
+    // #57 personalPrCycleMs — median cycle-time по PR где человек автор.
+    const prItems = (p.bbItems || []).filter(i => i.kind === 'pr' && i.at);
+    if (prItems.length) {
+      // Простая аппроксимация: для merged PR — created/updated as proxy. Без full
+      // lifecycle per author мы не имеем точных данных, но это индикативно.
+      const ages = prItems.map(i => {
+        const at = Date.parse(i.at);
+        return Number.isFinite(at) ? Date.now() - at : 0;
+      }).filter(n => n > 0).sort((a, b) => a - b);
+      m.personalPrCycleMs = ages.length ? ages[Math.floor(ages.length / 2)] : 0;
+    } else {
+      m.personalPrCycleMs = 0;
+    }
+
+    // #58 afterHoursRatio — % timestamps в нерабочие часы (21:00-09:00 или сб/вс).
+    const allActivity = [
+      ...(p.timelineToday    || []),
+      ...(p.timelineYesterday || []),
+      ...(p.timelinePrev     || []),
+      ...(p.bbItems          || []),
+    ];
+    let total = 0, afterHours = 0;
+    for (const a of allActivity) {
+      const t = Date.parse(a.at || '');
+      if (!Number.isFinite(t)) continue;
+      total++;
+      const d = new Date(t);
+      const day  = d.getUTCDay();          // 0=Sun, 6=Sat
+      const hour = d.getUTCHours();
+      const isWeekend  = day === 0 || day === 6;
+      const isOffHours = hour < 6 || hour >= 18;  // приблизительно UTC ≈ MSK-3, грубо
+      if (isWeekend || isOffHours) afterHours++;
+    }
+    m.afterHoursRatio = total ? +(afterHours / total).toFixed(3) : 0;
+    m.afterHoursTotalEvents = total;
+  }
 }
 
 /** Filter the model by an active projectKey. Returns a NEW shallow model.

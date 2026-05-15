@@ -5,6 +5,12 @@
 // it doesn't flag every `window.App?.foo()` call as an error.
 //
 // Add new entries here when you attach something fresh to `window`.
+//
+// AUDIT_TECH кр.13 — миграция window.* → Services registry (см.
+// docs/window-globals-migration.md). Новые service-singletons теперь
+// регистрируются через `Services.register()` из `app/services.js`. Window
+// продолжает зеркалировать для backward compat. Этот файл описывает оба
+// канала.
 
 interface Window {
   /** dataStore.applyBulkAction — exposed for chat/* and views/registry. */
@@ -80,3 +86,40 @@ interface Window {
 type ShowToastFn = ((msg: string, type?: string, ms?: number) => void) & { _t?: number };
 
 declare const showToast: ShowToastFn;
+
+/* ────────────────────────────────────────────────────────────
+   AUDIT_TECH кр.13 — Services registry + EventBus typing.
+   ──
+   Services — single namespace для service-singletons (replaces window.X).
+   EventBus — pub/sub для эфемерных нотификаций.
+   См. docs/window-globals-migration.md.
+   ─────────────────────────────────────────────────────────── */
+
+interface ServicesRegistry {
+  /** Регистрация сервиса. Идемпотентно. */
+  register(name: string, impl: any): void;
+  /** Получить зарегистрированный сервис или undefined. */
+  get(name: string): any;
+  /** Проверить что зарегистрирован. */
+  has(name: string): boolean;
+  /** Список зарегистрированных имён (для debug). */
+  list(): string[];
+  /** Любой зарегистрированный сервис: `Services.HistoryManager?.checkpoint(...)` */
+  [key: string]: any;
+}
+
+interface EventBusType {
+  on(event: string, handler: (payload?: any) => void): () => void;
+  off(event: string, handler: (payload?: any) => void): void;
+  once(event: string, handler: (payload?: any) => void): () => void;
+  emit(event: string, payload?: any): void;
+  clear(event?: string): void;
+}
+
+declare const Services: ServicesRegistry;
+declare const EventBus: EventBusType;
+
+interface Window {
+  Services?: ServicesRegistry;
+  EventBus?: EventBusType;
+}

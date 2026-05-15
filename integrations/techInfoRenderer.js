@@ -20,6 +20,9 @@
    ============================================================ */
 
 import { html, unsafe } from '../libs/safeHtml.js';
+import { prizmaLoaderMark } from '../app/prizmaUI.js';
+// UX скв.4 — Lucide-иконки вместо эмодзи 📋 / ⚠ / ✓ / ✗.
+import { Icons } from '../app/icons.js';
 
 /** URL allowlist — same shape as portfolioPulseRenderer.safeUrl. Reused
  *  locally so this module has no cross-renderer dep. */
@@ -41,7 +44,8 @@ function searchTokens(...parts) {
 /** Copy-button — clipboard write happens via delegated handler in techInfo.js. */
 function copyBtn(value) {
   if (!value) return html``;
-  return html`<button class="ti-copy" type="button" data-ti-copy="${value}" title="Скопировать «${value}»">📋</button>`;
+  // UX скв.4 — эмодзи 📋 заменено на Lucide-иконку 'clipboard'.
+  return html`<button class="ti-copy" type="button" data-ti-copy="${value}" title="Скопировать «${value}»">${unsafe(Icons.get('clipboard', { size: 14 }))}</button>`;
 }
 
 /** A list item with monospace key + text + copy button. */
@@ -76,7 +80,8 @@ function emptyBlock(message) {
 }
 
 function errorBlock(message) {
-  return html`<div class="ti-error">⚠ ${message}</div>`;
+  // UX скв.4 — эмодзи ⚠ заменено на Lucide-иконку 'alert-triangle'.
+  return html`<div class="ti-error">${unsafe(Icons.get('alert-triangle', { size: 14 }))} ${message}</div>`;
 }
 
 /* ── Per-source panes ─────────────────────────────────────── */
@@ -109,7 +114,12 @@ export function renderJiraPane(jira, errMsg) {
       title: 'Текущий пользователь',
       body: html`<div class="ti-list">
         ${listItem({ key: m.name || '', text: m.displayName || '—', sub: m.emailAddress || '' })}
-        ${listItem({ key: 'active', text: m.active ? '✓' : '✗' })}
+        ${listItem({
+          key: 'active',
+          // UX скв.4 — эмодзи ✓/✗ заменены на Lucide-иконки 'check'/'x'.
+          text: m.active ? unsafe(Icons.get('check', { size: 14 })) : unsafe(Icons.get('x', { size: 14 })),
+          search: m.active ? 'active true yes' : 'active false no',
+        })}
       </div>`,
     }));
   }
@@ -578,7 +588,8 @@ export function renderTechInfoModal(state) {
   // The pane-body content depends on tab + state.
   let paneBody;
   if (loading && !data) {
-    paneBody = html`<div class="ti-loading">⏳ Загружаю данные из Jira / Bitbucket / Confluence…</div>`;
+    // V21 — ⏳ emoji + plain text заменены на brand L2 loader (mark + caption).
+    paneBody = html`<div class="ti-loading">${unsafe(prizmaLoaderMark())}<div class="ti-loading-caption">Загружаю данные из Jira / Bitbucket / Confluence…</div></div>`;
   } else if (errorMsg && !data) {
     paneBody = html`<div class="ti-error">⚠ ${errorMsg}</div>`;
   } else if (data) {

@@ -143,4 +143,39 @@ describe('V20 S8 #21 — Property-based scrub contract', () => {
     // чтобы при добавлении нового field в state мы поймали leak.
     assert.ok(PROTECTED_FIELDS.length >= 13, 'Если добавили новое identity-поле — обновите PROTECTED_FIELDS');
   });
+
+  /* V21 V3 — Real fuzzing (не shuffle одних и тех же payloads).
+     Расширяет coverage с 7 known-cases до 200 уникальных random payloads. */
+  test('V21 V3: 200 random PII payloads — все скрабятся в safe-mode', () => {
+    function randomEmail() {
+      const local = Math.random().toString(36).slice(2, 10);
+      const tld = ['ru', 'sber.ru', 'sbrf.ru'][Math.floor(Math.random() * 3)];
+      return `${local}@${tld}`;
+    }
+    function randomFio() {
+      const last = ['Иванов', 'Петров', 'Сидоров', 'Кузнецов'][Math.floor(Math.random() * 4)];
+      const init = ['А', 'И', 'П', 'С'][Math.floor(Math.random() * 4)];
+      return `${last} ${init}.${init}.`;
+    }
+    function randomJiraId() {
+      const hex = '0123456789abcdef';
+      let s = '';
+      for (let i = 0; i < 16; i++) s += hex[Math.floor(Math.random() * 16)];
+      return s;
+    }
+    let leaks = 0;
+    const sampleSize = 200;
+    for (let i = 0; i < sampleSize; i++) {
+      const kind = Math.floor(Math.random() * 3);
+      const value = kind === 0 ? randomEmail() : (kind === 1 ? randomFio() : randomJiraId());
+      const type = kind === 0 ? 'email' : (kind === 1 ? 'fio' : 'jiraAccountId');
+      const state = buildStateWithPii([{ type, value }]);
+      const { json } = prepareDiagnosticExport(state, 'safe');
+      if (json.includes(value)) {
+        leaks++;
+        if (leaks === 1) console.warn(`[fuzz] FIRST LEAK: type=${type} value="${value}"`);
+      }
+    }
+    assert.equal(leaks, 0, `${leaks}/${sampleSize} random PII payloads протекли в safe-mode`);
+  });
 });

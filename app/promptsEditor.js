@@ -19,14 +19,24 @@ import {
   CATEGORIES as PROMPT_CATEGORIES,
 } from '../chat/chatPrompts.js';
 import { HistoryLog } from '../historyLog.js';
+import { ConfirmDialog } from './uxKit.js';
+import { Icons } from './icons.js';
+import { Services } from './services.js';
 
 export const PromptsEditor = {
   init() {
     const root = document.getElementById('llm-prompts-list');
     if (!root) return;
     PromptsEditor.render();
-    document.getElementById('llm-prompts-reset-all')?.addEventListener('click', () => {
-      if (!confirm('Сбросить ВСЕ промпты к defaults? Кастомные изменения будут потеряны.')) return;
+    document.getElementById('llm-prompts-reset-all')?.addEventListener('click', async () => {
+      // V21 Q — ConfirmDialog (danger). Custom-промпты не имеют undo (нет checkpoint).
+      const ok = await ConfirmDialog.show({
+        title: 'Сбросить все промпты?',
+        message: 'Все кастомные изменения промптов будут заменены на defaults. Действие необратимо.',
+        confirmLabel: 'Сбросить',
+        danger: true,
+      });
+      if (!ok) return;
       PROMPT_CATEGORIES.forEach(cat => resetPromptOverride(cat));
       PromptsEditor.render();
       window.showToast?.('Промпты сброшены к defaults');
@@ -45,11 +55,11 @@ export const PromptsEditor = {
       return `
         <details class="llm-prompt-card${customised ? ' llm-prompt-card-custom' : ''}" data-cat="${esc(cat)}"${idx === 0 ? ' open' : ''}>
           <summary>
-            <span class="llm-prompt-cat-icon">${PromptsEditor._iconFor(cat)}</span>
+            <span class="llm-prompt-cat-icon">${Icons.get(PromptsEditor._iconFor(cat), { size: 14 })}</span>
             <span class="llm-prompt-cat-label">${esc(p.label)}</span>
             <code class="llm-prompt-cat-key">${esc(cat)}</code>
             ${customised ? '<span class="llm-prompt-custom-flag" title="Кастомизирован">●</span>' : ''}
-            <button class="btn btn-ghost btn-xs llm-prompt-reset" data-cat="${esc(cat)}" title="Сбросить эту категорию к defaults"${customised ? '' : ' disabled'}>↺</button>
+            <button class="btn btn-ghost btn-xs llm-prompt-reset" data-cat="${esc(cat)}" title="Сбросить эту категорию к defaults" aria-label="Сбросить категорию к умолчаниям"${customised ? '' : ' disabled'}>${Icons.get('rotate-ccw', { size: 12 })}</button>
           </summary>
           <div class="llm-prompt-body">
             <label class="llm-prompt-field">
@@ -62,7 +72,7 @@ export const PromptsEditor = {
               <span class="llm-prompt-hint">Плейсхолдеры: <code>{{message}}</code> · <code>{{filters}}</code> · <code>{{context}}</code> · <code>{{structuredSuffix}}</code> · <code>{{antiInject}}</code></span>
             </label>
             <div class="llm-prompt-row-actions">
-              <button class="btn btn-outline btn-xs llm-prompt-save" data-cat="${esc(cat)}">💾 Сохранить</button>
+              <button class="btn btn-outline btn-xs llm-prompt-save" data-cat="${esc(cat)}">Сохранить</button>
               <span class="llm-prompt-status" data-cat="${esc(cat)}"></span>
             </div>
           </div>
@@ -81,7 +91,9 @@ export const PromptsEditor = {
   },
 
   _iconFor(cat) {
-    return ({ search:'🔍', explain:'💡', action:'⚡', analysis:'📊', planning:'🗺', report:'📋', general:'💬' }[cat]) || '·';
+    // E2 fix (codebase-03 audit §12 no-emoji) — emoji-словарь заменён на
+    // нейтральные dot-маркеры. Если нужны реальные иконки — Icons.get().
+    return '·';
   },
 
   _saveCategory(cat) {
@@ -100,7 +112,7 @@ export const PromptsEditor = {
     PromptsEditor.render();
     const status = document.querySelector(`.llm-prompt-status[data-cat="${cat}"]`);
     if (status) {
-      status.textContent = '✓ Сохранено';
+      status.textContent = 'Сохранено';
       status.classList.add('llm-prompt-status-ok');
       setTimeout(() => { status.textContent = ''; status.classList.remove('llm-prompt-status-ok'); }, 1500);
     }
@@ -123,4 +135,5 @@ export const PromptsEditor = {
   },
 };
 
+Services.register('PromptsEditor', PromptsEditor);
 if (typeof window !== 'undefined') window.PromptsEditor = PromptsEditor;

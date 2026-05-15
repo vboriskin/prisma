@@ -7,16 +7,34 @@
 
 import { state, notify } from '../state.js';
 import { writeChangeLogEntry } from './chatReports.js';
+import { trackBulk as _telBulk, trackLLM as _telLLM } from '../integrations/telemetry.js';
+import { Services } from '../app/services.js';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
+// AUDIT_HOLISTIC паттерн 9 / Идея 14 — migrated.
+// Local helper теперь делегирует в чистый `Toast.*` API (см. app/toast.js)
+// с back-compat fallback на legacy `window.showToast`. Это закрывает 16 callsites
+// в этом файле одним переключением вместо ручной правки каждого.
+const _TYPE_MAP = { success:'success', ok:'success', error:'error', err:'error',
+                    info:'info', warn:'warn', warning:'warn', loading:'loading' };
 function showToast(msg, type) {
-  try { window.showToast?.(msg, type); } catch(_) {}
+  try {
+    const T = Services.Toast;
+    if (T && typeof T.success === 'function') {
+      const m = _TYPE_MAP[type] || 'success';
+      return T[m](msg);
+    }
+    return window.showToast?.(msg, type);
+  } catch(_) {}
 }
 
 function navigateTo(section) {
+  // F5 fix (chat-04 audit) — приоритет Nav.goTo (проставляет data-active-module,
+  // <title>, обновляет chip-bar), затем legacy App.goTo, затем DOM-fallback.
   try {
-    if (window.App?.goTo) { window.App.goTo(section); return; }
+    if (Services.Nav?.goTo) { Services.Nav.goTo(section); return; }
+    if (Services.App?.goTo) { Services.App.goTo(section); return; }
     const btn = document.querySelector(`.nav-item[data-section="${section}"]`);
     if (btn) btn.click();
   } catch(_) {}
@@ -43,8 +61,11 @@ export function matchRowsByFilter(filter = {}) {
     if (filter.onlyRisky      && !(r.riskFlags||[]).length)          return false;
     if (filter.team           && !(r.team||'').toLowerCase().includes(filter.team.toLowerCase())) return false;
     if (filter.release) {
-      const rel = String(filter.release);
-      const keyMap = { '120': 'hasRelease120', '121': 'hasRelease121', '122': 'hasRelease122', 'ot': 'hasOvertime' };
+      // F2 fix (chat-04 audit) — нормализуем оба формата: '1.21' и '121'.
+      // chatEngine выдаёт `replace('.','')`, но Реестр хранит '1.21' — без
+      // нормализации matchRowsByFilter не находил ничего.
+      const rel = String(filter.release).replace('.', '').toLowerCase();
+      const keyMap = { '120': 'hasRelease120', '121': 'hasRelease121', '122': 'hasRelease122', 'ot': 'hasOvertime', 'overtime': 'hasOvertime' };
       const key = keyMap[rel];
       if (key && !r[key]) return false;
     }
@@ -97,6 +118,8 @@ export function buildBatchPreview(batchParams) {
       label: label || `${ACTION_LABELS[action]||action} (${matched.length})`,
     };
   }
+  // V22 — telemetry bulk preview.
+  try { _telBulk('preview', { rowsCount: matched.length, actionType: action }); } catch (_) {}
 
   if (matched.length === 0) {
     return {
@@ -124,13 +147,13 @@ ${previewLines}${moreCount > 0 ? `\n- _...и ещё ${moreCount} задач_` : 
 
   const actions = [
     {
-      label: `✓ Применить (${matched.length})`,
+      label: `Применить (${matched.length})`,
       type: 'confirm_batch',
       payload: { batchId },
       primary: true,
     },
     {
-      label: '✕ Отмена',
+      label: 'Отмена',
       type: 'cancel_batch',
       payload: { batchId },
     },
@@ -172,8 +195,12 @@ export function applyPendingBatch(batchId) {
     clear_blocker:  'clear_blocker',
   };
 
+  // F8 fix (chat-04 audit): не передаём hard-coded types:['backend'] для
+  // assign_release. applyBulkAction должен сохранить существующие types
+  // (frontend/QA chip-выбор), назначив release-флаг — иначе чат стирает
+  // ручную разметку. types=undefined => preserve.
   const payloadMap = {
-    assign_release: { release: value, types: ['backend'], _label: label },
+    assign_release: { release: value, _label: label },
     set_scope:      { scope: value, _label: label },
     mark_done:      { done: true, _label: label },
     set_comment:    { comment: value || '', append: true, _label: label },
@@ -200,21 +227,29 @@ export function applyPendingBatch(batchId) {
   try {
     window.applyBulkAction?.(rowIds, bulkAction, bulkPayload);
   } catch(_) {
-    // Fallback: direct mutation if applyBulkAction not on window
+    // F1 fix (chat-04 audit, CLAUDE.md контракт #1) — fallback mass-mutation
+    // ОБЯЗАН быть в Reactive.silent(), иначе на каждой из N строк Proxy
+    // триггерит debounce save + App.refreshAll. На N=50 это 50 reflows.
+    // F8 fix: убран hard-coded `r[field] = ['backend']` — preserve существующие.
     const ids = new Set(rowIds);
-    state.rows.filter(r => ids.has(r.id)).forEach(r => {
-      if (action === 'assign_release') {
-        const field = `release${value}Types`;
-        if (!Array.isArray(r[field])) r[field] = [];
-        if (!r[field].length) r[field] = ['backend'];
-        r.dirty = true; r.updatedAt = new Date().toISOString();
-        try { window.RowFactory?.updateDerived(r); } catch(_) {}
-      }
-      if (action === 'set_scope')    { r.scopeStatus = value; r.dirty = true; r.updatedAt = new Date().toISOString(); }
-      if (action === 'mark_done')    { r.isDone = true; if (!r.doneDate) r.doneDate = new Date().toISOString().slice(0,10); r.dirty = true; r.updatedAt = new Date().toISOString(); }
-      if (action === 'set_comment')  { r.comment = r.comment ? r.comment + '\n' + (value||'') : (value||''); r.dirty = true; r.updatedAt = new Date().toISOString(); }
-      if (action === 'clear_blocker'){ r.blockingDependency = false; r.blockingDeadline = ''; r.dirty = true; r.updatedAt = new Date().toISOString(); }
-    });
+    const apply = () => {
+      state.rows.filter(r => ids.has(r.id)).forEach(r => {
+        if (action === 'assign_release') {
+          const field = `release${value}Types`;
+          if (!Array.isArray(r[field])) r[field] = [];
+          // preserve types: если массив пуст — оставить пустым (UI знает дефолт),
+          // НЕ переписывать ['backend'] поверх.
+          r.dirty = true; r.updatedAt = new Date().toISOString();
+          try { window.RowFactory?.updateDerived(r); } catch(_) {}
+        }
+        if (action === 'set_scope')    { r.scopeStatus = value; r.dirty = true; r.updatedAt = new Date().toISOString(); }
+        if (action === 'mark_done')    { r.isDone = true; if (!r.doneDate) r.doneDate = new Date().toISOString().slice(0,10); r.dirty = true; r.updatedAt = new Date().toISOString(); }
+        if (action === 'set_comment')  { r.comment = r.comment ? r.comment + '\n' + (value||'') : (value||''); r.dirty = true; r.updatedAt = new Date().toISOString(); }
+        if (action === 'clear_blocker'){ r.blockingDependency = false; r.blockingDeadline = ''; r.dirty = true; r.updatedAt = new Date().toISOString(); }
+      });
+    };
+    if (Services.Reactive?.silent) Services.Reactive.silent(apply);
+    else apply();
     try { window.Storage?.save(); } catch(_) {}
     notify('chat_batch');
   }
@@ -235,8 +270,20 @@ export function applyPendingBatch(batchId) {
 
   writeChangeLogEntry({ action, label, rowIds, changes, source: 'chat' });
 
+  // F4 fix (chat-04 audit) — chat-batch теперь видим в HistoryLog.ai наравне
+  // с chat_message. Раньше mass-mutation на 50 задач была невидима в общей
+  // истории (только в внутреннем actionLog), что мешало аудиту.
+  try {
+    window.HistoryLog?.ai?.('chat_batch', `${label} · ${rowIds.length} задач`, {
+      details: JSON.stringify({ action, value, rowIds: rowIds.slice(0, 200) }),
+      source: 'chat',
+    });
+  } catch (_) {}
+
   state.llm.pendingBatch = null;
-  showToast(`✓ Применено к ${rowIds.length} задачам`, 'success');
+  // V22 — telemetry bulk apply.
+  try { _telBulk('apply', { rowsCount: rowIds.length, actionType: action }); } catch (_) {}
+  showToast(`Курс скорректирован — ${rowIds.length} задач`, 'success');
   return { ok: true, count: rowIds.length, label };
 }
 
@@ -259,11 +306,16 @@ function handleApplyFilter(payload) {
     if (payload.onlyBlocking !== undefined) f.onlyBlocking = !!payload.onlyBlocking;
     if (payload.onlyRisky    !== undefined) f.onlyRisky    = !!payload.onlyRisky;
     if (payload.onlyDone     !== undefined) f.onlyDone     = !!payload.onlyDone;
+    // F3 fix (chat-04 audit) — affinity tag, чтобы Реестр мог показать chip
+    // «фильтр от ассистента» с быстрым «сбросить». Без этого юзер не понимал,
+    // почему после navigate в Дашборд и обратно фильтры остались.
+    f._source = 'chat';
+    f._appliedAt = Date.now();
     notify('chat_filter');
     showToast('Фильтры применены');
     if (!payload.noNavigate) navigateTo('registry');
   } catch (e) {
-    showToast('Ошибка применения фильтров: ' + (e.message || e), 'error');
+    showToast('Курс не сверен · фильтры: ' + (e.message || e), 'error');
   }
 }
 
@@ -272,6 +324,8 @@ function handleClearFilters() {
   f.search = ''; f.team = ''; f.scope = ''; f.release = '';
   f.workType = ''; f.role = ''; f.assignee = ''; f.tag = '';
   f.onlyBlocking = false; f.onlyRisky = false; f.onlyDone = false; f.preset = null;
+  // F3 fix: clear affinity tag тоже.
+  f._source = null; f._appliedAt = 0;
   notify('chat_filter_clear');
   showToast('Фильтры сброшены');
 }
@@ -286,12 +340,17 @@ function handlePreviewRelease(payload) {
 }
 
 function handleSendPrompt(payload) {
+  // L4 fix: убран auto-click. Раньше LLM мог сочинить prompt + label «Применить»
+  // и при клике запрос ушёл бы автоматом (semi-automatic loop). Теперь:
+  // 1) prompt подставляется в input;
+  // 2) input получает фокус;
+  // 3) пользователь видит текст и САМ нажимает «Отправить» — это явное consent.
   const input = document.getElementById('assistant-input');
   if (input && payload.prompt) {
     input.value = payload.prompt;
     input.dispatchEvent(new Event('input'));
-    const sendBtn = document.getElementById('assistant-btn-send');
-    if (sendBtn && !sendBtn.disabled) sendBtn.click();
+    try { input.focus(); } catch (_) {}
+    // Auto-click убран намеренно — см. комментарий выше.
   }
 }
 
@@ -330,11 +389,33 @@ function handleExportSummary(payload) {
 
 function handleConfirmBatch(payload) {
   const result = applyPendingBatch(payload.batchId);
-  if (!result.ok) showToast(result.message || 'Не удалось применить', 'error');
+  if (!result.ok) {
+    // F6 fix (chat-04 audit) — на mismatch/empty raise виден в чате,
+    // не только в toast. Раньше silent-toast пропадал через 2.4s,
+    // юзер не понимал, что произошло.
+    const msg = result.message || 'Не удалось применить';
+    showToast(msg, 'error');
+    try {
+      if (state.llm?.history) {
+        state.llm.history.push({
+          role: 'assistant',
+          content: `Не удалось применить действие: ${msg}`,
+          isError: true,
+        });
+        Services.LLMAssistant?.renderMessages?.();
+        Services.LLMAssistant?._saveDebounced?.();
+      }
+    } catch (_) {}
+  }
   return result;
 }
 
 function handleCancelBatch() {
+  // V22 — telemetry bulk cancel; rowsCount берём из pendingBatch до сброса.
+  try {
+    const p = state.llm?.pendingBatch;
+    _telBulk('cancel', { rowsCount: p?.rowIds?.length || 0, actionType: p?.action || '' });
+  } catch (_) {}
   if (state.llm) state.llm.pendingBatch = null;
   showToast('Действие отменено');
 }
@@ -344,13 +425,16 @@ function handleTakeSnapshot() {
     window.takeSnapshot?.();
     showToast('📸 Снимок сохранён');
   } catch(_) {
-    showToast('Не удалось сохранить снимок', 'error');
+    showToast('Курс не сверен · снимок не сохранён', 'error');
   }
 }
 
 /* ── Dispatcher ──────────────────────────────────────────── */
 
 export function executeAction(type, payload = {}) {
+  // V22 — telemetry LLM-accepted: пользователь кликнул action-chip на ответе.
+  // Каждый клик = «принятие» LLM-предложения (proxy для accept-rate).
+  try { _telLLM('accepted', { actionType: type }); } catch (_) {}
   switch (type) {
     case 'navigate':        return handleNavigate(payload);
     case 'apply_filter':    return handleApplyFilter(payload);
@@ -363,9 +447,56 @@ export function executeAction(type, payload = {}) {
     case 'confirm_batch':   return handleConfirmBatch(payload);
     case 'cancel_batch':    return handleCancelBatch();
     case 'take_snapshot':   return handleTakeSnapshot();
+    case 'open_settings':   return handleOpenSettings(payload);   // L11
+    case 'set_focus':       return handleSetFocus(payload);          // V22 X-02 / K-03
     default:
       console.warn('[ChatActions] Unknown action type:', type, payload);
   }
+}
+
+// V22 X-02 / K-03 (audit-experts-2026-05-15 Selvadurai #1, #2) — единый
+// product-glue action: чат может сфокусировать любую вкладку на конкретном
+// объекте (employee / epic / team / release / block-id). Подписчики
+// focus-changed получают payload, переключают view + scroll-to.
+//
+// payload: { kind: 'employee'|'epic'|'team'|'release'|'block-id',
+//            id: string,        // identity-deterministic (email / Jira-key / team name)
+//            period?: '7d'|'14d'|'30d'|'q'|'all',
+//            source?: 'chat' }  // источник для telemetry
+function handleSetFocus(payload = {}) {
+  const focus = Services.Focus || globalThis.Focus;
+  if (!focus || typeof focus.set !== 'function') {
+    console.warn('[ChatActions] Focus service not available, set_focus ignored', payload);
+    return { ok: false, reason: 'no-focus-service' };
+  }
+  const kind = String(payload?.kind || '').trim();
+  const id   = String(payload?.id   || '').trim();
+  if (!kind || !id) {
+    console.warn('[ChatActions] set_focus: kind+id required', payload);
+    return { ok: false, reason: 'invalid-payload' };
+  }
+  try {
+    focus.set({
+      kind,
+      id,
+      period: payload?.period || '7d',
+      source: payload?.source || 'chat',
+    });
+    return { ok: true };
+  } catch (e) {
+    console.warn('[ChatActions] set_focus threw:', e);
+    return { ok: false, reason: 'focus-set-threw' };
+  }
+}
+
+// L11: открытие LLM-tab настроек прямо из error-сообщения.
+function handleOpenSettings(payload = {}) {
+  const modal = document.getElementById('app-settings-modal');
+  if (!modal) return;
+  modal.classList.remove('hidden');
+  const tab = payload?.tab || 'llm';
+  modal.querySelectorAll('.app-settings-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  modal.querySelectorAll('.app-settings-tab-content').forEach(c => c.classList.toggle('hidden', c.dataset.tabContent !== tab));
 }
 
 /**
@@ -385,7 +516,7 @@ export function bindActionClicks(messagesWrap) {
       const result = executeAction(type, payload);
       // If confirm_batch was applied, refresh messages to reflect the confirmed state
       if (type === 'confirm_batch' && result?.ok) {
-        try { window.LLMAssistant?.renderMessages(); } catch(_) {}
+        try { Services.LLMAssistant?.renderMessages(); } catch(_) {}
       }
       return;
     }

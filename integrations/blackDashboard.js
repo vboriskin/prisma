@@ -2,7 +2,7 @@
 /* ============================================================
    BLACK DASHBOARD — ORCHESTRATOR
    Wires the modular pieces together and manages the three sub-tabs:
-   🎯 Цели · 🔗 Покрытие · 📈 Метрики.
+   Goals · Coverage · Metrics.  (V22 Brand pass — без эмодзи в UI.)
 
    Public surface:
      BlackDashboard.render(container)
@@ -15,11 +15,43 @@ import { loadSettingsRaw } from './integrationsStore.js';
 import { fetchBlackDashboard } from './blackDashboardApi.js';
 import { analyseBlackDashboard } from './blackDashboardModel.js';
 import { ErrorsLog } from '../errorsLog.js';
-import { makePhraseFeeder } from './loaderPhrases.js';
+import { BD_PHRASES, startPhraseRotator } from './loaderPhrases.js';
 import {
   renderTopHeader, renderGoalsTab, renderCoverageTab, renderMetricsTab,
   renderNotConfigured, renderNotLoaded, renderLoader, renderError,
+  renderBdDiagModal, prepareBdDiagSafeJson,
 } from './blackDashboardRenderer.js';
+import { Services } from '../app/services.js';
+
+/* Phase 3 D2 — человекочитаемые HTTP-ошибки в error-state Чёрного дашборда.
+   Раньше пользователь видел raw `HTTP 500` / `HTTP 401` в `bd-state-error`.
+   Подход совпадает с views/integrationsView.js _humanHttp (тот же словарь),
+   но локальный helper, чтобы blackDashboard.js не зависел от views/. */
+function _bdHumanHttp(src) {
+  if (!src) return 'связь прервана';
+  let text = '';
+  let status = 0;
+  if (typeof src === 'string')               text = src;
+  else if (src instanceof Error)             text = src.message || '';
+  else if (typeof src === 'object') {
+    text = src.error || src.message || '';
+    if (typeof src.status === 'number')      status = src.status;
+  }
+  if (!status) {
+    const m = /HTTP\s*(\d{3})/i.exec(text);
+    if (m) status = parseInt(m[1], 10);
+  }
+  switch (status) {
+    case 401: return 'Sigma не пускает (нужен новый токен)';
+    case 403: return 'Sigma закрыла доступ';
+    case 404: return 'Sigma не нашла адрес — проверьте URL в настройках';
+    case 408: return 'Sigma не ответила вовремя — попробуйте ещё раз';
+    case 429: return 'Sigma просит притормозить';
+    case 500: case 502: case 503: case 504: return 'Sigma не отвечает — повторите позже';
+  }
+  if (!text || /^сеть$/i.test(text)) return 'связь прервана';
+  return text;
+}
 
 export const BlackDashboard = {
   _model: null,
@@ -63,33 +95,16 @@ export const BlackDashboard = {
   },
 
   async refresh() {
+    // V21 J #62 — abort предыдущего fetch (защита от double-click race).
+    try { this._abort?.abort(); } catch (_) { /* defensive */ }
     if (this._container && this._isSigmaConfigured()) await this._fetchAndRender();
   },
 
   _showLoader() {
     if (!this._container) return;
     this._container.innerHTML = renderLoader();
-
-    // V13 (11th pass): rotate humorous phrases every ~2.6s to signal aliveness
-    // during the long-running fetch. Stops on terminal state (success/error/
-    // cancel) to avoid leaking the interval. Idempotent — re-entry clears any
-    // existing timer first (e.g., user navigated away and back during fetch).
     this._stopPhraseRotator();
-    const feed = makePhraseFeeder();
-    const tick = () => {
-      const el = this._container?.querySelector('#bd-loader-phrase');
-      if (!el) return;
-      // Re-trigger CSS fade-in animation on every phrase swap.
-      el.style.animation = 'none';
-      void el.offsetWidth;
-      el.style.animation = '';
-      el.textContent = feed();
-    };
-    tick();                                     // paint first phrase immediately
-    this._phraseTimer = setInterval(tick, 2600);
-
-    // Cancel button — abort the in-flight fetch and repaint the not-loaded
-    // state so the user can retry. Mirrors PP's cancel UX.
+    this._phraseTimer = startPhraseRotator('bd-loader-phrase', BD_PHRASES);
     this._container.querySelector('#bd-loader-cancel')?.addEventListener('click', () => {
       try { this._abort?.abort(); } catch (_) {}
       this._loading = false;
@@ -102,10 +117,7 @@ export const BlackDashboard = {
   },
 
   _stopPhraseRotator() {
-    if (this._phraseTimer) {
-      clearInterval(this._phraseTimer);
-      this._phraseTimer = null;
-    }
+    if (this._phraseTimer) { clearInterval(this._phraseTimer); this._phraseTimer = null; }
   },
 
   async _fetchAndRender() {
@@ -166,7 +178,10 @@ export const BlackDashboard = {
         });
       } catch (_) {}
       if (this._container) {
-        this._container.innerHTML = renderError(msg);
+        // Phase 3 D2 — _bdHumanHttp оборачивает «HTTP 401/500/etc» в человеческую
+        // фразу. ErrorsLog.add выше получает raw msg для технического диагноза;
+        // в UI рендерим человеческую копию.
+        this._container.innerHTML = renderError(_bdHumanHttp(e));
         this._wireStateButtons();
       }
     } finally {
@@ -208,6 +223,84 @@ export const BlackDashboard = {
       });
     });
     root.querySelector('#bd-refresh-btn')?.addEventListener('click', () => this.refresh());
+    root.querySelector('#bd-diag-btn')?.addEventListener('click', () => this._openDiagModal());
+    // V22 C1 — SSO-banner CTA в BD-header. Открывает settings-modal на табе
+    // Confluence через global `window.openIntegrationsSettings(tab)`. graceful no-op
+    // если функция не зарегистрирована (например, BD загружен standalone).
+    root.querySelectorAll('[data-bd-open-settings]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.getAttribute('data-bd-open-settings') || 'confluence';
+        try { window.openIntegrationsSettings?.(tab); }
+        catch (e) { console.warn('[bd] openIntegrationsSettings failed', e); }
+      });
+    });
+    // V22 fix #16 (2026-05-09 UX) — HTML export dropdown.
+    const exportBtn  = root.querySelector('#bd-export-btn');
+    const exportMenu = root.querySelector('#bd-export-menu');
+    if (exportBtn && exportMenu) {
+      exportBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasHidden = exportMenu.hasAttribute('hidden');
+        exportMenu.toggleAttribute('hidden');
+        if (wasHidden) {
+          // Закрываем по клику вне меню.
+          const closeOnOutside = (ev) => {
+            if (!exportMenu.contains(ev.target) && ev.target !== exportBtn) {
+              exportMenu.setAttribute('hidden', '');
+              document.removeEventListener('click', closeOnOutside);
+            }
+          };
+          setTimeout(() => document.addEventListener('click', closeOnOutside), 0);
+        }
+      });
+      exportMenu.querySelectorAll('[data-bd-export]').forEach(item => {
+        item.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const kind = item.dataset.bdExport;
+          exportMenu.setAttribute('hidden', '');
+          if (!this._model) return;
+          try {
+            const mod = await import('./blackDashboardExport.js');
+            mod.downloadBlackDashboardExport(this._model, kind);
+          } catch (err) {
+            try { console.error('[BD export]', err); } catch (_) {}
+          }
+        });
+      });
+    }
+  },
+
+  _openDiagModal() {
+    if (!this._model) return;
+    // Remove any stale modal first.
+    document.getElementById('bd-diag-modal-overlay')?.remove();
+    const div = document.createElement('div');
+    div.innerHTML = renderBdDiagModal(this._model);
+    const overlay = div.firstElementChild;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector('#bd-diag-modal-close')?.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); }
+    }, { once: false });
+
+    overlay.querySelector('#bd-diag-export-btn')?.addEventListener('click', () => {
+      try {
+        const json = prepareBdDiagSafeJson(this._model);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        const ts   = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+        a.href     = url;
+        a.download = `bd-diagnostic-safe-${ts}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error('[BD diag export]', e);
+      }
+    });
   },
 
   _wireStateButtons() {
@@ -229,4 +322,5 @@ export const BlackDashboard = {
   },
 };
 
+Services.register('BlackDashboard', BlackDashboard);
 if (typeof window !== 'undefined') window.BlackDashboard = BlackDashboard;

@@ -5,6 +5,9 @@
    ============================================================ */
 
 import { state } from '../state.js';
+import { Utils } from '../utils.js';
+// V21 T — pl helper для русских plural'ов в reports.
+const _pl = (n, forms) => `${n} ${Utils.plural(n, forms)}`;
 
 export const DAILY_SNAPSHOT_KEY = 'q2_daily_snapshot_v1';
 const MAX_LOG_ROWS = 30; // max rows stored per log entry
@@ -28,6 +31,14 @@ function snapshotRow(r) {
 }
 
 export function takeSnapshot() {
+  // F7 fix (chat-04 audit) — race-guard: если есть pendingBatch, snapshot
+  // делать опасно (между takeSnapshot и confirm юзер может уйти, а потом
+  // вернуться, и diff смешает chat-changes с manual). Возвращаем существующий
+  // snapshot и сигнализируем «устаревший».
+  if (state.llm?.pendingBatch) {
+    try { window.showToast?.('Снимок не обновлён · сначала примените или отмените chat-действие', 'warning', 4000); } catch (_) {}
+    return loadSnapshot();
+  }
   const snap = {
     ts: new Date().toISOString(),
     total: state.rows.length,
@@ -136,16 +147,16 @@ function buildRecommendations(rows) {
   const recs = [];
   const blockers = rows.filter(r => r.blockingDependency && !r.isDone);
   if (blockers.length > 0)
-    recs.push(`Снять ${blockers.length} блокер(ов): начни с "${blockers[0].epic||blockers[0].tasks||'—'}" (${blockers[0].team||'—'})`);
+    recs.push(`Снять ${_pl(blockers.length, ['блокер','блокера','блокеров'])}: начни с "${blockers[0].epic||blockers[0].tasks||'—'}" (${blockers[0].team||'—'})`);
   const noRelease = rows.filter(r => r.isUnassigned && r.scopeStatus === 'Да' && !r.isDone);
   if (noRelease.length > 0)
-    recs.push(`Распределить ${noRelease.length} задач без релиза: скажи "перенеси задачи без релиза в 1.22"`);
+    recs.push(`Распределить ${_pl(noRelease.length, ['задачу','задачи','задач'])} без релиза: скажи "перенеси задачи без релиза в 1.22"`);
   const nearDeadline = rows.filter(r => r.blockingDeadline && !r.isDone);
   if (nearDeadline.length > 0)
-    recs.push(`Проверить ${nearDeadline.length} задач с дедлайном`);
+    recs.push(`Проверить ${_pl(nearDeadline.length, ['задачу','задачи','задач'])} с дедлайном`);
   const highRisk = rows.filter(r => (r.riskScore||0) >= 50 && !r.isDone);
   if (highRisk.length > 0)
-    recs.push(`Проанализировать ${highRisk.length} задач с riskScore ≥ 50`);
+    recs.push(`Проанализировать ${_pl(highRisk.length, ['задачу','задачи','задач'])} с riskScore ≥ 50`);
   if (recs.length === 0) recs.push('Данные в хорошем состоянии — продолжай в том же духе!');
   return recs;
 }

@@ -37,12 +37,13 @@ describe('V17.2 I5 — _autofillEmployeeIdentities', () => {
   test('НЕ перезаписывает уже заполненный email (manual wins)', () => {
     const emp = { fio: 'Иван Иванов', email: 'manual@company.com', jiraAccountId: '' };
     const model = { participants: [
-      { label: 'Иван Иванов', email: 'ivan@example.com', jiraAccountId: 'JIRA-ID' },
+      { label: 'Иван Иванов', email: 'ivan@example.com', jiraAccountId: 'jira-id' },
     ]};
     const r = _autofillEmployeeIdentities(model, [emp]);
     assert.equal(r.updated, 1, 'jiraAccountId всё-таки заполнили');
     assert.equal(emp.email, 'manual@company.com', 'manual email сохранён');
-    assert.equal(emp.jiraAccountId, 'JIRA-ID');
+    // F4: normalize() lowercase'ит jiraAccountId.
+    assert.equal(emp.jiraAccountId, 'jira-id');
   });
 
   test('пропускает ambiguous (двое сотрудников с одинаковым ФИО)', () => {
@@ -92,7 +93,8 @@ describe('V17.2 I5 — _autofillEmployeeIdentities', () => {
     ]};
     const r = _autofillEmployeeIdentities(model, [emp]);
     assert.equal(r.updated, 1);
-    assert.equal(emp.jiraAccountId, 'JIRA-ACC-1');
+    // F4: normalize() lowercase'ит jiraAccountId.
+    assert.equal(emp.jiraAccountId, 'jira-acc-1');
     assert.equal(emp.email, 'ivan@example.com', 'email не тронут');
   });
 

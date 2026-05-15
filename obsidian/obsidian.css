@@ -1,0 +1,1126 @@
+/* ============================================================================
+   OBSIDIAN MASCOT — MOTION SYSTEM
+   Brand: Призма · v1.0
+   
+   Использование:
+     1. Подключить obsidian-sprite.svg где-то в DOM (один раз).
+     2. Вставить элемент:
+          <div class="obs obs--ack">
+            <svg><use href="#obs-base"/></svg>
+          </div>
+     3. Менять класс через JS для смены состояния.
+   
+   ВАЖНО:
+   — Все анимации lupятся для демо. В продакшне применяй .obs--once
+     или используй animation-iteration-count:1 в каждом классе.
+   — Tier 2/3 анимации совместимы с Living Shape — стакайте
+     одновременно: <div class="obs obs--ack obs--alive">
+   — Цвета задаются через --obs-body и --obs-feature.
+============================================================================ */
+
+
+/* ============================================================================
+   1. TOKENS — единая система таймингов и easing
+   ============================================================================ */
+:root {
+  /* Color — v22 palette refresh (см. MASCOT_OBSIDIAN.md §13.4).
+     Чёрный (#0A0A0F) больше НЕ используется — все «тёмные» элементы
+     маскота используют Ink #1A1A22 (мягкий тёплый контраст «бумаги
+     и чернил»). Дефолт = тёмная тема: тело Star, глаза/рёбра Ink. */
+  --obs-body: #ffffff;
+  --obs-feature: #1A1A22;
+  /* VD-2 fix — outline opacity на body-stroke polygon. В тёмной теме body
+     контрастен с фоном сам по себе → outline играет роль тонкой грани
+     (0.45 «призрак»). В светлой теме body почти равен фону → outline берёт
+     на себя всю силуэт-нагрузку (0.9 «нарисован чернилами»). */
+  --obs-outline-opacity: 0.45;
+  /* VD-3 — цвет «свечения» Emerge (blade/edges/facets/ring). В тёмной теме
+     это Star (=body) → «свет вспыхивает в темноте». В светлой теме body
+     почти белый = фон → весь Emerge невидим. Инвертируем: light → Ink,
+     получается «чернила собираются в кристалл». */
+  --obs-emerge-glow: var(--obs-body);
+
+  /* Motion tokens — mM5 fix (design-03 audit): убраны dead --obs-quick и
+     --obs-active (нигде не использовались). Оставлены только реально
+     задействованные duration-токены. */
+  --obs-settle:  640ms cubic-bezier(0.4, 0.05, 0.4, 1);
+  --obs-emerge:  2400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Easings — mM5 fix: добавлены недостающие токены под hardcoded
+     cubic-bezier'ы (pendulum/bounce/wink), чтобы будущие миграции
+     избегали raw-литералов в keyframes. */
+  --obs-ease-out:        cubic-bezier(0.4, 0, 0.4, 1);
+  --obs-ease-spring:     cubic-bezier(0.34, 1.4, 0.64, 1);
+  --obs-ease-overshoot:  cubic-bezier(0.34, 1.56, 0.64, 1);
+  --obs-ease-soft:       cubic-bezier(0.4, 0.05, 0.4, 1);
+  --obs-ease-sharp:      cubic-bezier(0.3, 0, 0.4, 1);
+  --obs-ease-pendulum:   cubic-bezier(0.85, 0, 0.15, 1);  /* look/sway */
+  --obs-ease-bounce:     cubic-bezier(0.34, 1.5, 0.64, 1); /* success/wink */
+  --obs-ease-cur:        cubic-bezier(0.4, 0, 0.25, 1);   /* curious-body */
+
+  /* AUDIT_LAYOUT #45 — motion-system bridge:
+     obs-ease-* токены сохранены per-component (анимация маскота критична,
+     значения подобраны под физику Obsidian'а — НЕ заменять на prizma-*
+     алиасы, иначе breathe/wink/sway сломаются).
+     Семантические эквиваленты в брендбуке (только для документации):
+       --obs-ease-soft    ≈ --prizma-ease-calm    (брендбук: «спокойное»)
+       --obs-ease-out     ≈ --prizma-ease-decel
+       --obs-ease-spring  ≈ --prizma-ease-spring
+     Остальные (overshoot / sharp / pendulum / bounce / cur) — pure
+     motion-physics для маскота, без бренд-эквивалента. */
+}
+
+/* Light theme — VD-2 «inked silhouette».
+   Body #FFFFFF (как в тёмной — белая бумага), но контур усилен до 0.9 —
+   маскот читается как «силуэт чернилами на бумаге», а не как водяной знак.
+   Прежний #E8E5DA на фоне Star #F5F4EE давал контраст 1.20:1 → маскот
+   «проваливался» в фон, особенно на 144×144 FAB.
+   Feature — Ink #1A1A22 (тот же что и в тёмной теме): single source
+   of truth для тёмных элементов, никакого чистого чёрного нигде. */
+.obs-theme-light, [data-theme="light"] {
+  --obs-body: #FFFFFF;
+  --obs-feature: #1A1A22;
+  --obs-outline-opacity: 0.3;
+  /* Полупрозрачный Ink — keyframes Emerge сами умножают это на свою opacity
+     (0→1→0 для blade/edges, 0→1 для facets). База 0.5 даёт мягкое
+     «проявление чернил», без чёрной вспышки. */
+  --obs-emerge-glow: rgba(26, 26, 34, 0.5);
+}
+
+/* VD-2 — body-outline polygon. CSS перебивает inline opacity="0.45" в SVG
+   (presentation attribute → ниже specificity). На 28px chat-avatar
+   stroke-width 0.7 SVG-units ≈ 0.16 real-px — невидимо, не загрязняет
+   small-context. На 144×144 FAB ≈ 0.84 real-px — читается тонко. */
+.obs .obs-body-outline {
+  opacity: var(--obs-outline-opacity, 0.45);
+}
+
+
+
+/* ============================================================================
+   2. BASE WRAPPER
+   ============================================================================ */
+.obs {
+  display: inline-block;
+  position: relative;
+  line-height: 0;
+}
+.obs svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+/* Каждое движение анимируется на самом svg или на специальной группе */
+
+
+/* ============================================================================
+   3. TIER 3 — AMBIENT (постоянный фон жизни)
+   ============================================================================ */
+
+/* Breathe — асимметричный (вдох быстрее выдоха), всегда поверх любого state */
+.obs--breathe svg {
+  transform-origin: 50% 50%;
+  animation: obs-breathe 4.5s var(--obs-ease-soft) infinite;
+}
+@keyframes obs-breathe {
+  0%, 100% { transform: scale(1); }
+  35%      { transform: scale(1.04); }
+}
+
+/* Blink — трёхступенчатый */
+.obs--blink .obs-eye {
+  animation: obs-blink-eye 5.5s var(--obs-ease-out) infinite;
+}
+.obs--blink .obs-lid {
+  animation: obs-blink-lid 5.5s var(--obs-ease-out) infinite;
+}
+@keyframes obs-blink-eye {
+  0%, 87%  { r: 1.8; opacity: 1; }
+  89%      { r: 0.6; opacity: 1; }
+  91%      { r: 0; opacity: 0; }
+  93%      { r: 0.6; opacity: 1; }
+  95%, 100%{ r: 1.8; opacity: 1; }
+}
+@keyframes obs-blink-lid {
+  0%, 87%  { stroke-dashoffset: 9; opacity: 0; }
+  89%      { stroke-dashoffset: 5; opacity: 1; }
+  91%      { stroke-dashoffset: 0; opacity: 1; }
+  93%      { stroke-dashoffset: 5; opacity: 1; }
+  95%, 100%{ stroke-dashoffset: 9; opacity: 0; }
+}
+
+/* Look around — саккадическая (рывок + удержание) */
+.obs--look .obs-eye-l { animation: obs-look-l 6s var(--obs-ease-pendulum) infinite; }
+.obs--look .obs-eye-r { animation: obs-look-r 6s var(--obs-ease-pendulum) infinite; }
+@keyframes obs-look-l {
+  0%, 15%  { cx: -9; }
+  17%      { cx: -11; }
+  35%, 45% { cx: -11; }
+  47%      { cx: -9; }
+  60%, 68% { cx: -9; }
+  70%      { cx: -7; }
+  85%, 93% { cx: -7; }
+  95%      { cx: -9; }
+  100%     { cx: -9; }
+}
+@keyframes obs-look-r {
+  0%, 15%  { cx: 6; }
+  17%      { cx: 4; }
+  35%, 45% { cx: 4; }
+  47%      { cx: 6; }
+  60%, 68% { cx: 6; }
+  70%      { cx: 8; }
+  85%, 93% { cx: 8; }
+  95%      { cx: 6; }
+  100%     { cx: 6; }
+}
+
+/* Float — двумерный дрейф */
+.obs--float svg {
+  transform-origin: 50% 50%;
+  animation: obs-float 4s var(--obs-ease-soft) infinite;
+}
+@keyframes obs-float {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(0.5%, -3%); }
+  50%  { transform: translate(0, -5%); }
+  75%  { transform: translate(-0.5%, -3%); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Sway — маятник с задержкой на крайних точках */
+.obs--sway svg {
+  transform-origin: 50% 50%;
+  animation: obs-sway 5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes obs-sway {
+  0%, 5%, 95%, 100% { transform: rotate(-3deg); }
+  45%, 55%          { transform: rotate(3deg); }
+}
+
+/* Pulse — двойной (систола+диастола) */
+.obs--pulse svg {
+  transform-origin: 50% 50%;
+  animation: obs-pulse 3.5s cubic-bezier(0.4, 0, 0.4, 1) infinite;
+}
+@keyframes obs-pulse {
+  0%, 100% { transform: scale(1); }
+  10%      { transform: scale(1.05); }
+  18%      { transform: scale(1); }
+  28%      { transform: scale(1.07); }
+  40%      { transform: scale(1); }
+}
+
+
+/* ============================================================================
+   4. TIER 2 — MOMENTS (события продукта)
+   Three-act structure: anticipate → act → settle
+   ============================================================================ */
+
+/* ACKNOWLEDGE — кивок с анти-симметричным таймингом и squash */
+.obs--ack .obs-body { animation: obs-ack-body 1100ms var(--obs-ease-soft) both; transform-origin: 50% 70%; }
+.obs--ack .obs-eye { animation: obs-ack-eye 1100ms var(--obs-ease-out) both; }
+@keyframes obs-ack-body {
+  0%, 5%  { transform: translateY(0) rotate(0) scale(1, 1); }
+  14%     { transform: translateY(-7%) rotate(2deg) scale(0.97, 1.04); }
+  16%     { transform: translateY(-7%) rotate(2deg) scale(0.97, 1.04); }
+  21%     { transform: translateY(5%) rotate(-7deg) scale(1.10, 0.88); }
+  /* Slow 70% recovery */
+  32%     { transform: translateY(-1%) rotate(1deg) scale(0.99, 1.02); }
+  44%     { transform: translateY(0.3%) rotate(-0.3deg) scale(1, 1); }
+  68%, 100%{ transform: translateY(0) rotate(0) scale(1, 1); }
+}
+@keyframes obs-ack-eye {
+  0%, 7%  { cy: -3; rx: 1.8; ry: 1.8; }
+  16%     { cy: -3.6; rx: 1.8; ry: 1.8; }
+  22%     { cy: -1; rx: 2.2; ry: 1.4; }    /* eyes squash on impact */
+  34%     { cy: -3.3; rx: 1.8; ry: 1.8; }
+  46%, 100%{ cy: -3; rx: 1.8; ry: 1.8; }
+}
+
+/* CURIOUS — наклон с подачей тела + parallax глаз.
+   MD-2 fix — infinite loop пока FAB hover (а не one-shot 2200ms → freeze).
+   Keyframes 0%/100% уже neutral, поэтому петля бесшовная. На mouseleave
+   _setLoop('breathe') моментально снимет cur — поэтому добавляем CSS-bridge:
+   transition transform 200ms на .obs-body, чтобы любая mid-cycle поза
+   плавно вышла в neutral. */
+/* MD-2 v2 — bridge между Curious mid-cycle и neutral. Когда .obs--cur
+   снимается на mouseleave, animation удаляется и transform резко
+   возвращается к default. Transition даёт плавный 200ms откат. Во время
+   active animation transition is overridden by animation.
+   MD #4.4 + #4.12 — глобальный transition transform на .obs-body конфликтовал
+   с breathe scale на корневом <svg> (двойной transform-origin → дрейф центра
+   на 144px FAB при hover-leave). Сужено до .obs--cur context'а — transition
+   нужен ТОЛЬКО для curious↔neutral bridge'а на mouseleave. Прочие state'ы
+   (alert/ack/concerned/...) сами имеют both/forwards keyframes и не нуждаются. */
+.obs--cur .obs-body { transition: transform 200ms var(--obs-ease-out, ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .obs--cur .obs-body { transition: none; }
+}
+.obs--cur .obs-body { animation: obs-cur-body 2200ms cubic-bezier(0.4, 0, 0.25, 1) infinite; transform-origin: 50% 50%; }
+.obs--cur .obs-eye-l { animation: obs-cur-eye-l 2200ms cubic-bezier(0.4, 0, 0.25, 1) infinite; }
+.obs--cur .obs-eye-r { animation: obs-cur-eye-r 2200ms cubic-bezier(0.35, 0, 0.25, 1) infinite; }
+/* MD-3 — на крупном FAB (144×144) rotate -9deg даёт ~11px смещения углов
+   по диагонали — может цеплять соседние элементы. Снижаем амплитуду
+   только в FAB-контексте; chat-avatar / hero оставляем как есть. */
+.assistant-fab .obs--cur .obs-body { animation-name: obs-cur-body-fab; }
+@keyframes obs-cur-body-fab {
+  0%, 5%  { transform: translateX(0) rotate(0) scale(1, 1); }
+  10%     { transform: translateX(1%) rotate(1deg); }
+  20%     { transform: translateX(-1.5%) rotate(-3deg); }
+  28%     { transform: translateX(-2%) rotate(-5deg) scale(1.015, 0.985); }
+  35%, 58%{ transform: translateX(-2%) rotate(-5deg) scale(1.015, 0.985); }
+  44%     { transform: translateX(-1.85%) rotate(-5deg) scale(1.02, 0.985); }
+  72%     { transform: translateX(-1%) rotate(-2deg); }
+  85%     { transform: translateX(-0.2%) rotate(-0.5deg); }
+  95%, 100%{ transform: translateX(0) rotate(0) scale(1, 1); }
+}
+@keyframes obs-cur-body {
+  0%, 5%  { transform: translateX(0) rotate(0) scale(1, 1); }
+  10%     { transform: translateX(2%) rotate(2deg); }
+  20%     { transform: translateX(-3%) rotate(-5deg); }
+  28%     { transform: translateX(-4%) rotate(-9deg) scale(1.02, 0.98); }
+  35%, 58%{ transform: translateX(-4%) rotate(-9deg) scale(1.02, 0.98); }
+  /* micro-breath in hold */
+  44%     { transform: translateX(-3.7%) rotate(-9deg) scale(1.025, 0.985); }
+  /* slow exit */
+  72%     { transform: translateX(-2%) rotate(-4deg); }
+  85%     { transform: translateX(-0.3%) rotate(-1deg); }
+  95%, 100%{ transform: translateX(0) rotate(0) scale(1, 1); }
+}
+@keyframes obs-cur-eye-l {
+  0%, 5%  { cx: -9; cy: -3; }
+  18%     { cx: -7.5; cy: -3.5; }    /* leads */
+  28%, 58%{ cx: -6.3; cy: -3.8; }
+  72%     { cx: -7.5; cy: -3.5; }
+  85%, 100%{ cx: -9; cy: -3; }
+}
+@keyframes obs-cur-eye-r {
+  0%, 5%  { cx: 6; cy: -3; }
+  21%     { cx: 7.2; cy: -3.5; }     /* lags 60ms behind left */
+  31%, 58%{ cx: 8.6; cy: -3.8; }
+  72%     { cx: 7.5; cy: -3.5; }
+  85%, 100%{ cx: 6; cy: -3; }
+}
+
+/* ALERT — Stripe-style notification */
+.obs--alert .obs-body { animation: obs-alert-body 1200ms var(--obs-ease-sharp) both; transform-origin: 50% 50%; }
+.obs--alert .obs-eye { animation: obs-alert-eye 1200ms var(--obs-ease-out) both; }
+/* MD #4.5 — explicit count (2 cycles ≈ 2400ms) вместо infinite,
+   чтобы animation сама останавливалась если _clearExclusive не успел снять
+   .obs--alert (например, page-hidden / tab-blur). */
+.obs--alert .obs-bar-l { animation: obs-alert-bar-l 1200ms var(--obs-ease-sharp) both, obs-alert-bar-pulse 1200ms cubic-bezier(0.55, 0, 0.4, 1) 2 1200ms; }
+.obs--alert .obs-bar-r { animation: obs-alert-bar-r 1200ms var(--obs-ease-sharp) both, obs-alert-bar-pulse 1200ms cubic-bezier(0.55, 0, 0.4, 1) 2 1200ms; }
+.obs--alert .obs-ring { animation: obs-alert-ring 1200ms var(--obs-ease-out) both; }
+@keyframes obs-alert-eye {
+  0%, 5%   { r: 1.8; opacity: 1; }
+  9%       { r: 2.2; opacity: 1; }   /* surprise pop */
+  13%      { r: 1.4; opacity: 1; }
+  16%      { r: 0.4; opacity: 1; }
+  18%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-alert-bar-l {
+  0%, 16% { width: 0; x: -9.5; }
+  19%     { width: 2; x: -11; }
+  22%     { width: 5; x: -12.5; }
+  26%     { width: 9; x: -14; }
+  30%, 100%{ width: 9; x: -14; }
+}
+@keyframes obs-alert-bar-r {
+  0%, 17% { width: 0; x: 5.5; }
+  20%     { width: 2; x: 4; }
+  23%     { width: 5; x: 2.5; }
+  27%     { width: 9; x: 2; }
+  30%, 100%{ width: 9; x: 2; }
+}
+@keyframes obs-alert-body {
+  0%, 22% { transform: translate(0, 0) scale(1, 1); }
+  /* pre-impact tremble */
+  23%     { transform: translate(0.4%, -0.3%) scale(0.99, 1.01); }
+  24%     { transform: translate(0.6%, -0.4%) scale(0.99, 1.01); }
+  /* sharp impact */
+  26%     { transform: translate(-1.8%, 1.2%) scale(1.05, 0.94); }
+  /* spring back */
+  29%     { transform: translate(0.6%, -0.3%) scale(0.97, 1.03); }
+  32%     { transform: translate(-0.2%, 0.1%) scale(1.01, 0.99); }
+  /* emotional inertia — body still tense */
+  40%     { transform: translate(0, 0) scale(1.015, 1.015); }
+  60%     { transform: translate(0, 0) scale(1.012, 1.012); }
+  82%     { transform: translate(0, 0) scale(1.008, 1.008); }
+  92%, 100%{ transform: translate(0, 0) scale(1, 1); }
+}
+/* Asymmetric pulse — fast dim, slow bloom (medical-grade) */
+@keyframes obs-alert-bar-pulse {
+  0%, 33% { opacity: 1; }
+  38%     { opacity: 0.4; }
+  56%     { opacity: 1; }
+  62%     { opacity: 1; }
+  67%     { opacity: 0.5; }
+  85%     { opacity: 1; }
+  100%    { opacity: 1; }
+}
+@keyframes obs-alert-ring {
+  0%, 22% { r: 0; opacity: 0; }
+  26%     { r: 35; opacity: 0.5; }
+  40%     { r: 55; opacity: 0.15; }
+  50%, 100%{ r: 55; opacity: 0; }
+}
+
+/* SUCCESS — bounce + 4 sparks staggered */
+.obs--success .obs-body { animation: obs-success-body 1600ms var(--obs-ease-bounce) both; transform-origin: 50% 100%; }
+.obs--success .obs-eye { animation: obs-success-eye 1600ms var(--obs-ease-spring) both; }
+.obs--success .obs-spark { animation: obs-success-spark 1600ms var(--obs-ease-out) both; }
+.obs--success .obs-spark--2 { animation-delay: 60ms; }
+.obs--success .obs-spark--3 { animation-delay: 120ms; }
+.obs--success .obs-spark--4 { animation-delay: 90ms; }
+@keyframes obs-success-body {
+  0%, 5%   { transform: translateY(0) scale(1); }
+  10%      { transform: translateY(4%) scale(1.03, 0.96); }       /* crouch */
+  20%      { transform: translateY(-9%) scale(0.94, 1.07); }      /* peak */
+  30%      { transform: translateY(2%) scale(1.04, 0.96); }       /* land */
+  37%      { transform: translateY(-3%) scale(1.01, 1.01); }      /* secondary */
+  44%      { transform: translateY(0) scale(0.99, 1.01); }
+  52%      { transform: translateY(-1%) scale(1, 1); }            /* third */
+  60%, 100%{ transform: translateY(0) scale(1); }
+}
+@keyframes obs-success-eye {
+  0%, 15%  { r: 1.8; }
+  20%      { r: 2.2; }                /* eyes pop on peak */
+  30%      { r: 1.9; }
+  44%, 100%{ r: 1.8; }
+}
+@keyframes obs-success-spark {
+  0%, 12% { opacity: 0; transform: scale(0); }
+  18%     { opacity: 1; transform: scale(1); }
+  35%     { opacity: 0; transform: scale(0.6); }
+  100%    { opacity: 0; transform: scale(0); }
+}
+
+/* SURPRISED — defensive shrink → pop wide → frozen tension */
+.obs--surprised .obs-body { animation: obs-sur-body 1600ms cubic-bezier(0.4, 0.05, 0.3, 1) both; transform-origin: 50% 50%; }
+.obs--surprised .obs-eye { animation: obs-sur-eye 1600ms var(--obs-ease-out) both; }
+@keyframes obs-sur-body {
+  0%, 5%   { transform: translate(0, 0) scale(1, 1); }
+  9%       { transform: translate(0, 1%) scale(1.01, 0.99); }    /* tiny pre-flinch */
+  16%      { transform: translate(0, -4%) scale(1.04, 1.05); }    /* recoil up — both axes stretch */
+  22%      { transform: translate(0, -3%) scale(1.03, 1.03); }
+  35%      { transform: translate(0, -1.5%) scale(1.02, 1.02); }  /* tense hold */
+  48%      { transform: translate(0, -1%) scale(1.015, 1.015); }
+  64%      { transform: translate(0, -0.4%) scale(1.005, 1.005); }
+  78%, 100%{ transform: translate(0, 0) scale(1, 1); }
+}
+@keyframes obs-sur-eye {
+  0%, 5%  { r: 1.8; }
+  9%      { r: 0.8; }       /* defensive contraction */
+  11%     { r: 0.5; }
+  14%     { r: 2.6; }       /* sudden pop */
+  18%     { r: 2.8; }       /* peak */
+  22%     { r: 2.4; }
+  35%     { r: 2.2; }       /* slow contract */
+  48%     { r: 2.0; }
+  64%     { r: 1.85; }
+  78%, 100%{ r: 1.8; }
+}
+
+/* AWAKEN — closed lids open with stagger, eyes bloom */
+.obs--awaken .obs-lid-l { animation: obs-awa-lid-l 1200ms var(--obs-ease-sharp) both; }
+.obs--awaken .obs-lid-r { animation: obs-awa-lid-r 1200ms var(--obs-ease-sharp) both; }
+.obs--awaken .obs-eye-l { animation: obs-awa-eye-l 1200ms var(--obs-ease-overshoot) both; }
+.obs--awaken .obs-eye-r { animation: obs-awa-eye-r 1200ms var(--obs-ease-overshoot) both; }
+.obs--awaken .obs-body { animation: obs-awa-body 1200ms var(--obs-ease-soft) both; transform-origin: 50% 50%; }
+@keyframes obs-awa-lid-l {
+  0%, 12% { stroke-dashoffset: 0; opacity: 1; }
+  18%, 100%{ stroke-dashoffset: 9; opacity: 0; }
+}
+@keyframes obs-awa-lid-r {
+  0%, 14% { stroke-dashoffset: 0; opacity: 1; }
+  20%, 100%{ stroke-dashoffset: 9; opacity: 0; }
+}
+@keyframes obs-awa-eye-l {
+  0%, 18% { r: 0; opacity: 0; }
+  26%     { r: 2.4; opacity: 1; }   /* bloom — over-open */
+  32%     { r: 1.6; opacity: 1; }
+  40%, 100%{ r: 1.8; opacity: 1; }
+}
+@keyframes obs-awa-eye-r {
+  0%, 20% { r: 0; opacity: 0; }     /* lags 80ms */
+  28%     { r: 2.4; opacity: 1; }
+  34%     { r: 1.6; opacity: 1; }
+  42%, 100%{ r: 1.8; opacity: 1; }
+}
+@keyframes obs-awa-body {
+  0%, 18% { transform: scale(1); }
+  28%     { transform: scale(1.03); }    /* deeper inhale */
+  40%     { transform: scale(1.01); }
+  52%, 100%{ transform: scale(1); }
+}
+
+/* SETTLE — eyes close, lids draw in, body sinks into rest */
+.obs--settle .obs-eye { animation: obs-sett-eye 1200ms cubic-bezier(0.5, 0, 0.5, 1) both; }
+.obs--settle .obs-lid-l { animation: obs-sett-lid-l 1200ms var(--obs-ease-sharp) both; }
+.obs--settle .obs-lid-r { animation: obs-sett-lid-r 1200ms var(--obs-ease-sharp) both; }
+.obs--settle .obs-body { animation: obs-sett-body 1200ms var(--obs-ease-soft) both; transform-origin: 50% 70%; }
+@keyframes obs-sett-eye {
+  0%, 5%   { r: 1.8; }
+  10%      { r: 1.6; }
+  16%      { r: 1.2; }
+  22%      { r: 0.5; }
+  26%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-sett-lid-l {
+  0%, 18% { stroke-dashoffset: 9; opacity: 0; }
+  28%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-sett-lid-r {
+  0%, 20% { stroke-dashoffset: 9; opacity: 0; }   /* right lid lags */
+  30%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-sett-body {
+  0%, 5%  { transform: scale(1) rotate(0); }
+  20%     { transform: scale(0.99) rotate(0.3deg); }
+  35%     { transform: scale(1.025) rotate(0.5deg); }   /* deep breath */
+  55%     { transform: scale(0.99) rotate(0.5deg); }    /* exhale + lean held */
+  75%     { transform: scale(1.02) rotate(0.4deg); }    /* sleep breath */
+  100%    { transform: scale(1) rotate(0); }
+}
+
+/* SQUINT — eyes dilate before contract, bars grow inward */
+.obs--squint .obs-eye { animation: obs-sq-eye 800ms var(--obs-ease-out) both; }
+.obs--squint .obs-bar-l { animation: obs-sq-bar-l 800ms var(--obs-ease-sharp) both; }
+.obs--squint .obs-bar-r { animation: obs-sq-bar-r 800ms var(--obs-ease-sharp) both; }
+@keyframes obs-sq-eye {
+  0%, 5%  { r: 1.8; }
+  9%      { r: 2.1; }                 /* dilation — taking in info */
+  13%     { r: 1.4; }
+  17%     { r: 0.4; }
+  20%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-sq-bar-l {
+  0%, 18% { width: 0; x: -9.5; }
+  22%     { width: 3; x: -11.5; }
+  26%     { width: 6; x: -13; }
+  30%, 100%{ width: 9; x: -14; }
+}
+@keyframes obs-sq-bar-r {
+  0%, 19% { width: 0; x: 5.5; }
+  23%     { width: 3; x: 3.5; }
+  27%     { width: 6; x: 2.5; }
+  31%, 100%{ width: 9; x: 2; }
+}
+
+/* WINK — right eye narrows + closes + blooms back, head tilts to wink side */
+.obs--wink .obs-body { animation: obs-wink-body 1100ms cubic-bezier(0.4, 0, 0.3, 1) both; transform-origin: 50% 50%; }
+.obs--wink .obs-eye-l { animation: obs-wink-eye-l 1100ms var(--obs-ease-soft) both; }
+.obs--wink .obs-eye-r { animation: obs-wink-eye-r 1100ms cubic-bezier(0.34, 1.3, 0.64, 1) both; }
+.obs--wink .obs-lid-r { animation: obs-wink-lid-r 1100ms cubic-bezier(0.4, 0, 0.3, 1) both; }
+@keyframes obs-wink-body {
+  0%, 5%  { transform: rotate(0); }
+  15%     { transform: rotate(2deg); }
+  24%     { transform: rotate(2deg); }
+  35%     { transform: rotate(0.5deg); }
+  44%, 100%{ transform: rotate(0); }
+}
+@keyframes obs-wink-eye-l {
+  0%, 15% { r: 1.8; }
+  20%     { r: 1.6; }                 /* sympathetic narrow */
+  30%     { r: 1.7; }
+  44%, 100%{ r: 1.8; }
+}
+@keyframes obs-wink-eye-r {
+  0%, 5%  { r: 1.8; cy: -3; }
+  9%      { r: 1.5; cy: -3.3; }       /* prep — narrow + lift */
+  12%     { r: 1.0; cy: -3.5; }
+  18%     { r: 0; cy: -3.5; }         /* fully closed */
+  24%     { r: 0; cy: -3.5; }         /* hold */
+  28%     { r: 1.4; cy: -3.2; }       /* opening */
+  32%     { r: 2.2; cy: -3; }         /* bloom */
+  38%     { r: 1.7; cy: -3; }
+  44%, 100%{ r: 1.8; cy: -3; }
+}
+@keyframes obs-wink-lid-r {
+  0%, 12% { stroke-dashoffset: 9; opacity: 0; }
+  15%     { stroke-dashoffset: 5; opacity: 1; }
+  18%, 24%{ stroke-dashoffset: 0; opacity: 1; }
+  28%     { stroke-dashoffset: 5; opacity: 1; }
+  32%, 100%{ stroke-dashoffset: 9; opacity: 0; }
+}
+
+/* CONCERNED — eyes drop and converge, brows materialize asymmetrically */
+.obs--concerned .obs-eye-l { animation: obs-conc-eye-l 800ms var(--obs-ease-soft) both; }
+.obs--concerned .obs-eye-r { animation: obs-conc-eye-r 800ms var(--obs-ease-soft) both; }
+.obs--concerned .obs-brow-l { animation: obs-conc-brow-l 800ms var(--obs-ease-sharp) both; }
+.obs--concerned .obs-brow-r { animation: obs-conc-brow-r 800ms var(--obs-ease-sharp) both; }
+.obs--concerned .obs-body { animation: obs-conc-body 800ms var(--obs-ease-soft) both; transform-origin: 50% 50%; }
+@keyframes obs-conc-eye-l {
+  0%, 5%  { cx: -9; cy: -3; }
+  20%     { cx: -8; cy: -1; }    /* drop + converge */
+  100%    { cx: -8; cy: -1; }
+}
+@keyframes obs-conc-eye-r {
+  0%, 5%  { cx: 6; cy: -3; }
+  22%     { cx: 5; cy: -1; }
+  100%    { cx: 5; cy: -1; }
+}
+@keyframes obs-conc-brow-l {
+  0%, 8%  { stroke-dashoffset: 11; opacity: 0; }
+  22%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-conc-brow-r {
+  0%, 10% { stroke-dashoffset: 11; opacity: 0; }   /* lags 80ms */
+  24%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-conc-body {
+  0%, 25% { transform: translateY(0) scale(1); }
+  50%     { transform: translateY(0.5%) scale(1.025); }    /* heavy breath */
+  80%, 100%{ transform: translateY(0) scale(1); }
+}
+
+
+/* ============================================================================
+   5. TIER 1 — SIGNATURE (большие переходы состояний)
+   ============================================================================ */
+
+/* EMERGE — 6 фаз сборки кристалла из света. 2400ms. */
+.obs--emerge .obs-blade    { animation: obs-emerge-blade 2400ms var(--obs-ease-out) both; }
+.obs--emerge .obs-edge-l   { animation: obs-emerge-edge-l 2400ms var(--obs-ease-out) both; }
+.obs--emerge .obs-edge-r   { animation: obs-emerge-edge-r 2400ms var(--obs-ease-out) both; }
+.obs--emerge .obs-facet-tl { animation: obs-emerge-facet-tl 2400ms var(--obs-ease-spring) both; transform-origin: 50% 50%; }
+.obs--emerge .obs-facet-tr { animation: obs-emerge-facet-tr 2400ms var(--obs-ease-spring) both; transform-origin: 50% 50%; }
+.obs--emerge .obs-facet-bl { animation: obs-emerge-facet-bl 2400ms var(--obs-ease-spring) both; transform-origin: 50% 50%; }
+.obs--emerge .obs-facet-br { animation: obs-emerge-facet-br 2400ms var(--obs-ease-spring) both; transform-origin: 50% 50%; }
+.obs--emerge .obs-body     { animation: obs-emerge-body 2400ms var(--obs-ease-overshoot) both; transform-origin: 50% 50%; }
+.obs--emerge .obs-eye      { animation: obs-emerge-eye 2400ms var(--obs-ease-overshoot) both; }
+.obs--emerge .obs-ring     { animation: obs-emerge-ring 2400ms var(--obs-ease-out) both; }
+@keyframes obs-emerge-blade {
+  0%   { opacity: 0; transform: scaleY(0); }
+  4%   { opacity: 1; transform: scaleY(0.1); }
+  10%  { opacity: 1; transform: scaleY(1); }
+  20%  { opacity: 0.4; transform: scaleY(1); }
+  100% { opacity: 0; transform: scaleY(1); }
+}
+@keyframes obs-emerge-edge-l {
+  0%, 8%  { opacity: 0; transform: translateX(0) rotate(0); }
+  18%     { opacity: 1; transform: translateX(-12px) rotate(-15deg); }
+  28%, 100%{ opacity: 0; transform: translateX(-22px) rotate(-25deg); }
+}
+@keyframes obs-emerge-edge-r {
+  0%, 8%  { opacity: 0; transform: translateX(0) rotate(0); }
+  18%     { opacity: 1; transform: translateX(12px) rotate(15deg); }
+  28%, 100%{ opacity: 0; transform: translateX(22px) rotate(25deg); }
+}
+@keyframes obs-emerge-facet-tl {
+  0%, 16% { opacity: 0; transform: translate(-30px, -25px) scale(0.5); }
+  30%, 100%{ opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes obs-emerge-facet-tr {
+  0%, 16% { opacity: 0; transform: translate(30px, -25px) scale(0.5); }
+  32%, 100%{ opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes obs-emerge-facet-bl {
+  0%, 16% { opacity: 0; transform: translate(-25px, 30px) scale(0.5); }
+  34%, 100%{ opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes obs-emerge-facet-br {
+  0%, 16% { opacity: 0; transform: translate(28px, 28px) scale(0.5); }
+  36%, 100%{ opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes obs-emerge-body {
+  0%, 28% { opacity: 0; transform: scale(0.85); }
+  38%     { opacity: 1; transform: scale(1.06); }
+  44%     { transform: scale(0.98); }
+  50%, 100%{ opacity: 1; transform: scale(1); }
+}
+@keyframes obs-emerge-eye {
+  0%, 38% { r: 0; opacity: 0; }
+  46%     { r: 2.4; opacity: 1; }
+  52%     { r: 1.8; opacity: 1; }
+  100%    { r: 1.8; opacity: 1; }
+}
+@keyframes obs-emerge-ring {
+  0%, 38% { r: 8; opacity: 0; }
+  46%     { r: 50; opacity: 0.4; }
+  60%, 100%{ r: 65; opacity: 0; }
+}
+
+/* VANISH — зеркало Emerge, 2800ms */
+.obs--vanish .obs-eye     { animation: obs-vanish-eye 2800ms var(--obs-ease-soft) both; }
+.obs--vanish .obs-ring    { animation: obs-vanish-ring 2800ms ease-in both; }
+.obs--vanish .obs-body    { animation: obs-vanish-body 2800ms cubic-bezier(0.6, 0, 0.4, 0.5) both; transform-origin: 50% 50%; }
+.obs--vanish .obs-facet-tl{ animation: obs-vanish-facet-tl 2800ms cubic-bezier(0.5, 0, 0.7, 0.5) both; transform-origin: 50% 50%; }
+.obs--vanish .obs-facet-tr{ animation: obs-vanish-facet-tr 2800ms cubic-bezier(0.5, 0, 0.7, 0.5) both; transform-origin: 50% 50%; }
+.obs--vanish .obs-blade   { animation: obs-vanish-blade 2800ms cubic-bezier(0.4, 0, 0.6, 1) both; transform-origin: 50% 50%; }
+@keyframes obs-vanish-eye {
+  0%, 8%   { r: 1.8; opacity: 1; }
+  16%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-vanish-ring {
+  0%, 12% { r: 65; opacity: 0; }
+  18%     { r: 50; opacity: 0.4; }
+  26%     { r: 30; opacity: 0.6; }
+  34%, 100%{ r: 8; opacity: 0; }
+}
+@keyframes obs-vanish-body {
+  0%, 18%  { transform: scale(1); opacity: 1; }
+  24%      { transform: scale(0.96); opacity: 1; }       /* squeeze prep */
+  30%      { transform: scale(1.04); opacity: 1; }       /* last gasp */
+  46%      { transform: scale(0.3); opacity: 0.4; }
+  54%, 100%{ transform: scale(0); opacity: 0; }
+}
+@keyframes obs-vanish-facet-tl {
+  0%, 42% { transform: translate(0, 0) scale(1); opacity: 0; }
+  48%     { transform: translate(-8px, -7px) scale(0.7); opacity: 0.6; }
+  60%, 100%{ transform: translate(-30px, -25px) scale(0); opacity: 0; }
+}
+@keyframes obs-vanish-facet-tr {
+  0%, 42% { transform: translate(0, 0) scale(1); opacity: 0; }
+  48%     { transform: translate(8px, -7px) scale(0.7); opacity: 0.6; }
+  62%, 100%{ transform: translate(30px, -25px) scale(0); opacity: 0; }
+}
+@keyframes obs-vanish-blade {
+  0%, 62% { transform: scaleY(0); opacity: 0; }
+  68%     { transform: scaleY(1); opacity: 0.8; }
+  74%     { transform: scaleY(1); opacity: 1; }
+  82%     { transform: scaleY(0.4); opacity: 0.5; }
+  88%, 100%{ transform: scaleY(0); opacity: 0; }
+}
+
+/* HIBERNATE — погружение в глубокий сон с проявлением звезды Призмы. 5000ms loop. */
+.obs--hibernate .obs-body  { animation: obs-hib-body 5000ms var(--obs-ease-soft) infinite; transform-origin: 50% 80%; }
+.obs--hibernate .obs-eye   { animation: obs-hib-eye 5000ms cubic-bezier(0.5, 0, 0.5, 1) infinite; }
+.obs--hibernate .obs-lid-l { animation: obs-hib-lid-l 5000ms var(--obs-ease-sharp) infinite; }
+.obs--hibernate .obs-lid-r { animation: obs-hib-lid-r 5000ms var(--obs-ease-sharp) infinite; }
+.obs--hibernate .obs-aura  { animation: obs-hib-aura 5000ms ease-out infinite; }
+.obs--hibernate .obs-inner-star { animation: obs-hib-star-glow 5000ms var(--obs-ease-soft) infinite; }
+@keyframes obs-hib-body {
+  0%, 5%  { transform: translateY(0) rotate(0) scale(1); }
+  20%     { transform: translateY(0.5%) rotate(0.3deg) scale(1.005); }
+  45%     { transform: translateY(1%) rotate(0.6deg) scale(1.04); }      /* deep inhale */
+  68%     { transform: translateY(2%) rotate(0.8deg) scale(0.99); }       /* exhale, sink */
+  82%     { transform: translateY(1.8%) rotate(0.7deg) scale(1.02); }
+  100%    { transform: translateY(2%) rotate(0.8deg) scale(1); }
+}
+@keyframes obs-hib-eye {
+  0%, 5%  { r: 1.8; opacity: 1; }
+  12%     { r: 1.5; opacity: 1; }
+  20%     { r: 1.0; opacity: 1; }
+  28%     { r: 0.4; opacity: 1; }
+  34%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-hib-lid-l {
+  0%, 22% { stroke-dashoffset: 9; opacity: 0; }
+  36%, 100%{ stroke-dashoffset: 0; opacity: 0.8; }
+}
+@keyframes obs-hib-lid-r {
+  0%, 25% { stroke-dashoffset: 9; opacity: 0; }
+  39%, 100%{ stroke-dashoffset: 0; opacity: 0.8; }
+}
+@keyframes obs-hib-aura {
+  0%, 40% { r: 42; opacity: 0; }
+  60%     { r: 48; opacity: 0.18; }
+  85%     { r: 56; opacity: 0.12; }
+  100%    { r: 60; opacity: 0; }
+}
+@keyframes obs-hib-star-glow {
+  0%, 40% { opacity: 0; }
+  60%     { opacity: 0.08; }
+  78%     { opacity: 0.18; }
+  92%, 100%{ opacity: 0.22; }
+}
+
+
+/* ============================================================================
+   6. LIVING SHAPE — alternative для chat/streaming контекстов
+   Применять как отдельный режим, не комбинировать с Tier 1 одновременно.
+   Совместим с Tier 2 (см. obs--alive ниже).
+   ============================================================================ */
+
+/* THINKING (Living) — body sway 3-axis + edge shimmer chase */
+.obs--ls-thinking .obs-body { animation: obs-ls-think-body 3200ms var(--obs-ease-soft) infinite; transform-origin: 50% 50%; }
+.obs--ls-thinking .obs-edge-1 { animation: obs-ls-think-e1 3200ms var(--obs-ease-soft) infinite; }
+.obs--ls-thinking .obs-edge-2 { animation: obs-ls-think-e2 3200ms var(--obs-ease-soft) infinite; }
+.obs--ls-thinking .obs-edge-3 { animation: obs-ls-think-e3 3200ms var(--obs-ease-soft) infinite; }
+@keyframes obs-ls-think-body {
+  0%   { transform: translate(0, 0) rotate(0) scale(1); }
+  20%  { transform: translate(-1%, -0.6%) rotate(-1.2deg) scale(1.005); }
+  40%  { transform: translate(0.6%, -1.2%) rotate(0.8deg) scale(1.015); }
+  60%  { transform: translate(1%, -0.3%) rotate(1deg) scale(1.01); }
+  80%  { transform: translate(-0.4%, 0.5%) rotate(-0.5deg) scale(0.998); }
+  100% { transform: translate(0, 0) rotate(0) scale(1); }
+}
+@keyframes obs-ls-think-e1 { 0%, 100% { opacity: 0.18; } 25% { opacity: 0.55; } }
+@keyframes obs-ls-think-e2 { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.50; } }
+@keyframes obs-ls-think-e3 { 0%, 100% { opacity: 0.08; } 75% { opacity: 0.45; } }
+
+/* STREAMING (Living) — undulation + 4 particles in 2 waves */
+.obs--ls-streaming .obs-body { animation: obs-ls-stream-body 1600ms cubic-bezier(0.45, 0, 0.55, 1) infinite; transform-origin: 30% 50%; }
+.obs--ls-streaming .obs-emit-1 { animation: obs-ls-emit-1 1600ms var(--obs-ease-sharp) infinite; }
+.obs--ls-streaming .obs-emit-2 { animation: obs-ls-emit-2 1600ms var(--obs-ease-sharp) infinite; }
+.obs--ls-streaming .obs-emit-3 { animation: obs-ls-emit-3 1600ms var(--obs-ease-sharp) infinite; }
+.obs--ls-streaming .obs-emit-4 { animation: obs-ls-emit-4 1600ms var(--obs-ease-sharp) infinite; }
+/* V22 mascot-pass (art-director audit) — boost микро-features для small
+   контекстов (≤32px), где emotion-bars/concerned-brows/surprise-eyes
+   попадают в sub-pixel зону и нечитаемы. Применяется только к маскотам
+   с классом .obs--sm — обычные размеры (≥40px) используют стандартные
+   значения из спрайта.
+   SVG-attrs (r, stroke-width, height) стилизуются через CSS в современных
+   браузерах (SVG2 spec). На старых — silent no-op, fallback на дефолтные.
+
+   На 28px глаз r=1.8 SVG-units → 0.84 real-px. С r=2.4 → 1.12 real-px,
+   эмоция читается. */
+.obs--sm circle.obs-eye-l,
+.obs--sm circle.obs-eye-r { r: 2.4; }
+/* Bars/brows для concerned/alert state'ов; если элементов нет — no-op. */
+.obs--sm .obs-bar-l,
+.obs--sm .obs-bar-r { stroke-width: 2.6; }
+.obs--sm .obs-brow-l,
+.obs--sm .obs-brow-r { stroke-width: 2.0; }
+
+/* MD #4.6 — .obs--md size-class для 33-48px контейнеров (per-message avatar
+   40px, toast 40px, tour 44px). Между «small» (≤32px) и «default» (≥48px) —
+   concerned brows тонкие, eye r=1.8 sub-px на 40px canvas. Промежуточные
+   значения: r=2.0 (между sm 2.4 и default 1.8), bar height/stroke=1.9,
+   brow stroke 1.5.
+   TODO (next mascot-pass): применить класс к 3 callsite'ам:
+     • per-message avatar (.msg-avatar) — styles.css:5511
+     • toast mascot — uxKit.js
+     • tour mascot — uxKit.js
+   Сейчас НЕ применять mass-application — это может ломать визуально, нужен
+   per-context QA. Класс готов к использованию когда понадобится. */
+.obs--md circle.obs-eye-l,
+.obs--md circle.obs-eye-r { r: 2.0; }
+.obs--md .obs-bar-l,
+.obs--md .obs-bar-r { stroke-width: 1.9; }
+.obs--md .obs-brow-l,
+.obs--md .obs-brow-r { stroke-width: 1.5; }
+/* Усиленный breathe для small — на 28px scale 1.04 → 1.1px смещения,
+   на грани плацебо. 1.07 даёт 1.96px, читается как «живой». */
+.obs--sm.obs--breathe svg {
+  animation-name: obs-breathe-sm;
+}
+@keyframes obs-breathe-sm {
+  0%, 100% { transform: scale(1); }
+  35%      { transform: scale(1.07); }
+}
+
+/* MD-4 fix — particles на small (28px chat-avatar) вылетали к cx=54..58 SVG-
+   units → 25..28 real-px от центра 28px-avatar. С overflow:visible они
+   попадали на текст соседних bubble. Override ÷2 amplitude: cx max ≈ 26
+   units → 12 real-px на 28px canvas = частицы в пределах avatar+small
+   gap. */
+.obs--sm.obs--ls-streaming .obs-emit-1 { animation-name: obs-ls-emit-1-sm; }
+.obs--sm.obs--ls-streaming .obs-emit-2 { animation-name: obs-ls-emit-2-sm; }
+.obs--sm.obs--ls-streaming .obs-emit-3 { animation-name: obs-ls-emit-3-sm; }
+.obs--sm.obs--ls-streaming .obs-emit-4 { animation-name: obs-ls-emit-4-sm; }
+@keyframes obs-ls-emit-1-sm {
+  0%   { cx: 12; cy: -10; opacity: 0; r: 0; }
+  8%   { cx: 16; cy: -9; opacity: 1; r: 1.2; }
+  35%  { cx: 22; cy: -7; opacity: 0.8; r: 0.9; }
+  70%  { cx: 26; cy: -5; opacity: 0.3; r: 0.5; }
+  95%, 100% { opacity: 0; }
+}
+@keyframes obs-ls-emit-2-sm {
+  0%, 5% { cx: 16; cy: 0; opacity: 0; r: 0; }
+  15%    { cx: 18; cy: 1; opacity: 1; r: 1.1; }
+  45%    { cx: 24; cy: 2; opacity: 0.7; r: 0.8; }
+  80%    { cx: 28; cy: 3; opacity: 0.2; r: 0.4; }
+  100%   { opacity: 0; }
+}
+@keyframes obs-ls-emit-3-sm {
+  0%, 40% { cx: 12; cy: -10; opacity: 0; r: 0; }
+  48%     { cx: 16; cy: -9; opacity: 1; r: 1.2; }
+  75%     { cx: 22; cy: -7; opacity: 0.8; r: 0.9; }
+  100%    { cx: 26; cy: -5; opacity: 0; r: 0.5; }
+}
+@keyframes obs-ls-emit-4-sm {
+  0%, 50% { cx: 12; cy: 10; opacity: 0; r: 0; }
+  60%     { cx: 14; cy: 10; opacity: 1; r: 1; }
+  85%     { cx: 20; cy: 9; opacity: 0.6; r: 0.7; }
+  100%    { cx: 25; cy: 8; opacity: 0; r: 0.3; }
+}
+
+/* mM6 fix (design-03 audit) — на 32px (chat-avatar) physics §13.6 теряется:
+   skewY 1.5° даёт ≤0.5px смещения. Усиливаем amplitude в ~2× для small. */
+.obs--sm.obs--ls-streaming .obs-body { animation-name: obs-ls-stream-body-sm; }
+@keyframes obs-ls-stream-body-sm {
+  0%   { transform: scale(1, 1) skewY(0) translateX(0); }
+  20%  { transform: scale(1.08, 0.94) skewY(-3deg) translateX(-1%); }
+  40%  { transform: scale(0.97, 1.04) skewY(1deg) translateX(0.6%); }
+  60%  { transform: scale(1.08, 0.94) skewY(-3deg) translateX(-1%); }
+  80%  { transform: scale(0.97, 1.04) skewY(1deg) translateX(0.6%); }
+  100% { transform: scale(1, 1) skewY(0) translateX(0); }
+}
+@keyframes obs-ls-stream-body {
+  0%   { transform: scale(1, 1) skewY(0) translateX(0); }
+  20%  { transform: scale(1.04, 0.97) skewY(-1.5deg) translateX(-0.5%); }
+  40%  { transform: scale(0.99, 1.02) skewY(0.5deg) translateX(0.3%); }
+  60%  { transform: scale(1.04, 0.97) skewY(-1.5deg) translateX(-0.5%); }
+  80%  { transform: scale(0.99, 1.02) skewY(0.5deg) translateX(0.3%); }
+  100% { transform: scale(1, 1) skewY(0) translateX(0); }
+}
+@keyframes obs-ls-emit-1 {
+  0%   { cx: 18; cy: -15; opacity: 0; r: 0; }
+  8%   { cx: 24; cy: -14; opacity: 1; r: 1.6; }
+  35%  { cx: 38; cy: -10; opacity: 0.8; r: 1.3; }
+  70%  { cx: 54; cy: -7; opacity: 0.3; r: 0.7; }
+  95%, 100% { opacity: 0; }
+}
+@keyframes obs-ls-emit-2 {
+  0%, 5% { cx: 24; cy: 0; opacity: 0; r: 0; }
+  15%    { cx: 28; cy: 1; opacity: 1; r: 1.5; }
+  45%    { cx: 42; cy: 3; opacity: 0.7; r: 1.1; }
+  80%    { cx: 58; cy: 5; opacity: 0.2; r: 0.5; }
+  100%   { opacity: 0; }
+}
+@keyframes obs-ls-emit-3 {
+  0%, 40% { cx: 18; cy: -15; opacity: 0; r: 0; }
+  48%     { cx: 24; cy: -14; opacity: 1; r: 1.6; }
+  75%     { cx: 38; cy: -10; opacity: 0.8; r: 1.3; }
+  100%    { cx: 54; cy: -7; opacity: 0; r: 0.7; }
+}
+@keyframes obs-ls-emit-4 {
+  0%, 50% { cx: 18; cy: 15; opacity: 0; r: 0; }
+  60%     { cx: 22; cy: 15; opacity: 1; r: 1.4; }
+  85%     { cx: 36; cy: 14; opacity: 0.6; r: 1; }
+  100%    { cx: 50; cy: 13; opacity: 0; r: 0.4; }
+}
+
+/* COMPLETE (Living) — particles return + satisfied stretch */
+.obs--ls-complete .obs-body { animation: obs-ls-done-body 1600ms var(--obs-ease-spring) both; transform-origin: 50% 50%; }
+.obs--ls-complete .obs-return-1 { animation: obs-ls-done-r1 1600ms var(--obs-ease-soft) both; }
+.obs--ls-complete .obs-return-2 { animation: obs-ls-done-r2 1600ms var(--obs-ease-soft) both; }
+.obs--ls-complete .obs-eye { animation: obs-ls-done-eye 1600ms cubic-bezier(0.34, 1.3, 0.64, 1) both; }
+@keyframes obs-ls-done-body {
+  0%   { transform: scale(0.96, 1.02) skewY(-0.5deg) translateX(-1%); }
+  18%  { transform: scale(1.06, 1.03) skewY(0.3deg) translateX(0); }
+  35%  { transform: scale(1.02, 0.99) skewY(0); }
+  50%  { transform: scale(0.99, 1.01); }
+  65%  { transform: scale(1.01, 1); }
+  80%, 100% { transform: scale(1); }
+}
+@keyframes obs-ls-done-r1 {
+  0%   { cx: 54; cy: -7; opacity: 1; r: 0.7; }
+  35%  { cx: 30; cy: -5; opacity: 1; r: 1.4; }
+  70%  { cx: 8; cy: -4; opacity: 0.7; r: 1.2; }
+  90%, 100%{ cx: 0; cy: -3; opacity: 0; r: 0; }
+}
+@keyframes obs-ls-done-r2 {
+  0%, 5% { cx: 50; cy: 5; opacity: 1; r: 0.6; }
+  40%    { cx: 28; cy: 3; opacity: 1; r: 1.3; }
+  72%    { cx: 8; cy: 0; opacity: 0.6; r: 1; }
+  92%    { cx: 0; cy: -3; opacity: 0; r: 0; }
+}
+@keyframes obs-ls-done-eye {
+  0%   { r: 1.8; }
+  18%  { r: 2.1; }
+  35%  { r: 1.7; }
+  50%  { r: 1.85; }
+  100% { r: 1.8; }
+}
+
+/* STOP (Living) — body freeze mid-undulation, particles freeze in flight */
+.obs--ls-stop .obs-body { animation: obs-ls-stop-body 2400ms var(--obs-ease-sharp) both; transform-origin: 30% 50%; }
+.obs--ls-stop .obs-emit-1 { animation: obs-ls-stop-p1 2400ms var(--obs-ease-sharp) both; }
+.obs--ls-stop .obs-emit-2 { animation: obs-ls-stop-p2 2400ms var(--obs-ease-sharp) both; }
+.obs--ls-stop .obs-eye { animation: obs-ls-stop-eye 2400ms ease-out both; }
+@keyframes obs-ls-stop-body {
+  0%, 5%  { transform: scale(1, 1) skewY(0) translateX(0); }
+  12%     { transform: scale(1.04, 0.97) skewY(-1.5deg) translateX(-0.5%); }
+  16%     { transform: scale(1.05, 0.96) skewY(-2deg) translateX(-1%); }
+  35%     { transform: scale(1.04, 0.97) skewY(-1.7deg) translateX(-0.8%); }
+  60%     { transform: scale(1.01, 0.99) skewY(-0.7deg) translateX(-0.3%); }
+  85%, 100%{ transform: scale(1) skewY(0) translateX(0); }
+}
+@keyframes obs-ls-stop-p1 {
+  0%   { cx: 18; cy: -15; opacity: 0; r: 0; }
+  8%   { cx: 24; cy: -14; opacity: 1; r: 1.6; }
+  16%  { cx: 32; cy: -12; opacity: 1; r: 1.5; }
+  100% { cx: 32; cy: -12; opacity: 0.3; r: 1.5; }
+}
+@keyframes obs-ls-stop-p2 {
+  0%, 5% { cx: 24; cy: 0; opacity: 0; r: 0; }
+  14%    { cx: 28; cy: 1; opacity: 1; r: 1.4; }
+  18%    { cx: 34; cy: 2; opacity: 1; r: 1.4; }
+  100%   { cx: 34; cy: 2; opacity: 0.25; r: 1.4; }
+}
+@keyframes obs-ls-stop-eye {
+  0%, 12% { r: 1.8; }
+  16%     { r: 2.2; }
+  22%, 100%{ r: 1.6; }
+}
+
+/* ERROR (Living) — broken rhythm + concerned brows materialize after */
+.obs--ls-error .obs-body { animation: obs-ls-err-body 2400ms var(--obs-ease-out) both; transform-origin: 50% 50%; }
+.obs--ls-error .obs-emit-1 { animation: obs-ls-err-p1 2400ms var(--obs-ease-out) both; }
+.obs--ls-error .obs-emit-2 { animation: obs-ls-err-p2 2400ms var(--obs-ease-out) both; }
+.obs--ls-error .obs-brow-l { animation: obs-ls-err-brow-l 2400ms var(--obs-ease-sharp) both; }
+.obs--ls-error .obs-brow-r { animation: obs-ls-err-brow-r 2400ms var(--obs-ease-sharp) both; }
+.obs--ls-error .obs-eye { animation: obs-ls-err-eye 2400ms ease-out both; }
+@keyframes obs-ls-err-body {
+  0%, 100% { transform: scale(1) skewY(0) translateX(0); }
+  10%      { transform: scale(1.04, 0.97) skewY(-1.5deg) translateX(-0.5%); }
+  18%      { transform: scale(0.97, 1.04) skewY(2deg) translateX(0.8%); }
+  26%      { transform: scale(1.05, 0.96) skewY(-2.5deg) translateX(-1%); }
+  34%      { transform: scale(0.98, 1.02) skewY(1deg) translateX(0.4%); }
+  44%      { transform: scale(1.02, 0.99) skewY(-0.6deg) translateX(-0.2%); }
+  55%      { transform: scale(1) skewY(0) translateX(0); }
+}
+@keyframes obs-ls-err-p1 {
+  0%   { cx: 18; cy: -15; opacity: 0; r: 0; }
+  10%  { cx: 25; cy: -14; opacity: 1; r: 1.5; }
+  18%  { cx: 14; cy: -8; opacity: 0.6; r: 1.2; }
+  28%  { cx: 30; cy: -18; opacity: 0.4; r: 0.8; }
+  40%  { cx: 20; cy: -12; opacity: 0.2; r: 0.5; }
+  55%, 100%{ opacity: 0; }
+}
+@keyframes obs-ls-err-p2 {
+  0%, 8% { cx: 24; cy: 0; opacity: 0; r: 0; }
+  18%    { cx: 18; cy: 5; opacity: 0.8; r: 1.3; }
+  28%    { cx: 32; cy: -3; opacity: 0.4; r: 0.9; }
+  40%, 100% { opacity: 0; }
+}
+@keyframes obs-ls-err-brow-l {
+  0%, 55% { stroke-dashoffset: 11; opacity: 0; }
+  72%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-ls-err-brow-r {
+  0%, 58% { stroke-dashoffset: 11; opacity: 0; }
+  75%, 100%{ stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes obs-ls-err-eye {
+  0%, 8%  { r: 1.8; }
+  18%     { r: 1.5; }
+  28%     { r: 1.3; }
+  44%     { r: 1.5; }
+  60%, 100%{ r: 1.6; }
+}
+
+/* TOOL-USE (Living) — body leans toward tool socket */
+.obs--ls-tool .obs-body { animation: obs-ls-tool-body 2800ms var(--obs-ease-out) both; transform-origin: 50% 100%; }
+.obs--ls-tool .obs-particle { animation: obs-ls-tool-particle 2800ms var(--obs-ease-out) both; }
+.obs--ls-tool .obs-socket { animation: obs-ls-tool-socket 2800ms var(--obs-ease-soft) both; }
+.obs--ls-tool .obs-eye-l { animation: obs-ls-tool-eye-l 2800ms var(--obs-ease-out) both; }
+.obs--ls-tool .obs-eye-r { animation: obs-ls-tool-eye-r 2800ms var(--obs-ease-out) both; }
+@keyframes obs-ls-tool-body {
+  0%, 8%  { transform: rotate(0) translate(0, 0) scale(1); }
+  20%     { transform: rotate(-3deg) translate(-1%, -0.5%) scale(1.005); }
+  35%     { transform: rotate(-7deg) translate(-2.5%, -2%) scale(1.015); }
+  55%     { transform: rotate(-7deg) translate(-2.5%, -2%) scale(1.012); }
+  72%     { transform: rotate(-3deg) translate(-1%, -0.5%) scale(1.005); }
+  85%     { transform: rotate(1deg) translate(0.3%, 0) scale(1.005); }
+  95%, 100%{ transform: rotate(0) translate(0, 0) scale(1); }
+}
+@keyframes obs-ls-tool-particle {
+  0%, 8%  { cx: 0; cy: -3; opacity: 0; r: 0; }
+  18%     { cx: -7; cy: -13; opacity: 1; r: 1.5; }
+  32%     { cx: -22; cy: -25; opacity: 1; r: 1.6; }
+  45%     { cx: -25; cy: -28; opacity: 1; r: 2.2; }
+  55%     { cx: -25; cy: -28; opacity: 1; r: 2.6; }
+  68%     { cx: -15; cy: -16; opacity: 1; r: 1.8; }
+  82%     { cx: -3; cy: -5; opacity: 1; r: 1.4; }
+  92%, 100%{ cx: 0; cy: -3; opacity: 0; r: 0; }
+}
+@keyframes obs-ls-tool-socket {
+  0%, 30% { r: 0; opacity: 0; }
+  42%     { r: 5; opacity: 0.4; }
+  55%     { r: 6; opacity: 0.6; }
+  70%     { r: 5; opacity: 0.4; }
+  85%, 100%{ r: 0; opacity: 0; }
+}
+@keyframes obs-ls-tool-eye-l {
+  0%, 18% { cx: -9; cy: -3; }
+  35%, 68%{ cx: -11; cy: -5; }
+  85%, 100%{ cx: -9; cy: -3; }
+}
+@keyframes obs-ls-tool-eye-r {
+  0%, 18% { cx: 6; cy: -3; }
+  35%, 68%{ cx: 4; cy: -5; }
+  85%, 100%{ cx: 6; cy: -3; }
+}
+
+/* MOVE / TOUR (Living) — undulating swim with overshoot */
+.obs--ls-move .obs-body-x { animation: obs-ls-move-x 4000ms var(--obs-ease-out) both; }
+.obs--ls-move .obs-body-wave { animation: obs-ls-move-wave 4000ms var(--obs-ease-soft) both; transform-origin: 50% 50%; }
+.obs--ls-move .obs-trail-1 { animation: obs-ls-move-trail 4000ms ease-out both; }
+.obs--ls-move .obs-trail-2 { animation: obs-ls-move-trail 4000ms ease-out both; animation-delay: 150ms; }
+.obs--ls-move .obs-trail-3 { animation: obs-ls-move-trail 4000ms ease-out both; animation-delay: 300ms; }
+@keyframes obs-ls-move-x {
+  0%, 8%  { transform: translateX(0); }
+  15%     { transform: translateX(-2%); }
+  25%     { transform: translateX(15%); }
+  40%     { transform: translateX(35%); }
+  52%     { transform: translateX(48%); }   /* overshoot */
+  60%, 78%{ transform: translateX(43%); }   /* settle */
+  90%     { transform: translateX(15%); }
+  100%    { transform: translateX(0); }
+}
+@keyframes obs-ls-move-wave {
+  0%, 8%  { transform: skewY(0) scale(1); }
+  20%     { transform: skewY(-2deg) scale(1.04, 0.97); }
+  30%     { transform: skewY(2deg) scale(0.97, 1.04); }
+  40%     { transform: skewY(-2deg) scale(1.04, 0.97); }
+  50%     { transform: skewY(1deg) scale(1); }
+  60%, 78%{ transform: skewY(0) scale(1); }
+  85%     { transform: skewY(-1deg) scale(1.02, 0.99); }
+  100%    { transform: skewY(0) scale(1); }
+}
+@keyframes obs-ls-move-trail {
+  0%, 15% { opacity: 0; transform: translate(0, 0) scale(1); }
+  25%     { opacity: 0.7; transform: translate(-12px, -2px) scale(1); }
+  45%     { opacity: 0; transform: translate(-30px, -2px) scale(0.4); }
+  100%    { opacity: 0; }
+}
+
+
+/* ============================================================================
+   7. STACKING — комбинация Tier 2 + Living Shape
+   Применяй обе классы одновременно: <div class="obs obs--ack obs--alive">
+   ============================================================================ */
+
+/* Living Shape базовые колебания, поверх которых работают Tier 2 жесты */
+.obs--alive::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Animation handled by SVG transform on root, see usage docs */
+}
+/* Усиление breathe — для постоянной жизни поверх любого state */
+.obs--alive svg {
+  transform-origin: 50% 50%;
+  animation: obs-alive-breathe 4500ms var(--obs-ease-soft) infinite;
+}
+@keyframes obs-alive-breathe {
+  0%, 100% { transform: scale(1) skewY(0); }
+  35%      { transform: scale(1.015, 0.995) skewY(-0.2deg); }
+  65%      { transform: scale(0.998, 1.005) skewY(0.15deg); }
+}
+
+
+/* ============================================================================
+   8. UTILITIES
+   ============================================================================ */
+
+/* One-shot — для Tier 2 событий в продакшне */
+.obs--once {
+  animation-iteration-count: 1 !important;
+  animation-fill-mode: both !important;
+}
+
+/* Force loop — для idle/Tier 3 */
+.obs--loop {
+  animation-iteration-count: infinite !important;
+}
+
+
+/* ============================================================================
+   9. ACCESSIBILITY
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .obs *,
+  .obs svg {
+    animation: none !important;
+    transition: none !important;
+  }
+}

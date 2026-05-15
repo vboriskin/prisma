@@ -29,9 +29,15 @@ import { RowFactory } from '../rowFactory.js';
 import { RegistryView } from '../views/registry.js';
 import { HistoryLog } from '../historyLog.js';
 import { Reactive } from '../reactiveStore.js';
+import { Utils } from '../utils.js';
+import { Services } from './services.js';
 
 export const HistoryManager = {
-  limit: 45,
+  // F6 fix (codebase-01 audit) — было 45 deep-clones × 2k rows × 50 fields
+  // = 50-100MB heap. На больших проектах GC pauses + visible jank. Cap=20
+  // покрывает реальные undo-сценарии (никто не нажимает Ctrl+Z 45 раз подряд)
+  // и снимает heap-pressure.
+  limit: 20,
   undoStack: [],
   redoStack: [],
   _restoring: false,
@@ -40,7 +46,7 @@ export const HistoryManager = {
     if (window.HistoryModule && typeof window.HistoryModule.buildSnapshot === 'function') {
       return window.HistoryModule.buildSnapshot(state);
     }
-    return JSON.parse(JSON.stringify({
+    return Utils.deepClone({
       rows: state.rows, employees: state.employees,
       customCols: state.customCols, colOrder: state.colOrder,
       colWidths: state.colWidths, colVisibility: state.colVisibility,
@@ -53,15 +59,19 @@ export const HistoryManager = {
       // history snapshots so undo correctly reverts those V14 toggles.
       planLocked: state.planLocked,
       ganttEditMode: state.ganttEditMode,
-    }));
+    });
   },
 
   _fingerprint(snapshot) {
     if (window.HistoryModule && typeof window.HistoryModule.fingerprint === 'function') {
       return window.HistoryModule.fingerprint(snapshot);
     }
-    const payload = JSON.stringify(snapshot);
-    return payload.length + ':' + payload.slice(0, 180);
+    // F6 fix (codebase-01 audit) — раньше JSON.stringify полного snapshot
+    // на каждый checkpoint = O(rows×cols) сериализация на каждый клик.
+    // Дешёвый fingerprint: dataVersion + rows.length + первые 60 байт.
+    const rows = snapshot?.rows || [];
+    const dv = snapshot?._dataVersion || 0;
+    return `${dv}:${rows.length}:${state.activeSection || ''}:${rows.length ? JSON.stringify(rows[0]).slice(0, 60) : ''}`;
   },
 
   checkpoint(label='edit') {
@@ -90,7 +100,7 @@ export const HistoryManager = {
         if (window.HistoryModule && typeof window.HistoryModule.applySnapshot === 'function') {
           window.HistoryModule.applySnapshot(state, snapshot);
         } else {
-          Object.assign(state, JSON.parse(JSON.stringify(snapshot)));
+          Object.assign(state, Utils.deepClone(snapshot));
         }
         syncColumnSettings();
         RegistryView.applyRowHeight();
@@ -100,9 +110,9 @@ export const HistoryManager = {
         Storage.save();
       });
       // Explicit single refresh after the silent block.
-      window.App?.populateFilterDropdowns?.();
-      window.App?.refreshAll?.();
-      window.App?.updateTopbarBadge?.();
+      Services.App?.populateFilterDropdowns?.();
+      Services.App?.refreshAll?.();
+      Services.App?.updateTopbarBadge?.();
     } finally {
       HistoryManager._restoring = false;
       HistoryManager.syncButtons();
@@ -149,4 +159,5 @@ export const HistoryManager = {
   },
 };
 
+Services.register('HistoryManager', HistoryManager);
 if (typeof window !== 'undefined') window.HistoryManager = HistoryManager;

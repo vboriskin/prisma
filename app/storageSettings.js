@@ -18,6 +18,8 @@
    ============================================================ */
 
 import { Utils } from '../utils.js';
+import { ConfirmDialog } from './uxKit.js';
+import { Services } from './services.js';
 
 export const StorageSettings = {
   _formatBytes(n) {
@@ -42,12 +44,12 @@ export const StorageSettings = {
     const st = AppDataStore.status();
     const sqliteOn  = st.mode === 'sqlite';
     const sqliteOk  = st.sqliteReady;
-    const sqliteErrRaw = (window.SQLiteStore && window.SQLiteStore.lastError && window.SQLiteStore.lastError()) || '';
+    const sqliteErrRaw = (Services.SQLiteStore && Services.SQLiteStore.lastError && Services.SQLiteStore.lastError()) || '';
     const sqliteErr = Utils.escapeHtml(String(sqliteErrRaw));
     let sqliteStatusLabel;
-    if (sqliteOk)              sqliteStatusLabel = '✓ загружен';
-    else if (sqliteOn && sqliteErrRaw) sqliteStatusLabel = '✗ ошибка загрузки';
-    else if (sqliteOn)         sqliteStatusLabel = '⏳ инициализация…';
+    if (sqliteOk)              sqliteStatusLabel = 'загружен';
+    else if (sqliteOn && sqliteErrRaw) sqliteStatusLabel = 'ошибка загрузки';
+    else if (sqliteOn)         sqliteStatusLabel = 'инициализация…';
     else                       sqliteStatusLabel = '— не используется';
     host.innerHTML = `
       <div class="app-storage-row">
@@ -71,23 +73,23 @@ export const StorageSettings = {
         <span><b>Режим:</b> ${st.mode}</span>
         <span><b>SQLite:</b> ${sqliteStatusLabel}</span>
         <span><b>Размер БД:</b> ${StorageSettings._formatBytes(st.dumpSize)}</span>
-        <span><b>Миграция:</b> ${st.migrated ? '✓ выполнена' : '— не выполнена'}</span>
+        <span><b>Миграция:</b> ${st.migrated ? 'выполнена' : '— не выполнена'}</span>
       </div>
       ${(sqliteOn && !sqliteOk && sqliteErrRaw) ? `
         <div class="app-storage-error" style="margin:8px 0;padding:10px 12px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);font-size:12.5px;line-height:1.5;color:#b91c1c">
           <b>Не удалось загрузить sql.js.</b> ${sqliteErr}<br>
           <span style="opacity:.85">Положите файлы <code>libs/sql-wasm.js</code> и <code>libs/sql-wasm.wasm</code> в проект, либо проверьте доступ к <code>cdn.jsdelivr.net</code>.</span>
-          <button class="btn btn-ghost btn-xs" id="app-storage-retry-init" style="margin-left:6px">↻ Повторить</button>
+          <button class="btn btn-ghost btn-xs" id="app-storage-retry-init" style="margin-left:6px" data-icon="rotate-cw" data-icon-size="12" aria-label="Повторить инициализацию">Повторить</button>
         </div>` : ''}
 
       <div class="app-storage-actions">
-        <button class="btn btn-outline btn-sm" id="app-storage-migrate" ${!sqliteOk ? 'disabled' : ''} title="${!sqliteOk ? 'SQLite ещё не загружен' : 'Перенести строки из localStorage в SQLite'}">↻ Перенести данные из localStorage</button>
-        <button class="btn btn-outline btn-sm" id="app-storage-export"  ${!sqliteOk ? 'disabled' : ''}>⤓ Скачать .sqlite</button>
+        <button class="btn btn-outline btn-sm" id="app-storage-migrate" data-icon="rotate-cw" data-icon-size="14" aria-label="Перенести данные из localStorage в SQLite" ${!sqliteOk ? 'disabled' : ''} title="${!sqliteOk ? 'SQLite ещё не загружен' : 'Перенести строки из localStorage в SQLite'}">Перенести данные из localStorage</button>
+        <button class="btn btn-outline btn-sm" id="app-storage-export" data-icon="download" data-icon-size="14" aria-label="Скачать .sqlite" ${!sqliteOk ? 'disabled' : ''}>Скачать .sqlite</button>
         <label class="btn btn-outline btn-sm" ${!sqliteOk ? 'style="opacity:.45;pointer-events:none"' : ''}>
-          ⤒ Загрузить .sqlite
+          <span data-icon="upload" data-icon-size="14" aria-hidden="true"></span> Загрузить .sqlite
           <input type="file" id="app-storage-import" accept=".sqlite,.db,application/octet-stream" hidden>
         </label>
-        <button class="btn btn-ghost btn-sm" id="app-storage-clear" ${!sqliteOk ? 'disabled' : ''}>🗑 Очистить SQLite</button>
+        <button class="btn btn-ghost btn-sm" id="app-storage-clear" data-icon="trash" data-icon-size="14" aria-label="Очистить SQLite" ${!sqliteOk ? 'disabled' : ''}>Очистить SQLite</button>
       </div>
 
       <div class="app-storage-section-divider"></div>
@@ -95,11 +97,12 @@ export const StorageSettings = {
       <div class="app-storage-row" style="margin-top:8px">
         <div class="app-storage-info">
           <div class="app-storage-info-title">Экран приветствия</div>
-          <div class="app-storage-info-sub">Сбросить флаг «уже видел приветствие» — splash «Привет 👋» снова появится при следующей загрузке.</div>
+          <div class="app-storage-info-sub">Сбросить флаг «уже видел приветствие» — splash снова появится при следующей загрузке.</div>
         </div>
-        <button class="btn btn-outline btn-sm" id="app-storage-reset-welcome">🔄 Сбросить экран приветствия</button>
+        <button class="btn btn-outline btn-sm" id="app-storage-reset-welcome" data-icon="rotate-cw" data-icon-size="14" aria-label="Сбросить экран приветствия">Сбросить экран приветствия</button>
       </div>
     `;
+    try { Services.Icons?.hydrate?.(host); } catch(_) {}
     StorageSettings._wire(host, deps);
   },
 
@@ -121,14 +124,14 @@ export const StorageSettings = {
     });
     host.querySelector('#app-storage-retry-init')?.addEventListener('click', async (e) => {
       const btn = e.currentTarget;
-      btn.disabled = true; btn.textContent = '⏳ Загружаю…';
-      const ok = await window.SQLiteStore?.init?.();
+      btn.disabled = true; btn.textContent = 'Загружаю…';
+      const ok = await Services.SQLiteStore?.init?.();
       if (ok) window.showToast?.('SQLite загружен');
-      else    window.showToast?.('Снова не получилось: ' + (window.SQLiteStore?.lastError?.() || 'unknown'), 'error', 4500);
+      else    window.showToast?.('Снова не получилось: ' + (Services.SQLiteStore?.lastError?.() || 'unknown'), 'error', 4500);
       StorageSettings.render(host, deps);
     });
     re?.addEventListener('click', async () => {
-      re.disabled = true; re.textContent = '⏳ Перенос…';
+      re.disabled = true; re.textContent = 'Перенос…';
       const res = await AppDataStore.migrateFromLocalStorage();
       if (res.ok) {
         window.showToast?.(`Перенесено ${res.rowsCount} строк в SQLite`);
@@ -141,7 +144,7 @@ export const StorageSettings = {
     host.querySelector('#app-storage-export')?.addEventListener('click', async () => {
       try {
         await AppDataStore.persist();
-        const bytes = window.SQLiteStore?.exportDump?.();
+        const bytes = Services.SQLiteStore?.exportDump?.();
         if (!bytes) { window.showToast?.('БД пустая', 'info'); return; }
         const blob = new Blob([bytes], { type: 'application/octet-stream' });
         const url = URL.createObjectURL(blob);
@@ -154,11 +157,11 @@ export const StorageSettings = {
       const f = e.target.files?.[0]; if (!f) return;
       try {
         const buf = await f.arrayBuffer();
-        if (!window.SQLiteStore) throw new Error('SQLite не загружен');
-        if (!window.SQLiteStore.isReady()) await window.SQLiteStore.init();
-        window.SQLiteStore.importDump(new Uint8Array(buf));
+        if (!Services.SQLiteStore) throw new Error('SQLite не загружен');
+        if (!Services.SQLiteStore.isReady()) await Services.SQLiteStore.init();
+        Services.SQLiteStore.importDump(new Uint8Array(buf));
         // Pull rows into state.rows so UI sees them
-        try { state.rows = window.SQLiteStore.getRows(); } catch(_) {}
+        try { state.rows = Services.SQLiteStore.getRows(); } catch(_) {}
         Storage.save();
         notify('storage-import');
         window.showToast?.(`Импортирована БД: ${StorageSettings._formatBytes(buf.byteLength)}`);
@@ -167,8 +170,16 @@ export const StorageSettings = {
       e.target.value = '';
     });
     host.querySelector('#app-storage-clear')?.addEventListener('click', async () => {
-      if (!confirm('Удалить все данные в SQLite? localStorage НЕ затрагивается.')) return;
-      try { window.SQLiteStore?.clearAll(); await window.SQLiteStore?.clearPersistence(); }
+      // V21 Q — ConfirmDialog (danger). SQLite-данные не имеют undo, нужно type-confirm.
+      const ok = await ConfirmDialog.show({
+        title: 'Очистить SQLite-хранилище?',
+        message: 'Будут удалены все данные из SQLite. localStorage не затрагивается. Действие необратимо.',
+        confirmLabel: 'Очистить',
+        danger: true,
+        typeToConfirm: 'ОЧИСТИТЬ',
+      });
+      if (!ok) return;
+      try { Services.SQLiteStore?.clearAll(); await Services.SQLiteStore?.clearPersistence(); }
       catch(_) {}
       window.showToast?.('SQLite очищен');
       StorageSettings.render(host, deps);

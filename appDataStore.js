@@ -1,5 +1,10 @@
 'use strict';
 /* ============================================================
+   V18 O2 (AUDIT_HOLISTIC O2): Этот модуль обёрнут в `appDataStore`
+   backend в `app/storage/StorageRouter.js`. Router предоставляет
+   единый StorageInterface поверх всех 3 stores. `AppDataStore`
+   API остаётся неизменным — router просто адаптирует методы.
+
    appDataStore — v11 unified storage facade
    Decides between localStorage (legacy) and SQLite (experimental)
    based on `localStorage.dataStorageMode`. UI code talks to this
@@ -29,6 +34,7 @@
 
 import { state } from './state.js';
 import { SQLiteStore } from './sqliteStore.js';
+import { Services } from './app/services.js';
 
 const MODE_KEY = 'dataStorageMode';
 const MIGRATED_KEY = 'q2_sqlite_migrated_v1';
@@ -175,4 +181,5 @@ export const AppDataStore = {
   },
 };
 
+Services.register('AppDataStore', AppDataStore);
 if (typeof window !== 'undefined') window.AppDataStore = AppDataStore;

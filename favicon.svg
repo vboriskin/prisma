@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  СБОФ Планирование favicon (V18.1).
-  Mini-Gantt cascade: three staggered task bars on accent surface.
-  Semantics: dependent tasks across release windows 1.20 / 1.21 / 1.22.
-  Each row offset right of the previous → readable as Gantt with deps,
-  not as a flat burn-down. Solid fills only, no gradients, no animations.
-  Foreground white, surface accent #4f46e5, container squircle rx=6.
+  Призма — Favicon 16×16
+  Уменьшенная версия: только главные + боковые лучи. Диагональные убираются на этом размере.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="6" fill="#4f46e5"/>
-  <rect x="6"  y="8"  width="14" height="4" rx="1.5" fill="#ffffff"/>
-  <rect x="12" y="14" width="14" height="4" rx="1.5" fill="#ffffff"/>
-  <rect x="8"  y="20" width="11" height="4" rx="1.5" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="Призма">
+  <title>Призма</title>
+  <g transform="translate(8,8)" fill="currentColor">
+    <polygon points="0,-6.5 0.5,-0.5 0,0 -0.5,-0.5"/>
+    <polygon points="0,6.5 0.5,0.5 0,0 -0.5,0.5"/>
+    <polygon points="-6.5,0 -0.5,-0.5 0,0 -0.5,0.5" opacity="0.7"/>
+    <polygon points="6.5,0 0.5,-0.5 0,0 0.5,0.5" opacity="0.7"/>
+    <circle r="0.4"/>
+  </g>
 </svg>

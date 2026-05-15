@@ -96,11 +96,11 @@ ${factors.length
 
   const actions = [
     row.blockingDependency && {
-      label: '🚫 Снять блокер', type: 'confirm_batch',
+      label: 'Снять блокер', type: 'confirm_batch',
       payload: { action: 'clear_blocker', filter: { ids: [row.id] }, label: `Снять блокер: ${row.epic||row.id}` },
     },
     !row.isDone && {
-      label: '✓ Отметить сделано', type: 'confirm_batch',
+      label: 'Отметить сделано', type: 'confirm_batch',
       payload: { action: 'mark_done', filter: { ids: [row.id] }, label: `Завершить: ${row.epic||row.id}` },
     },
   ].filter(Boolean);
@@ -156,8 +156,8 @@ ${blockers.length ? `### Ключевые блокеры (топ-5):\n${topBlock
 - Подтвердить scope: согласовать ${needsConf.length} задач`;
 
   const actions = [
-    { label: `🔍 Блокеры ${label}`, type: 'apply_filter', payload: { onlyBlocking: true, release: label.replace('.','') } },
-    { label: `📋 Все задачи ${label}`, type: 'apply_filter', payload: { release: label.replace('.','') } },
+    { label: `Блокеры ${label}`, type: 'apply_filter', payload: { onlyBlocking: true, release: label.replace('.','') } },
+    { label: `Все задачи ${label}`, type: 'apply_filter', payload: { release: label.replace('.','') } },
   ];
 
   const drilldown = [
@@ -192,7 +192,7 @@ export function explainTeamOverload(teamName) {
   const sorted = Object.entries(load).sort((a,b) => b[1].total - a[1].total);
   const overloaded = sorted.filter(([,v]) => v.total >= 5);
   const lines = sorted.slice(0, 8).map(([name, v]) =>
-    `- **${esc(name)}**: ${v.total} задач | 1.20: ${v.r120} · 1.21: ${v.r121} · 1.22: ${v.r122}${v.blockers ? ` · 🚫${v.blockers}` : ''}`
+    `- **${esc(name)}**: ${v.total} задач | 1.20: ${v.r120} · 1.21: ${v.r121} · 1.22: ${v.r122}${v.blockers ? ` · блокеров: ${v.blockers}` : ''}`
   ).join('\n');
 
   const text = `## Нагрузка: ${esc(label)}
@@ -239,7 +239,7 @@ export function explainMetric(metricName, opts = {}) {
     return {
       text: `## Объяснение riskScore (глобально)\n\n**Рискованных задач:** ${risky.length} из ${rows.length}\n\n### По типам рисков:\n${flagLines}\n\n### Топ-5 задач:\n${top5}\n\n### Формула:\n\`\`\`\n${RISK_SCORE_FORMULA}\n\`\`\``,
       cards: [], actions: [
-        { label: '⚠ Показать рискованные', type: 'apply_filter', payload: { onlyRisky: true }, primary: true },
+        { label: 'Показать рискованные', type: 'apply_filter', payload: { onlyRisky: true }, primary: true },
       ], drilldown: [
         { text: 'Как снизить риски?', prompt: 'Что нужно сделать, чтобы снизить количество рискованных задач?' },
       ],

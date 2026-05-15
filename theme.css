@@ -1,0 +1,303 @@
+/**
+ * Призма — theme.css
+ * CSS custom properties для тёмной и светлой тем.
+ * Переключение через [data-theme="light"] на корневом элементе.
+ *
+ * Принцип: светлая тема НЕ инверсия тёмной.
+ * Каждый цвет имеет двойника на той же hue-оси с другой светлотой.
+ */
+
+:root,
+[data-theme="dark"] {
+  /* Core */
+  --prizma-bg: #0A0A0F;
+  --prizma-bg-elevated: #1A1A22;
+  --prizma-bg-tertiary: #2A2A30;
+
+  /* Знак и основной текст.
+     V21 Wave-3 (a11y) — secondary поднят с #5A5A64 (3.4:1) до #8E8E96 (~5.4:1)
+     для прохождения WCAG 2.1 AA на small text (минимум 4.5:1 на Night #0A0A0F).
+     A4 (a11y, 2026-05) — tertiary поднят с #5A5A64 (~2.96:1) до #8A8A92 (~4.6:1):
+     ~30+ classов (bd-fetched, bd-team-mini, int-field-hint, bd-cov-pk, bd-state-sub…)
+     используют --text-3/--text-4 на small 10-12.5px и до этого фейлили AA.
+     Brandbook Mist остаётся семантическим референсом, но фактическое значение
+     для текста — поднято. */
+  --prizma-mark: #FFFFFF;
+  --prizma-text-primary: #FFFFFF;
+  --prizma-text-secondary: #8E8E96;
+  --prizma-text-tertiary: #8A8A92;
+
+  /* Границы */
+  --prizma-border: rgba(255, 255, 255, 0.08);
+  --prizma-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Signal — яркие на тёмном */
+  --prizma-on-course: #7FE8B5;
+  --prizma-drift: #FFB347;
+  --prizma-off-course: #FF6B6B;
+  --prizma-information: #6EC1E4;
+  --prizma-insight: #B084CC;
+
+  /* Фоны для signal-pills */
+  --prizma-on-course-bg: rgba(127, 232, 181, 0.12);
+  --prizma-drift-bg: rgba(255, 179, 71, 0.12);
+  --prizma-off-course-bg: rgba(255, 107, 107, 0.12);
+  --prizma-information-bg: rgba(110, 193, 228, 0.12);
+  --prizma-insight-bg: rgba(176, 132, 204, 0.12);
+
+  /* Work-type stripes — гибрид: 3 signature (BE/FE/QA) + 6 нейтральных
+     tint'ов на оси Mist↔Stone. Декоративные: ≠ signal по hue+chroma.
+     Используются как 3px-полоска слева на pill (см. .gantt-type-pill).
+     Контраст ≥3:1 vs Twilight #1A1A22 (UI-graphics, WCAG SC 1.4.11). */
+  --prizma-worktype-be:   #5A8FB8;
+  --prizma-worktype-fe:   #6FB89A;
+  --prizma-worktype-qa:   #C49A5C;
+  --prizma-worktype-an:   #8A8AA0;
+  --prizma-worktype-ba:   #9C8FA8;
+  --prizma-worktype-impl: #A89070;
+  --prizma-worktype-mig:  #7A98A8;
+  --prizma-worktype-stab: #7AA890;
+  --prizma-worktype-hf:   #C47A5C;
+
+  /* Прозрачности лучей звезды */
+  --prizma-mark-opacity-main: 1;
+  --prizma-mark-opacity-side: 0.7;
+  --prizma-mark-opacity-diagonal: 0.45;
+}
+
+[data-theme="light"] {
+  /* Core */
+  --prizma-bg: #FAFAF8;
+  --prizma-bg-elevated: #FFFFFF;
+  --prizma-bg-tertiary: #F0EDE5;
+
+  /* Знак и основной текст */
+  --prizma-mark: #1A1A22;
+  --prizma-text-primary: #1A1A22;
+  --prizma-text-secondary: #7A7A82;
+  --prizma-text-tertiary: #5A5A64;
+
+  /* Границы */
+  --prizma-border: rgba(26, 26, 34, 0.08);
+  --prizma-border-strong: rgba(26, 26, 34, 0.15);
+
+  /* Signal — тёмные и насыщенные на светлом */
+  --prizma-on-course: #0F8A5F;
+  --prizma-drift: #B5670A;
+  --prizma-off-course: #C13838;
+  --prizma-information: #1F6B96;
+  --prizma-insight: #6B4488;
+
+  /* Фоны для signal-pills */
+  --prizma-on-course-bg: rgba(15, 138, 95, 0.1);
+  --prizma-drift-bg: rgba(181, 103, 10, 0.1);
+  --prizma-off-course-bg: rgba(193, 56, 56, 0.1);
+  --prizma-information-bg: rgba(31, 107, 150, 0.1);
+  --prizma-insight-bg: rgba(107, 68, 136, 0.1);
+
+  /* Work-type stripes — light variant (тёмные тона на Snow/Paper). */
+  --prizma-worktype-be:   #2C5F88;
+  --prizma-worktype-fe:   #3A8060;
+  --prizma-worktype-qa:   #8A6428;
+  --prizma-worktype-an:   #5A5A6E;
+  --prizma-worktype-ba:   #6A5E78;
+  --prizma-worktype-impl: #705A40;
+  --prizma-worktype-mig:  #456878;
+  --prizma-worktype-stab: #3A6850;
+  --prizma-worktype-hf:   #8A4828;
+}
+
+/* Auto-тема — следует за системой */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] {
+    --prizma-bg: #FAFAF8;
+    --prizma-bg-elevated: #FFFFFF;
+    --prizma-bg-tertiary: #F0EDE5;
+    --prizma-mark: #1A1A22;
+    --prizma-text-primary: #1A1A22;
+    --prizma-text-secondary: #7A7A82;
+    --prizma-text-tertiary: #5A5A64;
+    --prizma-border: rgba(26, 26, 34, 0.08);
+    --prizma-border-strong: rgba(26, 26, 34, 0.15);
+    --prizma-on-course: #0F8A5F;
+    --prizma-drift: #B5670A;
+    --prizma-off-course: #C13838;
+    --prizma-information: #1F6B96;
+    --prizma-insight: #6B4488;
+
+    --prizma-worktype-be:   #2C5F88;
+    --prizma-worktype-fe:   #3A8060;
+    --prizma-worktype-qa:   #8A6428;
+    --prizma-worktype-an:   #5A5A6E;
+    --prizma-worktype-ba:   #6A5E78;
+    --prizma-worktype-impl: #705A40;
+    --prizma-worktype-mig:  #456878;
+    --prizma-worktype-stab: #3A6850;
+    --prizma-worktype-hf:   #8A4828;
+  }
+}
+
+/* Плавный переход между темами */
+:root {
+  transition:
+    background-color 240ms ease-out,
+    color 240ms ease-out;
+}
+
+/* AUDIT_LAYOUT #36 (critical) — раньше здесь был `* { transition: ... }`.
+   Универсальный селектор × 4 properties = paint-pass на ВСЕ узлы (10k+
+   в Реестре/Ганте) при каждом hover/focus/mutation. Заменяем на явный
+   whitelist «контейнеров», у которых смена темы должна анимироваться.
+   `prefers-reduced-motion` уважается. Атомарные элементы (td, span,
+   svg, path) не получают transition — тема меняется мгновенно, что
+   визуально незаметно но даёт х10 perf на theme-switch. */
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  .app-section,
+  .prizma-card, .pz-card,
+  .card, .kpi-card,
+  .btn,
+  .chip, .tag-item, .ms-chip,
+  .toast,
+  #topbar, #sidebar,
+  .modal, .modal-overlay {
+    transition:
+      background-color 240ms ease-out,
+      border-color 240ms ease-out,
+      color 240ms ease-out,
+      fill 240ms ease-out;
+  }
+}
+
+/* Easing-функции */
+:root {
+  --prizma-ease-calm: cubic-bezier(0.16, 1, 0.3, 1);
+  --prizma-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --prizma-ease-smooth: ease-in-out;
+  --prizma-ease-decel: ease-out;
+}
+
+/* AUDIT_LAYOUT #44 (critical) — Z-scale: единая 6-step шкала вместо
+   50 уникальных z-index'ов. Любое новое overlay должно использовать
+   токен (никаких magic-numbers). Если нужно «выше чем X» — берём
+   следующий уровень, не +1.
+   Старые значения (50/79/89/200/500/1000/2000/9999/10000/100000)
+   мигрируем постепенно — codemod опасен, переводим точечно при
+   правке соседнего кода. */
+:root {
+  --z-base:    1;       /* обычный flow */
+  --z-sticky:  10;      /* sticky table headers, gantt sticky cells */
+  --z-fab:     100;     /* mascot, floating action buttons */
+  --z-dropdown:1000;    /* меню, popover, ctx-menu */
+  --z-toast:   2000;    /* нотификации */
+  --z-overlay: 9000;    /* dim/backdrop под модалом */
+  --z-modal:   10000;   /* собственно модалы */
+  --z-debug:   12000;   /* dev-only overlay (Reactive logs и т.п.) */
+  --z-mascot:  100000;  /* AUDIT_MASCOT 4.8 — FAB маскота поверх splash/welcome/modals */
+}
+
+/* AUDIT_MASCOT 3.1 — highlight recently-arrived chat message (после
+   открытия чата по pulseAlert). Spine-pill 3px stripe-left, fade-out
+   через 2.4s через transition (стрипа снимается через JS removeClass). */
+.msg-row.msg-row-recent {
+  position: relative;
+  transition: padding-left 240ms var(--prizma-ease-decel, ease-out);
+  padding-left: 12px;
+}
+.msg-row.msg-row-recent::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px;
+  background: var(--prizma-information, #6EC1E4);
+  border-radius: 2px;
+  animation: msg-row-recent-pulse 2400ms ease-out 1;
+}
+@keyframes msg-row-recent-pulse {
+  0%   { opacity: 0; }
+  10%  { opacity: 1; }
+  60%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* AUDIT_LAYOUT #27 — generic pre-mount skeleton. Используется в HTML до
+   того как соответствующий view сделает render(). Никаких !important,
+   никаких inline-style на самом контейнере. */
+.pz-section-skeleton {
+  padding: 24px;
+  display: block;
+}
+.pz-skel-line {
+  background: var(--prizma-bg-tertiary, #f3f4f6);
+  border-radius: 4px;
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pz-skel-line::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%);
+    animation: pz-skel-shimmer 1.4s ease-in-out infinite;
+  }
+}
+@keyframes pz-skel-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Keyframes анимаций */
+
+/* EMERGE — первое появление звезды */
+@keyframes prizma-emerge-core {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes prizma-emerge-ray {
+  from { transform: scale(0.2); opacity: 0; }
+  to   { transform: scale(1); opacity: var(--prizma-ray-opacity, 1); }
+}
+
+/* BREATHE — idle-состояние, всегда включено */
+@keyframes prizma-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.04); opacity: 1; }
+}
+
+/* PULSE — сигнал внимания */
+@keyframes prizma-pulse-ring {
+  0%   { transform: scale(0.4); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* ALIGN — смена контекста */
+@keyframes prizma-align {
+  0%   { transform: rotate(-12deg); }
+  50%  { transform: rotate(2deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* L1 — inline pulse */
+@keyframes prizma-loader-inline {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50%      { transform: scale(1); opacity: 1; }
+}
+
+/* L3 — skeleton shimmer */
+@keyframes prizma-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+/* Уважаем prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

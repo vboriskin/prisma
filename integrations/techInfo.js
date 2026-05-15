@@ -15,6 +15,7 @@
 
 import { fetchTechInfo } from './techInfoApi.js';
 import { renderTechInfoModal } from './techInfoRenderer.js';
+import { Services } from '../app/services.js';
 
 const OVERLAY_ID = 'ti-modal-overlay';
 
@@ -209,9 +210,9 @@ export const TechInfo = {
       a.remove();
       // Defer revoke — Safari sometimes drops the download if URL revokes too fast.
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      try { window.showToast?.(`Сохранено: ${a.download}`); } catch {}
+      try { window.showToast?.(`Файл сохранён · ${a.download}`); } catch {}
     } catch (e) {
-      try { window.showToast?.('Не удалось выгрузить JSON: ' + (e?.message || 'unknown'), 'error', 4000); } catch {}
+      try { window.showToast?.('Курс не сверен · экспорт: ' + (e?.message || 'unknown'), 'error', 4000); } catch {}
     }
   },
 
@@ -243,4 +244,5 @@ export const TechInfo = {
   },
 };
 
+Services.register('TechInfo', TechInfo);
 if (typeof window !== 'undefined') window.TechInfo = TechInfo;

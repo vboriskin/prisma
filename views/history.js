@@ -7,36 +7,77 @@
 import { state }              from '../state.js';
 import { Utils }              from '../utils.js';
 import { clearHistoryLog, exportHistoryAsCSV } from '../historyLog.js';
+import { ConfirmDialog } from '../app/uxKit.js';
+import { renderPageHeader, prizmaEmptyGlyph } from '../app/prizmaUI.js';
+import { Icons } from '../app/icons.js';
+import { Services } from '../app/services.js';
 
 const esc = s => Utils.escapeHtml(String(s ?? ''));
 
+// V21 Wave-3 — emoji-icons → Lucide-style line-glyph через Icons.get(name).
+// Семантика категорий теперь в `iconKey` (а не в emoji-символе).
+// AUDIT-ART #14 — десемантизация цветов категорий. Раньше data/ai/view/system
+// получали отдельные signal-токены (information / insight / on-course / drift).
+// Брендбук §3 — signal-цвета зарезервированы за статусом курса. История —
+// нейтральный системный экран; все категории теперь нейтральный grey-icon
+// (`--prizma-text-secondary`). Активная/выделенная категория получает синий
+// `--prizma-information` («информация про действие») через CSS-селектор
+// `[data-hist-active="true"]` + 3px stripe-left.
+const NEUTRAL_CATEGORY_COLOR = 'var(--prizma-text-secondary)';
+const ACTIVE_CATEGORY_COLOR  = 'var(--prizma-information)';
 const CATEGORY_META = {
-  data:         { icon: '📊', label: 'Данные',     color: '#4f46e5' },
-  ai:           { icon: '🤖', label: 'AI',         color: '#7c3aed' },
-  integrations: { icon: '🔗', label: 'Интеграции', color: '#0284c7' },
-  settings:     { icon: '⚙️', label: 'Настройки',  color: '#6b7280' },
-  view:         { icon: '👁',  label: 'Навигация',  color: '#10b981' },
-  system:       { icon: '🛠',  label: 'Система',    color: '#f59e0b' },
+  data:         { iconKey: 'bar-chart',      label: 'Данные',     color: NEUTRAL_CATEGORY_COLOR },
+  ai:           { iconKey: 'sparkles',       label: 'AI',         color: NEUTRAL_CATEGORY_COLOR },
+  integrations: { iconKey: 'cpu',            label: 'Интеграции', color: NEUTRAL_CATEGORY_COLOR },
+  settings:     { iconKey: 'settings',       label: 'Настройки',  color: NEUTRAL_CATEGORY_COLOR },
+  view:         { iconKey: 'eye',            label: 'Навигация',  color: NEUTRAL_CATEGORY_COLOR },
+  system:       { iconKey: 'wrench',         label: 'Система',    color: NEUTRAL_CATEGORY_COLOR },
 };
 
-function fmtDateTime(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('ru', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' });
-  } catch(_) { return iso; }
+/* AUDIT-ART #14 — runtime style-инжект для истории.
+   styles.css не правится (параллельные агенты конфликтуют).
+   Идемпотентно: повторные вызовы no-op. */
+function injectHistoryAuditArtStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('audit-art-history-style')) return;
+  const style = document.createElement('style');
+  style.id = 'audit-art-history-style';
+  style.textContent = `
+/* AUDIT-ART #14 — нейтральные категории. Active/selected = синий
+   (information) + 3px stripe-left, не filled. */
+.hist-stat-card[data-hist-active="true"] {
+  --stat-color: ${ACTIVE_CATEGORY_COLOR};
+  color: ${ACTIVE_CATEGORY_COLOR};
+  border-left: 3px solid ${ACTIVE_CATEGORY_COLOR};
+  background: transparent;
+}
+.hist-stat-card[data-hist-active="true"] .hist-stat-icon {
+  color: ${ACTIVE_CATEGORY_COLOR};
+}
+.hist-stat-card[data-hist-active="true"] .hist-stat-count,
+.hist-stat-card[data-hist-active="true"] .hist-stat-label {
+  color: ${ACTIVE_CATEGORY_COLOR};
+}
+/* hist-entry — выделенная (по совпадению с активной категорией) строка
+   получает synodic 3px stripe-left information. tabular-nums на счётчиках. */
+.hist-entry[data-hist-highlighted="true"] {
+  border-left: 3px solid ${ACTIVE_CATEGORY_COLOR};
+  padding-left: 9px;
+}
+.hist-entry-count,
+.hist-entry-time-rel,
+.hist-entry-time-abs {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+`;
+  document.head.appendChild(style);
 }
 
-function fmtRelative(iso) {
-  if (!iso) return '';
-  const ts = Date.parse(iso); if (!Number.isFinite(ts)) return '';
-  const diff = Date.now() - ts;
-  if (diff < 60_000) return 'только что';
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} мин назад`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} ч назад`;
-  if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)} дн назад`;
-  return '';
-}
+// V21 π9 — локальные `fmtDateTime` и `fmtRelative` свёрнуты на единые
+// `Utils.fmtDateTime` / `Utils.fmtRelTime` (audit-2026-05-04 §2).
+function fmtDateTime(iso) { return Utils.fmtDateTime(iso); }
+function fmtRelative(iso) { return Utils.fmtRelTime(iso); }
 
 const HistoryView = {
   _filter: { category: '', search: '', simOnly: false },
@@ -45,23 +86,28 @@ const HistoryView = {
     const root = document.getElementById('section-history');
     if (!root) return;
 
+    // AUDIT-ART #14 — runtime style-инжект (idempotent).
+    injectHistoryAuditArtStyles();
+
     const log = Array.isArray(state.actionLog) ? state.actionLog : [];
     const filtered = HistoryView._applyFilters(log);
+    const activeCat = HistoryView._filter.category || '';
 
     // Stats by category
     const stats = {};
     log.forEach(e => { stats[e.category] = (stats[e.category] || 0) + 1; });
 
     root.innerHTML = `
+      ${renderPageHeader('history', { sub: 'След пути назад: что и когда менялось.' })}
       <div class="hist-page">
         <div class="hist-header">
           <div>
-            <h2 class="hist-title">📜 История изменений</h2>
+            <h2 class="hist-title">История изменений</h2>
             <p class="hist-subtitle">Всего записей: <b>${log.length}</b> · Показано: <b>${filtered.length}</b></p>
           </div>
           <div class="hist-actions">
-            <button class="btn btn-outline btn-sm" id="hist-export-csv">⤓ Экспорт CSV</button>
-            <button class="btn btn-ghost btn-sm" id="hist-clear" title="Очистить весь журнал">🗑 Очистить</button>
+            <button class="btn btn-outline btn-sm" id="hist-export-csv" data-icon="download" data-icon-size="14" aria-label="Экспорт истории в CSV">Экспорт CSV</button>
+            <button class="btn btn-ghost btn-sm" id="hist-clear" data-icon="trash" data-icon-size="14" aria-label="Очистить весь журнал" title="Очистить весь журнал">Очистить</button>
           </div>
         </div>
 
@@ -70,7 +116,7 @@ const HistoryView = {
           <select id="hist-category" class="filter-select">
             <option value="">Все категории</option>
             ${Object.entries(CATEGORY_META).map(([k,v]) =>
-              `<option value="${esc(k)}" ${HistoryView._filter.category === k ? 'selected' : ''}>${v.icon} ${v.label} ${stats[k] ? `(${stats[k]})` : ''}</option>`
+              `<option value="${esc(k)}" ${HistoryView._filter.category === k ? 'selected' : ''}>${v.label} ${stats[k] ? `(${stats[k]})` : ''}</option>`
             ).join('')}
           </select>
           <label class="hist-check">
@@ -80,21 +126,26 @@ const HistoryView = {
         </div>
 
         <div class="hist-stats">
-          ${Object.entries(CATEGORY_META).map(([k,v]) => `
-            <button class="hist-stat-card" data-hist-category="${esc(k)}" style="--stat-color:${v.color}">
-              <span class="hist-stat-icon">${v.icon}</span>
+          ${Object.entries(CATEGORY_META).map(([k,v]) => {
+            // AUDIT-ART #14 — active card = синий information + stripe-left
+            // через `data-hist-active`. Inactive — нейтральный grey.
+            const isActive = activeCat === k;
+            const color = isActive ? ACTIVE_CATEGORY_COLOR : v.color;
+            return `
+            <button class="hist-stat-card" data-hist-category="${esc(k)}" data-hist-active="${isActive ? 'true' : 'false'}" style="--stat-color:${color}">
+              <span class="hist-stat-icon" style="color:${color}">${Icons.get(v.iconKey, { size: 16 })}</span>
               <span class="hist-stat-count">${stats[k] || 0}</span>
               <span class="hist-stat-label">${esc(v.label)}</span>
             </button>
-          `).join('')}
+          `;}).join('')}
         </div>
 
         <div class="hist-list-wrap">
           ${filtered.length ? HistoryView._renderList(filtered) : `
             <div class="hist-empty">
-              <div class="hist-empty-icon">📭</div>
+              ${prizmaEmptyGlyph()}
               <div class="hist-empty-title">${log.length ? 'Нет записей по фильтру' : 'Журнал пуст'}</div>
-              <div class="hist-empty-sub">${log.length ? 'Попробуйте сбросить фильтры выше.' : 'Любые изменения данных, AI-запросы, синки интеграций будут отображаться здесь.'}</div>
+              <div class="hist-empty-sub">${log.length ? 'Попробуйте сбросить фильтры выше.' : 'Здесь появятся изменения данных, AI-запросы и синхронизации.'}</div>
             </div>
           `}
         </div>
@@ -146,10 +197,19 @@ const HistoryView = {
   },
 
   _renderEntry(e) {
-    const meta = CATEGORY_META[e.category] || { icon: '·', label: e.category, color: '#9ca3af' };
+    const meta = CATEGORY_META[e.category] || { iconKey: 'tag', label: e.category, color: NEUTRAL_CATEGORY_COLOR };
+    // AUDIT_LAYOUT #15 — data-state даёт Spine-pill хук для визуальной
+    // иерархии (важное / обычное / отменённое). Категория сама уже
+    // диктует tone — пробрасываем её и в data-state для CSS-селекторов.
+    const stateAttr = e.simMode ? 'sim' : (e.category || 'default');
+    // AUDIT-ART #14 — иконка категории в нейтральном grey. Если категория
+    // совпадает с активным фильтром — highlight stripe-left + information-color
+    // через атрибут (CSS-инжект, никаких filled-фонов).
+    const isHighlighted = HistoryView._filter.category && HistoryView._filter.category === e.category;
+    const iconColor = isHighlighted ? ACTIVE_CATEGORY_COLOR : meta.color;
     return `
-      <div class="hist-entry${e.simMode ? ' hist-entry-sim' : ''}" data-hist-id="${esc(e.id)}">
-        <div class="hist-entry-icon" style="background: color-mix(in srgb, ${meta.color} 18%, transparent); color: ${meta.color}">${meta.icon}</div>
+      <div class="hist-entry${e.simMode ? ' hist-entry-sim' : ''}" data-hist-id="${esc(e.id)}" data-state="${esc(stateAttr)}" data-hist-highlighted="${isHighlighted ? 'true' : 'false'}">
+        <div class="hist-entry-icon" style="background: color-mix(in srgb, ${iconColor} 12%, transparent); color: ${iconColor}">${Icons.get(meta.iconKey, { size: 14 })}</div>
         <div class="hist-entry-body">
           <div class="hist-entry-title">
             ${esc(e.label)}
@@ -198,8 +258,15 @@ const HistoryView = {
       window.showToast?.('История экспортирована в CSV');
     });
 
-    root.querySelector('#hist-clear')?.addEventListener('click', () => {
-      if (!confirm('Удалить весь журнал истории? Это действие необратимо.')) return;
+    root.querySelector('#hist-clear')?.addEventListener('click', async () => {
+      // V21 Q — ConfirmDialog (danger). История действий не имеет undo.
+      const ok = await ConfirmDialog.show({
+        title: 'Удалить журнал истории?',
+        message: 'Все записи о действиях пользователя будут удалены. Это действие необратимо.',
+        confirmLabel: 'Удалить',
+        danger: true,
+      });
+      if (!ok) return;
       clearHistoryLog();
       window.showToast?.('Журнал очищен');
       HistoryView.render();
@@ -207,5 +274,6 @@ const HistoryView = {
   },
 };
 
+Services.register('HistoryView', HistoryView);
 if (typeof window !== 'undefined') window.HistoryView = HistoryView;
 export { HistoryView };

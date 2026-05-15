@@ -9,10 +9,15 @@ import { Utils } from '../utils.js';
 import { RowFactory } from '../rowFactory.js';
 import { Storage } from '../dataStore.js';
 import { RH } from './renderHelpers.js';
+import { renderPageHeader } from '../app/prizmaUI.js';
+import { Services } from '../app/services.js';
 
 export const KanbanView = {
   _drag: { rowId:null, sourceCol:null },
   render() {
+    // F10 fix (codebase-01) + sj3 (codebase-05) — отметить рендер для guard'а.
+    try { Services.App?.markRenderedNow?.(); } catch (_) {}
+    _injectKanbanHeader();
     const filtered=FilterEngine.getFiltered();
     const board=document.getElementById('kanban-board');
     const columns=[
@@ -32,13 +37,26 @@ export const KanbanView = {
       const body=document.createElement('div'); body.className='kanban-col-body';
 
       // Drop target
-      body.addEventListener('dragover',e=>{ e.preventDefault(); body.classList.add('drag-over'); colEl.classList.add('drag-target'); });
-      body.addEventListener('dragleave',()=>{ body.classList.remove('drag-over'); colEl.classList.remove('drag-target'); });
+      body.addEventListener('dragover',e=>{ e.preventDefault(); body.classList.add('prizma-dragging'); colEl.classList.add('prizma-drop-target'); });
+      body.addEventListener('dragleave',()=>{ body.classList.remove('prizma-dragging'); colEl.classList.remove('prizma-drop-target'); });
       body.addEventListener('drop',e=>{
-        e.preventDefault(); body.classList.remove('drag-over'); colEl.classList.remove('drag-target');
+        e.preventDefault(); body.classList.remove('prizma-dragging'); colEl.classList.remove('prizma-drop-target');
         const {rowId,sourceCol}=KanbanView._drag;
-        if (!rowId||sourceCol===col.key) return;
-        const row=state.rows.find(r=>r.id===rowId); if(!row) return;
+        // V21 J #80 — drop в ту же колонку или без rowId — теперь explicit
+        // toast вместо silent return (юзер думал «не сработало»).
+        if (!rowId) {
+          window.showToast?.('Не удалось определить карточку — попробуй ещё раз', 'warning', 1800);
+          return;
+        }
+        if (sourceCol===col.key) {
+          window.showToast?.('Карточка уже в этой колонке', 'info', 1500);
+          return;
+        }
+        const row=state.rows.find(r=>r.id===rowId);
+        if (!row) {
+          window.showToast?.('Карточка не найдена в данных — обнови страницу', 'error', 2400);
+          return;
+        }
         if (col.key==='backlog') {
           // Remove from source release only
           if (sourceCol!=='backlog'&&columns.find(c=>c.key===sourceCol)?.tfSet) {
@@ -64,6 +82,14 @@ export const KanbanView = {
         if(row.blockingDependency)borderCls='card-blocking';
         else if(row.riskFlags&&row.riskFlags.length)borderCls='card-risky';
         if(row.isDone)borderCls+=' card-done';
+        // P11.4 — overdue marker: blockingDependency + blockingDeadline в прошлом.
+        // Класс .kanban-card-overdue даёт 3px stripe-left цвета off-course (см. styles.css P11.4).
+        let isOverdue=false;
+        if (row.blockingDependency && row.blockingDeadline) {
+          const dl=new Date(row.blockingDeadline);
+          if (!isNaN(dl.getTime()) && dl < new Date()) isOverdue=true;
+        }
+        if (isOverdue) borderCls+=' kanban-card-overdue';
         const types=(col.tfGet?row[col.tfGet]:[])||[];
 
         const card=document.createElement('div');
@@ -79,10 +105,10 @@ export const KanbanView = {
             ${RH.scopeChip(row.scopeStatus)}
             ${types.length?RH.workTypeChips(types):''}
             ${row.role?`<span class="chip chip-indigo">${Utils.truncate(row.role,20)}</span>`:''}
-            ${row.blockingDependency?`<span class="chip chip-red">🚧${row.blockingDeadline?' до '+row.blockingDeadline:''}</span>`:''}
+            ${row.blockingDependency?`<span class="chip chip-red" title="Блокирующая зависимость${row.blockingDeadline?' до '+row.blockingDeadline:''}"><span class="signal-dot signal-off-course"></span>${row.blockingDeadline?' до '+row.blockingDeadline:' блок'}</span>`:''}
             ${RH.riskBadges(row.riskFlags)}${RH.doneBadge(row.isDone)}
-            ${row.jiraStatus?`<span class="chip chip-blue kanban-int-badge" title="Jira: ${row.jiraStatus}">🔵 ${row.jiraStatus.slice(0,12)}</span>`:''}
-            ${row.prStatus==='merged'?`<span class="chip chip-green kanban-int-badge" title="PR Merged">🟢 Merged</span>`:row.prStatus==='approved'?`<span class="chip chip-teal kanban-int-badge" title="PR Approved">✅ Approved</span>`:row.prStatus==='open'?`<span class="chip chip-yellow kanban-int-badge" title="PR открыт">🟡 PR</span>`:row.jiraKey&&!row.prUrl?`<span class="chip chip-gray kanban-int-badge" title="Нет PR">⚠️</span>`:''}
+            ${row.jiraStatus?`<span class="chip chip-blue kanban-int-badge" title="Jira: ${row.jiraStatus}"><span class="signal-dot signal-information"></span> ${row.jiraStatus.slice(0,12)}</span>`:''}
+            ${row.prStatus==='merged'?`<span class="chip chip-green kanban-int-badge" title="PR Merged"><span class="signal-dot signal-on-course"></span> Merged</span>`:row.prStatus==='approved'?`<span class="chip chip-teal kanban-int-badge" title="PR Approved"><span class="signal-dot signal-on-course"></span> Approved</span>`:row.prStatus==='open'?`<span class="chip chip-yellow kanban-int-badge" title="PR открыт"><span class="signal-dot signal-drift"></span> PR</span>`:row.jiraKey&&!row.prUrl?`<span class="chip chip-gray kanban-int-badge" title="Нет PR"><span class="signal-dot signal-off-course"></span> no-PR</span>`:''}
           </div>`;
         card.addEventListener('dragstart',e=>{
           KanbanView._drag={rowId:row.id,sourceCol:col.key};
@@ -96,3 +122,15 @@ export const KanbanView = {
     });
   },
 };
+
+function _injectKanbanHeader() {
+  const section = document.getElementById('section-kanban');
+  if (!section) return;
+  let host = section.querySelector('#kanban-prizma-header');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'kanban-prizma-header';
+    section.insertBefore(host, section.firstChild);
+  }
+  host.innerHTML = renderPageHeader('kanban', { sub: 'WIP-доска: задачи по статусу.' });
+}

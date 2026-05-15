@@ -6,8 +6,10 @@
    ============================================================ */
 
 import { state }                        from '../state.js';
-import { computeProgress, computeLoad } from '../metricsEngine.js';
-import { computeHealthScore }           from '../chat/chatAlerts.js';
+// AUDIT_ARCHITECTURE #15 — computeHealthScore zhivet teper' v
+// metricsEngine; eto zakryvaet edinstvennyy narushennyy border
+// `ai/* → chat/*`. Funkciya — chistaya metrika, ne UI.
+import { computeProgress, computeLoad, computeHealthScore } from '../metricsEngine.js';
 
 const pct = (n, d) => d ? Math.round(n / d * 100) : 0;
 

@@ -21,6 +21,13 @@
 import { state }            from '../state.js';
 import { FilterEngine }     from '../filters.js';
 import { applyBulkAction }  from '../dataStore.js';
+import { Reactive }         from '../reactiveStore.js';
+// AUDIT_HOLISTIC F5 — единая платформа bulk-операций. Здесь используется как
+// preview-ассистент перед apply (показывает summary в toast), а для двух
+// migration-callsites — `mark_done` и `clear_blocker` — также как primary
+// path apply через BulkPlatform.apply (получаем undoToken + audit-trail).
+// Старые callsites продолжают работать через applyBulkAction (адаптер).
+import { BulkPlatform }     from './bulkPlatform.js';
 
 export const BulkEditPanel = {
   show() {
@@ -35,24 +42,43 @@ export const BulkEditPanel = {
     const panel = document.getElementById('bulk-panel');
     if (!panel) return;
     const count = state.bulkSelected.size;
+    // V21 J #67 — показать сколько из выбранных видимы в текущем фильтре.
+    // Раньше юзер видел «Выбрано: 5», применял bulk, получал toast
+    // «вне фильтра» — а panel молчал. Теперь panel сам сообщает diff.
+    let visibleCount = count;
+    try {
+      if (typeof FilterEngine !== 'undefined' && FilterEngine?.getFiltered) {
+        const visibleIds = new Set(FilterEngine.getFiltered().map(r => r.id));
+        visibleCount = [...state.bulkSelected].filter(id => visibleIds.has(id)).length;
+      }
+    } catch (_) { /* defensive */ }
     const countEl = panel.querySelector('#bulk-count');
-    if (countEl) countEl.textContent = `Выбрано: ${count}`;
+    if (countEl) {
+      if (visibleCount === count) {
+        countEl.textContent = `Выбрано: ${count}`;
+      } else {
+        countEl.textContent = `Выбрано: ${visibleCount} из ${count} (${count - visibleCount} вне фильтра)`;
+      }
+    }
   },
   toggle(rowId, checked) {
     if (checked) state.bulkSelected.add(rowId);
     else         state.bulkSelected.delete(rowId);
+    Reactive.notifyManual(); // V21 S F5 — Set ops Proxy не видит.
     if (state.bulkSelected.size > 0) BulkEditPanel.show();
     else                              BulkEditPanel.hide();
     BulkEditPanel.update();
   },
   selectAll(rows) {
     rows.forEach(r => state.bulkSelected.add(r.id));
+    Reactive.notifyManual();
     BulkEditPanel.show();
     BulkEditPanel.update();
     document.querySelectorAll('.bulk-row-cb').forEach(cb => { cb.checked = true; });
   },
   clearAll() {
     state.bulkSelected.clear();
+    Reactive.notifyManual();
     BulkEditPanel.hide();
     document.querySelectorAll('.bulk-row-cb').forEach(cb => { cb.checked = false; });
     const selectAll = document.getElementById('bulk-select-all');
@@ -85,7 +111,32 @@ export const BulkEditPanel = {
       payload.assignee = inp ? inp.value.trim() : '';
       if (!payload.assignee) return;
     }
-    applyBulkAction(ids, actionType, payload);
+    // AUDIT_HOLISTIC F5 — два migration-callsite на BulkPlatform: `mark_done`
+    // и `clear_blocker`. Получаем undoToken + audit-trail, остальные пока
+    // через legacy applyBulkAction (контракт совместимости). Маппинг
+    // сохраняет существующую UX (toast, clearAll).
+    const useBulkPlatform = (actionType === 'mark_done') || (actionType === 'clear_blocker');
+    if (useBulkPlatform) {
+      const op = (actionType === 'mark_done')
+        ? { kind: 'mark-done',
+            targets: ids.map(id => ({ rowId: id })),
+            payload: { value: payload.done !== false },
+            source: 'registry',
+            label: 'mark_done (registry bulk panel)' }
+        : { kind: 'custom',
+            targets: ids.map(id => ({ rowId: id })),
+            payload: { fields: { blockingDependency: false, blockingDeadline: '' } },
+            source: 'registry',
+            label: 'clear_blocker (registry bulk panel)' };
+      const res = BulkPlatform.apply(op);
+      if (res.ok) {
+        window.showToast?.(`Курс скорректирован — ${res.applied} задач (можно отменить)`, 'success', 2400);
+      } else {
+        window.showToast?.(`Не удалось применить: ${res.reason}`, 'warning', 2400);
+      }
+    } else {
+      applyBulkAction(ids, actionType, payload);
+    }
     BulkEditPanel.clearAll();
   },
   bindUI() {

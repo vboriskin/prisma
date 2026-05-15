@@ -6,103 +6,26 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { URL } = require('url');
 // V19 E4 — structured logger вместо ad-hoc console.* calls.
 // JSON output по умолчанию (для ELK ingestion), levels via LOG_LEVEL env.
 const logger = require('./server/logger.js');
-
-/**
- * V19 C4 — telemetry endpoint handler.
- * Принимает single event или batch events от frontend, emit'ит через
- * logger.event() в structured log. Side-effect: только log entry,
- * никакой DB.
- *
- * Безопасность:
- *   - whitelist event-name regex (защита от arbitrary string flood)
- *   - max-batch 50 events / req
- *   - rate-limit уже применён upstream
- *   - сами data поля sanitized: only primitives + plain objects, depth ≤ 3
- *
- * Frontend usage:
- *   navigator.sendBeacon('/api/telemetry', JSON.stringify({event, data}))
- *   — fire-and-forget, не блокирует UI.
- */
-async function handleTelemetry(req, res) {
-  try {
-    const raw = await readBody(req, 64 * 1024);
-    const body = raw ? JSON.parse(raw) : {};
-    const events = Array.isArray(body.events)
-      ? body.events
-      : (body.event ? [body] : []);
-    if (!events.length) { writeJson(res, 400, { error: 'event[s] required' }); return; }
-    if (events.length > 50) { writeJson(res, 400, { error: 'max 50 events per request' }); return; }
-    let accepted = 0;
-    for (const e of events) {
-      const name = String(e?.event || '').trim();
-      // Whitelist: <namespace>.<action> — alphanumeric + dot, max 80 chars.
-      if (!/^[a-z][a-z0-9_]{0,30}\.[a-z][a-z0-9_]{0,40}$/.test(name)) continue;
-      const data = _sanitizeTelemetryData(e?.data);
-      logger.event(name, { ...data, src: 'browser' });
-      accepted++;
-    }
-    writeJson(res, 200, { ok: true, accepted, total: events.length });
-  } catch (err) {
-    logger.warn('[telemetry] handler error', { err: err?.message || String(err) });
-    writeJson(res, 400, { error: 'Invalid telemetry payload' });
-  }
-}
-
-/** Sanitize телеметрии payload: primitives + flat object, max 1KB JSON. */
-function _sanitizeTelemetryData(data) {
-  if (data == null || typeof data !== 'object') return {};
-  const out = {};
-  for (const [k, v] of Object.entries(data)) {
-    // Whitelist key chars + max 40-char keys.
-    if (!/^[a-zA-Z0-9_]{1,40}$/.test(k)) continue;
-    // Primitives only at top level. Nested objects coerced to JSON-string
-    // truncated 200 chars (visibility, не storage).
-    if (v == null) continue;
-    if (typeof v === 'string')   { out[k] = v.slice(0, 200); continue; }
-    if (typeof v === 'number')   { out[k] = Number.isFinite(v) ? v : 0; continue; }
-    if (typeof v === 'boolean')  { out[k] = v; continue; }
-    if (Array.isArray(v))        { out[k] = v.slice(0, 20).join(','); continue; }
-    // Fallback: stringify nested object (truncated).
-    try { out[k] = JSON.stringify(v).slice(0, 200); } catch (_) { /* skip */ }
-  }
-  return out;
-}
+// V18 — Observability + operational endpoints (rate-limit, /health, /ready,
+// /metrics, /metrics/prom, /api/telemetry, /api/client-error) вынесены
+// в отдельный модуль. `_metrics` остаётся в этом файле (используется
+// LLM-budget code), передаётся в фабрику createObservability ниже.
+const { createObservability } = require('./server/observability.js');
 
 const PORT = parseInt(process.argv[2], 10) || 8080;
 const ROOT = __dirname;
-const DEFAULT_GIGACHAT_BASE = process.env.GIGACHAT_API_BASE || 'https://gigachat.devices.sberbank.ru/api/v1';
-const SERVER_ACCESS_TOKEN = process.env.GIGACHAT_ACCESS_TOKEN || '';
-const MAX_BODY = 8 * 1024 * 1024;
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.svg': 'image/svg+xml',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.csv': 'text/csv; charset=utf-8',
-  // V15 fix (errors-log report 2026-04-30): without this MIME the browser
-  // rejects WebAssembly streaming compile with "Unexpected response MIME
-  // type. Expected 'application/wasm'", forcing fallback to ArrayBuffer
-  // instantiation — which then trips the CSP `wasm-unsafe-eval` block.
-  '.wasm': 'application/wasm',
-  // Fonts (in case any get re-vendored locally later — harmless extras).
-  '.woff':  'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf':   'font/ttf',
-};
-
-function writeJson(res, code, data) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(data));
-}
+// V22 Stage 8 — bootstrap helpers + static handler extracted to small
+// dedicated modules. Destructured names preserve the existing call-site
+// shape (writeJson/readBody/isSameOriginRequest/MAX_BODY) — keeps every
+// in-file usage unchanged.
+const { writeJson, readBody, isSameOriginRequest, MAX_BODY } = require('./server/helpers.js');
+const { serveStatic } = require('./server/static.js');
 
 /* ────────────────────────────────────────────────────────────
    Rate limit (per-IP, sliding 1-min window)
@@ -114,23 +37,33 @@ function writeJson(res, code, data) {
    ─────────────────────────────────────────────────────────── */
 const RL_WINDOW_MS  = 60 * 1000;
 const RL_LIMIT      = parseInt(process.env.RATE_LIMIT_PER_MIN || '120', 10);
-const _rlBuckets = new Map();   // ip → [timestamp, ...]
+const _rlBuckets = new Map();   // bucketKey → [timestamp, ...]
 function clientIp(req) {
   // Trust the connection address — local tool, no proxy in front.
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
+// V21 R (audit-2026-05-03 §C B10) — per-user rate-limit вместо чисто
+// per-IP. За корпоративным NAT все юзеры режут друг друга. Теперь
+// бэкэнд сначала смотрит на X-Client-Id (HTTP-заголовок, который
+// фронт отправляет с каждым запросом — UUID per-tab из localStorage),
+// и фолбэчится на IP только если идентификатора нет.
+function clientBucketKey(req) {
+  const cid = req.headers && (req.headers['x-client-id'] || req.headers['x-user-id']);
+  if (cid && typeof cid === 'string') return 'cid:' + cid.slice(0, 64);
+  return 'ip:' + clientIp(req);
+}
 function checkRateLimit(req) {
-  const ip = clientIp(req);
+  const key = clientBucketKey(req);
   const now = Date.now();
-  const arr = _rlBuckets.get(ip) || [];
+  const arr = _rlBuckets.get(key) || [];
   // Drop entries outside window. Keeps memory bounded for steady traffic.
   while (arr.length && arr[0] <= now - RL_WINDOW_MS) arr.shift();
   if (arr.length >= RL_LIMIT) {
     return { ok: false, retryAfter: Math.ceil((arr[0] + RL_WINDOW_MS - now) / 1000) };
   }
   arr.push(now);
-  _rlBuckets.set(ip, arr);
-  // Periodic cheap GC: trim the map if it grew unreasonably (>1000 IPs).
+  _rlBuckets.set(key, arr);
+  // Periodic cheap GC: trim the map if it grew unreasonably (>1000 ключей).
   if (_rlBuckets.size > 1000) {
     for (const [k, v] of _rlBuckets) if (!v.length || v[v.length-1] < now - RL_WINDOW_MS) _rlBuckets.delete(k);
   }
@@ -147,8 +80,17 @@ const _metrics = {
   errors4xx: 0,
   errors5xx: 0,
   rateLimited: 0,
+  // V21 U (audit-2026-05-03 §E R7) — реальные observability-метрики:
+  // p95 latency через ring-buffer последних 1000 latencies, DAU через
+  // X-Client-Id за последние 24ч, client-error rate.
+  latencies: [],          // ring-buffer (последние 1000 ms)
+  latenciesIdx: 0,
+  daus: new Map(),        // clientId -> last seen epoch ms
+  clientErrors: 0,        // total client-side errors reported (R6)
+  clientErrorsRecent: [], // [{at, msg}] — последние 50 для quick view
 };
-function recordRequest(pathname, statusCode) {
+const _LATENCY_BUFFER = 1000;
+function recordRequest(pathname, statusCode, latencyMs) {
   _metrics.requestsTotal++;
   // Bucket by API prefix so paths like /api/jira/issue/PROJ-123 don't blow up the map.
   const bucket = pathname.startsWith('/api/integrations/') ? pathname.split('/').slice(0,4).join('/')
@@ -158,661 +100,164 @@ function recordRequest(pathname, statusCode) {
   _metrics.requestsByPath[bucket] = (_metrics.requestsByPath[bucket] || 0) + 1;
   if (statusCode >= 400 && statusCode < 500) _metrics.errors4xx++;
   if (statusCode >= 500) _metrics.errors5xx++;
-}
-
-function readBody(req, limitBytes) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    req.on('data', (chunk) => {
-      size += chunk.length;
-      if (size > limitBytes) {
-        reject(new Error('Payload too large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-    req.on('error', reject);
-  });
-}
-
-function buildChatEndpoint(base) {
-  const normalized = String(base || DEFAULT_GIGACHAT_BASE).replace(/\/+$/, '');
-  if (normalized.endsWith('/chat/completions')) return normalized;
-  if (normalized.endsWith('/v1')) return `${normalized}/chat/completions`;
-  if (normalized.endsWith('/api')) return `${normalized}/v1/chat/completions`;
-  return `${normalized}/chat/completions`;
-}
-
-// ============================================================
-// GIGACHAT OAUTH — token cache + exchange
-// ============================================================
-const GIGACHAT_OAUTH_URL = process.env.GIGACHAT_OAUTH_URL
-  || 'https://ngw.devices.sberbank.ru:9443/api/v2/oauth';
-const GIGACHAT_SCOPE = process.env.GIGACHAT_SCOPE || 'GIGACHAT_API_PERS';
-
-// In-memory token cache — scoped to clientId so multiple configs can coexist
-const _tokenCache = new Map(); // clientId → { token, expiresAt }
-
-/**
- * Returns a valid GigaChat Bearer token.
- * Fetches a new one from OAuth if missing or within 90s of expiry.
- * Never logs the secret.
- */
-async function gigachatGetToken(clientId, clientSecret) {
-  const cacheKey = clientId;
-  const cached = _tokenCache.get(cacheKey);
-  const now = Date.now();
-  if (cached && cached.token && cached.expiresAt - now > 90_000) {
-    return cached.token;
+  if (Number.isFinite(latencyMs)) {
+    _metrics.latencies[_metrics.latenciesIdx % _LATENCY_BUFFER] = latencyMs;
+    _metrics.latenciesIdx++;
   }
-
-  // Build Basic auth: base64(clientId:clientSecret)
-  const cred = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-  // Unique request ID required by GigaChat OAuth
-  const rqUID = [8,4,4,4,12].map(n => [...Array(n)].map(() => Math.floor(Math.random()*16).toString(16)).join('')).join('-');
-
-  return new Promise((resolve, reject) => {
-    const oauthUrl = new URL(GIGACHAT_OAUTH_URL);
-    const body = `scope=${encodeURIComponent(GIGACHAT_SCOPE)}`;
-    const opts = {
-      method: 'POST',
-      protocol: oauthUrl.protocol,
-      hostname: oauthUrl.hostname,
-      port: oauthUrl.port || 443,
-      path: oauthUrl.pathname + (oauthUrl.search || ''),
-      headers: {
-        'Authorization': `Basic ${cred}`,
-        'RqUID': rqUID,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(body),
-        'Accept': 'application/json',
-      },
-      // GigaChat OAuth endpoint uses Sberbank internal CA — allow insecure for on-prem
-      rejectUnauthorized: false,
-    };
-    const req = https.request(opts, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        const text = Buffer.concat(chunks).toString('utf-8');
-        if (res.statusCode >= 400) {
-          return reject(new Error(`GigaChat OAuth ${res.statusCode}: ${text.slice(0, 200)}`));
-        }
-        let parsed;
-        try { parsed = JSON.parse(text); } catch(_) { return reject(new Error('GigaChat OAuth: invalid JSON')); }
-        const token = parsed.access_token;
-        if (!token) return reject(new Error('GigaChat OAuth: no access_token in response'));
-        // expires_at is ms since epoch (GigaChat v2 API)
-        const expiresAt = typeof parsed.expires_at === 'number'
-          ? parsed.expires_at
-          : (Date.now() + 29 * 60 * 1000); // fallback: 29 min
-        _tokenCache.set(cacheKey, { token, expiresAt });
-        resolve(token);
-      });
-    });
-    req.setTimeout(12000, () => req.destroy(new Error('GigaChat OAuth timeout')));
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+}
+function recordClientSeen(req) {
+  // V21 U — DAU. X-Client-Id переживает рестарт клиента, поэтому уникален.
+  const cid = req.headers && (req.headers['x-client-id'] || req.headers['x-user-id']);
+  if (!cid) return;
+  _metrics.daus.set(String(cid).slice(0, 64), Date.now());
+}
+function _quantile(arr, q) {
+  if (!arr.length) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * q));
+  return sorted[idx];
+}
+function _activeDaus() {
+  const cutoff = Date.now() - 24 * 3600 * 1000;
+  let n = 0;
+  for (const [k, t] of _metrics.daus) {
+    if (t < cutoff) _metrics.daus.delete(k);
+    else n++;
+  }
+  return n;
 }
 
-function forwardSSEOrChunk(upstreamRes, clientRes) {
-  clientRes.writeHead(200, {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-  clientRes.write('event: meta\ndata: {"ok":true}\n\n');
-  upstreamRes.on('data', (chunk) => {
-    clientRes.write(chunk);
-  });
-  upstreamRes.on('end', () => {
-    clientRes.write('data: [DONE]\n\n');
-    clientRes.end();
-  });
-}
-
-function proxyChat(req, res) {
-  readBody(req, MAX_BODY).then(async (raw) => {
-    const body = raw ? JSON.parse(raw) : {};
-    const clientId     = String(body.clientId     || '').trim();
-    const clientSecret = String(body.clientSecret || '').trim();
-    let   token        = String(body.token        || '').trim() || SERVER_ACCESS_TOKEN;
-
-    // ── GigaChat OAuth: exchange clientId+clientSecret for Bearer token ──
-    if (clientId && clientSecret) {
-      try {
-        token = await gigachatGetToken(clientId, clientSecret);
-      } catch (e) {
-        writeJson(res, 502, { error: 'GigaChat OAuth failed: ' + e.message });
-        return;
-      }
-    }
-
-    if (!token) {
-      writeJson(res, 400, { error: 'Нет токена. Укажите token или пару clientId + clientSecret в настройках LLM.' });
-      return;
-    }
-
-    const endpoint = buildChatEndpoint(body.apiBaseUrl || DEFAULT_GIGACHAT_BASE);
-    const endpointUrl = new URL(endpoint);
-    const payload = {
-      model: body.model || 'GigaChat-2',
-      messages: Array.isArray(body.messages) ? body.messages : [],
-      stream: body.stream !== false,
-      temperature: Number.isFinite(Number(body.temperature)) ? Number(body.temperature) : 0.2,
-      max_tokens: Number.isFinite(Number(body.max_tokens)) ? Number(body.max_tokens) : 900,
-    };
-
-    // ── Perform the upstream chat request (with one 401-retry) ──
-    const doRequest = (bearerToken, retryOnUnauth) => {
-      const payloadRaw = JSON.stringify(payload);
-      const transport = endpointUrl.protocol === 'http:' ? http : https;
-      const upstreamReq = transport.request({
-        protocol: endpointUrl.protocol,
-        hostname: endpointUrl.hostname,
-        port: endpointUrl.port || (endpointUrl.protocol === 'http:' ? 80 : 443),
-        path: endpointUrl.pathname + endpointUrl.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${bearerToken}`,
-          Accept: payload.stream ? 'text/event-stream' : 'application/json',
-          'Content-Length': Buffer.byteLength(payloadRaw),
-        },
-        // Allow Sberbank internal CA (same as OAuth call)
-        rejectUnauthorized: false,
-      }, (upstreamRes) => {
-        const status = upstreamRes.statusCode || 500;
-        const upstreamType = (upstreamRes.headers['content-type'] || '').toLowerCase();
-
-        if (status === 401 && retryOnUnauth && clientId && clientSecret) {
-          // Consume upstream body then refresh token and retry once
-          upstreamRes.resume();
-          _tokenCache.delete(clientId); // invalidate cached token
-          gigachatGetToken(clientId, clientSecret)
-            .then(newTok => doRequest(newTok, false))
-            .catch(e => { if (!res.writableEnded) writeJson(res, 502, { error: 'GigaChat token refresh failed: ' + e.message }); });
-          return;
-        }
-
-        if (status >= 400) {
-          const errChunks = [];
-          upstreamRes.on('data', (chunk) => errChunks.push(chunk));
-          upstreamRes.on('end', () => {
-            const errText = Buffer.concat(errChunks).toString('utf-8');
-            const parsed = (() => { try { return JSON.parse(errText); } catch (_) { return null; } })();
-            if (!res.writableEnded) writeJson(res, status, {
-              error: 'GigaChat upstream error',
-              status,
-              details: parsed || errText || 'Unknown upstream error',
-            });
-          });
-          return;
-        }
-
-        if (payload.stream) {
-          if (upstreamType.includes('text/event-stream') || upstreamType.includes('stream') || upstreamType.includes('json')) {
-            forwardSSEOrChunk(upstreamRes, res);
-          } else {
-            const chunks = [];
-            upstreamRes.on('data', (chunk) => chunks.push(chunk));
-            upstreamRes.on('end', () => {
-              const text = Buffer.concat(chunks).toString('utf-8');
-              if (res.writableEnded) return;
-              res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' });
-              res.write(`data: ${text}\n\n`);
-              res.write('data: [DONE]\n\n');
-              res.end();
-            });
-          }
-        } else {
-          if (!res.writableEnded) {
-            res.writeHead(200, { 'Content-Type': upstreamType || 'application/json; charset=utf-8' });
-            upstreamRes.pipe(res);
-          }
-        }
-      });
-
-      req.on('close', () => { if (!res.writableEnded) upstreamReq.destroy(new Error('Client disconnected')); });
-      upstreamReq.on('error', (err) => {
-        if (res.writableEnded) return;
-        writeJson(res, 502, { error: 'Proxy request failed', details: String(err && err.message ? err.message : err) });
-      });
-      upstreamReq.write(payloadRaw);
-      upstreamReq.end();
-    };
-
-    doRequest(token, true);
-
-  }).catch((err) => {
-    writeJson(res, /Payload too large/.test(String(err)) ? 413 : 400, {
-      error: 'Invalid request body',
-      details: String(err && err.message ? err.message : err),
-    });
-  });
-}
+// ============================================================
+// LLM / GigaChat — extracted to server/llm.js (V18 pilot)
+// Constants, OAuth, SSE forwarding, budget cap and the proxyChat
+// handler all live in server/llm.js now. Keep this factory call
+// here so server.js retains only the route registration below
+// (search for '/api/llm/chat').
+// ============================================================
+const llm = require('./server/llm.js').create({ readBody, writeJson, MAX_BODY });
 
 // ============================================================
 // JIRA PULSE — config + proxy
+// ----------------------------------------------------------------
+// V18 extraction — config block (JIRA_CONFIG_FILE / JIRA_DEFAULT_CONFIG /
+// jiraReadConfig / jiraWriteConfig / jiraSanitizeAreas / jiraSanitizeConfig)
+// + jiraBuildReport + handleJiraApi moved to server/jira-api.js. The
+// low-level helpers (jiraRequest, jiraSearchAll, jiraPLimit,
+// jiraBuildAreaReport, jiraInvalidateRecentCache, etc.) STAY here —
+// they are wired into the module via the factory below.
+//
+// The factory call lives near the route registration further down
+// (search "require('./server/jira-api.js')") because it needs
+// `jiraRequest` / `jiraSearchAll` / `jiraBuildAreaReport` /
+// `jiraInvalidateRecentCache` / `jiraPLimit` — all defined later in
+// this file. After the require, we destructure backward-compat
+// aliases so existing in-file callsites
+// (jiraResolveSprintFieldId / jiraBuildAreaReport / etc.) keep
+// using `jiraReadConfig()` / `jiraSanitizeAreas()` unchanged.
 // ============================================================
-const JIRA_CONFIG_FILE = path.join(ROOT, 'jira_config.json');
-const JIRA_DEFAULT_CONFIG = {
-  jiraBaseUrl: '', jiraToken: '',
-  jiraProjectKeys: '',             // comma-separated Jira project keys, e.g. "PAY,SBOF"
-  areas: [],                       // [{ name, projectKey }] — derived from jiraProjectKeys when needed
-  // Sigma Jira (second instance) — used by /api/integrations/black-dashboard
-  // to fetch quarterly goal-epics linked to Delta tasks via «Domain link».
-  sigmaJiraBaseUrl: '', sigmaJiraToken: '',
-  sigmaGoalEpicKeys: '',           // comma-separated goal-epic keys, e.g. "GOAL-1, GOAL-2"
-  bitbucketBaseUrl: '', bitbucketToken: '',
-  bitbucketProjectKeys: '',        // comma-separated repo slugs / project keys for PR search
-  confluenceBaseUrl: '', confluenceToken: '',
-  confluenceSpaceKeys: '',         // V17.2 I2c — comma-separated space keys for CQL filter
-  activityWindowHours: 72,         // V17.2 I2c — окно активности (часов): default 3 рабочих дня
-  allowInsecureTls: false,         // global TLS flag
-  sinceDate: '2025-01-01',         // cut-off for Jira/Confluence search
-  staleDays: 3, noMovementDays: 2,
-  // Чёрный дашборд: следовать [Cloners] issue-link цепочкам при раскрытии
-  // дерева Domain-link. Нужно для команд (например, SMEAM), где эпики
-  // версионируются между квартальными релизами через cloner-цепочки вместо
-  // Epic Link / parent. Включено по умолчанию — расширяет JQL чтобы покрыть
-  // и cloner-родительство, не задевая обычные команды.
-  followCloners: true,
-};
 
-function jiraReadConfig() {
-  try { return { ...JIRA_DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(JIRA_CONFIG_FILE, 'utf8')) }; }
-  catch(_) { return { ...JIRA_DEFAULT_CONFIG }; }
-}
-function jiraWriteConfig(patch) {
-  const next = { ...jiraReadConfig(), ...patch };
-  fs.writeFileSync(JIRA_CONFIG_FILE, JSON.stringify(next, null, 2), 'utf8');
-  return next;
-}
-function jiraSanitizeAreas(areas) {
-  if (!Array.isArray(areas)) return [];
-  const seen = new Set(), out = [];
-  for (const a of areas) {
-    const pk = String(a.projectKey||'').trim(), nm = String(a.name||pk||'').trim();
-    if (!pk || seen.has(pk)) continue;
-    seen.add(pk); out.push({ name:nm, projectKey:pk });
-  }
-  return out;
-}
-function jiraSanitizeConfig(cfg) {
-  return {
-    jiraBaseUrl:         cfg.jiraBaseUrl||'',
-    jiraProjectKeys:     cfg.jiraProjectKeys||'',
-    areas:               jiraSanitizeAreas(cfg.areas),
-    sigmaJiraBaseUrl:    cfg.sigmaJiraBaseUrl||'',
-    sigmaGoalEpicKeys:   cfg.sigmaGoalEpicKeys||'',
-    bitbucketBaseUrl:    cfg.bitbucketBaseUrl||'',
-    bitbucketProjectKeys:cfg.bitbucketProjectKeys||'',
-    confluenceBaseUrl:   cfg.confluenceBaseUrl||'',
-    confluenceSpaceKeys: cfg.confluenceSpaceKeys||'',
-    activityWindowHours: Number.isFinite(+cfg.activityWindowHours) ? Math.min(168, Math.max(1, +cfg.activityWindowHours)) : 72,
-    allowInsecureTls:    !!cfg.allowInsecureTls,
-    sinceDate:           cfg.sinceDate || '2025-01-01',
-    staleDays:           cfg.staleDays??3,
-    noMovementDays:      cfg.noMovementDays??2,
-    hasJiraToken:        !!cfg.jiraToken,
-    hasSigmaJiraToken:   !!cfg.sigmaJiraToken,
-    hasBitbucketToken:   !!cfg.bitbucketToken,
-    hasConfluenceToken:  !!cfg.confluenceToken,
-  };
-}
+// V18 extraction step 2 — keepAlive agents, circuit-breaker, httpCache,
+// SSRF guard, jiraForward / jiraRequest / jiraSearchAll / jiraPLimit /
+// _jiraGate* / _bbGate* и связанные helpers вынесены в server/upstream.js.
+// Это shared HTTP-инфраструктура для ВСЕХ outbound integration-вызовов
+// (Jira, Bitbucket, Confluence, Zephyr, Jenkins) — не jira-only, отсюда
+// нейтральное имя модуля. Backward-compat aliases ниже — все existing
+// callsite'ы внутри server.js продолжают работать без изменений.
+const upstream = require('./server/upstream.js');
+const {
+  jiraForward, jiraParseResp, jiraSleep,
+  jiraRequest, jiraSearchAll, jiraPLimit,
+  _breakerCheck, _breakerRecordFailure, _breakerRecordSuccess,
+  _httpCacheGet, _httpCacheSet, _httpCacheKey,
+  _ssrfBlocked, _cfBuildPathCascade,
+  _jiraGateWait, _jiraGateClose,
+  _bbGateWait, _bbGateClose,
+  _MAX_RESPONSE_BYTES, _HTTP_CACHE_TTL_MS,
+  // Live state Maps — _periodicCleanup ниже в этом файле проходит по ним
+  // (reference-equal с upstream.js — один и тот же объект на оба модуля).
+  _HTTP_CACHE, _breakers,
+} = upstream;
 
-function jiraForward({ targetUrl, method='GET', headers={}, body=null, allowInsecureTls=false, timeoutMs=30000 }) {
-  return new Promise((resolve, reject) => {
-    let parsed;
-    try { parsed = new URL(targetUrl); } catch(e) { return reject(new Error('Bad URL: '+targetUrl)); }
-    const lib = parsed.protocol==='https:' ? https : http;
-    const opts = {
-      method, hostname: parsed.hostname,
-      port: parsed.port||(parsed.protocol==='https:'?443:80),
-      path: parsed.pathname+(parsed.search||''),
-      headers: { Accept:'application/json', 'User-Agent':'sbof-planner/1.0', ...headers },
-      rejectUnauthorized: !allowInsecureTls,
-    };
-    const r = lib.request(opts, (resp) => {
-      const chunks = [];
-      resp.on('data', c=>chunks.push(c));
-      resp.on('end', ()=>resolve({ status:resp.statusCode||0, headers:resp.headers, text:Buffer.concat(chunks).toString('utf8') }));
-    });
-    r.setTimeout(timeoutMs, ()=>r.destroy(new Error('Timeout '+parsed.hostname)));
-    r.on('error', reject);
-    if (body!=null) {
-      const pl = typeof body==='string'?body:JSON.stringify(body);
-      r.setHeader('Content-Type','application/json'); r.setHeader('Content-Length',Buffer.byteLength(pl)); r.write(pl);
-    }
-    r.end();
-  });
-}
-function jiraParseResp(resp, label) {
-  if (resp.status<200||resp.status>=300) {
-    let msg=`${label} ${resp.status}`;
-    try { const j=JSON.parse(resp.text); if(j.errorMessages?.length) msg+=': '+j.errorMessages.join('; '); else if(j.message) msg+=': '+j.message; } catch(_){}
-    const e=new Error(msg); e.status=resp.status; throw e;
-  }
-  if (!resp.text) return {};
-  return JSON.parse(resp.text);
-}
-function jiraSleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
+// V18 extraction — Jira-domain helpers (jiraResolveSprintFieldId /
+// jiraInvalidateRecentCache / jiraBuildAreaReport / jiraResolveProjectId)
+// + recent-bucket cache state вынесены в server/jira-helpers.js. Factory
+// wired here EARLY so `_recentBucketCache` / `_RECENT_CACHE_TTL_MS` aliases
+// are bound before `_periodicCleanup` ever fires (setInterval'ed below).
+// Zephyr's `jiraResolveZephyrResultFieldId` is wired LATE through
+// `setZephyrResultFieldIdResolver(...)` after the zephyr factory boots.
+const _jiraHelpers = require('./server/jira-helpers.js').create({
+  jiraRequest, jiraSearchAll, jiraPLimit,
+});
+const {
+  jiraResolveSprintFieldId,
+  jiraInvalidateRecentCache,
+  jiraBuildAreaReport,
+  jiraResolveProjectId,
+  _recentBucketCache,
+  _RECENT_CACHE_TTL_MS,
+} = _jiraHelpers;
 
-// ── Shared 429 rate-limit gate ─────────────────────────────────────
-// When one in-flight Jira request gets throttled, ALL other requests
-// must pause until the gate opens. Otherwise concurrent chunks each
-// hit retry independently, multiplying load and re-triggering 429s
-// in a feedback loop. Single global state for simplicity — fine for
-// this single-process server. Reset when the wait window passes.
-let _jiraGateUntil = 0;        // epoch ms; 0 = open
-let _jiraGateReason = '';      // for logs
-function _jiraGateWait() {
+// PR-CW — периодический GC всех in-memory структур. Раньше cleanup происходил
+// только on-access (`_httpCacheGet` проверяет TTL только при чтении), и при
+// низком трафике entries скапливались часами. Теперь sweep раз в 5 мин:
+//   · _HTTP_CACHE: drop entries старше 5 мин
+//   · _recentBucketCache: drop entries старше 24h
+//   · _metrics.daus: drop clients > 24h неактивные
+//   · _breakers: drop hosts > 7д без открытий (стабилизировались)
+//   · _llmBudgetPerUser (now in server/llm.js): drop entries > 48h (in-place GC)
+const _CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+function _periodicCleanup() {
   const now = Date.now();
-  if (now >= _jiraGateUntil) return Promise.resolve();
-  return jiraSleep(_jiraGateUntil - now);
-}
-function _jiraGateClose(ms, reason) {
-  const until = Date.now() + ms;
-  if (until > _jiraGateUntil) {
-    _jiraGateUntil = until;
-    _jiraGateReason = reason;
-    logger.warn('[jira:gate] closed', { gateMs: ms, reason });
+  // _HTTP_CACHE
+  let httpDropped = 0;
+  for (const [k, v] of _HTTP_CACHE) {
+    if (now - v.at > _HTTP_CACHE_TTL_MS) { _HTTP_CACHE.delete(k); httpDropped++; }
   }
-}
-
-async function jiraRequest(cfg, method, apiPath, body, maxRetries=5) {
-  // Retry kicks in on 429 + 502/503/504 (transient gateway errors common
-  // behind corporate reverse-proxies).
-  //
-  // V13 (2026-04, second pass): user reports sustained 429 storms on corp
-  // Jira where finite retry budgets aren't enough — first failure of a
-  // single chunk takes the whole BFS level down (with 21 seeds there's
-  // only one chunk; one failure = total abort). Their preference: "let
-  // it load longer". Solution:
-  //   • 429 retries: effectively unlimited (cap 60 attempts × 30s = up
-  //     to ~30 min wall-clock per request). Counted SEPARATELY from
-  //     gateway/5xx so a server outage still bails out at maxRetries=5.
-  //   • Honors `Retry-After` (capped at 60s per attempt).
-  //   • Shared gate (`_jiraGateUntil`) — when ANY request gets 429, the
-  //     gate closes for the wait window and all OTHER concurrent requests
-  //     queue behind it instead of fighting for tokens.
-  // The 240s client-side timeout on black-dashboard is the ultimate bound;
-  // genuinely-broken Jira will still surface (just later).
-  const target = cfg.jiraBaseUrl.replace(/\/+$/,'')+apiPath;
-  const tls = !!cfg.allowInsecureTls;
-  const authH = cfg.jiraToken?.includes(':')
-    ? 'Basic ' + Buffer.from(cfg.jiraToken).toString('base64')
-    : 'Bearer ' + cfg.jiraToken;
-  let delay = 2000;
-  let rateLimitAttempts = 0;        // separate counter for 429
-  let gatewayAttempts   = 0;        // separate counter for 5xx
-  // V13 (5th pass): cap 429 retries to a budget that fits within the
-  // client-side 10-min timeout AND leaves room for OTHER work (sigma
-  // goal fetch, expand, team coverage). 12 attempts × 30s cap = up to
-  // 6 min waiting per request. With concurrency=2 and shared gate, the
-  // total wall-clock impact stays below ~8 min for the worst case.
-  // Note: relies on `_jiraGateWait()` to queue concurrent requests
-  // behind any active 429 cooldown — so we don't multiply pressure.
-  const RATE_LIMIT_MAX  = 12;
-  const t0 = Date.now();
-  const HARD_BUDGET_MS  = 6 * 60 * 1000;    // 6 min absolute cap per request
-  while (true) {
-    if (Date.now() - t0 >= HARD_BUDGET_MS) {
-      throw Object.assign(new Error(`Jira request budget exhausted after ${rateLimitAttempts} 429s + ${gatewayAttempts} gateway retries`), { status: 0 });
-    }
-    await _jiraGateWait();           // queue behind any active 429 cooldown
-    // V17 P5 — per-call HTTP timeout bumped 25 s → 60 s. Per-query budget
-    // (60-75 s above) is the higher gate; this one is the lowest-level
-    // per-page bound. Audit 2026-05-V17 pt 5.
-    const resp = await jiraForward({ targetUrl:target, method, headers:{ Authorization: authH }, body:body??null, allowInsecureTls:tls, timeoutMs: 60000 });
-    const isRateLimit  = resp.status === 429;
-    const isGatewayErr = resp.status === 502 || resp.status === 503 || resp.status === 504;
-    if (isRateLimit) {
-      if (rateLimitAttempts >= RATE_LIMIT_MAX) {
-        throw Object.assign(new Error(`Jira 429 rate limit (after ${RATE_LIMIT_MAX} retries, ${Math.round((Date.now()-t0)/1000)}s)`), { status: 429 });
-      }
-      rateLimitAttempts++;
-      // Honor Retry-After if Jira sends it; cap each wait at 30s to bound
-      // worst-case latency per attempt. Exponential back-off when no header.
-      const retryAfterSec = parseInt(resp.headers['retry-after']||'0',10);
-      const waitMs = Math.min(retryAfterSec > 0 ? retryAfterSec*1000 : delay, 30000);
-      _jiraGateClose(waitMs, `429 on ${apiPath} (attempt ${rateLimitAttempts})`);
-      await jiraSleep(waitMs);
-      delay = Math.min(delay*2, 30000);
-      continue;
-    }
-    if (isGatewayErr) {
-      if (gatewayAttempts >= maxRetries) {
-        throw Object.assign(new Error(`Jira ${resp.status} gateway`), { status: resp.status });
-      }
-      gatewayAttempts++;
-      const retryAfterSec = parseInt(resp.headers['retry-after']||'0',10);
-      const waitMs = Math.min(retryAfterSec > 0 ? retryAfterSec*1000 : delay, 30000);
-      await jiraSleep(waitMs);
-      delay = Math.min(delay*2, 30000);
-      continue;
-    }
-    return jiraParseResp(resp, 'Jira');
+  // _recentBucketCache
+  let recentDropped = 0;
+  for (const [k, v] of _recentBucketCache) {
+    if (now - (v.cachedAt || 0) > _RECENT_CACHE_TTL_MS) { _recentBucketCache.delete(k); recentDropped++; }
   }
-}
-async function jiraSearchAll(cfg, jql, fields, expand, hardCap=2000, timeBudgetMs=Infinity) {
-  // Paginate until either (a) all issues fetched, (b) hardCap items collected,
-  // or (c) elapsed > timeBudgetMs. The time budget is what keeps a single
-  // heavy query (e.g. SMECM backlog with thousands of issues + changelog
-  // expand) from holding back the per-PK 35s deadline. Returns whatever
-  // pages succeeded — partial results are useful.
-  const out = []; let startAt = 0; const t0 = Date.now();
-  while (true) {
-    const data = await jiraRequest(cfg, 'POST', '/rest/api/2/search', { jql, startAt, maxResults: 100, fields, expand });
-    const issues = data.issues || [];
-    out.push(...issues);
-    const elapsed = Date.now() - t0;
-    if (issues.length < 100) break;
-    if (out.length >= (data.total || out.length)) break;
-    if (startAt > hardCap) break;
-    if (elapsed > timeBudgetMs) break;
-    startAt += issues.length;
+  // _metrics.daus (24h)
+  let dausDropped = 0;
+  const dauCutoff = now - 24 * 3600 * 1000;
+  for (const [k, t] of _metrics.daus) {
+    if (t < dauCutoff) { _metrics.daus.delete(k); dausDropped++; }
   }
-  return out;
-}
-function jiraPLimit(concurrency, tasks) {
-  return new Promise((resolve) => {
-    const results=new Array(tasks.length); let i=0, done=0, running=0;
-    const next=()=>{
-      while(running<concurrency&&i<tasks.length) {
-        const idx=i++; running++;
-        Promise.resolve().then(()=>tasks[idx]()).then(r=>{results[idx]=r;},e=>{results[idx]={__error:e.message};})
-          .then(()=>{ running--; done++; if(done===tasks.length) resolve(results); else next(); });
-      }
-    };
-    if(!tasks.length) resolve([]); else next();
-  });
-}
-// Sprint info lives in a "Sprint" custom field whose ID varies between Jira
-// instances (10020 on Cloud, 10010/10007 on Server, but corporate Jiras often
-// use bespoke IDs like customfield_11200). Static list misses those —
-// `_jiraSprintFieldId` is discovered at runtime via /rest/api/2/field.
-const JIRA_FIELDS = ['summary','description','status','assignee','reporter','updated','created','priority','issuetype','labels','duedate','timetracking','timeoriginalestimate','aggregatetimespent','worklog','comment','parent','subtasks','resolution','resolutiondate'];
-
-let _jiraSprintFieldIdCache = { url: '', id: '', at: 0 };
-const _SPRINT_FIELD_TTL = 30 * 60 * 1000;   // 30 min
-
-/** Discover the Sprint custom-field ID for the current Jira. Cached per-base-URL. */
-async function jiraResolveSprintFieldId(cfg) {
-  const now = Date.now();
-  if (_jiraSprintFieldIdCache.url === cfg.jiraBaseUrl
-      && now - _jiraSprintFieldIdCache.at < _SPRINT_FIELD_TTL
-      && _jiraSprintFieldIdCache.id) {
-    return _jiraSprintFieldIdCache.id;
+  // _breakers — stable hosts (closed, openUntil=0, и failures старше 7д) — drop
+  let breakersDropped = 0;
+  const breakerStaleMs = 7 * 24 * 3600 * 1000;
+  for (const [host, b] of _breakers) {
+    if (!b) { _breakers.delete(host); breakersDropped++; continue; }
+    const stillBlocked = b.openUntil && now < b.openUntil;
+    const recentFailure = (b.failures || []).some(t => now - t < breakerStaleMs);
+    if (!stillBlocked && !recentFailure) { _breakers.delete(host); breakersDropped++; }
   }
-  try {
-    const fields = await jiraRequest(cfg, 'GET', '/rest/api/2/field');
-    if (Array.isArray(fields)) {
-      // Prefer explicit "Sprint" name (Jira agile module). Fallback to any
-      // schema-typed sprint customfield.
-      const exact = fields.find(f => (f.name || '').toLowerCase() === 'sprint' && f.id && f.id.startsWith('customfield_'));
-      const fuzzy = fields.find(f => f.schema?.custom === 'com.atlassian.jira.plugin.system.customfieldtypes:sprint' || /sprint/i.test(f.id || ''));
-      const found = exact || fuzzy;
-      if (found && found.id) {
-        _jiraSprintFieldIdCache = { url: cfg.jiraBaseUrl, id: found.id, at: now };
-        return found.id;
-      }
-    }
-  } catch(_) { /* fall through to fallback */ }
-  // Fallback to the most common known IDs — added to fields list, harmless if absent.
-  const fallback = 'customfield_10020';
-  _jiraSprintFieldIdCache = { url: cfg.jiraBaseUrl, id: fallback, at: now };
-  return fallback;
-}
-
-/* ── Phase 3 — Zephyr/Xray test-result customfield auto-discovery ──
-   Different test-management plugins store the PASS/FAIL outcome in
-   different places:
-     · Zephyr Squad (Server):  custom field "Test Status" or "Execution Status"
-     · Zephyr Scale:           customfield with name containing "test result"
-     · Xray:                   customfield "Test Run Status"
-   We probe `/rest/api/2/field` once per Jira (TTL 1h) and pick the first
-   match by name keyword. Returns '' if nothing matched — caller should
-   then fall back to issue.fields.status.name (which works for the
-   simplest Zephyr setups where execution status === Jira status).
-   ────────────────────────────────────────────────────────────────── */
-let _zephyrResultFieldIdCache = { url: '', id: '', at: 0 };
-const _ZEPHYR_FIELD_TTL = 60 * 60 * 1000;   // 1 hour
-async function jiraResolveZephyrResultFieldId(cfg) {
-  const now = Date.now();
-  if (_zephyrResultFieldIdCache.url === cfg.jiraBaseUrl
-      && now - _zephyrResultFieldIdCache.at < _ZEPHYR_FIELD_TTL) {
-    return _zephyrResultFieldIdCache.id;     // may be '' = "no field found"
-  }
-  let found = '';
-  try {
-    const fields = await jiraRequest(cfg, 'GET', '/rest/api/2/field');
-    if (Array.isArray(fields)) {
-      // Match by name keyword, prefer customfield_*. First-match wins —
-      // ordering by specificity to avoid picking up unrelated "status" fields.
-      const KEYWORDS = [
-        /test\s*run\s*status/i,
-        /execution\s*status/i,
-        /test\s*status/i,
-        /test\s*result/i,
-        /прогон/i,
-        /результ.*тест/i,
-      ];
-      for (const rx of KEYWORDS) {
-        const f = fields.find(f =>
-          rx.test(String(f.name || '')) && String(f.id || '').startsWith('customfield_'));
-        if (f) { found = f.id; break; }
-      }
-    }
-  } catch(_) { /* probe failed — fall through to '' = use status.name */ }
-  _zephyrResultFieldIdCache = { url: cfg.jiraBaseUrl, id: found, at: now };
-  return found;
-}
-
-async function jiraBuildAreaReport(cfg, area) {
-  // Discover the sprint field ID for this Jira (cached). Falls back to common
-  // values if the /field probe fails.
-  const sprintFieldId = await jiraResolveSprintFieldId(cfg);
-  // Phase 3: discover the Zephyr/Xray test-result customfield (returns '' if not found).
-  const zephyrFieldId = await jiraResolveZephyrResultFieldId(cfg);
-  // Sprint query needs the discovered field; other queries don't.
-  // Both sprint+recent+inProgress queries need the zephyr field if we found one,
-  // so it's part of every fetch. Empty string is filtered out below.
-  const extraFields = [sprintFieldId, 'customfield_10010', 'customfield_10007', zephyrFieldId].filter(Boolean);
-  const SPRINT_FIELDS = JIRA_FIELDS.concat(extraFields);
-  const ALL_FIELDS    = JIRA_FIELDS.concat([zephyrFieldId].filter(Boolean));
-  const pk = area.projectKey;
-
-  // Run the four sub-queries with `allSettled` — one slow / failing query
-  // (typically the heavy backlog one) would previously sink the whole PK
-  // via Promise.all reject. Now we collect partial results AND keep a
-  // per-stage error trail so the diagnostics panel can show what broke.
-  //
-  // budgetMs per query gates pagination — the per-PK outer timeout (35s
-  // default) is the safety net, but each query has its own internal budget
-  // so the slowest doesn't starve others. SMECM-class teams have thousands
-  // of in-progress / backlog issues; even with hardCap=500, raw network
-  // latency for 5 pages × 4 queries × `expand:changelog` overrun the budget.
-  // ── Pulse query plan — optimised after repeated 45s timeouts on slow corp Jira ──
-  // Key optimisation: ONLY `recent` (last 3 days) needs `expand:changelog` for
-  // timeline events. `sprint` and `inProgress` are list-only — analysePulse will
-  // STILL pick up changelog for any issue that's also in `recent` because the
-  // dedup-by-key step preserves the version with the fattest payload. Issues that
-  // are sprint/inProgress but NOT touched in 3d simply have no timeline events
-  // (which is correct — there's nothing to bucket). Removing the expand here
-  // typically halves response size and 2-4× faster per page.
-  // V17 P5 — per-query budgets bumped 2× (was 20-30s, now 60-75s).
-  // User-side feedback: timeouts кричали постоянно на медленном корп-Jira.
-  // Outer client timeout 600s (10 min) даёт запас 10× даже при 4 backlog'ах
-  // подряд по 75s. Audit 2026-05-V17 pt 5.
-  const queries = [
-    // Sprint is bounded by Jira agile (active-sprint issues only) — usually <300.
-    { name: 'sprint',     jql: `project="${pk}" AND sprint in openSprints()`,                                        fields: SPRINT_FIELDS, expand: [],            cap: 500, budgetMs: 75000 },
-    // "Updated last 3d" is the timeline data source — needs changelog. Cap small.
-    { name: 'recent',     jql: `project="${pk}" AND updated >= -3d`,                                                  fields: ALL_FIELDS,    expand: ['changelog'], cap: 400, budgetMs: 75000 },
-    // In-progress can be huge for active teams; we sample. The "what's now"
-    // tab uses these — N=500 is enough to surface the headline. NO changelog.
-    { name: 'inProgress', jql: `project="${pk}" AND statusCategory = "In Progress"`,                                  fields: ALL_FIELDS,    expand: [],            cap: 500, budgetMs: 60000 },
-    // Backlog: NO changelog, cap small. Backlog tab shows counts + types only.
-    { name: 'backlog',    jql: `project="${pk}" AND statusCategory != Done AND (sprint is EMPTY OR sprint not in openSprints())`, fields: ALL_FIELDS, expand: [], cap: 200, budgetMs: 60000 },
-  ];
-
-  // Timed allSettled — record per-stage ms + status so the diagnostic panel
-  // can show "sprint 2.1s ✓ · recent 4.7s ✓ · inProgress 18.0s (cap) · backlog 12.0s (budget)".
-  const stageTimings = [];
-  const settled = await Promise.allSettled(queries.map(async (q) => {
-    const t0 = Date.now();
+  if (httpDropped + recentDropped + dausDropped + breakersDropped > 0) {
     try {
-      const v = await jiraSearchAll(cfg, q.jql, q.fields, q.expand, q.cap, q.budgetMs);
-      stageTimings.push({ name: q.name, ms: Date.now() - t0, ok: true, count: v.length });
-      return v;
-    } catch (e) {
-      stageTimings.push({ name: q.name, ms: Date.now() - t0, ok: false, error: e?.message || String(e) });
-      throw e;
-    }
-  }));
-
-  const stageErrors = [];
-  const get = (i) => {
-    if (settled[i].status === 'fulfilled') return settled[i].value;
-    stageErrors.push(`${queries[i].name}: ${settled[i].reason?.message || settled[i].reason || 'failed'}`);
-    return [];   // partial: empty array, other queries' results still flow through
-  };
-  const sprintIssues     = get(0);
-  const recentIssues     = get(1);
-  const inProgressIssues = get(2);
-  const backlogIssues    = get(3);
-
-  const byKey = new Map();
-  for (const arr of [sprintIssues, recentIssues, inProgressIssues, backlogIssues]) {
-    for (const it of arr) byKey.set(it.key, it);
+      logger?.debug?.('memory cleanup', {
+        httpDropped, recentDropped, dausDropped, breakersDropped,
+        httpSize: _HTTP_CACHE.size, recentSize: _recentBucketCache.size,
+        dausSize: _metrics.daus.size, breakersSize: _breakers.size,
+      });
+    } catch (_) { /* logger может быть не готов на boot */ }
   }
-
-  // Only report `error` if EVERY sub-query failed — otherwise return what
-  // we got and surface the per-stage trail in `error` for diagnostics.
-  const allFailed = stageErrors.length === queries.length;
-  return {
-    name: area.name, projectKey: pk,
-    issues: Array.from(byKey.values()),
-    sprintKeys:     sprintIssues.map(i => i.key),
-    inProgressKeys: inProgressIssues.map(i => i.key),
-    backlogKeys:    backlogIssues.map(i => i.key),
-    devStatus: {},
-    // Phase 3: tell the model which customfield holds the Zephyr/Xray test
-    // result. Empty string = "fall back to issue.fields.status.name".
-    zephyrResultFieldId: zephyrFieldId || '',
-    error: allFailed ? stageErrors.join(' | ') : null,
-    stageErrors: stageErrors.length ? stageErrors : null,
-    stageTimings,        // [{name, ms, ok, count?, error?}] — surfaced in pp diagnostics
-  };
 }
+const _cleanupTimer = setInterval(_periodicCleanup, _CLEANUP_INTERVAL_MS);
+if (_cleanupTimer.unref) _cleanupTimer.unref();   // не блокируем graceful shutdown
+
+// V18 extraction step 2 — _ssrfBlocked, _cfBuildPathCascade,
+// jiraForward, jiraParseResp, jiraSleep, _jiraGate*, jiraRequest,
+// jiraSearchAll, jiraPLimit вынесены в server/upstream.js (см.
+// require + destructure возле LLM-extraction в начале файла).
+// Здесь стоял блок ~440 LOC; теперь все callsite'ы используют
+// функции через destructured backward-compat aliases.
+
+// V18 extraction — Jira-domain helpers (jiraResolveSprintFieldId /
+// jiraInvalidateRecentCache / jiraBuildAreaReport / jiraResolveProjectId)
+// + JIRA_FIELDS / JIRA_DEFAULT_EXPAND constants + recent-bucket cache
+// state вынесены в server/jira-helpers.js. Factory wired EARLY (right
+// after upstream destructure) — see top of file. Here стоял блок ~240 LOC.
 
 /* ────────────────────────────────────────────────────────────
    Portfolio Pulse: Bitbucket / Confluence 48h-window aggregators.
@@ -830,6 +275,89 @@ const _authHelpers = require('./server/integrations/authHelpers.js');
 const _ppMakeAuthHeader      = _authHelpers.makeAuthHeader;
 const _ppKeyForAuthor        = _authHelpers.keyForAuthor;
 const _ppRedactSecretsInText = _authHelpers.redactSecretsInText;
+
+// V18 extraction — Confluence fetchers вынесены в server/confluence.js
+// (ppFetchConfluenceActivity + 5 cf-helpers + private _ppCfAuditAugment).
+// Factory wires runtime deps (upstream HTTP / concurrency / path-cascade /
+// auth helpers). Backward-compat aliases ниже — все callsite'ы внутри
+// server.js (и _runPortfolioPulse в particular) продолжают работать без
+// изменений.
+const _confluence = require('./server/confluence.js').create({
+  jiraForward,
+  jiraPLimit,
+  _cfBuildPathCascade,
+  _ppMakeAuthHeader,
+  _ppKeyForAuthor,
+  _ppRedactSecretsInText,
+});
+const {
+  ppFetchConfluenceActivity,
+  ppFetchCfAuthorshipVelocity,
+  ppFetchCfSpaceAcl,
+  ppFetchRetroClosure,
+  ppFetchCfHealthMetrics,
+  ppFetchStaleConfluence,
+} = _confluence;
+
+// V18 extraction — Zephyr / test-management вынесены в server/zephyr.js
+// (jiraResolveZephyrResultFieldId + 5 helpers + ppFetchZephyrActivity).
+// `jiraResolveProjectId` теперь живёт в server/jira-helpers.js — фабрика
+// получает его прямой ссылкой (вместо прежнего wrapper-arrow на hoisted
+// function declaration).
+const _zephyr = require('./server/zephyr.js').create({
+  jiraRequest,
+  jiraForward,
+  jiraPLimit,
+  jiraResolveProjectId,
+  ppMakeAuthHeader: _ppMakeAuthHeader,
+});
+const {
+  jiraResolveZephyrResultFieldId,
+  ppFetchZephyrActivity,
+} = _zephyr;
+// V18 extraction — late-bind Zephyr field-id resolver into jira-helpers
+// (chicken/egg: jiraBuildAreaReport вызывает jiraResolveZephyrResultFieldId,
+// который определён в zephyr factory — но jira-helpers wired ВЫШЕ, чтобы
+// `_recentBucketCache` был доступен `_periodicCleanup`. Поэтому setter).
+_jiraHelpers.setZephyrResultFieldIdResolver(jiraResolveZephyrResultFieldId);
+
+// V18 extraction — Jenkins verify endpoint вынесен в server/jenkins.js
+// (handleJenkinsVerify). Маршрут остаётся в handleIntegrationsApi — просто
+// delegate'ит в модульный handler.
+const _jenkins = require('./server/jenkins.js').create({
+  jiraForward,
+  writeJson,
+  ppMakeAuthHeader: _ppMakeAuthHeader,
+});
+const { handleJenkinsVerify, handleJenkinsScan } = _jenkins;
+
+/**
+ * API5: нормализация Stash-timestamp'а. Atlassian возвращает миллисекунды
+ * (13 цифр), но Sber-доки в примерах показывают секунды (10 цифр). Если
+ * стенд однажды вернёт seconds-encoded ts — все 48ч/72ч окна молча empty
+ * (`ts < cutoffTs` всегда true для 1970-х дат). Guard: если ts < 10^10 —
+ * умножаем на 1000.
+ */
+function _ppNormalizeBbTs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 10_000_000_000 ? n * 1000 : n;
+}
+
+/**
+ * Возвращает Set допустимых BB project-keys в lowercase из cfg.bitbucketProjectKeys.
+ * Поддерживает форматы "PROJECT" и "PROJECT/repo" (берёт первый сегмент).
+ * Пустой allowlist (нет настройки) → пустой Set, и вызывающий код должен сам
+ * решать, что делать (обычно — fallback на listProjects).
+ */
+function _ppBbAllowedProjects(cfg) {
+  return new Set(
+    String(cfg?.bitbucketProjectKeys || '')
+      .split(',')
+      .map(s => (s.trim().split('/')[0] || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
 
 /**
  * V18 P5 — единый helper для path-cascade pattern, который раньше дублировался
@@ -872,235 +400,31 @@ async function _cfPathCascade(urls, opts = {}) {
   }
   return { ok: false, status: lastStatus, error: lastStatus ? `HTTP ${lastStatus}` : 'no response', tried };
 }
-async function ppFetchBitbucketActivity(cfg, tls, cutoffTs, cutoffIso) {
-  if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { authors: {}, configured: false };
-  const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
-  const auth = _ppMakeAuthHeader(cfg.bitbucketToken);
-  const isCloud = /bitbucket\.org/i.test(base) || /\/2\.0\b/.test(base);
-  const repos = String(cfg.bitbucketProjectKeys || '')
-    .split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
-  if (!repos.length) return { authors: {}, configured: true, error: 'projectKeys пусты' };
-  // lowerKey → { commits, prs, displayName, email,
-  //              items: [{kind:'pr'|'commit', title, url, repo, at, status?}] }
-  // items[] is capped at 50 per author so even a huge contributor stays bounded.
-  const authors = {};
-  const tried = [];
-  const ITEMS_CAP_PER_AUTHOR = 50;
-  const bump = (kind, displayName, email, item) => {
-    const k = _ppKeyForAuthor(displayName, email);
-    if (!k) return;
-    if (!authors[k]) authors[k] = {
-      commits: 0, prs: 0, displayName: displayName || email || k, email: email || '', items: [],
-      // Wave 4d: PR review action counters. `reviews` is the umbrella sum;
-      // breakdowns let the renderer show "✓3 approve · ⚠1 needs-work".
-      reviews: 0, approves: 0, needsWork: 0, declined: 0, prComments: 0,
-    };
-    if (!authors[k][kind] && kind !== 'reviews') authors[k][kind] = 0;
-    authors[k][kind]++;
-    if (!authors[k].displayName && displayName) authors[k].displayName = displayName;
-    if (!authors[k].email && email) authors[k].email = email;
-    if (item && authors[k].items.length < ITEMS_CAP_PER_AUTHOR) {
-      authors[k].items.push(item);
-    }
-  };
-  // Track PRs we should ask for activity stream. Each entry: {proj, repo, prId, at, title, url, isCloud:false, repoPath}.
-  // Capped globally to 30 to bound the per-PK 90 s budget.
-  const _prsForActivity = [];
-  const ACTIVITY_CAP = 30;
-  const get = (url) => jiraForward({
-    targetUrl: url, method: 'GET',
-    headers: { Authorization: auth },
-    allowInsecureTls: tls, timeoutMs: 20000,
-  }).catch(e => ({ status: 0, text: '', _err: e.message }));
-
-  // Expand single-segment Server entries (e.g. "SBOFPL") to all repos under
-  // that project — saves the user from having to list every repo manually.
-  const expanded = [];
-  for (const entry of repos) {
-    const segs = entry.split('/').map(s => s.trim()).filter(Boolean);
-    if (segs.length >= 2 || isCloud) { expanded.push(entry); continue; }
-    // Single segment + Server mode: probe `/projects/{KEY}/repos`.
-    const projKey = segs[0];
-    const repoListResp = await jiraForward({
-      targetUrl: `${base}/rest/api/1.0/projects/${encodeURIComponent(projKey)}/repos?limit=50`,
-      method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 15000,
-    }).catch(e => ({ status: 0, text: '', _err: e.message }));
-    tried.push({ entry, type: 'list-repos', status: repoListResp.status });
-    if (repoListResp.status >= 200 && repoListResp.status < 300) {
-      try {
-        const list = (JSON.parse(repoListResp.text).values || []).map(r => `${projKey}/${r.slug || r.name}`);
-        if (list.length) {
-          expanded.push(...list.slice(0, 10));   // cap to first 10 repos to keep latency bounded
-        } else {
-          tried.push({ entry, skipped: 'у проекта нет репозиториев или нет доступа' });
-        }
-      } catch (_) {
-        tried.push({ entry, skipped: 'не удалось разобрать список репозиториев' });
-      }
-    } else {
-      tried.push({ entry, skipped: `проект не найден / 401-403 (HTTP ${repoListResp.status}) — нужен формат PROJECT/repo для Server, либо токен без доступа к проекту` });
-    }
-  }
-
-  for (const entry of expanded) {
-    const segs = entry.split('/').map(s => s.trim()).filter(Boolean);
-    if (segs.length < 2 && !isCloud) { tried.push({ entry, skipped: 'нужен формат PROJECT/repo для Server' }); continue; }
-    const proj = segs.length >= 2 ? segs[0] : '';
-    const repo = segs[segs.length - 1];
-
-    // === CLOUD ===
-    if (isCloud) {
-      const repoPath = segs.length >= 2 ? `${segs[0]}/${segs[1]}` : repo;
-      // Pull-requests updated in 48h window. q= filter is server-side (cheap).
-      const prsResp = await get(`${base}/repositories/${encodeURI(repoPath)}/pullrequests?pagelen=50&state=OPEN,MERGED,DECLINED&q=updated_on>"${cutoffIso}"`);
-      tried.push({ entry: repoPath, type: 'pr', status: prsResp.status });
-      if (prsResp.status >= 200 && prsResp.status < 300) {
-        try { for (const p of (JSON.parse(prsResp.text).values || [])) {
-          bump('prs', p.author?.display_name || '', p.author?.nickname || '', {
-            kind: 'pr',
-            title:  p.title || '',
-            url:    p.links?.html?.href || '',
-            repo:   repoPath,
-            at:     p.updated_on || p.created_on || '',
-            status: (p.state || '').toLowerCase(),
-          });
-        } } catch(_) {}
-      }
-      // Commits — no server-side date filter, paginate first page and filter client-side.
-      const cmResp = await get(`${base}/repositories/${encodeURI(repoPath)}/commits?pagelen=100`);
-      tried.push({ entry: repoPath, type: 'commit', status: cmResp.status });
-      if (cmResp.status >= 200 && cmResp.status < 300) {
-        try {
-          for (const c of (JSON.parse(cmResp.text).values || [])) {
-            const ts = Date.parse(c.date || '');
-            if (!Number.isFinite(ts) || ts < cutoffTs) continue;
-            const dn = c.author?.user?.display_name || _parseEmailName(c.author?.raw);
-            const em = _parseEmailEmail(c.author?.raw);
-            bump('commits', dn, em, {
-              kind: 'commit',
-              title: (c.message || '').split('\n')[0],
-              url:    c.links?.html?.href || '',
-              repo:   repoPath,
-              at:     c.date || '',
-              hash:   c.hash || '',
-            });
-          }
-        } catch(_) {}
-      }
-      continue;
-    }
-    // === SERVER (Stash) ===
-    if (proj && repo) {
-      // PRs: state=ALL, order=NEWEST, filter by updatedDate client-side
-      const prsResp = await get(`${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/pull-requests?state=ALL&order=NEWEST&limit=50`);
-      tried.push({ entry, type: 'pr', status: prsResp.status });
-      if (prsResp.status >= 200 && prsResp.status < 300) {
-        try {
-          for (const p of (JSON.parse(prsResp.text).values || [])) {
-            const ts = p.updatedDate || p.createdDate || 0;
-            if (ts < cutoffTs) continue;
-            const u = p.author?.user || {};
-            const prTitle = p.title || '';
-            const prUrl   = p.links?.self?.[0]?.href || '';
-            bump('prs', u.displayName || u.name || '', u.emailAddress || '', {
-              kind: 'pr',
-              title:  prTitle,
-              url:    prUrl,
-              repo:   `${proj}/${repo}`,
-              at:     ts ? new Date(ts).toISOString() : '',
-              status: (p.state || '').toLowerCase(),
-              prId:   p.id,
-            });
-            // Wave 4d: queue activity-stream fetch for this PR (Server only).
-            if (_prsForActivity.length < ACTIVITY_CAP && p.id != null) {
-              _prsForActivity.push({ proj, repo, prId: p.id, at: ts, title: prTitle, url: prUrl });
-            }
-          }
-        } catch(_) {}
-      }
-      // Commits — no since param without sha; pull recent and filter by authorTimestamp.
-      const cmResp = await get(`${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/commits?limit=100`);
-      tried.push({ entry, type: 'commit', status: cmResp.status });
-      if (cmResp.status >= 200 && cmResp.status < 300) {
-        try {
-          for (const c of (JSON.parse(cmResp.text).values || [])) {
-            const ts = c.authorTimestamp || c.committerTimestamp || 0;
-            if (ts < cutoffTs) continue;
-            const a = c.author || {};
-            bump('commits', a.displayName || a.name || '', a.emailAddress || '', {
-              kind: 'commit',
-              title: (c.message || '').split('\n')[0],
-              url:   `${base}/projects/${proj}/repos/${repo}/commits/${c.id || c.displayId || ''}`,
-              repo:  `${proj}/${repo}`,
-              at:    ts ? new Date(ts).toISOString() : '',
-              hash:  c.displayId || c.id || '',
-            });
-          }
-        } catch(_) {}
-      }
-    }
-  }
-  // ── Wave 4d: pull review-action stream for the recent PRs (Server). ──
-  // Each PR's `/activities` returns a paginated list of events: APPROVED,
-  // UNAPPROVED, REVIEWED, COMMENTED, DECLINED, MERGED, OPENED, etc. We bump
-  // per-author counters for the review-relevant ones and append items[] so
-  // the timeline can show "Иван approved PAY-1234 (PR #234)".
-  if (_prsForActivity.length) {
-    const ACTIVITY_CONCURRENCY = 4;
-    let i = 0, running = 0;
-    await new Promise((resolve) => {
-      const next = () => {
-        while (running < ACTIVITY_CONCURRENCY && i < _prsForActivity.length) {
-          const job = _prsForActivity[i++]; running++;
-          (async () => {
-            const { proj, repo, prId, title, url } = job;
-            const aResp = await get(`${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/pull-requests/${prId}/activities?limit=100`);
-            tried.push({ entry: `${proj}/${repo}#${prId}`, type: 'pr-activity', status: aResp.status });
-            if (aResp.status >= 200 && aResp.status < 300) {
-              try {
-                for (const a of (JSON.parse(aResp.text).values || [])) {
-                  const ts = a.createdDate || 0;
-                  if (ts < cutoffTs) continue;
-                  const u = a.user || {};
-                  const action = String(a.action || '').toUpperCase();
-                  const dn = u.displayName || u.name || '';
-                  const em = u.emailAddress || '';
-                  // Map Stash actions → which counter to bump. Skip OPENED /
-                  // MERGED / RESCOPED — those are author-side, not reviews.
-                  const counter =
-                    action === 'APPROVED'  ? 'approves'   :
-                    action === 'REVIEWED'  ? 'needsWork'  :    // Stash uses REVIEWED for needs-work
-                    action === 'DECLINED'  ? 'declined'   :
-                    action === 'COMMENTED' ? 'prComments' : '';
-                  if (!counter) continue;
-                  // Bump both: specific counter + umbrella `reviews`.
-                  bump(counter, dn, em, {
-                    kind:  'review',
-                    title: `${action.toLowerCase()} · ${title}`,
-                    url,   repo: `${proj}/${repo}`,
-                    at:    ts ? new Date(ts).toISOString() : '',
-                    action,
-                    prId,
-                  });
-                  bump('reviews', dn, em, null);
-                }
-              } catch(_) {}
-            }
-          })().finally(() => { running--; if (i >= _prsForActivity.length && running === 0) resolve(); else next(); });
-        }
-      };
-      next();
-    });
-  }
-
-  return { authors, configured: true, repos: expanded.length, tried, prActivitiesScanned: _prsForActivity.length };
-}
+// V18 extraction step 5 — ppFetchBitbucketActivity вынесена в server/bitbucket.js.
+// Здесь стоял блок ~565 LOC; теперь все callsite'ы используют функцию через
+// destructured backward-compat alias возле `require('./server/bitbucket.js').create`.
 function _parseEmailName(raw) {
   if (!raw) return ''; const m = String(raw).match(/^([^<]+)</); return m ? m[1].trim() : '';
 }
 function _parseEmailEmail(raw) {
   if (!raw) return ''; const m = String(raw).match(/<([^>]+)>/); return m ? m[1].trim() : '';
 }
+
+// V18 extraction step 5 — Bitbucket fetcher'ы (Activity / Governance /
+// _bbFetchWithRetry) вынесены в server/bitbucket.js. Factory получает уже
+// резолвенные deps (jiraForward / _bbGate* / jiraPLimit / pp-helpers) и
+// возвращает три функции с теми же сигнатурами, что были раньше — все
+// existing callsite'ы (`_runPortfolioPulse`, `ppFetchDevStatusForIssues`)
+// продолжают работать без изменений.
+const bitbucket = require('./server/bitbucket.js').create({
+  jiraForward, jiraSleep,
+  _bbGateWait, _bbGateClose,
+  jiraPLimit,
+  _ppMakeAuthHeader, _ppKeyForAuthor,
+  _parseEmailName, _parseEmailEmail,
+  _ppNormalizeBbTs, _ppBbAllowedProjects,
+});
+const { ppFetchBitbucketActivity, ppFetchBitbucketGovernance, _bbFetchWithRetry } = bitbucket;
 
 /* ============================================================
    PHASE 1 — Jira dev-status panel as PR/commit source
@@ -1135,17 +459,66 @@ async function ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues) {
     ? 'Basic ' + Buffer.from(cfg.jiraToken).toString('base64')
     : 'Bearer ' + cfg.jiraToken;
 
+  // BUGFIX: dev-status API возвращает PR/коммиты из ВСЕХ BB-проектов,
+  // привязанных к Jira-задаче — даже из тех, что отсутствуют в
+  // bitbucketProjectKeys. Раньше комментарий сверху явно говорил «No
+  // bitbucketProjectKeys setting needed», но пользователь хочет чтобы
+  // активность считалась только из настроенных проектов. Допустимые
+  // PROJECT-keys собираем из bitbucketProjectKeys (формат "PROJECT/repo"
+  // или "PROJECT"); пустой allowlist = пропускаем фильтр (legacy-режим).
+  const _bbAllowedProjectKeys = new Set(
+    String(cfg.bitbucketProjectKeys || '')
+      .split(',')
+      .map(s => (s.trim().split('/')[0] || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const _bbExtractProjectKey = (url) => {
+    if (!url) return '';
+    const m = String(url).match(/\/projects\/([^/]+)\/repos\//i);
+    return m ? m[1].toLowerCase() : '';
+  };
+  const _bbAllow = (url) => {
+    if (!_bbAllowedProjectKeys.size) return true;       // backward-compat: no filter
+    const pk = _bbExtractProjectKey(url);
+    if (!pk) return false;                              // не смогли разобрать → отбрасываем
+    return _bbAllowedProjectKeys.has(pk);
+  };
+
   const ITEMS_CAP_PER_AUTHOR = 50;
   const authors = {};
   const tried = [];
+  let _bbDroppedOutOfAllowlist = 0;
+  // E1: keep up to 10 example items dropped by allowlist so UI may show
+  // «команда контрибутит во внешний repo» insight instead of opaque count.
+  const _bbDroppedSamples = [];
+  const DROPPED_SAMPLES_CAP = 10;
+  const _pushDroppedSample = (kind, item) => {
+    if (_bbDroppedSamples.length >= DROPPED_SAMPLES_CAP) return;
+    _bbDroppedSamples.push({
+      kind,
+      author: String(item.author || '').slice(0, 80),
+      authorSlug: String(item.authorSlug || '').slice(0, 80),
+      project: String(item.project || ''),
+      repo: String(item.repo || ''),
+      // Title truncated to 60 chars (constraint — no commit body / PR description).
+      title: String(item.title || '').split('\n')[0].slice(0, 60),
+      url: String(item.url || ''),
+      at: item.at || '',
+    });
+  };
   // Stash sometimes uses applicationType=bitbucket on newer installs. We prefer
   // 'stash' first (matches existing ppFetchBitbucketActivity expectations) but
   // remember which one yielded results so we don't waste calls on the other.
   let preferredAppType = 'stash';
   let appTypeProbed = false;
+  let appTypeEmptyResponses = 0;   // M7: счётчик именно пустых, не всех попыток
 
-  const bump = (kind, displayName, email, item) => {
-    const k = _ppKeyForAuthor(displayName, email);
+  // R6: signature унифицирован с repo-walk bump (line 1488) — пятый параметр
+  // slug. Раньше repo-walk хранил key=slug (latin), dev-status key=displayName
+  // (русский) → один человек = два bucket'а в `authors`, merge их не слепливал.
+  // Теперь оба пути идут через одинаковый `_ppKeyForAuthor(displayName||slug, email)`.
+  const bump = (kind, displayName, email, item, slug) => {
+    const k = _ppKeyForAuthor(displayName || slug, email);
     if (!k) return;
     if (!authors[k]) authors[k] = {
       commits: 0, prs: 0, displayName: displayName || email || k, email: email || '', items: [],
@@ -1155,6 +528,8 @@ async function ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues) {
     authors[k][kind]++;
     if (!authors[k].displayName && displayName) authors[k].displayName = displayName;
     if (!authors[k].email && email) authors[k].email = email;
+    const sl = String(slug || '').toLowerCase().trim();
+    if (sl && !authors[k].slug) authors[k].slug = sl;
     if (item && authors[k].items.length < ITEMS_CAP_PER_AUTHOR) {
       authors[k].items.push(item);
     }
@@ -1182,30 +557,62 @@ async function ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues) {
   const seenCommit = new Set();
   const seenAuthorKeys = new Set();    // dedup author identity per (kind, prId|hash)
 
+  // R2: extract `PROJECT/repo` из URL вида `…/projects/PROJ/repos/REPO/…`,
+  // чтобы dev-status и repo-walk использовали идентичный repo-формат для
+  // dedup-key в `_ppMergeAuthorMaps`. Раньше repo-walk → 'PROJ/repo',
+  // dev-status → '' либо `repositoryName` (без проекта) → ключи не совпадали,
+  // PR двоился либо терялся.
+  const _extractRepoPath = (url) => {
+    if (!url) return '';
+    const m = String(url).match(/\/projects\/([^/]+)\/repos\/([^/?#]+)/i);
+    return m ? `${m[1]}/${m[2]}` : '';
+  };
+
   const fetchOne = async (job) => {
     // Per-call timeout via AbortController-style timeoutMs in jiraForward.
     // Cascade applicationType: try preferredAppType first; if 200 + no detail
     // entries on FIRST few calls, fall back to the other.
     const url = `${base}/rest/dev-status/1.0/issue/detail?issueId=${encodeURIComponent(job.issueId)}&applicationType=${preferredAppType}&dataType=${job.dataType}`;
-    const r = await jiraForward({
+    // V21 BB-RL fix — retry с shared _bbGate. Раньше прямой jiraForward ловил
+    // 429 (80% запросов!) и молча возвращал {found:0} — теряли BB-attribution
+    // для сотен PR. Теперь до 4 попыток с honor-Retry-After. tried.push
+    // ниже как было — пишет финальный исход (200 если retry помог).
+    const r = await _bbFetchWithRetry({
       targetUrl: url, method: 'GET',
       headers: { Authorization: auth },
       allowInsecureTls: tls, timeoutMs: PER_CALL_TIMEOUT_MS,
-    }).catch(e => ({ status: 0, text: '', _err: e.message }));
+    });
 
     tried.push({ entry: job.issueKey, type: `dev-${job.dataType}`, status: r.status });
 
     if (r.status < 200 || r.status >= 300) return { found: 0 };
 
     let parsed;
-    try { parsed = JSON.parse(r.text); } catch (_) { return { found: 0 }; }
+    try { parsed = JSON.parse(r.text); } catch (e) {
+      // M1: было `catch(_) { return ... }` — JSON-parse failure терял
+      // дев-статус целой задачи без записи в tried[].
+      tried.push({ entry: job.issueKey, type: `dev-${job.dataType}-parse`, error: String(e?.message || e).slice(0, 100) });
+      return { found: 0 };
+    }
     const detail = Array.isArray(parsed?.detail) ? parsed.detail : [];
 
-    // First-pass appType probe: if pullrequest dataType returned an empty
-    // detail[] for the first ~5 issues with `stash`, switch to `bitbucket`.
-    if (!appTypeProbed && tried.length >= 5 && detail.every(d => !d.pullRequests?.length && !d.repositories?.length)) {
-      preferredAppType = preferredAppType === 'stash' ? 'bitbucket' : 'stash';
-      appTypeProbed = true;
+    // R3: was «после 10 пустых ответов swap». При CONCURRENCY=8 восемь
+    // параллельных fetchOne стартуют ДО прихода первого результата —
+    // если все 8 случайно пустые (норма для onboarding), счётчик прыгнет
+    // к 8 до того как любой ответ установит appTypeProbed=true → ложный
+    // swap. Считаем порог × 3 (24 пустых до swap'а), и используем
+    // counter+early-out atomically: одна проверка делает swap+probe.
+    if (!appTypeProbed) {
+      const isEmpty = detail.length === 0 || detail.every(d => !d.pullRequests?.length && !d.repositories?.length);
+      if (isEmpty) {
+        const cnt = ++appTypeEmptyResponses;
+        if (cnt >= CONCURRENCY * 3 && !appTypeProbed) {
+          preferredAppType = preferredAppType === 'stash' ? 'bitbucket' : 'stash';
+          appTypeProbed = true;
+        }
+      } else {
+        appTypeProbed = true; // первый реальный ответ — фиксируем правильный appType
+      }
     }
 
     let found = 0;
@@ -1213,38 +620,80 @@ async function ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues) {
       for (const d of detail) for (const pr of (d.pullRequests || [])) {
         const at = pr.lastUpdate || pr.updated || '';
         if (at && Date.parse(at) < cutoffTs) continue;     // outside 48h window
+        // PR-CG: отбрасываем PR из BB-проектов вне bitbucketProjectKeys.
+        if (!_bbAllow(pr.url)) {
+          _bbDroppedOutOfAllowlist++;
+          _pushDroppedSample('pr', {
+            author: pr.author?.displayName || pr.author?.name || '',
+            authorSlug: pr.author?.name || pr.author?.slug || '',
+            project: _bbExtractProjectKey(pr.url),
+            repo: _extractRepoPath(pr.url) || pr.repositoryName || '',
+            title: pr.name || pr.title || '',
+            url: pr.url || '',
+            at: pr.lastUpdate || pr.updated || '',
+          });
+          continue;
+        }
         const prId = String(pr.id || pr.url || '');
         const dedupKey = `${prId}|${pr.author?.name || ''}`;
         if (seenAuthorKeys.has(dedupKey)) continue;
         seenAuthorKeys.add(dedupKey);
         seenPr.add(prId);
+        // R2: repo в формате `PROJECT/repo` (как в repo-walk) для dedup-консистентности.
+        const repoPath = _extractRepoPath(pr.url) || pr.repositoryName || pr.source?.repository?.name || '';
+        // R6: bump-signature consistent с repo-walk — передаём slug пятым
+        // аргументом (dev-status `bump` сейчас имеет арность 4, slug
+        // игнорируется без crash, но при будущей унификации подхватится).
         bump('prs', pr.author?.name || pr.author?.displayName || '', pr.author?.email || '', {
           kind:   'pr',
           title:  pr.name || pr.title || '',
           url:    pr.url || '',
-          repo:   pr.repositoryName || pr.source?.repository?.name || '',
+          repo:   repoPath,
           at, status: String(pr.status || '').toLowerCase(),
           prId,
           source: 'dev-status',
-        });
+        }, pr.author?.name || pr.author?.slug || '');
         found++;
       }
     } else if (job.dataType === 'repository') {
       for (const d of detail) for (const repo of (d.repositories || [])) {
+        // PR-CG: отбрасываем целиком репозиторий, если его проект не в allowlist.
+        // У repo.url обычно есть `/projects/PROJECT/repos/...`. Если url нет, но
+        // у первого коммита есть — пробуем по нему.
+        const repoUrl = repo.url || (repo.commits && repo.commits[0] && repo.commits[0].url) || '';
+        if (!_bbAllow(repoUrl)) {
+          _bbDroppedOutOfAllowlist += (repo.commits || []).length;
+          // Take first commit as sample (rest of repo collapses into the count).
+          const firstC = (repo.commits || [])[0];
+          if (firstC) {
+            _pushDroppedSample('commit', {
+              author: firstC.author?.displayName || firstC.author?.name || '',
+              authorSlug: firstC.author?.name || '',
+              project: _bbExtractProjectKey(repoUrl),
+              repo: _extractRepoPath(repoUrl) || repo.name || '',
+              title: String(firstC.message || '').split('\n')[0],
+              url: firstC.url || repoUrl,
+              at: firstC.authorTimestamp || firstC.timestamp || '',
+            });
+          }
+          continue;
+        }
+        // R2: repo в формате `PROJECT/repo` для dedup-консистентности.
+        const repoPath = _extractRepoPath(repoUrl) || repo.name || '';
         for (const c of (repo.commits || [])) {
           const at = c.authorTimestamp || c.timestamp || '';
           if (at && Date.parse(at) < cutoffTs) continue;
           const hash = String(c.id || c.displayId || '');
           if (seenCommit.has(hash)) continue;
           seenCommit.add(hash);
-          bump('commits', c.author?.name || c.author?.displayName || '', c.author?.email || '', {
+          bump('commits', c.author?.displayName || c.author?.name || '', c.author?.email || '', {
             kind: 'commit',
             title: String(c.message || '').split('\n')[0],
             url:    c.url || `${base}/projects/_/repos/${encodeURIComponent(repo.name||'_')}/commits/${hash}`,
-            repo:   repo.name || '',
+            repo:   repoPath,
             at, hash,
             source: 'dev-status',
-          });
+          }, c.author?.name || '');
           found++;
         }
       }
@@ -1269,7 +718,15 @@ async function ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues) {
     next();
   });
 
-  return { authors, configured: true, tried, scanned: queue.length, prs: seenPr.size, commits: seenCommit.size };
+  return {
+    authors, configured: true, tried, scanned: queue.length,
+    prs: seenPr.size, commits: seenCommit.size,
+    droppedOutOfAllowlist: _bbDroppedOutOfAllowlist,
+    // E1 — first 10 dropped items (sampled). Provides «команда контрибутит
+    // во внешний repo» visibility instead of opaque count.
+    droppedSamples: _bbDroppedSamples,
+    allowedProjectKeys: [..._bbAllowedProjectKeys],
+  };
 }
 
 /** Merge two `{authors: {[k]: {commits, prs, items, ...}}}` aggregates into one.
@@ -1292,9 +749,21 @@ function _ppMergeAuthorMaps(...maps) {
       if (!out[k].displayName && a.displayName) out[k].displayName = a.displayName;
       if (!out[k].email       && a.email)       out[k].email       = a.email;
       for (const f of COUNT_FIELDS) out[k][f] += (a[f] || 0);
-      const seen = new Set(out[k].items.map(it => `${it.kind}|${it.prId || it.hash || it.url || ''}`));
+      // H9: ключ дедупа `${kind}|${repo}|${prId}` — Stash auto-increments
+      // prId per-repo (PR #1 в RepoA и PR #1 в RepoB совпадают), один из
+      // двух терялся при `${kind}|${prId}` без repo.
+      // R2: если repo пустой хотя бы с одной стороны (старый dev-status формат
+      // или partial fixture), полагаемся на url (он глобально уникален) —
+      // иначе один и тот же PR попадёт двумя записями в items.
+      const dedupKey = (it) => {
+        const id = it.prId || it.hash || '';
+        if (it.repo && id) return `${it.kind}|${it.repo}|${id}`;
+        // fallback: глобально-уникальный url, либо kind+id если url пуст
+        return `${it.kind}|${it.url || id || ''}`;
+      };
+      const seen = new Set(out[k].items.map(dedupKey));
       for (const it of (a.items || [])) {
-        const dk = `${it.kind}|${it.prId || it.hash || it.url || ''}`;
+        const dk = dedupKey(it);
         if (dk && seen.has(dk)) continue;
         if (out[k].items.length >= ITEMS_CAP) break;
         seen.add(dk);
@@ -1338,7 +807,16 @@ const { buildBlackDashboard, sigmaCfgView } = createBlackDashboard({
 // в server/integrations/jobs.js (раньше — два почти идентичных inline-куска).
 const { createJobsCluster } = require('./server/integrations/jobs.js');
 
-const _bdCluster = createJobsCluster({ prefix: 'bd',    ttlMs: 30 * 60 * 1000, maxCount: 50, label: 'bd' });
+// V21 Q (audit-2026-05-03 §E R1) — persist async-jobs на диск, чтобы
+// перезапуск сервера НЕ оставлял клиентов с вечным 404 polling. Папку
+// делаем в `os.tmpdir/sbof-jobs` чтобы не засорять рабочее дерево; на
+// production можно переопределить `JOBS_PERSIST_DIR` env переменной.
+const _osTmp  = require('os').tmpdir();
+const _pathLib = require('path');
+const JOBS_PERSIST_BASE = process.env.JOBS_PERSIST_DIR || _pathLib.join(_osTmp, 'sbof-jobs');
+
+const _bdCluster = createJobsCluster({ prefix: 'bd',    ttlMs: 30 * 60 * 1000, maxCount: 50, label: 'bd',
+  persistDir: _pathLib.join(JOBS_PERSIST_BASE, 'bd') });
 function bdCreateJob() { return _bdCluster.create(); }
 function bdGetJob(id)  { return _bdCluster.get(id); }
 function bdRunJob(job, cfg) {
@@ -1350,10 +828,15 @@ function bdRunJob(job, cfg) {
 // V20 S8 #13 — pulse job TTL 30 → 120 мин. Pилот feedback: «захожу в diag
 // раз в 2 недели — jobId протух всегда». 120 мин покрывает большинство
 // сценариев + сберегает память (jobs ≤ 20, не существенно).
-const _pulseCluster = createJobsCluster({ prefix: 'pulse', ttlMs: 120 * 60 * 1000, maxCount: 20, label: 'pulse' });
+const _pulseCluster = createJobsCluster({ prefix: 'pulse', ttlMs: 120 * 60 * 1000, maxCount: 20, label: 'pulse',
+  persistDir: _pathLib.join(JOBS_PERSIST_BASE, 'pulse') });
 function pulseCreateJob(payload) { return _pulseCluster.create(payload); }
 function pulseGetJob(id)         { return _pulseCluster.get(id); }
 function pulseRunJob(job, runner){ return _pulseCluster.run(job, runner); }
+
+// V18 extraction — TECH 17.2 cancel-registry + pulseCancelRegister/Get/Mark/
+// AssertNotCancelled вынесены в server/pulse-runner.js. Aliases destructure'ятся
+// после wire-up factory ниже (после `jiraApi` factory — там есть jiraSanitizeAreas).
 
 /* ──────────────────────────────────────────────────────────
    V18.1 P7-S1.2 — rate-limit + result cache для /employee-detail.
@@ -1408,1843 +891,671 @@ function pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, result
   }
 }
 
+// V18 extraction — _runPortfolioPulse (Pulse orchestrator, ~210 LOC) вынесен
+// в server/pulse-runner.js. Factory wired ниже (после jiraApi factory),
+// и alias destructure возвращает _runPortfolioPulse + cancel-helpers.
+
+
+/* ════════════════════════════════════════════════════════════
+   Jira project-id resolver (V18 extraction).
+   `jiraResolveProjectId` теперь в server/jira-helpers.js — фабрика
+   wired EARLY (после upstream destructure) + alias destructure'ится
+   обратно в server.js, прокидывается в zephyr factory.
+   ──────────────────────────────────────────────────────────── */
+
+// V18 extraction — `_zephyrNormalizeUserKey` (Z3 user-key normalizer)
+// вынесен в server/zephyr.js вместе с `ppFetchZephyrActivity` и всеми
+// retry/probe/Scale/JQL fallback'ами. См. require/destructure возле
+// _confluence в начале файла.
+
+// V18 extraction step 2 — _bbGateWait/_bbGateClose вынесены в
+// server/upstream.js. Caller _bbFetchWithRetry ниже использует их
+// через destructured aliases в начале файла.
 /**
- * V18 P7 — выделено из inline /api/integrations/portfolio-pulse handler'а.
- * Возвращает full Pulse response { reports, bitbucket, confluence, ... }.
- * При ошибках валидации throws Error с `.statusCode = 400`.
- * @param {object} body  request body (`projectKeys`, optional `employees`)
- * @param {object} cfg   jiraReadConfig() result
- * @param {boolean} tls
- * @param {(phase: string) => void} [onPhase]  optional progress callback (для async-job)
- * @returns {Promise<object>}
+ * BB fetch с retry на 429/502-504/network. До 4 попыток, exp backoff
+ * c jitter, honors Retry-After header. shared-gate _bbGate* блокирует
+ * остальные параллельные запросы пока 429-cooldown не пройдёт.
+ * Pure: не пишет в tried — caller продолжает push'ить как до фикса
+ * (запись в tried только финальный исход — 200 если retry помог, 429
+ * если все попытки exhausted).
+ * Returns {status, text, headers} like jiraForward.
  */
-async function _runPortfolioPulse(body, cfg, tls, onPhase) {
-  const setPhase = typeof onPhase === 'function' ? onPhase : (() => {});
-  if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
-    const err = new Error('Jira не настроена'); err.statusCode = 400; throw err;
-  }
-  let pks = Array.isArray(body.projectKeys) ? body.projectKeys
-          : String(body.projectKeys || '').split(',');
-  pks = pks.map(s => String(s||'').trim()).filter(Boolean);
-  if (!pks.length) {
-    const fromCfg = String(cfg.jiraProjectKeys || '').split(',').map(s=>s.trim()).filter(Boolean);
-    const fromAreas = jiraSanitizeAreas(cfg.areas).map(a => a.projectKey);
-    pks = fromCfg.length ? fromCfg : fromAreas;
-  }
-  if (!pks.length) {
-    const err = new Error('Не указаны projectKeys'); err.statusCode = 400; throw err;
-  }
+// V18 extraction step 5 — _bbFetchWithRetry вынесена в server/bitbucket.js.
+// Здесь стоял блок ~23 LOC; теперь все callsite'ы (включая ppFetchDevStatusForIssues)
+// используют функцию через destructured alias из bitbucket.create({...}) factory.
 
-  const winHours    = Math.min(168, Math.max(1, Number(cfg.activityWindowHours) || 72));
-  const cutoffTs    = Date.now() - winHours * 3600 * 1000;
-  const cutoffIso   = new Date(cutoffTs).toISOString();
-  const cqlCutoffTs = cutoffTs - 60 * 60 * 1000;
-  const PER_PK_TIMEOUT_MS = parseInt(process.env.PULSE_PK_TIMEOUT_MS || '90000', 10);
-  const t0 = Date.now();
-  const log = [`[pulse] start: ${pks.length} PKs, timeout/PK ${PER_PK_TIMEOUT_MS}ms`];
-  setPhase(`fetch-jira (${pks.length} PKs)`);
+// V18 extraction — Zephyr probe + Tests DC + Scale + JQL fallback +
+// orchestrator (~680 LOC) вынесены в server/zephyr.js. Backward-compat
+// alias `ppFetchZephyrActivity` импортирован выше через
+// `const { ... ppFetchZephyrActivity } = _zephyr;`. Здесь стоял блок:
+//   _zephyrFetchWithRetry, _zephyrFetchTestsDc_LEGACY, _zephyrProbe,
+//   _zephyrFetchScale, _zephyrFetchJqlFallback, ppFetchZephyrActivity.
 
-  const withTimeout = (label, promise, ms) => Promise.race([
-    promise.then(v => ({ ok: true, value: v })),
-    new Promise(resolve => setTimeout(() => resolve({ ok: false, timeout: ms }), ms)),
-  ]).then(r => { if (!r.ok) log.push(`[pulse] ${label} TIMEOUT after ${r.timeout}ms`); return r; });
+/* ════════════════════════════════════════════════════════════
+   V21 Y4 (audit-09 §G #1, #3, §K #8, §K #10) — Big metrics fetch
+   ────────────────────────────────────────────────────────────
+   Все 4 fetcher'а возвращают «частичные данные если интеграция не
+   настроена», `tried[]` для diagnostics. Вызываются в parallel из
+   _runPortfolioPulse в новой promise-пачке `bigMetrics`.
+   ──────────────────────────────────────────────────────────── */
 
-  const reportsPromise = jiraPLimit(2, pks.map(pk => async () => {
-    const pkStart = Date.now();
-    const area    = { name: pk, projectKey: pk };
-    const r = await withTimeout(`pk:${pk}`, jiraBuildAreaReport(cfg, area), PER_PK_TIMEOUT_MS);
-    const elapsed = Date.now() - pkStart;
-    if (!r.ok) {
-      log.push(`[pulse] ${pk}: timeout after ${elapsed}ms`);
-      return { projectKey: pk, error: `timeout ${PER_PK_TIMEOUT_MS}ms`, issues: [], sprintKeys: [], inProgressKeys: [], backlogKeys: [], _ms: elapsed };
+// Y4-1: Reopen rate — JQL count «status changed FROM Done TO X AFTER -90d».
+// Дёшево: один search-by-jql на PK с maxResults=0 (только total).
+async function ppFetchReopenRate(cfg, projectKeys) {
+  if (!cfg.jiraBaseUrl || !cfg.jiraToken || !projectKeys.length) {
+    return { configured: false, byPk: {}, tried: [] };
+  }
+  const tried = [];
+  const byPk = {};
+  await jiraPLimit(3, projectKeys.map(pk => async () => {
+    try {
+      // Reopens (status changed FROM Done back) за 90 дней.
+      const reopenJql = `project="${pk}" AND status changed FROM "Done" AFTER -90d`;
+      const re = await jiraRequest(cfg, 'POST', '/rest/api/2/search', { jql: reopenJql, startAt: 0, maxResults: 0 });
+      // Done за тот же период — для нормализации.
+      const doneJql   = `project="${pk}" AND status changed TO "Done" AFTER -90d`;
+      const dn = await jiraRequest(cfg, 'POST', '/rest/api/2/search', { jql: doneJql, startAt: 0, maxResults: 0 });
+      const reopenCount = Number(re?.total) || 0;
+      const doneCount   = Number(dn?.total) || 0;
+      byPk[pk] = {
+        reopens: reopenCount,
+        dones:   doneCount,
+        rate:    doneCount > 0 ? (reopenCount / doneCount) : 0,
+        windowDays: 90,
+      };
+      tried.push({ type: 'reopen-rate', pk, status: 200, reopens: reopenCount, dones: doneCount });
+    } catch (e) {
+      tried.push({ type: 'reopen-rate', pk, status: e?.status || 0, error: String(e?.message || e).slice(0, 100) });
     }
-    const data = r.value;
-    if (Array.isArray(data.stageTimings)) {
-      for (const s of data.stageTimings) {
-        log.push(`[pulse] ${pk} · ${s.name}: ${s.ms}ms ${s.ok ? '✓ ' + (s.count ?? 0) + ' issues' : '✗ ' + (s.error || 'failed')}`);
+  }));
+  return { configured: true, byPk, tried };
+}
+
+// V21 Z5 (audit-09 §C #13) — Stale tags fetcher (release cadence).
+// Возвращает per repo последние 5 tags + age последнего release tag.
+async function ppFetchStaleTags(cfg, tls, knownRepos = []) {
+  if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { configured: false, byRepo: {}, tried: [] };
+  if (!knownRepos.length) return { configured: true, byRepo: {}, tried: [] };
+  const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
+  const auth = _ppMakeAuthHeader(cfg.bitbucketToken);
+  const tried = [];
+  const byRepo = {};
+  await jiraPLimit(4, knownRepos.map(({ proj, repo }) => async () => {
+    try {
+      const url = `${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/tags?orderBy=MODIFICATION&limit=10`;
+      const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+      tried.push({ type: 'stale-tags', proj, repo, status: r.status });
+      if (r.status < 200 || r.status >= 300) return;
+      const tags = JSON.parse(r.text || '{}').values || [];
+      const lastTag = tags[0];
+      if (!lastTag) {
+        byRepo[`${proj}/${repo}`] = { lastTagName: null, daysSinceLastTag: null, totalTags: 0 };
+        return;
+      }
+      // Age based on latest tag's commit. Stash returns tag.metadata['com.atlassian...'] sometimes.
+      // Fallback: try latestCommit hash + separate /commits/{sha} call (skip — too expensive).
+      // Instead: use display name + count.
+      byRepo[`${proj}/${repo}`] = {
+        lastTagName: lastTag.displayId || lastTag.id || '',
+        totalTags: tags.length,
+      };
+    } catch (e) { tried.push({ type: 'stale-tags', proj, repo, error: String(e?.message || e).slice(0, 100) }); }
+  }));
+  return { configured: true, byRepo, tried };
+}
+
+// V21 AS (audit-09 §H #80/#39) — Onboarding precise.
+// Для каждого autor'а в BB определяем earliest commit timestamp (=когда впервые
+// появился в репо). Используем pagination commits sorted=oldest-first, cap=5 repos × 5 страниц × 200 commit'ов.
+//
+// Outcome: { perAuthor: { [name]: firstSeenTs }, recentlyJoined: [...], tried: [] }
+// recentlyJoined — кто появился < 90 дней назад (новенькие).
+async function ppFetchOnboardingHistory(cfg, tls) {
+  if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { configured: false, perAuthor: {}, recentlyJoined: [], tried: [] };
+  const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
+  const auth = _ppMakeAuthHeader(cfg.bitbucketToken);
+  const tried = [];
+
+  // Reuse repo discovery (top-5).
+  const repos = [];
+  try {
+    // C5: env-параметризуем cap репозиториев для onboarding (был жёстко 1/проект).
+    const ONBOARD_REPO_CAP_PER_PROJ = Math.max(1, Math.min(20, Number(process.env.PULSE_BB_ONBOARD_REPOS_PER_PROJECT) || 5));
+    const ONBOARD_REPO_LIMIT = Math.max(5, Math.min(100, Number(process.env.PULSE_BB_ONBOARD_REPO_LIMIT) || 30));
+    const projsR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+    if (projsR.status >= 200 && projsR.status < 300) {
+      let projs = JSON.parse(projsR.text || '{}').values || [];
+      // PR-CG: фильтруем проекты по bitbucketProjectKeys allowlist.
+      const allow = _ppBbAllowedProjects(cfg);
+      if (allow.size) projs = projs.filter(p => allow.has(String(p.key || '').toLowerCase()));
+      for (const p of projs) {
+        if (repos.length >= ONBOARD_REPO_LIMIT) break;
+        const reposR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects/${encodeURIComponent(p.key)}/repos?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+        if (reposR.status >= 200 && reposR.status < 300) {
+          const list = JSON.parse(reposR.text || '{}').values || [];
+          // M9 revert: sort by id desc оказался регрессивным (свежие репо
+          // ≠ активные). Используем исходный порядок Stash (по имени).
+          for (const r of list.slice(0, ONBOARD_REPO_CAP_PER_PROJ)) {
+            repos.push({ proj: p.key, repo: r.slug });
+            if (repos.length >= ONBOARD_REPO_LIMIT) break;
+          }
+        }
       }
     }
-    log.push(`[pulse] ${pk}: ${data.error ? 'ERROR ' + data.error : (data.issues?.length || 0) + ' issues'} · ${elapsed}ms`);
-    return {
-      projectKey: pk,
-      error:          data.error || null,
-      issues:         data.issues || [],
-      sprintKeys:     data.sprintKeys || [],
-      inProgressKeys: data.inProgressKeys || [],
-      backlogKeys:    data.backlogKeys || [],
-      stageTimings:   data.stageTimings || [],
-      zephyrResultFieldId: data.zephyrResultFieldId,
-      _ms:            elapsed,
-    };
+  } catch (e) { tried.push({ type: 'onboard-discover', error: String(e?.message || e).slice(0, 100) }); }
+  if (!repos.length) return { configured: true, perAuthor: {}, recentlyJoined: [], tried, error: 'no-repos' };
+
+  // Per-author earliest timestamp.
+  const perAuthor = new Map();
+  await jiraPLimit(3, repos.map(({ proj, repo }) => async () => {
+    let start = 0;
+    const PAGE_SIZE = 200;
+    const PAGES_CAP = 5;     // 5 × 200 = 1000 commits per repo
+    for (let pg = 0; pg < PAGES_CAP; pg++) {
+      try {
+        const url = `${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/commits?limit=${PAGE_SIZE}&start=${start}`;
+        const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 12000 });
+        tried.push({ type: 'onboard-commits', proj, repo, page: pg, status: r.status });
+        if (r.status < 200 || r.status >= 300) break;
+        const data = JSON.parse(r.text || '{}');
+        const commits = data.values || [];
+        for (const c of commits) {
+          const ts = _ppNormalizeBbTs(c.authorTimestamp || c.committerTimestamp || 0);
+          if (!ts) continue;
+          // H3: identity-deterministic key (раньше использовался первый
+          // непустой из displayName/name/email — один человек с разным git
+          // user.name в разных репо двоился как два author'а).
+          const dn = c.author?.displayName || c.author?.name || '';
+          const em = c.author?.emailAddress || '';
+          const key = _ppKeyForAuthor(dn, em);
+          if (!key) continue;
+          const prev = perAuthor.get(key);
+          if (!prev || ts < prev.ts) perAuthor.set(key, { ts, displayName: dn || em || key, email: em, slug: c.author?.name || '' });
+        }
+        // API10: было `data.isLastPage || commits.length < PAGE_SIZE` —
+        // тот же anti-pattern что чинили для CF. Stash может вернуть
+        // полную страницу при isLastPage=true. Полагаемся только на
+        // `isLastPage` (per контракт). Если `nextPageStart=null` при
+        // isLastPage=false — defensively break (защита от infinite loop).
+        if (data.isLastPage === true) break;
+        if (commits.length === 0) break;
+        if (data.nextPageStart == null && data.isLastPage !== false) break;
+        start = data.nextPageStart || (start + PAGE_SIZE);
+      } catch (e) { tried.push({ type: 'onboard-commits', proj, repo, error: String(e?.message || e).slice(0, 100) }); break; }
+    }
   }));
-  const bbPromise = withTimeout('bitbucket',
-    ppFetchBitbucketActivity(cfg, tls, cutoffTs, cutoffIso), PER_PK_TIMEOUT_MS);
-  const ppCfEmployees = Array.isArray(body?.employees) ? body.employees : [];
-  const cfPromise = withTimeout('confluence',
-    ppFetchConfluenceActivity(cfg, tls, cutoffTs, { cqlCutoffTs, employees: ppCfEmployees }), PER_PK_TIMEOUT_MS);
-  // V20 S9 — Real Zephyr fetch (parallel with BB/CF). Pилот finding: zephyr
-  // counts всегда 0/0 потому что использовался Jira issue-type heuristic.
-  // Теперь — отдельный fetch /rest/tests/1.0/* (Zephyr Tests app DC).
-  const zephyrPromise = withTimeout('zephyr',
-    ppFetchZephyrActivity(cfg, tls, cutoffTs), PER_PK_TIMEOUT_MS);
 
-  const [reports, bbR, cfR, zR] = await Promise.all([reportsPromise, bbPromise, cfPromise, zephyrPromise]);
-  setPhase('fetch-bb-cf-done');
-  const bitbucketRepoWalk = bbR.ok ? bbR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
-  const confluence = cfR.ok ? cfR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms` };
-  const zephyr = zR.ok ? zR.value : { authors: {}, error: `timeout ${PER_PK_TIMEOUT_MS}ms`, configured: false };
-
-  const hotIssues = [];
-  for (const r of reports) {
-    if (r.error) continue;
-    const backlogSet = new Set(r.backlogKeys || []);
-    for (const it of (r.issues || [])) {
-      if (!backlogSet.has(it.key)) hotIssues.push(it);
+  // Build summary.
+  const cutoff90d = Date.now() - 90 * 24 * 3600 * 1000;
+  const cutoff30d = Date.now() - 30 * 24 * 3600 * 1000;
+  const perAuthorObj = {};
+  const recentlyJoined = [];
+  for (const [key, info] of perAuthor) {
+    const ts = info?.ts ?? info;        // backward-compat если value просто timestamp
+    const displayName = info?.displayName || key;
+    perAuthorObj[key] = ts;
+    if (ts > cutoff90d) {
+      recentlyJoined.push({
+        name: displayName,
+        key,
+        email: info?.email || '',
+        slug: info?.slug || '',
+        firstSeenTs: ts,
+        firstSeenIso: new Date(ts).toISOString().slice(0, 10),
+        daysActive: Math.floor((Date.now() - ts) / 86400000),
+        veryNew: ts > cutoff30d,
+      });
     }
   }
-  setPhase('dev-status');
-  const dsR = await withTimeout('dev-status',
-    ppFetchDevStatusForIssues(cfg, tls, cutoffTs, hotIssues), PER_PK_TIMEOUT_MS).catch(()=>({ ok:false }));
-  const devStatus = dsR && dsR.ok ? dsR.value : { authors: {}, configured: false, tried: [], scanned: 0 };
-  // V18 P8 — раздельные bucket'ы для repo-walk и dev-status authors.
-  //   repoAuthors  = authoritative из Bitbucket repo-walk (юзер настроил BB)
-  //   devStatusAuthors = supplementary из Jira dev-info panel (cross-checked
-  //     for email/login существование). Frontend (analysePulse) теперь сам
-  //     решает что показать пользователю — UI может разделить их (например,
-  //     помечать devStatus-only как "Внешние авторы PR" в карточке).
-  //   `authors` (merged) ОСТАВЛЕН для backward-compat: текущий frontend пока
-  //   читает `authors`. Когда переедет на raw repoAuthors+devStatusAuthors —
-  //   merged можно удалить.
-  const _devStatusAuthorsFiltered = {};
-  for (const [k, v] of Object.entries(devStatus.authors || {})) {
-    const hasEmail = !!String(v?.email || '').trim();
-    const hasLoginishKey = /^[a-z0-9._-]+$/i.test(String(k).trim());
-    if (hasEmail || hasLoginishKey) _devStatusAuthorsFiltered[k] = v;
-  }
-  const mergedAuthors = _ppMergeAuthorMaps(bitbucketRepoWalk.authors || {}, _devStatusAuthorsFiltered);
-  const bitbucket = {
-    authors:           mergedAuthors,                                 // legacy — будет retired когда frontend перейдёт на raw bucket'ы
-    repoAuthors:       bitbucketRepoWalk.authors || {},               // V18 P8 — pure repo-walk (Bitbucket настроен)
-    devStatusAuthors:  _devStatusAuthorsFiltered,                     // V18 P8 — pure dev-info (через Jira), filtered
-    configured: bitbucketRepoWalk.configured,
-    tried:      [...(bitbucketRepoWalk.tried || []), ...(devStatus.tried || [])],
-    repos:      bitbucketRepoWalk.repos || 0,
-    prActivitiesScanned: bitbucketRepoWalk.prActivitiesScanned || 0,
-    devStatus:  { scanned: devStatus.scanned || 0, prs: devStatus.prs || 0, commits: devStatus.commits || 0, configured: devStatus.configured },
-    error:      bitbucketRepoWalk.error || null,
-  };
-  log.push(`[pulse] dev-status: scanned ${devStatus.scanned||0} dev-info calls, found ${devStatus.prs||0} PR · ${devStatus.commits||0} commits`);
-  log.push(`[pulse] done in ${Date.now() - t0}ms · ${reports.filter(r => !r.error).length}/${reports.length} PKs ok`);
-  setPhase('finalize');
+  recentlyJoined.sort((a, b) => a.firstSeenTs - b.firstSeenTs); // newest at top via slice in UI
 
-  const zephyrResultFieldId = reports.find(r => r.zephyrResultFieldId)?.zephyrResultFieldId || '';
   return {
-    reports,
-    fetchedAt:   new Date().toISOString(),
-    projectKeys: pks,
-    jiraBaseUrl: String(cfg.jiraBaseUrl || '').replace(/\/+$/, ''),
-    zephyrResultFieldId,
-    bitbucket,
-    confluence,
-    zephyr,                                            // V20 S9 — Real Zephyr fetch (Sber DC)
-    diagnostics: {
-      totalMs:  Date.now() - t0,
-      perPk:    reports.map(r => ({ pk: r.projectKey, ms: r._ms || 0, ok: !r.error, error: r.error || null, issues: (r.issues || []).length })),
-      log,
+    configured: true,
+    perAuthor: perAuthorObj,
+    recentlyJoined,
+    tried,
+    summary: {
+      totalAuthorsSeen: perAuthor.size,
+      recentJoinersCount: recentlyJoined.length,
+      veryNewCount: recentlyJoined.filter(r => r.veryNew).length,
     },
   };
 }
 
-/**
- * V17.2 I2c — Confluence activity collector.
- *
- * Что делает:
- *   • space-scope `space in (DEV, PAY, ...)` если задан `cfg.confluenceSpaceKeys`
- *   • per-employee `contributor in (...)` / `creator in (...)` / `mention in (...)`
- *     если переданы `opts.employees` с identity (lookup-by-email-prefix
- *     или по `confluenceAccountId`)
- *   • CQL cutoff с +1ч padding для TZ-skew, точная фильтрация у нас по cutoffTs
- *   • Pagination через start/limit (cap 1000 events на тип)
- *   • Три типа активности: page/blogpost edits, comments, mentions
- *   • Path-cascade Cloud `/wiki/rest/...` ↔ DC `/rest/...`
- *   • Дедупликация: edit > comment > mention (если один target_id и тот же author)
- */
-async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
-  if (!cfg.confluenceBaseUrl || !cfg.confluenceToken) return { authors: {}, configured: false, tried: [] };
-  const baseRaw = String(cfg.confluenceBaseUrl).replace(/\/+$/, '').replace(/\/wiki$/i, '');
-  const auth = _ppMakeAuthHeader(cfg.confluenceToken);
+
+// V21 AA (audit-09 §C #9, #14, #15) — BB governance + PR-size aggregator.
+// Один fetcher: per-repo ACL + hooks + sample PR-size distribution.
+// ACL/hooks — 1 call/repo каждый; PR-size — 1 call/PR cap=20 PR глобально.
+// V18 extraction step 5 — ppFetchBitbucketGovernance вынесена в server/bitbucket.js.
+// Здесь стоял блок ~152 LOC; теперь все callsite'ы используют функцию через
+// destructured backward-compat alias возле `require('./server/bitbucket.js').create`.
+
+// Y4-2: Stale branches — BB `/branches?orderBy=MODIFICATION&details=true&limit=100`.
+// Per repo top-N stale (>30d no commits). Cap 5 repos на pulse чтобы не разогнать timeout.
+async function ppFetchStaleBranches(cfg, tls) {
+  if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { configured: false, byRepo: {}, tried: [] };
+  const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
+  const auth = _ppMakeAuthHeader(cfg.bitbucketToken);
   const tried = [];
-
-  const cqlCutoffTs = Number(opts.cqlCutoffTs) || (cutoffTs - 60 * 60 * 1000);
-  const isoCutoff   = new Date(cqlCutoffTs).toISOString().replace('T', ' ').slice(0, 16);
-  const employees   = Array.isArray(opts.employees) ? opts.employees : [];
-
-  // Build CQL identity clause: contributor in ("alice", "bob") or mention in (...)
-  // Используем username (email-prefix) и confluenceAccountId как кандидатов.
-  // CQL Confluence ожидает username; для большинства DC это email-prefix.
-  const identityNames = new Set();
-  for (const e of employees) {
-    const cf = String(e.confluenceAccountId || '').trim();
-    if (cf) identityNames.add(cf);
-    const em = String(e.email || '').trim().toLowerCase();
-    if (em && em.includes('@')) {
-      identityNames.add(em.split('@')[0]);     // email-prefix as username (LDAP/AD common)
-      identityNames.add(em);                    // full email (Cloud accountId path иногда)
-    }
-  }
-  const identityList = [...identityNames];
-  const idClause = identityList.length
-    ? ` AND ${'%FIELD%'} in (${identityList.map(n => `"${n.replace(/"/g, '\\"')}"`).join(', ')})`
-    : '';
-
-  // Space scope clause: AND space in (DEV, PAY).
-  // Inline parser (server.js не импортирует портальные модули).
-  const spaceKeys = String(cfg.confluenceSpaceKeys || '')
-    .split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
-  const spaceClause = spaceKeys.length
-    ? ` AND space in (${spaceKeys.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')})`
-    : '';
-
-  // Path cascade — try Cloud first, fall back to DC.
-  const PATHS = [
-    { tag: 'wiki-rest', url: `${baseRaw}/wiki/rest/api/content/search` },
-    { tag: 'rest',      url: `${baseRaw}/rest/api/content/search` },
-  ];
-
-  // Page through CQL with cap=1000 per type per call.
-  async function paginatedSearch(pathSpec, cql, expand) {
-    const out = [];
-    let start = 0;
-    const limit = 100;
-    const cap = 1000;
-    let pages = 0;
-    while (out.length < cap && pages < 10) {
-      const url = `${pathSpec.url}?cql=${encodeURIComponent(cql)}&start=${start}&limit=${limit}&expand=${encodeURIComponent(expand)}`;
-      const t0 = Date.now();
-      const r = await jiraForward({
-        targetUrl: url, method: 'GET',
-        headers: { Authorization: auth, Accept: 'application/json' },
-        allowInsecureTls: tls, timeoutMs: 20000,
-      }).catch(e => ({ status: 0, text: '', _err: e?.message }));
-      tried.push({ type: pathSpec.tag, status: r.status, cql, start, ms: Date.now() - t0, error: r._err || '' });
-      if (r.status === 401 || r.status === 403) return { results: [], status: r.status };
-      if (r.status >= 300) {
-        if (out.length === 0) return { results: [], status: r.status };
-        break;
-      }
-      let parsed;
-      try { parsed = JSON.parse(r.text); } catch (_) { parsed = null; }
-      const batch = parsed?.results || [];
-      out.push(...batch);
-      pages++;
-      if (batch.length < limit) break;     // last page
-      start += limit;
-    }
-    return { results: out, status: 200 };
-  }
-
-  // Run a CQL query, picking the first PATH that returns 2xx or a result.
-  async function runCQL(cqlNoIdentity, cqlField, expand) {
-    const cql = cqlNoIdentity + idClause.replace('%FIELD%', cqlField) + spaceClause;
-    for (const p of PATHS) {
-      const r = await paginatedSearch(p, cql, expand);
-      if (r.status >= 200 && r.status < 300) return { results: r.results, path: p, cql };
-      if (r.status === 401 || r.status === 403) return { results: [], path: p, cql, authError: r.status };
-      // 404 / 400 → try next path
-    }
-    return { results: [], path: PATHS[PATHS.length - 1], cql };
-  }
-
-  // ── Pass 1: page / blogpost edits ─────────────────────────
-  const editCql = `type in (page, blogpost) AND lastmodified > "${isoCutoff}"`;
-  const editR = await runCQL(editCql, 'contributor', 'version,space,history.lastUpdated,history.createdBy');
-
-  // ── Pass 2: comments ─────────────────────────────────────
-  const commentCql = `type = comment AND created > "${isoCutoff}"`;
-  const commentR = await runCQL(commentCql, 'creator', 'version,space,container');
-
-  // ── Pass 3: mentions ─────────────────────────────────────
-  const mentionCql = `lastmodified > "${isoCutoff}"`;
-  const mentionR = await runCQL(mentionCql, 'mention', 'version,space');
-
-  // Auth-error cascade end: bail with explicit message.
-  const anyAuthErr = [editR, commentR, mentionR].find(x => x?.authError);
-  if (anyAuthErr) {
-    return { authors: {}, configured: true, tried, error: `Confluence HTTP ${anyAuthErr.authError} — токен просрочен или нет прав` };
-  }
-
-  const winningPath = (editR.path || commentR.path || mentionR.path || PATHS[0]).tag;
-  const urlBase = winningPath === 'wiki-rest' ? `${baseRaw}/wiki` : baseRaw;
-
-  // ── Aggregate authors ────────────────────────────────────
-  const authors = {};
-  const ensureAuthor = (dn, em, k) => {
-    if (!authors[k]) authors[k] = { edits: 0, comments: 0, mentions: 0, displayName: dn || em || k, email: em, items: [], _seenTargets: new Set() };
-    return authors[k];
-  };
-  const pushItem = (a, item) => {
-    if (a.items.length >= 100) return;
-    if (item.targetId) {
-      // V17.2 I2c — dedup: предпочитаем edit/create > comment > mention для
-      //   одного и того же target_id у одного автора. Если уже видели этот
-      //   target — пропускаем (порядок проходов: edits → comments → mentions
-      //   гарантирует что edit «победит» дальше идущий mention).
-      if (a._seenTargets.has(item.targetId)) return;
-      a._seenTargets.add(item.targetId);
-    }
-    a.items.push(item);
-  };
-
-  // Pass 1 — edits
-  for (const p of (editR.results || [])) {
-    const v = p.version || {};
-    const tsP = Date.parse(v.when || '');
-    if (Number.isFinite(tsP) && tsP < cutoffTs) continue;
-    const dn = v.by?.displayName || v.by?.publicName || '';
-    const em = v.by?.email || '';
-    const k = _ppKeyForAuthor(dn, em);
-    if (!k) continue;
-    const a = ensureAuthor(dn, em, k);
-    a.edits++;
-    pushItem(a, {
-      kind: (Number(v.number) || 0) === 1 ? 'create' : 'edit',
-      title: p.title || '',
-      url:   p._links?.webui ? `${urlBase}${p._links.webui}` : '',
-      at:    v.when || '',
-      spaceKey:  p.space?.key  || '',
-      spaceName: p.space?.name || '',
-      targetId:  String(p.id || ''),
-    });
-  }
-  // Pass 2 — comments
-  for (const c of (commentR.results || [])) {
-    const v = c.version || {};
-    const tsP = Date.parse(v.when || c.history?.createdDate || '');
-    if (Number.isFinite(tsP) && tsP < cutoffTs) continue;
-    const dn = v.by?.displayName || c.history?.createdBy?.displayName || '';
-    const em = v.by?.email || c.history?.createdBy?.email || '';
-    const k = _ppKeyForAuthor(dn, em);
-    if (!k) continue;
-    const a = ensureAuthor(dn, em, k);
-    a.comments++;
-    const cont = c.container || {};
-    pushItem(a, {
-      kind:  'comment',
-      title: cont.title || c.title || '(без заголовка)',
-      url:   c._links?.webui ? `${urlBase}${c._links.webui}` : (cont._links?.webui ? `${urlBase}${cont._links.webui}` : ''),
-      at:    v.when || c.history?.createdDate || '',
-      spaceKey:  c.space?.key  || cont.space?.key  || '',
-      spaceName: c.space?.name || cont.space?.name || '',
-      targetId:  `${cont.id || c.id || ''}#comment-${c.id || ''}`,
-    });
-  }
-  // Pass 3 — mentions (only attribute to identity-list users — иначе мы получим
-  //          автора страницы, не упомянутого человека; CQL `mention=...`
-  //          возвращает контент где упомянут username, не самого автора).
-  for (const p of (mentionR.results || [])) {
-    const v = p.version || {};
-    const tsP = Date.parse(v.when || '');
-    if (Number.isFinite(tsP) && tsP < cutoffTs) continue;
-    // Mentions нельзя точно атрибутировать только по version.by — это автор
-    // правки, а не упомянутый. Распределяем только если у нас есть identity-list:
-    // для каждого identityName проверяем содержит ли тело страницы @<name>.
-    if (!identityList.length) continue;
-    const dn = v.by?.displayName || '';
-    const em = v.by?.email || '';
-    // Мы не можем без скачивания тела страницы 100% сказать кто упомянут.
-    // Workaround: атрибутируем mention каждому identity-юзеру (overcount
-    // приемлем для baseline; план Step 5 явно говорит «mentions слабое
-    // место чистого REST»). Дедуп по targetId защищает от повторов.
-    for (const idName of identityList) {
-      const fakeKey = idName.toLowerCase();
-      const a = ensureAuthor(idName, '', fakeKey);
-      if (a._seenTargets.has(String(p.id || ''))) continue;
-      a.mentions++;
-      pushItem(a, {
-        kind:  'mention',
-        title: p.title || '',
-        url:   p._links?.webui ? `${urlBase}${p._links.webui}` : '',
-        at:    v.when || '',
-        spaceKey:  p.space?.key  || '',
-        spaceName: p.space?.name || '',
-        targetId:  String(p.id || ''),
-        mentionedBy: dn || em || '',
-      });
-    }
-  }
-
-  // Cleanup _seenTargets перед возвратом (это служебное поле).
-  for (const a of Object.values(authors)) delete a._seenTargets;
-
-  // ── V20 S5.3 — Audit-log fallback ────────────────────────
-  // Если CQL search ничего/мало вернул (типичная ситуация для Sber DC где
-  // user.email не индексирован) — добираем events через audit log.
-  // /rest/auditing/1.0/events?affectedObject=Space,<id> возвращает все
-  // события за период с author.name = ФИО. Match'им по emp.fio.
-  //
-  // Решение применяется ТОЛЬКО если:
-  //   · есть spaceKeys (без них audit нерелевантен)
-  //   · CQL дал < 5 events ИЛИ < 50% от identity-list authors
-  // Прерываемся раньше если audit token не имеет прав или нет space ID.
-  const cqlAuthorsCount = Object.keys(authors).length;
-  const identityCount = identityList.length;
-  const cqlSparse = cqlAuthorsCount < Math.max(5, Math.floor(identityCount * 0.5));
-  if (spaceKeys.length && cqlSparse && employees.length) {
-    try {
-      await _ppCfAuditAugment({
-        baseRaw, auth, tls, cutoffTs, spaceKeys, employees,
-        authors, ensureAuthor, pushItem, tried,
-      });
-    } catch (e) {
-      tried.push({ type: 'audit-fallback', error: _ppRedactSecretsInText(e?.message || 'thrown', 100) });
-    }
-  }
-  for (const a of Object.values(authors)) delete a._seenTargets;     // повторный cleanup
-
-  return { authors, configured: true, tried, scope: { spaces: spaceKeys, employees: identityList.length, windowHours: Math.round((Date.now() - cutoffTs) / 3600000) } };
-}
-
-/**
- * V20 S5.3 — Confluence audit log → augment authors map.
- *
- * Pipeline:
- *   1) Resolve каждый spaceKey → spaceId (через /rest/api/space/<key>).
- *   2) Для каждого spaceId fetch /rest/auditing/1.0/events?affectedObject=Space,<id>
- *      paginated (cursor-based в DC).
- *   3) Для каждого event:
- *      · фильтр timestamp >= cutoffTs (client-side, т.к. audit не принимает period filter
- *        в DC до 7.20)
- *      · author.name (= ФИО) → match по emp.fio (case-insensitive).
- *      · если match — bump соответствующий counter (edits/comments/mentions)
- *        исходя из event.type.action.
- *
- * Не заменяет CQL pipeline — augmentирует. Дедуп через _seenTargets.
- */
-async function _ppCfAuditAugment(opts) {
-  const { baseRaw, auth, tls, cutoffTs, spaceKeys, employees, authors, ensureAuthor, pushItem, tried } = opts;
-  // V20 S6.1 — Build FIO → employee map. Service-аккаунты ИСКЛЮЧАЮТСЯ —
-  // если бот зарегистрирован с FIO (auto-create), его не должны путать с
-  // настоящим автором, даже если ФИО совпадает.
-  const fioMap = new Map();
-  for (const e of employees) {
-    if (e.isServiceAccount) continue;
-    const fio = String(e.fio || '').toLowerCase().trim();
-    if (fio) fioMap.set(fio, e);
-  }
-  if (!fioMap.size) return;
-
-  // 1) Resolve space IDs.
-  const spaceIds = [];
-  for (const key of spaceKeys.slice(0, 5)) {     // cap = 5 spaces чтобы не спамить
-    const url = `${baseRaw}/rest/api/space/${encodeURIComponent(key)}`;
-    const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(() => ({ status: 0 }));
-    tried.push({ type: 'audit-space-resolve', key, status: r.status });
-    if (r.status < 200 || r.status >= 300) continue;
-    try {
-      const parsed = JSON.parse(r.text);
-      if (parsed.id) spaceIds.push({ key, id: String(parsed.id) });
-    } catch (_) {}
-  }
-  if (!spaceIds.length) return;
-
-  // 2) Fetch audit events per space, paginated by cursor. Cap = 5 pages × 100 = 500 events.
-  const action2counter = (action) => {
-    const a = String(action || '').toLowerCase();
-    if (a.includes('comment'))                 return 'comments';
-    if (a.includes('mention'))                 return 'mentions';
-    if (a.includes('updated') || a.includes('edited') || a.includes('created')) return 'edits';
-    return null;
-  };
-
-  let augmented = 0;
-  for (const sp of spaceIds) {
-    let cursor = null;
-    let pages = 0;
-    while (pages < 5) {
-      let url = `${baseRaw}/rest/auditing/1.0/events?affectedObject=${encodeURIComponent(`Space,${sp.id}`)}&limit=100`;
-      if (cursor) url += `&pageCursor=${encodeURIComponent(cursor)}&offset=0`;
-      const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 12000 }).catch(e => ({ status: 0, _err: e?.message }));
-      tried.push({ type: 'audit-events', spaceKey: sp.key, page: pages, status: r.status });
-      if (r.status === 401 || r.status === 403) {
-        return;     // нет прав на audit — bail
-      }
-      if (r.status < 200 || r.status >= 300) break;
-      let parsed; try { parsed = JSON.parse(r.text); } catch (_) { break; }
-      const events = parsed.entities || [];
-      if (!events.length) break;
-      let oldestEventBeforeCutoff = false;
-      for (const ev of events) {
-        const ts = Date.parse(ev.timestamp || '');
-        if (!Number.isFinite(ts)) continue;
-        if (ts < cutoffTs) { oldestEventBeforeCutoff = true; continue; }
-        const fio = String(ev.author?.name || '').toLowerCase().trim();
-        if (!fio) continue;
-        const emp = fioMap.get(fio);
-        if (!emp) continue;     // не наш сотрудник
-        // Найдём target.
-        const target = (ev.affectedObjects || []).find(o => o.type === 'Page' || o.type === 'Comment' || o.type === 'Blogpost') || {};
-        const counter = action2counter(ev.type?.action);
-        if (!counter) continue;
-        const dn = ev.author?.name || '';
-        const em = emp.email || '';
-        const k = _ppKeyForAuthor(dn, em);
-        if (!k) continue;
-        const a = ensureAuthor(dn, em, k);
-        a[counter]++;
-        pushItem(a, {
-          kind: counter === 'edits' ? 'edit' : (counter === 'comments' ? 'comment' : 'mention'),
-          title: target.name || ev.type?.action || 'audit',
-          url:   target.uri || '',
-          at:    ev.timestamp || '',
-          spaceKey:  sp.key,
-          targetId:  String(target.id || ev.id || `${sp.id}-${ts}`),
-          source:    'audit-log',
-        });
-        augmented++;
-      }
-      // Если самый старый event на странице УЖЕ до cutoff — следующая будет ещё старее, прерываемся.
-      if (oldestEventBeforeCutoff && events.length === parsed.pagingInfo?.size) break;
-      cursor = parsed.pagingInfo?.nextPageCursor || null;
-      if (!cursor || parsed.pagingInfo?.lastPage) break;
-      pages++;
-    }
-  }
-  tried.push({ type: 'audit-augmented', count: augmented, spaces: spaceIds.length });
-}
-
-/* ════════════════════════════════════════════════════════════
-   V20 S9 — REAL ZEPHYR FETCH (Sber DC compatible)
-   ────────────────────────────────────────────────────────────
-   Pилот finding: zephyr counts всегда 0/0 потому что текущая
-   реализация ищет Jira issues с типом «Test» (heuristic
-   `zephyrKind`). В Sber Zephyr DC test cases — это НЕ Jira issues,
-   а отдельные сущности `/rest/tests/1.0/testcase/...`.
-
-   API endpoints (Zephyr Tests for Jira Server/DC):
-     GET /rest/tests/1.0/testcase/search?query=testCase.projectId+IN+(<id>)+AND+testCase.updatedOn>="<iso>"
-         → test cases (created/updated)
-     GET /rest/tests/1.0/testrun/search?query=testRun.projectId+IN+(<id>)+AND+testRun.updatedOn>="<iso>"
-         → test runs (executed)
-   Project ID — numeric (требует resolve через /rest/api/2/project/{key}).
-
-   Без N²M expense: НЕ дёргаем testresults per-run. Использует:
-     · testCase.createdBy/updatedBy → testsCreated
-     · testRun.userKeys[] / createdBy / updatedBy → testsExecuted
-   ──────────────────────────────────────────────────────────── */
-
-const _PROJECT_ID_TTL = 30 * 60 * 1000;   // 30 min cache
-const _projectIdCache = new Map();         // 'baseUrl|key' → { id, at }
-
-/** Resolve projectKey → numeric projectId via /rest/api/2/project/{key}. */
-async function jiraResolveProjectId(cfg, projectKey) {
-  const cacheKey = `${cfg.jiraBaseUrl}|${projectKey}`;
-  const cached = _projectIdCache.get(cacheKey);
-  if (cached && (Date.now() - cached.at) < _PROJECT_ID_TTL) {
-    return cached.id;
-  }
+  const byRepo = {};
+  // Берём список проектов, в каждом — 5 первых repos.
+  let repos = [];
   try {
-    const proj = await jiraRequest(cfg, 'GET', `/rest/api/2/project/${encodeURIComponent(projectKey)}`);
-    const id = String(proj?.id || '');
-    if (id) {
-      _projectIdCache.set(cacheKey, { id, at: Date.now() });
-      return id;
+    // C5: env-параметризация для stale-branches.
+    const STALE_REPOS_PER_PROJ = Math.max(1, Math.min(50, Number(process.env.PULSE_BB_STALE_REPOS_PER_PROJECT) || 20));
+    const STALE_REPO_LIMIT = Math.max(5, Math.min(200, Number(process.env.PULSE_BB_STALE_REPO_LIMIT) || 80));
+    const projsR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+    if (projsR.status >= 200 && projsR.status < 300) {
+      let projs = JSON.parse(projsR.text || '{}').values || [];
+      const allow = _ppBbAllowedProjects(cfg);
+      if (allow.size) projs = projs.filter(p => allow.has(String(p.key || '').toLowerCase()));
+      for (const p of projs) {
+        if (repos.length >= STALE_REPO_LIMIT) break;
+        const reposR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects/${encodeURIComponent(p.key)}/repos?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+        if (reposR.status >= 200 && reposR.status < 300) {
+          const list = JSON.parse(reposR.text || '{}').values || [];
+          // M9 revert: исходный Stash-порядок (алфавитно).
+          for (const r of list.slice(0, STALE_REPOS_PER_PROJ)) {
+            repos.push({ proj: p.key, repo: r.slug });
+            if (repos.length >= STALE_REPO_LIMIT) break;
+          }
+        }
+      }
     }
-  } catch (_) { /* probe failed */ }
-  // Negative cache 5 min — не пробуем повторно срочно.
-  _projectIdCache.set(cacheKey, { id: '', at: Date.now() - _PROJECT_ID_TTL + 5 * 60 * 1000 });
-  return '';
-}
+  } catch (e) { tried.push({ type: 'stale-branches-discover', error: String(e?.message || e).slice(0, 100) }); }
+  if (!repos.length) return { configured: true, byRepo: {}, tried, error: 'no-repos-discovered' };
 
-/**
- * V20 S9 — Fetch Zephyr activity per project.
- * Returns: { authors: { [userKey]: { testsCreated, testsExecuted, items: [...], displayName } },
- *            configured: bool, tried: [], summary: { tcCount, trCount } }
- */
-async function ppFetchZephyrActivity(cfg, tls, cutoffTs) {
-  if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
-    return { authors: {}, configured: false, tried: [] };
-  }
-  const projectKeys = String(cfg.jiraProjectKeys || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
-  if (!projectKeys.length) return { authors: {}, configured: false, tried: [] };
-  const baseRaw = String(cfg.jiraBaseUrl).replace(/\/+$/, '');
-  const auth = _ppMakeAuthHeader(cfg.jiraToken);
-  const tried = [];
-  const isoCutoff = new Date(cutoffTs).toISOString().replace('T', ' ').slice(0, 19);
-
-  // Step 1: Resolve project keys → numeric IDs (parallel, cached).
-  const projects = [];
-  await Promise.all(projectKeys.map(async (pk) => {
-    const id = await jiraResolveProjectId(cfg, pk);
-    if (id) projects.push({ pk, id });
-    else tried.push({ type: 'project-resolve', pk, status: 0, error: 'no-id' });
-  }));
-  if (!projects.length) return { authors: {}, configured: true, tried, error: 'projects-unresolved' };
-
-  // Step 2: Fetch test cases + test runs per project (parallel within project).
-  const authors = {};
-  const ensureAuthor = (k, dn) => {
-    if (!k) return null;
-    if (!authors[k]) authors[k] = { testsCreated: 0, testsExecuted: 0, items: [], displayName: dn || k };
-    else if (dn && !authors[k].displayName) authors[k].displayName = dn;
-    return authors[k];
-  };
-
-  const tcFields = 'id,key,projectId,name,createdBy,createdOn,updatedBy,updatedOn';
-  const trFields = 'id,key,projectId,name,createdBy,createdOn,updatedBy,updatedOn,userKeys,executionTime,testResultStatuses,status(id,name)';
-
-  let tcTotal = 0, trTotal = 0;
-  await Promise.all(projects.map(async ({ pk, id }) => {
-    // Test cases — created/updated ≥ cutoff.
+  const cutoffTs = Date.now() - 30 * 24 * 3600 * 1000;
+  await jiraPLimit(4, repos.map(({ proj, repo }) => async () => {
     try {
-      const cqlTC = `testCase.projectId IN (${id}) AND testCase.updatedOn >= "${isoCutoff}"`;
-      const urlTC = `${baseRaw}/rest/tests/1.0/testcase/search?query=${encodeURIComponent(cqlTC)}&fields=${tcFields}&maxResults=200&startAt=0&archived=false`;
-      const r = await jiraForward({ targetUrl: urlTC, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 15000 }).catch(e => ({ status: 0, _err: e?.message }));
-      tried.push({ type: 'zephyr-testcase', pk, status: r.status });
-      if (r.status >= 200 && r.status < 300) {
-        const parsed = JSON.parse(r.text || '{}');
-        const results = Array.isArray(parsed?.results) ? parsed.results : [];
-        tcTotal += results.length;
-        for (const tc of results) {
-          const updatedMs = Date.parse(tc.updatedOn || tc.createdOn || '');
-          if (Number.isFinite(updatedMs) && updatedMs < cutoffTs) continue;
-          const creator = String(tc.createdBy || '').trim();
-          const updater = String(tc.updatedBy || tc.createdBy || '').trim();
-          // Created bucket — by createdBy.
-          const a1 = ensureAuthor(creator);
-          if (a1) {
-            a1.testsCreated++;
-            if (a1.items.length < 50) a1.items.push({
-              kind: 'test-case', key: tc.key || '', name: (tc.name || '').slice(0, 80),
-              at: tc.updatedOn || tc.createdOn || '', pk,
-              url: `${baseRaw}/secure/Tests.jspa#/testCase/${encodeURIComponent(tc.key || '')}`,
-            });
-          }
-          // Updated by another → also creator-bucket для updater (если ≠ creator).
-          if (updater && updater !== creator) {
-            const a2 = ensureAuthor(updater);
-            if (a2 && a2.items.length < 50) a2.items.push({
-              kind: 'test-case-edit', key: tc.key || '', name: (tc.name || '').slice(0, 80),
-              at: tc.updatedOn || '', pk,
-              url: `${baseRaw}/secure/Tests.jspa#/testCase/${encodeURIComponent(tc.key || '')}`,
-            });
-          }
-        }
-      }
-    } catch (e) { tried.push({ type: 'zephyr-testcase', pk, error: String(e?.message || e).slice(0, 100) }); }
-
-    // Test runs — created/updated ≥ cutoff.
-    try {
-      const cqlTR = `testRun.projectId IN (${id}) AND testRun.updatedOn >= "${isoCutoff}"`;
-      const urlTR = `${baseRaw}/rest/tests/1.0/testrun/search?query=${encodeURIComponent(cqlTR)}&fields=${trFields}&maxResults=200&startAt=0&archived=false`;
-      const r = await jiraForward({ targetUrl: urlTR, method: 'GET', headers: { Authorization: auth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 15000 }).catch(e => ({ status: 0, _err: e?.message }));
-      tried.push({ type: 'zephyr-testrun', pk, status: r.status });
-      if (r.status >= 200 && r.status < 300) {
-        const parsed = JSON.parse(r.text || '{}');
-        const results = Array.isArray(parsed?.results) ? parsed.results : [];
-        trTotal += results.length;
-        for (const tr of results) {
-          const updatedMs = Date.parse(tr.updatedOn || tr.createdOn || '');
-          if (Number.isFinite(updatedMs) && updatedMs < cutoffTs) continue;
-          // Executor bucket — все userKeys[] + updatedBy.
-          const executors = new Set();
-          if (Array.isArray(tr.userKeys)) for (const u of tr.userKeys) if (u) executors.add(String(u).trim());
-          if (tr.updatedBy)  executors.add(String(tr.updatedBy).trim());
-          if (tr.createdBy && (tr.status?.name === 'Done' || tr.status?.id === 4956)) {
-            // Если run был «выполнен» (status=Done) и нет userKeys — приписать creator'у.
-            if (executors.size === 0) executors.add(String(tr.createdBy).trim());
-          }
-          for (const u of executors) {
-            const a = ensureAuthor(u);
-            if (!a) continue;
-            a.testsExecuted++;
-            if (a.items.length < 50) a.items.push({
-              kind: 'test-run', key: tr.key || '', name: (tr.name || '').slice(0, 80),
-              at: tr.updatedOn || tr.createdOn || '', pk,
-              status: tr.status?.name || '', executionTime: tr.executionTime || 0,
-              url: `${baseRaw}/secure/Tests.jspa#/testPlayer/${encodeURIComponent(tr.key || '')}`,
-            });
-          }
-        }
-      }
-    } catch (e) { tried.push({ type: 'zephyr-testrun', pk, error: String(e?.message || e).slice(0, 100) }); }
+      const url = `${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/branches?orderBy=MODIFICATION&details=true&limit=100`;
+      const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 12000 });
+      tried.push({ type: 'stale-branches', proj, repo, status: r.status });
+      if (r.status < 200 || r.status >= 300) return;
+      const branches = JSON.parse(r.text || '{}').values || [];
+      const stale = branches
+        .map(b => ({
+          name: b.displayId || b.id || '',
+          lastCommitTs: _ppNormalizeBbTs(b.metadata?.['com.atlassian.bitbucket.server.bitbucket-branch:latest-commit-metadata']?.committerTimestamp || 0),
+        }))
+        .filter(b => b.name && b.lastCommitTs && b.lastCommitTs < cutoffTs)
+        .map(b => ({ ...b, daysIdle: Math.floor((Date.now() - b.lastCommitTs) / 86400000) }))
+        .sort((a, b) => a.lastCommitTs - b.lastCommitTs)
+        .slice(0, 20);
+      byRepo[`${proj}/${repo}`] = { staleCount: stale.length, top: stale };
+    } catch (e) { tried.push({ type: 'stale-branches', proj, repo, status: 0, error: String(e?.message || e).slice(0, 100) }); }
   }));
 
-  return {
-    authors,
-    configured: true,
-    tried,
-    summary: { projectsResolved: projects.length, testCasesScanned: tcTotal, testRunsScanned: trTotal },
-  };
-}
-
-async function jiraBuildReport(cfg) {
-  // Resolve project keys: prefer unified `jiraProjectKeys`, fall back to legacy `areas`
-  let areas = jiraSanitizeAreas(cfg.areas);
-  const keys = String(cfg.jiraProjectKeys || '').split(',').map(s => s.trim()).filter(Boolean);
-  if (keys.length) areas = keys.map(k => ({ name: k, projectKey: k }));
-  if (!cfg.jiraBaseUrl||!cfg.jiraToken) throw Object.assign(new Error('Jira URL или токен не заданы'),{status:400});
-  if (!areas.length) throw Object.assign(new Error('Не задано ни одного пространства (jiraProjectKeys)'),{status:400});
-  const staleDays=Number(cfg.staleDays)||3, noMovementDays=Number(cfg.noMovementDays)||2;
-  const areaReports = await jiraPLimit(2, areas.map(a=>()=>jiraBuildAreaReport(cfg,a)));
-  const now=new Date(), yesterday=new Date(now); yesterday.setHours(0,0,0,0); yesterday.setDate(yesterday.getDate()-1);
-  const today=new Date(now); today.setHours(0,0,0,0);
-  const dayBefore=new Date(yesterday); dayBefore.setDate(dayBefore.getDate()-1);
-  return {
-    generatedAt:now.toISOString(),
-    yesterdayRange:{ from:yesterday.toISOString(), to:today.toISOString() },
-    dayBeforeYesterdayRange:{ from:dayBefore.toISOString(), to:yesterday.toISOString() },
-    last48hRange:{ from:new Date(Date.now()-48*3600000).toISOString(), to:now.toISOString() },
-    staleDays, noMovementDays, areas:areaReports, bitbucket:null, confluence:null,
-  };
-}
-
-async function handleJiraApi(req, res, pathname) {
-  try {
-    if (pathname==='/api/jira/config' && req.method==='GET') {
-      return writeJson(res, 200, jiraSanitizeConfig(jiraReadConfig()));
-    }
-    if (pathname==='/api/jira/config' && req.method==='POST') {
-      const raw = await readBody(req, 512*1024);
-      const body = raw ? JSON.parse(raw) : {};
-      const patch = {};
-      // V17.2 I2c — `confluenceSpaceKeys` добавлен в whitelist string-полей.
-      for (const k of ['jiraBaseUrl', 'jiraProjectKeys', 'sigmaJiraBaseUrl', 'sigmaGoalEpicKeys', 'bitbucketBaseUrl', 'bitbucketProjectKeys', 'confluenceBaseUrl', 'confluenceSpaceKeys']) {
-        if (typeof body[k]==='string') patch[k]=body[k].trim();
-      }
-      // V17.2 I2c — activityWindowHours: clamp [1, 168].
-      if (Number.isFinite(+body.activityWindowHours)) {
-        patch.activityWindowHours = Math.min(168, Math.max(1, Math.round(+body.activityWindowHours)));
-      }
-      // Auto-derive `areas` from jiraProjectKeys (so JiraPulse keeps working)
-      if (typeof body.jiraProjectKeys === 'string') {
-        const keys = body.jiraProjectKeys.split(',').map(s => s.trim()).filter(Boolean);
-        patch.areas = keys.map(k => ({ name: k, projectKey: k }));
-      }
-      if (Array.isArray(body.areas)) patch.areas=jiraSanitizeAreas(body.areas);
-      if (typeof body.allowInsecureTls==='boolean') patch.allowInsecureTls=body.allowInsecureTls;
-      if (typeof body.sinceDate==='string' && /^\d{4}-\d{2}-\d{2}$/.test(body.sinceDate.trim())) patch.sinceDate=body.sinceDate.trim();
-      if (typeof body.staleDays==='number') patch.staleDays=body.staleDays;
-      if (typeof body.noMovementDays==='number') patch.noMovementDays=body.noMovementDays;
-      if (typeof body.jiraToken==='string'&&body.jiraToken) patch.jiraToken=body.jiraToken;
-      // Sigma token: ONLY persisted when non-empty — preserves existing token on save with blank field.
-      if (typeof body.sigmaJiraToken==='string'&&body.sigmaJiraToken) patch.sigmaJiraToken=body.sigmaJiraToken;
-      if (typeof body.bitbucketToken==='string'&&body.bitbucketToken) patch.bitbucketToken=body.bitbucketToken;
-      if (typeof body.confluenceToken==='string'&&body.confluenceToken) patch.confluenceToken=body.confluenceToken;
-      const next = jiraWriteConfig(patch);
-      return writeJson(res, 200, jiraSanitizeConfig(next));
-    }
-    if (pathname==='/api/jira/verify' && req.method==='POST') {
-      const cfg=jiraReadConfig();
-      if (!cfg.jiraBaseUrl||!cfg.jiraToken) return writeJson(res,400,{ok:false,error:'Нет jiraBaseUrl или токена'});
-      const me = await jiraRequest(cfg,'GET','/rest/api/2/myself',null);
-      return writeJson(res,200,{ok:true,who:me.displayName||me.name||'?'});
-    }
-    if (pathname==='/api/jira/report' && req.method==='POST') {
-      const cfg=jiraReadConfig();
-      const report = await jiraBuildReport(cfg);
-      return writeJson(res, 200, report);
-    }
-    writeJson(res, 404, { error: 'Неизвестный Jira API метод' });
-  } catch(e) {
-    const status = (e.status&&e.status>=400&&e.status<600)?e.status:500;
-    writeJson(res, status, { error: e.message||String(e) });
+  // V21 Z5 (audit-09 §C #13) — также собираем stale tags для тех же repos.
+  const tagsResult = await ppFetchStaleTags(cfg, tls, repos);
+  for (const [repoKey, tagInfo] of Object.entries(tagsResult.byRepo)) {
+    if (!byRepo[repoKey]) byRepo[repoKey] = { staleCount: 0, top: [] };
+    byRepo[repoKey].lastTag = tagInfo.lastTagName;
+    byRepo[repoKey].totalTags = tagInfo.totalTags;
   }
+  for (const t of tagsResult.tried) tried.push(t);
+
+  return { configured: true, byRepo, tried, _repos: repos };
 }
 
-// ============================================================
-// INTEGRATIONS API — Jira issue, Bitbucket PR, Confluence search
-// ============================================================
-async function handleIntegrationsApi(req, res, pathname) {
-  // V13 (6th pass): /status endpoints are GET-only by design — они
-  // poll-endpoints, идемпотентные, jobId в query-string. Everything
-  // else stays POST-only as before.
-  // V18.1 fix — добавлен '/portfolio-pulse/status' (V18 P7 ввёл async-job
-  // pattern, но забыл обновить этот guard → клиент получал 405 на GET).
-  const STATUS_POLL_PATHS = new Set([
-    '/api/integrations/black-dashboard/status',
-    '/api/integrations/portfolio-pulse/status',
-  ]);
-  const isStatusPoll = STATUS_POLL_PATHS.has(pathname);
-  if (isStatusPoll) {
-    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed (GET required)' }); return; }
-  } else {
-    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return; }
-  }
+
+
+// Y4/Z3 — Hot-files top-20 + Bus-factor per file (audit-09 §G #20-#21, §K #9).
+// Алгоритм: per repo берём последние 200 коммитов за 30 дней; для каждого commit
+// берём /changes — list файлов. Агрегируем file → totalChanges + byAuthor map.
+// Top-20 hot files. Bus-factor: если 1 author > 80% changes на файл → bf=1.
+//
+// Cost guard: TOTAL_CHANGES_CALL_CAP=1500 на pulse чтобы не заклинило BB.
+// Concurrency=8 через jiraPLimit. Repos cap = 5 per pulse (top-discovered).
+async function ppFetchHotFiles(cfg, tls) {
+  if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) return { configured: false, hotFiles: [], busFactor: [], tried: [] };
+  const base = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
+  const auth = _ppMakeAuthHeader(cfg.bitbucketToken);
+  const tried = [];
+  // PR-CZ — окно расширено 30→90 дней, cap 200→1000 commits/repo. Пилот-feedback:
+  // «у big-repo 200 commits = 5 дней, stale-branches > 30д не обнаруживаются».
+  // Параметризовано через env для тонкой настройки.
+  const HOT_FILES_DAYS              = Math.max(1, Math.min(180, Number(process.env.HOT_FILES_DAYS) || 90));
+  const COMMITS_PER_REPO_CAP        = Math.max(50, Math.min(1000, Number(process.env.HOT_FILES_COMMITS_PER_REPO) || 1000));
+  const TOTAL_CALL_CAP              = Math.max(500, Math.min(5000, Number(process.env.HOT_FILES_TOTAL_CALL_CAP) || 2000));
+  const REPOS_CAP                   = 5;
+  const cutoffTs = Date.now() - HOT_FILES_DAYS * 24 * 3600 * 1000;
+  let callsUsed = 0;
+
+  // Step 1: discover repos (re-using стиль из ppFetchStaleBranches).
+  const repos = [];
   try {
-    // GET requests don't have a body — skip readBody to avoid the 256kb wait.
-    const raw = isStatusPoll ? '' : await readBody(req, 256 * 1024);
-    const body = raw ? JSON.parse(raw) : {};
-    const cfg  = jiraReadConfig();
-
-    // ── helpers ──────────────────────────────────────────────
-    const tls = !!cfg.allowInsecureTls;
-    // V18 P6 — унифицировал на top-level _ppMakeAuthHeader (был локальный дубль).
-    const makeAuthHeader = _ppMakeAuthHeader;
-
-    // ── /api/integrations/jira-issue ─────────────────────────
-    if (pathname === '/api/integrations/jira-issue') {
-      const key = String(body.key || '').trim();
-      if (!key) { writeJson(res, 400, { error: 'Missing key' }); return; }
-      if (!cfg.jiraBaseUrl || !cfg.jiraToken) { writeJson(res, 400, { error: 'Jira не настроена' }); return; }
-      const issue = await jiraRequest(cfg, 'GET', `/rest/api/2/issue/${encodeURIComponent(key)}?fields=status,assignee,updated`);
-      writeJson(res, 200, {
-        key,
-        status:    issue.fields?.status?.name || '',
-        assignee:  issue.fields?.assignee?.displayName || '',
-        updatedAt: issue.fields?.updated || '',
-      });
-      return;
-    }
-
-    // ── /api/integrations/employee-performance ───────────────
-    // V17 P4: aggregate per-employee metrics from Jira (assignees +
-    // open/done/overdue counts) for projects in cfg.jiraProjectKeys.
-    // Bitbucket / Confluence pillars are stubbed for MVP — extension
-    // points are documented in audit-2026-05-V17/04-perf-tab.md.
-    if (pathname === '/api/integrations/employee-performance') {
-      if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
-        writeJson(res, 400, { error: 'Jira не настроена — заполни jiraBaseUrl + jiraToken в настройках интеграций' });
-        return;
-      }
-      const projectKeys = String(cfg.jiraProjectKeys || '')
-        .split(',').map(s => s.trim()).filter(Boolean);
-      if (!projectKeys.length) {
-        writeJson(res, 400, { error: 'Не указано ни одного проекта в jiraProjectKeys' });
-        return;
-      }
-      try {
-        // One JQL call per project — bounded by `maxResults: 200`. We aggregate
-        // assignees on the fly. Fields limited to what we actually need.
-        const FIELDS = 'assignee,status,duedate,resolutiondate';
-        const STATUS_DONE_RE = /(done|closed|resolved|готов|закрыт|выполнен)/i;
-        const empMap = new Map();      // accountId → { fio, email, jira:{open,done,overdue} }
-        const today = new Date();
-
-        for (const pk of projectKeys) {
-          const jql = `project = "${pk.replace(/"/g, '\\"')}" AND assignee is not EMPTY`;
-          let startAt = 0;
-          // Limit: 4 pages × 200 = 800 issues per project. Tunable.
-          for (let page = 0; page < 4; page++) {
-            const qs = `jql=${encodeURIComponent(jql)}&fields=${encodeURIComponent(FIELDS)}&maxResults=200&startAt=${startAt}`;
-            let resp;
-            try {
-              resp = await jiraRequest(cfg, 'GET', `/rest/api/2/search?${qs}`);
-            } catch (e) {
-              // Per-project failure — skip but record in meta.
-              break;
-            }
-            const issues = Array.isArray(resp?.issues) ? resp.issues : [];
-            for (const it of issues) {
-              const a = it.fields?.assignee;
-              if (!a) continue;
-              const id = a.accountId || a.key || a.name || a.displayName;
-              if (!id) continue;
-              if (!empMap.has(id)) {
-                empMap.set(id, {
-                  fio:   a.displayName || a.name || id,
-                  email: a.emailAddress || '',
-                  jira:  { open: 0, done: 0, overdue: 0 },
-                  bitbucket: {},
-                  confluence: {},
-                });
-              }
-              const slot = empMap.get(id);
-              const statusName = it.fields?.status?.name || '';
-              const isDone = STATUS_DONE_RE.test(statusName) || !!it.fields?.resolutiondate;
-              if (isDone) slot.jira.done++;
-              else        slot.jira.open++;
-              const due = it.fields?.duedate;
-              if (due && !isDone) {
-                const d = new Date(due);
-                if (!Number.isNaN(d.getTime()) && d < today) slot.jira.overdue++;
-              }
-            }
-            if (issues.length < 200) break;       // last page
-            startAt += 200;
+    // C5: env-параметризация для hot-files. REPOS_CAP уже env-конфигурируется
+    // выше; добавляем env для per-project cap.
+    const HOT_REPOS_PER_PROJ = Math.max(1, Math.min(20, Number(process.env.PULSE_BB_HOT_REPOS_PER_PROJECT) || 5));
+    const projsR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+    if (projsR.status >= 200 && projsR.status < 300) {
+      let projs = JSON.parse(projsR.text || '{}').values || [];
+      const allow = _ppBbAllowedProjects(cfg);
+      if (allow.size) projs = projs.filter(p => allow.has(String(p.key || '').toLowerCase()));
+      for (const p of projs) {
+        if (repos.length >= REPOS_CAP) break;
+        const reposR = await jiraForward({ targetUrl: `${base}/rest/api/1.0/projects/${encodeURIComponent(p.key)}/repos?limit=50`, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+        if (reposR.status >= 200 && reposR.status < 300) {
+          const list = JSON.parse(reposR.text || '{}').values || [];
+          // M9 revert: исходный Stash-порядок (алфавитно).
+          for (const r of list.slice(0, HOT_REPOS_PER_PROJ)) {
+            repos.push({ proj: p.key, repo: r.slug });
+            if (repos.length >= REPOS_CAP) break;
           }
         }
-
-        // V17 P4 — TODO: Bitbucket / Confluence aggregation. Hooks in:
-        //   integrations/employeePerformance.js renderCard()
-        //     reads emp.bitbucket.{prsAuthored, prsOpen}
-        //     reads emp.confluence.{pages}
-        // Server-side: map accountId/email → BB user → /pullrequests + CF /content.
-
-        const employees = Array.from(empMap.values());
-        writeJson(res, 200, {
-          employees,
-          meta: {
-            projectKeys,
-            fetchedAt: new Date().toISOString(),
-            sources: { jira: true, bitbucket: false, confluence: false },
-          },
-        });
-      } catch (e) {
-        writeJson(res, 500, { error: e?.message || String(e) });
       }
-      return;
     }
+  } catch (e) { tried.push({ type: 'hot-files-discover', error: String(e?.message || e).slice(0, 100) }); }
+  if (!repos.length) return { configured: true, hotFiles: [], busFactor: [], tried, error: 'no-repos-discovered' };
 
-    // ── /api/integrations/portfolio-pulse ────────────────────
-    // V11 Portfolio Pulse: fetches Jira data for multiple project keys in one call,
-    // returns flat per-PK reports with `error` set on individual failures (so one
-    // broken PK doesn't kill the whole response).
-    if (pathname === '/api/integrations/portfolio-pulse') {
-      // V18 P7 — sync POST остался для backward-compat и contract-тестов;
-      // вся логика выделена в `_runPortfolioPulse` чтобы async-job /start
-      // мог переиспользовать тот же код. Новый frontend → /start + /status.
-      try {
-        const result = await _runPortfolioPulse(body, cfg, tls);
-        writeJson(res, 200, result);
-      } catch (e) {
-        writeJson(res, e.statusCode || 500, { error: e.message || String(e) });
-      }
-      return;
-    }
+  // Step 2: per repo — fetch commits + changes per commit, aggregate file → counts.
+  const fileStats = new Map(); // path → { changes, byAuthor: Map<authorName, count>, repos: Set<string> }
+  // V21 BC (audit-09 §H Sprint #18) — per-commit churn (lines added/removed).
+  const commitChurn = []; // { at, additions, deletions, repo, author }
+  for (const { proj, repo } of repos) {
+    if (callsUsed >= TOTAL_CALL_CAP) break;
+    try {
+      // Get recent commits.
+      const cmUrl = `${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/commits?limit=${COMMITS_PER_REPO_CAP}`;
+      const cmR = await jiraForward({ targetUrl: cmUrl, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 12000 });
+      callsUsed++;
+      tried.push({ type: 'hot-files-commits', proj, repo, status: cmR.status });
+      if (cmR.status < 200 || cmR.status >= 300) continue;
+      const commits = (JSON.parse(cmR.text || '{}').values || [])
+        .filter(c => _ppNormalizeBbTs(c.authorTimestamp || c.committerTimestamp || 0) >= cutoffTs);
+      if (!commits.length) continue;
 
-    // ── /api/integrations/portfolio-pulse/start ──────────────
-    // V18 P7 — async-job pattern (mirrors /black-dashboard/start).
-    if (pathname === '/api/integrations/portfolio-pulse/start') {
-      // Fail-fast: явные ошибки валидации возвращаем СРАЗУ (без создания job),
-      // чтобы клиент мог показать их сразу, а не через poll.
-      if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
-        writeJson(res, 400, { error: 'Jira не настроена' });
-        return;
-      }
-      const job = pulseCreateJob(body);
-      // V19 C4 — telemetry: pulse-job started (server-side counterpart
-      // к scanner2.fetch_done с client-side latency).
-      logger.event('pulse.start', {
-        jobId: job.id,
-        pkCount: (body.projectKeys || []).length,
-        empCount: (body.employees || []).length,
-      });
-      pulseRunJob(job, async (j) => {
-        return await _runPortfolioPulse(body, cfg, tls, (newPhase) => { j.phase = newPhase; });
-      });
-      writeJson(res, 200, { jobId: job.id, startedAt: job.startedAt });
-      return;
-    }
-
-    // ── /api/integrations/portfolio-pulse/status?jobId=X ─────
-    if (pathname === '/api/integrations/portfolio-pulse/status') {
-      const qs = (req.url.split('?')[1] || '');
-      const params = new URLSearchParams(qs);
-      const jobId = (params.get('jobId') || '').trim();
-      const job = pulseGetJob(jobId);
-      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
-      writeJson(res, 200, {
-        jobId:      job.id,
-        status:     job.status,
-        phase:      job.phase,
-        startedAt:  job.startedAt,
-        finishedAt: job.finishedAt,
-        result:     job.status === 'done' ? job.result : null,
-        error:      job.error,
-      });
-      return;
-    }
-
-    // ── /api/integrations/portfolio-pulse/employee-detail ────
-    // V18.1 P4 — lazy drill-down endpoint для Сканнера 2.0.
-    // Берёт raw reports из cached pulse-job (TTL 30 мин), переиспользует
-    // analysePulse + enrichForScanner2 для одного участника. Это точка
-    // расширения для P5+ side-panel: позволяет (а) пересчитать enrichment
-    // с другим dwellHours-порогом без re-fetch'а Jira, (б) в будущем —
-    // browser-TZ heatmap (передаётся hourTZOffset).
-    //
-    // Cache-hit ≈ 200-500мс. Cache-miss → 404 (клиент должен заново
-    // запустить /start). НЕ делаем re-fetch здесь, чтобы избежать
-    // дублирования heavy логики.
-    if (pathname === '/api/integrations/portfolio-pulse/employee-detail') {
-      const jobId = String(body.jobId || '').trim();
-      const employeeKey = String(body.employeeKey || '').trim();
-      const dwellHours = Number(body.dwellHours) > 0 ? Number(body.dwellHours) : 24;
-      // V18.1 P7-S2.3 — tzOffsetMin from browser. Если не передан —
-      // server использует свой local time (legacy behavior, может «съехать»
-      // для users в другой TZ).
-      const tzOffsetMin = (typeof body.tzOffsetMin === 'number') ? body.tzOffsetMin : null;
-      if (!jobId || !employeeKey) {
-        writeJson(res, 400, { error: 'jobId and employeeKey required' });
-        return;
-      }
-      // V18.1 P7-S1.2 — rate-limit per-jobId 30 req / 60s. Защищает
-      // analysePulse от DoS через retry-loop (любой knowing jobId).
-      if (!pulseDetailRateAllow(jobId)) {
-        writeJson(res, 429, {
-          error: 'Rate limit: max 30 requests per minute per jobId',
-          retryAfter: Math.ceil(PULSE_DETAIL_RATE_WINDOW_MS / 1000),
-        });
-        return;
-      }
-      const job = pulseGetJob(jobId);
-      if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
-      if (job.status !== 'done') {
-        writeJson(res, 409, { error: `Job not done yet (status=${job.status})` });
-        return;
-      }
-      if (!job.result) {
-        writeJson(res, 404, { error: 'Job has no result (cancelled or errored)' });
-        return;
-      }
-      // V18.1 P7-S1.2 — result cache TTL 5 мин. Hit → no analysePulse re-run.
-      // P7-S2.3: cache key включает tzOffsetMin (разные TZ → разные heatmap).
-      const cached = pulseDetailCacheGet(jobId, employeeKey, dwellHours, tzOffsetMin);
-      if (cached) {
-        writeJson(res, 200, {
-          ...cached,
-          meta: { ...(cached.meta || {}), fromCache: true, fromResultCache: true },
-        });
-        return;
-      }
-      const t0 = Date.now();
-      try {
-        // ESM modules — Node auto-reparse'ит через dynamic import.
-        const { analysePulse } = await import('./integrations/portfolioPulseModel.js');
-        const { enrichForScanner2 } = await import('./integrations/teamScanner2Enrichment.js');
-        // employees: пустой массив — server не имеет доступа к state.employees,
-        // identity-mapping не нужен для drill-down (key уже известен).
-        const baseModel = analysePulse(job.result, { staleDays: 7, employees: [] });
-        // V18.1 P7-S2.3 — tzOffsetMin прокидывается в enrichment.
-        const enriched  = enrichForScanner2(baseModel, job.result, {
-          dwellHours,
-          ...(typeof tzOffsetMin === 'number' ? { tzOffsetMin } : {}),
-        });
-        const p = (enriched.participants || []).find(x => x.key === employeeKey);
-        if (!p) {
-          writeJson(res, 404, { error: 'employeeKey not found in cached participants' });
-          return;
-        }
-        const payload = {
-          employee: {
-            key:           p.key,
-            label:         p.label,
-            email:         p.email,
-            jiraAccountId: p.jiraAccountId,
-            avatar:        p.avatar,
-            // V18.1 P7-S1.2 — defensive: projects может быть Set до Array.from
-            //   на model.js:629. Если кто-то рефакторит pp model — JSON.stringify(Set)
-            //   = '{}'. Здесь явно конвертируем.
-            projects:      Array.isArray(p.projects) ? p.projects : Array.from(p.projects || []),
-          },
-          enrichment: {
-            heatmap:         p.heatmap,
-            contextSwitches: p.contextSwitches,
-            timeline72h:     p.timeline72h,
-            blockers:        p.blockers,
-          },
-          aggregates: {
-            loggedTodaySec:     p.loggedTodaySec     || 0,
-            loggedYesterdaySec: p.loggedYesterdaySec || 0,
-            loggedDayBeforeSec: p.loggedDayBeforeSec || 0,
-            badges:             p.badges             || {},
-            issuesNowCount:    (p.issuesNow || []).length,
-            staleCount:        (p.stale     || []).length,
-          },
-          meta: {
-            fromCache: true,
-            fromResultCache: false,
-            jobId,
-            builtMs: Date.now() - t0,
-            dwellThresholdHours: enriched.scannerV2?.dwellThresholdHours ?? dwellHours,
-            serverLocalTZ:       enriched.scannerV2?.serverLocalTZ       ?? (tzOffsetMin === null),
-            tzOffsetMin:         enriched.scannerV2?.tzOffsetMin ?? tzOffsetMin,
-          },
-        };
-        pulseDetailCacheSet(jobId, employeeKey, dwellHours, tzOffsetMin, payload);
-        // V19 C4 — telemetry: drill-down compute с latency.
-        logger.event('pulse.detail_built', {
-          jobId, builtMs: payload.meta.builtMs, dwellHours, hasTz: tzOffsetMin !== null,
-        });
-        writeJson(res, 200, payload);
-      } catch (e) {
-        logger.error('[employee-detail] enrichment failed', { err: e?.message || String(e), jobId, employeeKey });
-        writeJson(res, 500, { error: 'enrichment failed: ' + (e?.message || 'unknown') });
-      }
-      return;
-    }
-
-    // ── /api/integrations/jira-fetch-all ─────────────────────
-    // Bulk-fetch issues from Jira. If areas (projectKeys) are configured — use them.
-    // Otherwise fall back to "issues assigned to current user, unresolved, updated last 90 days".
-    if (pathname === '/api/integrations/jira-fetch-all') {
-      if (!cfg.jiraBaseUrl || !cfg.jiraToken) { writeJson(res, 400, { error: 'Jira не настроена' }); return; }
-      // Use unified `jiraProjectKeys` (comma-separated) if set; fall back to legacy `areas`
-      let areas = jiraSanitizeAreas(cfg.areas);
-      const keys = String(cfg.jiraProjectKeys || '').split(',').map(s => s.trim()).filter(Boolean);
-      if (keys.length) areas = keys.map(k => ({ name: k, projectKey: k }));
-      const fields = ['summary','status','assignee','updated','priority','labels','issuetype','duedate','parent','resolution','components','fixVersions'];
-      // Use configured cut-off date (default 2025-01-01); allow override per request
-      const requestedSince = String(body.sinceDate || '').trim();
-      const since = /^\d{4}-\d{2}-\d{2}$/.test(requestedSince) ? requestedSince : (cfg.sinceDate || '2025-01-01');
-      let jql;
-      if (areas.length) {
-        const projects = areas.map(a => `"${a.projectKey}"`).join(',');
-        jql = `project in (${projects}) AND updated >= "${since}" ORDER BY updated DESC`;
-      } else {
-        // No project areas configured — only fetch user's own issues since cutoff
-        jql = `assignee = currentUser() AND updated >= "${since}" ORDER BY updated DESC`;
-      }
-      try {
-        const issues = await jiraSearchAll(cfg, jql, fields, [], 1500);
-        const flat = issues.map(it => ({
-          key:       it.key,
-          summary:   it.fields?.summary || '',
-          status:    it.fields?.status?.name || '',
-          assignee:  it.fields?.assignee?.displayName || '',
-          updatedAt: it.fields?.updated || '',
-          priority:  it.fields?.priority?.name || '',
-          labels:    Array.isArray(it.fields?.labels) ? it.fields.labels : [],
-          issuetype: it.fields?.issuetype?.name || '',
-          dueDate:   it.fields?.duedate || '',
-          parentKey: it.fields?.parent?.key || '',
-          components:(it.fields?.components || []).map(c => c.name).filter(Boolean),
-          fixVersions:(it.fields?.fixVersions || []).map(v => v.name).filter(Boolean),
-          team:      (it.fields?.components || []).map(c => c.name).filter(Boolean).join(', ') || '',
-        }));
-        writeJson(res, 200, { issues: flat, jql, count: flat.length, areasUsed: areas.length });
-      } catch(e) {
-        writeJson(res, 500, { error: e.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/bitbucket-prs ──────────────────────
-    if (pathname === '/api/integrations/bitbucket-prs') {
-      const jiraKey = String(body.jiraKey || '').trim();
-      if (!jiraKey) { writeJson(res, 400, { error: 'Missing jiraKey' }); return; }
-      if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) { writeJson(res, 400, { error: 'Bitbucket не настроен' }); return; }
-      const base       = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
-      const authHeader = makeAuthHeader(cfg.bitbucketToken);
-      const projectKeys = String(cfg.bitbucketProjectKeys || '').split(',').map(s => s.trim()).filter(Boolean);
-      const prs = [];
-      const targets = projectKeys.length ? projectKeys : ['_'];
-      for (const proj of targets.slice(0, 5)) {
+      // Fetch /changes per commit с concurrency.
+      const changesTasks = commits.slice(0, COMMITS_PER_REPO_CAP).map(c => async () => {
+        if (callsUsed >= TOTAL_CALL_CAP) return null;
+        const sha = c.id || c.displayId || '';
+        if (!sha) return null;
         try {
-          const searchUrl = proj === '_'
-            ? `${base}/pullrequests?q=title~"${encodeURIComponent(jiraKey)}"&pagelen=10`
-            : `${base}/repositories/${encodeURIComponent(proj)}/pullrequests?q=title~"${encodeURIComponent(jiraKey)}"&pagelen=10`;
-          const resp = await jiraForward({
-            targetUrl: searchUrl, method: 'GET',
-            headers: { Authorization: authHeader },
-            allowInsecureTls: tls,
-          });
-          if (resp.status < 300) {
-            const data = JSON.parse(resp.text);
-            (data.values || []).forEach(pr => {
-              prs.push({
-                url:       pr.links?.html?.href || '',
-                status:    (pr.state || '').toLowerCase(),
-                title:     pr.title || '',
-                updatedAt: pr.updated_on || '',
-                reviewers: (pr.reviewers || []).length,
-              });
+          const chUrl = `${base}/rest/api/1.0/projects/${encodeURIComponent(proj)}/repos/${encodeURIComponent(repo)}/commits/${sha}/changes?limit=200`;
+          const chR = await jiraForward({ targetUrl: chUrl, method: 'GET', headers: { Authorization: auth }, allowInsecureTls: tls, timeoutMs: 8000 });
+          callsUsed++;
+          if (chR.status < 200 || chR.status >= 300) return null;
+          const changes = (JSON.parse(chR.text || '{}').values || []);
+          const author = c.author?.displayName || c.author?.name || c.author?.emailAddress || 'unknown';
+          // V21 BC — accumulate per-commit lines added/deleted.
+          let commitAdditions = 0, commitDeletions = 0;
+          for (const ch of changes) {
+            // C6: `ch.path?.toString` truthy ВСЕГДА (toString есть на любом
+            // Object) — ветка попадает на любой объект, агрегируя под пустыми
+            // ключами. Корректный extract: явно проверяем shape.
+            let path = '';
+            if (typeof ch.path === 'string') path = ch.path;
+            else if (ch.path && typeof ch.path === 'object') {
+              const parent = ch.path.parent ? `${ch.path.parent}/` : '';
+              const name = ch.path.name || '';
+              path = `${parent}${name}`;
+            }
+            if (!path) continue;
+            const e = fileStats.get(path) || { changes: 0, byAuthor: new Map(), repos: new Set() };
+            e.changes++;
+            e.byAuthor.set(author, (e.byAuthor.get(author) || 0) + 1);
+            e.repos.add(`${proj}/${repo}`);
+            fileStats.set(path, e);
+            commitAdditions += Number(ch.linesAdded) || 0;
+            commitDeletions += Number(ch.linesRemoved) || 0;
+          }
+          if (commitAdditions + commitDeletions > 0) {
+            commitChurn.push({
+              at:        _ppNormalizeBbTs(c.authorTimestamp || c.committerTimestamp || 0),
+              additions: commitAdditions,
+              deletions: commitDeletions,
+              repo:      `${proj}/${repo}`,
+              author,
             });
           }
-        } catch(_) {}
-      }
-      writeJson(res, 200, { prs, jiraKey });
-      return;
-    }
-
-    // ── /api/integrations/confluence-search ──────────────────
-    // V17.2 I2a — переписано:
-    //   • path-cascade `/wiki/rest/...` → `/rest/...` → `/wiki/rest/api/content/search`
-    //   • `Accept: application/json` (без него Server возвращает HTML за SSO)
-    //   • CQL вместо `title=...` exact-match (раньше «PROJ-123» не находил
-    //     страницы «PROJ-123 Спецификация»)
-    //   • trim хвостового `/wiki` чтобы не получалось `…/wiki/wiki/rest/...`
-    //   • явный 401-handler («токен просрочен или нет прав»)
-    if (pathname === '/api/integrations/confluence-search') {
-      const query = String(body.query || '').trim();
-      if (!query) { writeJson(res, 400, { error: 'Missing query' }); return; }
-      if (!cfg.confluenceBaseUrl || !cfg.confluenceToken) { writeJson(res, 400, { error: 'Confluence не настроена' }); return; }
-      // I2a — strip trailing `/` and trailing `/wiki` so the cascade can
-      // independently try `/wiki/rest/...` без двойного префикса.
-      const base = String(cfg.confluenceBaseUrl).replace(/\/+$/, '').replace(/\/wiki$/i, '');
-      const requestedSince = String(body.sinceDate || '').trim();
-      const since = /^\d{4}-\d{2}-\d{2}$/.test(requestedSince) ? requestedSince : (cfg.sinceDate || '2025-01-01');
-      // V17.2 I2c — добавляем space-scope если задан в настройках.
-      const _searchSpaceKeys = String(cfg.confluenceSpaceKeys || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
-      const _spaceClause = _searchSpaceKeys.length
-        ? ` AND space in (${_searchSpaceKeys.map(k => `"${k.replace(/"/g, '\\"')}"`).join(', ')})`
-        : '';
-      const cql = `(title ~ "${query.replace(/"/g, '\\"')}" OR text ~ "${query.replace(/"/g, '\\"')}") AND type = page${_spaceClause} ORDER BY lastModified DESC`;
-      const tryPaths = [
-        `${base}/wiki/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=20&expand=version,history.lastUpdated`,
-        `${base}/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=20&expand=version,history.lastUpdated`,
-        // Legacy Server fallback if `/content/search` not available.
-        `${base}/wiki/rest/api/content?type=page&title=${encodeURIComponent(query)}&limit=20&expand=version`,
-        `${base}/rest/api/content?type=page&title=${encodeURIComponent(query)}&limit=20&expand=version`,
-      ];
-      const headers = {
-        Authorization: makeAuthHeader(cfg.confluenceToken),
-        Accept: 'application/json',
-      };
-      // V18 P5 — переиспользует _cfPathCascade helper.
-      const cascade = await _cfPathCascade(tryPaths, { headers, allowInsecureTls: tls });
-      if (cascade.authError) {
-        writeJson(res, 200, { pages: [], query, sinceDate: since, error: `Confluence: HTTP ${cascade.authError} — токен просрочен или нет прав`, tried: cascade.tried });
-        return;
-      }
-      const pages = [];
-      if (cascade.ok) {
-        let data;
-        try { data = JSON.parse(cascade.text); }
-        catch (_) {
-          writeJson(res, 200, { pages: [], query, sinceDate: since, error: 'Confluence вернул не-JSON (вероятно SSO/HTML)', tried: cascade.tried });
-          return;
-        }
-        const sinceTs = Date.parse(since + 'T00:00:00Z');
-        (data.results || []).forEach(p => {
-          const lastMod = p.version?.when || p.history?.lastUpdated?.when || '';
-          if (lastMod && Number.isFinite(sinceTs)) {
-            const ts = Date.parse(lastMod);
-            if (Number.isFinite(ts) && ts < sinceTs) return;
-          }
-          const webLink = p._links?.base && p._links?.webui ? p._links.base + p._links.webui : '';
-          pages.push({ title: p.title || '', url: webLink, lastModified: lastMod });
-        });
-        if (pages.length > 5) pages.length = 5;
-      }
-      const errorMsg = cascade.ok ? '' : (cascade.error || 'Confluence недоступен');
-      writeJson(res, 200, { pages, query, sinceDate: since, ...(errorMsg ? { error: errorMsg, tried: cascade.tried } : {}) });
-      return;
-    }
-
-    // ── /api/integrations/verify-bitbucket ───────────────────
-    if (pathname === '/api/integrations/verify-bitbucket') {
-      if (!cfg.bitbucketBaseUrl || !cfg.bitbucketToken) { writeJson(res, 200, { ok: false, error: 'Bitbucket не настроен' }); return; }
-      const base   = cfg.bitbucketBaseUrl.replace(/\/+$/, '');
-      const authH  = makeAuthHeader(cfg.bitbucketToken);
-      const fwd    = url => jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: authH }, allowInsecureTls: tls });
-      // Try Bitbucket Server first (/rest/api/1.0/profile/recent/repos),
-      // then fall back to Bitbucket Cloud (/user)
-      let who = '?';
-      let ok  = false;
-      const serverResp = await fwd(`${base}/rest/api/1.0/profile/recent/repos?limit=1`).catch(()=>null);
-      if (serverResp && serverResp.status < 300) {
-        ok = true; // Server — no user name from this endpoint, just confirms auth works
-      } else if (serverResp && serverResp.status === 401) {
-        writeJson(res, 200, { ok: false, error: 'Неверный токен (401)' }); return;
-      } else {
-        // Fallback: Bitbucket Cloud
-        const cloudResp = await fwd(`${base}/user`).catch(()=>null);
-        if (cloudResp && cloudResp.status < 300) {
-          const d = JSON.parse(cloudResp.text || '{}');
-          who = d.display_name || d.username || '?';
-          ok  = true;
-        } else if (cloudResp && cloudResp.status === 401) {
-          writeJson(res, 200, { ok: false, error: 'Неверный токен (401)' }); return;
-        } else {
-          writeJson(res, 200, { ok: false, error: `HTTP ${cloudResp?.status ?? 'нет ответа'} — проверьте Base URL` }); return;
-        }
-      }
-      writeJson(res, 200, { ok, who });
-      return;
-    }
-
-    // ── /api/integrations/sigma-verify ───────────────────────
-    if (pathname === '/api/integrations/sigma-verify') {
-      if (!cfg.sigmaJiraBaseUrl || !cfg.sigmaJiraToken) { writeJson(res, 200, { ok: false, error: 'Sigma Jira не настроена' }); return; }
-      try {
-        const sigCfg = sigmaCfgView(cfg);
-        const me = await jiraRequest(sigCfg, 'GET', '/rest/api/2/myself');
-        writeJson(res, 200, { ok: true, who: me.displayName || me.name || '?' });
-      } catch (e) {
-        writeJson(res, 200, { ok: false, error: e.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/tech-info ──────────────────────────
-    // Reuse the `body` already parsed at the top of handleIntegrationsApi —
-    // calling readBody again would hang because the request stream is consumed.
-    if (pathname === '/api/integrations/tech-info') {
-      try {
-        const source = ['all','jira','bitbucket','confluence'].includes(body.source) ? body.source : 'all';
-        const forceRefresh = !!body.forceRefresh;
-        const data = await buildTechInfo(cfg, { source, forceRefresh });
-        writeJson(res, 200, data);
-      } catch (e) {
-        writeJson(res, 500, { error: e?.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/black-dashboard/start ──────────────
-    // Async job pattern: returns jobId immediately; client polls /status.
-    if (pathname === '/api/integrations/black-dashboard/start') {
-      try {
-        const job = bdCreateJob();
-        bdRunJob(job, cfg);
-        writeJson(res, 200, { jobId: job.id, startedAt: job.startedAt });
-      } catch (e) {
-        writeJson(res, 500, { error: e.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/black-dashboard/status?jobId=X ─────
-    if (pathname === '/api/integrations/black-dashboard/status') {
-      try {
-        const qs = (req.url.split('?')[1] || '');
-        const params = new URLSearchParams(qs);
-        const jobId = params.get('jobId') || '';
-        const job = bdGetJob(jobId);
-        if (!job) { writeJson(res, 404, { error: 'Unknown jobId (возможно истёк TTL 120 мин — нажмите ↻ Обновить чтобы создать новый pulse-job)' }); return; }
-        const out = {
-          jobId:     job.id,
-          status:    job.status,
-          phase:     job.phase,
-          startedAt: job.startedAt,
-          elapsedMs: Date.now() - job.startedAt,
-        };
-        if (job.finishedAt) {
-          out.finishedAt = job.finishedAt;
-          out.durationMs = job.finishedAt - job.startedAt;
-        }
-        if (job.status === 'done')  out.result = job.result;
-        if (job.status === 'error') out.error  = job.error;
-        writeJson(res, 200, out);
-      } catch (e) {
-        writeJson(res, 500, { error: e.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/black-dashboard ────────────────────
-    // Legacy synchronous endpoint — kept for back-compat. New clients
-    // should use /start + /status. This one will hit the same long-load
-    // problem as before; documented intentionally.
-    if (pathname === '/api/integrations/black-dashboard') {
-      try {
-        const data = await buildBlackDashboard(cfg);
-        writeJson(res, 200, data);
-      } catch (e) {
-        writeJson(res, 500, { error: e.message || String(e) });
-      }
-      return;
-    }
-
-    // ── /api/integrations/confluence-audit-logins ────────────
-    // V17.2 I2c (G7) — Audit log из Confluence: логины/выходы за окно.
-    //   Endpoint /rest/api/audit?startDate=<ms>&endDate=<ms>&limit=1000.
-    //   Может быть отключён в админке (Audit log → Configuration) или
-    //   retention < окна — отдаём явное сообщение.
-    if (pathname === '/api/integrations/confluence-audit-logins') {
-      if (!cfg.confluenceBaseUrl || !cfg.confluenceToken) { writeJson(res, 400, { error: 'Confluence не настроена' }); return; }
-      const base = String(cfg.confluenceBaseUrl).replace(/\/+$/, '').replace(/\/wiki$/i, '');
-      const headers = { Authorization: makeAuthHeader(cfg.confluenceToken), Accept: 'application/json' };
-      const winHours = Math.min(168, Math.max(1, Number(cfg.activityWindowHours) || 72));
-      const startMs = Date.now() - winHours * 3600 * 1000;
-      const endMs   = Date.now();
-      // V18 P5 — переиспользует _cfPathCascade.
-      const cascade = await _cfPathCascade([
-        `${base}/wiki/rest/api/audit?startDate=${startMs}&endDate=${endMs}&limit=1000&start=0`,
-        `${base}/rest/api/audit?startDate=${startMs}&endDate=${endMs}&limit=1000&start=0`,
-      ], { headers, allowInsecureTls: tls, timeoutMs: 25000 });
-      if (cascade.authError) {
-        writeJson(res, 200, { ok: false, error: `Audit log недоступен (HTTP ${cascade.authError}). Нужен Confluence administrator или audit-viewer.`, tried: cascade.tried });
-        return;
-      }
-      if (!cascade.ok) {
-        writeJson(res, 200, { ok: false, error: 'Audit log endpoint не найден или недоступен. В админке: Audit log → Configuration.', tried: cascade.tried });
-        return;
-      }
-      const tried = cascade.tried;     // alias чтобы не править все ссылки на tried ниже
-      let parsed;
-      try { parsed = JSON.parse(cascade.text); } catch (_) { parsed = null; }
-      const records = parsed?.results || [];
-      // Filter to login/logout entries. Confluence Server / DC summary patterns
-      // обычно: «User logged in», «User logged out», «User logged in (single sign-on)».
-      const isLoginEntry = (r) => {
-        const s = String(r?.summary || '').toLowerCase();
-        return s.includes('logged in') || s.includes('logged out') || s.includes('login') || s.includes('logout');
-      };
-      // Group by author identity → counts.
-      const byUser = {};
-      for (const rec of records) {
-        if (!isLoginEntry(rec)) continue;
-        const author = rec.author || rec.authorObject || rec.user || {};
-        const key = String(author.userKey || author.username || author.name || author.email || '').toLowerCase();
-        if (!key) continue;
-        if (!byUser[key]) byUser[key] = {
-          userKey: author.userKey || '',
-          username: author.username || author.name || '',
-          email: author.email || '',
-          displayName: author.displayName || author.name || '',
-          loginCount: 0,
-          logoutCount: 0,
-          lastLoginAt: '',
-          items: [],
-        };
-        const summary = String(rec.summary || '').toLowerCase();
-        const ts = Number(rec.creationDate) || Date.parse(rec.creationDate || '') || 0;
-        if (summary.includes('logged out') || summary.includes('logout')) byUser[key].logoutCount++;
-        else byUser[key].loginCount++;
-        if (ts && ts > Date.parse(byUser[key].lastLoginAt || 0)) byUser[key].lastLoginAt = new Date(ts).toISOString();
-        if (byUser[key].items.length < 50) {
-          byUser[key].items.push({
-            kind: (summary.includes('logout') || summary.includes('logged out')) ? 'logout' : 'login',
-            at: ts ? new Date(ts).toISOString() : '',
-            summary: rec.summary || '',
-            remoteAddress: rec.remoteAddress || '',
-          });
-        }
-      }
-      // Audit может вернуть retention info в поле `auditRetentionPeriod`. Сразу подсветим.
-      const retention = parsed?.retentionPeriod || parsed?.auditRetentionPeriod || null;
-      writeJson(res, 200, {
-        ok: true,
-        windowHours: winHours,
-        users: Object.values(byUser).sort((a, b) => b.loginCount - a.loginCount),
-        totalRecords: records.length,
-        loginRecords: Object.values(byUser).reduce((n, u) => n + u.loginCount + u.logoutCount, 0),
-        retention,
-        tried,
+        } catch (e) { /* skip individual commit */ }
       });
-      return;
-    }
+      // jiraPLimit(8, ...) — параллельно 8 changes-call'ов.
+      await jiraPLimit(8, changesTasks);
+    } catch (e) { tried.push({ type: 'hot-files-walk', proj, repo, error: String(e?.message || e).slice(0, 100) }); }
+  }
 
-    // ── /api/integrations/confluence-resolve-user ────────────
-    // V17.2 I2c — резолвим пользователя по email или ФИО → возвращаем
-    //   confluenceAccountId / username / displayName / email. Используется
-    //   для автозаполнения identity-полей в карточке сотрудника.
-    //   Cascade:
-    //     1) `/wiki/rest/api/user/search?cql=user.emailAddress="..."` (Cloud)
-    //     2) `/rest/api/search?cql=user.email~"..."` (DC, ~ префикс-search)
-    //     3) `/rest/api/user/search?username=<email-prefix>`
-    //     4) cql=user.fullname~"<fio>" если нет email
-    if (pathname === '/api/integrations/confluence-resolve-user') {
-      if (!cfg.confluenceBaseUrl || !cfg.confluenceToken) { writeJson(res, 400, { error: 'Confluence не настроена' }); return; }
-      const email = String(body.email || '').trim().toLowerCase();
-      const fullname = String(body.fullname || '').trim();
-      if (!email && !fullname) { writeJson(res, 400, { error: 'Нужен email или fullname' }); return; }
-      const base = String(cfg.confluenceBaseUrl).replace(/\/+$/, '').replace(/\/wiki$/i, '');
-      const headers = { Authorization: makeAuthHeader(cfg.confluenceToken), Accept: 'application/json' };
-      const tried = [];
-      const tryFetch = async (url) => {
-        const r = await jiraForward({ targetUrl: url, method: 'GET', headers, allowInsecureTls: tls }).catch((e) => ({ status: 0, text: String(e?.message || e) }));
-        tried.push({ url: url.replace(/[?].*$/, '...'), status: r.status });
-        return r;
+  // Step 3: build top-20 hot files + bus-factor.
+  const hotFiles = [...fileStats.entries()]
+    .map(([path, stats]) => {
+      // Bus-factor: minimum N authors covering 80% of changes.
+      const authorCounts = [...stats.byAuthor.entries()].sort((a, b) => b[1] - a[1]);
+      const total = stats.changes;
+      let cum = 0;
+      let bf = 0;
+      for (const [, cnt] of authorCounts) {
+        cum += cnt;
+        bf++;
+        if (cum / total >= 0.8) break;
+      }
+      const topAuthor = authorCounts[0] || ['', 0];
+      return {
+        path,
+        changes: stats.changes,
+        repos: [...stats.repos],
+        authors: authorCounts.length,
+        topAuthor:    topAuthor[0],
+        topAuthorPct: total ? Math.round(topAuthor[1] / total * 100) : 0,
+        busFactor:    bf,
       };
-      const buildCandidates = () => {
-        const out = [];
-        if (email) {
-          out.push(`${base}/wiki/rest/api/search/user?cql=${encodeURIComponent(`user.email = "${email}"`)}`);
-          out.push(`${base}/rest/api/search?cql=${encodeURIComponent(`user.email = "${email}"`)}&limit=10`);
-          const prefix = email.split('@')[0];
-          if (prefix) {
-            out.push(`${base}/rest/api/user/search?username=${encodeURIComponent(prefix)}&limit=10`);
-            out.push(`${base}/wiki/rest/api/user/search?username=${encodeURIComponent(prefix)}&limit=10`);
+    })
+    .sort((a, b) => b.changes - a.changes)
+    .slice(0, 20);
+
+  // Bus-factor list: файлы где bf=1 + 80%+ концентрация — критичные.
+  const busFactor = hotFiles.filter(f => f.busFactor === 1 && f.topAuthorPct >= 80);
+
+  return { configured: true, hotFiles, busFactor, tried, callsUsed, commitChurn };
+}
+
+// Y4-4: Sprint commitment vs delivery — главный gap по audit value.
+// Шаги: discover boardId per project → fetch closed sprints → fetch end-state issues.
+// Cap = 6 sprints per project (последние). Считаем ratio committed_count / delivered_count
+// по completed status.
+async function ppFetchSprintCommitVsDelivery(cfg, projectKeys) {
+  if (!cfg.jiraBaseUrl || !cfg.jiraToken || !projectKeys.length) {
+    return { configured: false, byPk: {}, tried: [] };
+  }
+  const tried = [];
+  const byPk = {};
+  await jiraPLimit(2, projectKeys.map(pk => async () => {
+    try {
+      // Step 1: find board for this project. /rest/agile/1.0/board?projectKeyOrId=PK
+      const boardData = await jiraRequest(cfg, 'GET', `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(pk)}`);
+      const boards = boardData?.values || [];
+      if (!boards.length) { tried.push({ type: 'sprint-commit', pk, status: 0, error: 'no-board' }); return; }
+      const boardId = boards[0].id;
+      // Step 2: last 6 closed sprints, newest first.
+      const sprintsData = await jiraRequest(cfg, 'GET', `/rest/agile/1.0/board/${boardId}/sprint?state=closed&maxResults=6`);
+      const sprints = (sprintsData?.values || []).slice(-6); // последние 6
+      if (!sprints.length) { tried.push({ type: 'sprint-commit', pk, status: 0, error: 'no-closed-sprints' }); return; }
+      // V21 sprint-commit-fix — параллелим sprints внутри pk (jiraPLimit 3).
+      // Раньше: sequential for-loop = 6 × ~3-5с = 18-30с per PK + Jira-429-retry =
+      // легко улетает в 90с-timeout. Теперь: 3 параллельно × 2 batches ≈ 8-12с.
+      // jiraPLimit + _jiraGate координируют 429-throttling между чанками.
+      const sprintTasks = sprints.map(s => async () => {
+        try {
+          // Step 3: issues at sprint end-state. V21 AD — добавили SP fields для estimation accuracy.
+          const issuesData = await jiraRequest(cfg, 'GET', `/rest/agile/1.0/sprint/${s.id}/issue?fields=status,resolution,resolutiondate,customfield_10004,customfield_10100,timetracking,aggregatetimespent&maxResults=200`);
+          const issues = issuesData?.issues || [];
+          const total = issues.length;
+          const done  = issues.filter(i => i.fields?.status?.statusCategory?.key === 'done').length;
+          const spillover = total - done;
+          let plannedSp = 0, actualHrs = 0;
+          for (const i of issues) {
+            const f = i.fields || {};
+            const sp = Number(f.customfield_10004) || 0;
+            if (sp > 0) plannedSp += sp;
+            const ts = Number(f.aggregatetimespent) || 0;
+            actualHrs += ts / 3600;
           }
-        }
-        if (fullname) {
-          out.push(`${base}/wiki/rest/api/search/user?cql=${encodeURIComponent(`user.fullname ~ "${fullname.replace(/"/g, '\\"')}"`)}`);
-          out.push(`${base}/rest/api/search?cql=${encodeURIComponent(`user.fullname ~ "${fullname.replace(/"/g, '\\"')}"`)}&limit=10`);
-        }
-        return out;
-      };
-      let resolved = null;
-      for (const url of buildCandidates()) {
-        const r = await tryFetch(url);
-        if (r.status === 401 || r.status === 403) {
-          writeJson(res, 200, { ok: false, error: `Confluence HTTP ${r.status} — токен просрочен`, tried });
-          return;
-        }
-        if (r.status < 200 || r.status >= 300) continue;
-        let parsed;
-        try { parsed = JSON.parse(r.text); } catch (_) { continue; }
-        // user/search format: { results: [{user: {...}}, ...] } or [{...}, ...]
-        const results = Array.isArray(parsed) ? parsed
-                       : Array.isArray(parsed?.results) ? parsed.results
-                       : [];
-        for (const item of results) {
-          const u = item.user || item;
-          const u_email = String(u.email || u.emailAddress || '').toLowerCase();
-          if (email && u_email && u_email !== email) continue;
-          if (email && !u_email) continue;     // не доверяем без email-подтверждения
-          resolved = {
-            accountId: u.accountId || u.userKey || '',
-            username:  u.username  || u.name    || '',
-            displayName: u.displayName || u.publicName || u.name || '',
-            email: u_email || email || '',
-            avatar: u.profilePicture?.path || u.avatarUrls?.['48x48'] || '',
+          const hoursPerSp = plannedSp > 0 ? +(actualHrs / plannedSp).toFixed(1) : null;
+          return {
+            id: s.id,
+            name: s.name || `Sprint ${s.id}`,
+            startDate:    s.startDate || '',
+            endDate:      s.endDate   || '',
+            completeDate: s.completeDate || '',
+            committed: total,
+            delivered: done,
+            spillover,
+            ratio:     total > 0 ? done / total : 0,
+            plannedSp,
+            actualHrs: +actualHrs.toFixed(1),
+            hoursPerSp,
           };
-          break;
+        } catch (e) {
+          tried.push({ type: 'sprint-commit-issues', pk, sprint: s.id, error: String(e?.message || e).slice(0, 100) });
+          return null;
         }
-        if (resolved) break;
-      }
-      if (!resolved) { writeJson(res, 200, { ok: false, error: 'Пользователь не найден в Confluence', tried }); return; }
-      writeJson(res, 200, { ok: true, user: resolved, tried });
-      return;
-    }
-
-    // ── /api/integrations/diag-audit ─────────────────────────
-    // V20 S8 #14 — Server-side audit-log для diagnostic JSON export.
-    // localStorage-only audit можно очистить — HR-compliance ненадёжен.
-    // Логируем факт экспорта в structured-log → попадает в ELK через
-    // server logger pipeline. БЕЗ contents — только метаданные.
-    if (pathname === '/api/integrations/diag-audit') {
-      try {
-        logger.event('integrations.diag_audit', {
-          mode:              String(body.mode || 'safe').slice(0, 16),
-          sizeBytes:         Math.min(Number(body.sizeBytes) || 0, 10 * 1024 * 1024),
-          pkCount:           Math.min(Number(body.pkCount) || 0, 100),
-          consentGiven:      !!body.consentGiven,
-          consentSource:     String(body.consentSource || 'unknown').slice(0, 32),
-          disclaimerVersion: String(body.disclaimerVersion || '').slice(0, 32),
-        });
-        writeJson(res, 200, { ok: true });
-      } catch (e) {
-        writeJson(res, 500, { ok: false, error: 'audit log failed' });
-      }
-      return;
-    }
-
-    // ── /api/integrations/resolve-identities ─────────────────
-    // V20 S4 — bulk resolver: для каждого { key, email, fullname }
-    //   парраллельно дёргаем BB user-search + CF user-search,
-    //   возвращаем найденные { bbLogin, bbDisplayName, cfAccountId,
-    //   cfDisplayName }. ИЗ POV V17.2 I1c контракта это identity-
-    //   deterministic: email — авторитетный SAML-claim, lookup по нему
-    //   через API детерминированный, не fuzzy-match по ФИО.
-    //
-    // Concurrency: max 5 parallel to не уронить BB/CF при 100+ users.
-    // Per-user timeout: 8 сек на источник.
-    //
-    // Ответ:
-    //   { results: [{ key, email, bb: {ok, slug?, displayName?, error?},
-    //                 cf: {ok, accountId?, displayName?, error?} }, ...],
-    //     summary: { total, bbResolved, cfResolved } }
-    if (pathname === '/api/integrations/resolve-identities') {
-      const items = Array.isArray(body.items) ? body.items.slice(0, 500) : [];
-      if (!items.length) { writeJson(res, 400, { error: 'items[] is empty or missing' }); return; }
-      const bbConfigured = !!(cfg.bitbucketBaseUrl && cfg.bitbucketToken);
-      const cfConfigured = !!(cfg.confluenceBaseUrl && cfg.confluenceToken);
-      if (!bbConfigured && !cfConfigured) {
-        writeJson(res, 400, { error: 'Ни BB, ни Confluence не настроены — нечего резолвить' });
-        return;
-      }
-      const bbBase = bbConfigured ? cfg.bitbucketBaseUrl.replace(/\/+$/, '') : null;
-      const bbAuth = bbConfigured ? makeAuthHeader(cfg.bitbucketToken) : null;
-      const cfBase = cfConfigured ? cfg.confluenceBaseUrl.replace(/\/+$/, '').replace(/\/wiki$/i, '') : null;
-      const cfAuth = cfConfigured ? makeAuthHeader(cfg.confluenceToken) : null;
-
-      const tryBbByEmail = async (email) => {
-        // BB Server: /rest/api/1.0/users?filter=<email> — filter ищет по
-        // username/email/displayName. Берём только тех у кого emailAddress
-        // совпадает (защита от false-positive по фамилии).
-        try {
-          const url = `${bbBase}/rest/api/1.0/users?filter=${encodeURIComponent(email)}&limit=10`;
-          const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: bbAuth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(e => ({ status: 0, text: String(e?.message || e) }));
-          if (r.status < 200 || r.status >= 300) return { ok: false, error: `HTTP ${r.status}` };
-          const parsed = JSON.parse(r.text || '{}');
-          const values = Array.isArray(parsed.values) ? parsed.values : [];
-          const match = values.find(u => String(u.emailAddress || '').toLowerCase() === email);
-          if (!match) return { ok: false, error: 'не найден' };
-          return { ok: true, slug: match.slug || match.name || '', displayName: match.displayName || '', emailAddress: match.emailAddress || '' };
-        } catch (e) { return { ok: false, error: _ppRedactSecretsInText(e.message || 'thrown', 100) }; }
+      });
+      const sprintRecords = (await jiraPLimit(3, sprintTasks)).filter(Boolean);
+      // V21 AD — aggregate spillover + estimation accuracy.
+      const totalSpillover = sprintRecords.reduce((s, r) => s + r.spillover, 0);
+      const hpsValues = sprintRecords.map(r => r.hoursPerSp).filter(n => n != null && n > 0);
+      const hpsAvg = hpsValues.length ? hpsValues.reduce((s, n) => s + n, 0) / hpsValues.length : null;
+      const hpsCoV = (hpsValues.length >= 2 && hpsAvg)
+        ? Math.sqrt(hpsValues.reduce((s, n) => s + (n - hpsAvg) ** 2, 0) / hpsValues.length) / hpsAvg
+        : null;
+      byPk[pk] = {
+        boardId,
+        sprints: sprintRecords,
+        velocityTrend: sprintRecords.map(r => r.delivered),
+        avgDeliveryRatio: sprintRecords.length
+          ? sprintRecords.reduce((s, r) => s + r.ratio, 0) / sprintRecords.length
+          : 0,
+        // V21 AD — точные spillover + estimation summary.
+        spilloverTotal: totalSpillover,
+        spilloverAvg:   sprintRecords.length ? +(totalSpillover / sprintRecords.length).toFixed(1) : 0,
+        estimationAccuracy: hpsAvg != null ? {
+          avgHoursPerSp: +hpsAvg.toFixed(1),
+          coV:           hpsCoV != null ? +hpsCoV.toFixed(2) : null,
+          n:             hpsValues.length,
+        } : null,
       };
-
-      const tryCfByEmail = async (email, fullname) => {
-        // V20 S5.2 — CF cascade redesigned для Sber Confluence DC.
-        //
-        // Контекст из API-примеров (Confluence DC 7.x):
-        //   · user.email cql НЕ работает (всегда 0 results)
-        //   · /rest/api/user?username=X нужен NUMERIC LDAP id, не email-prefix
-        //   · /rest/api/search?cql=user.fullname="ФИО" работает по ТОЧНОМУ
-        //     ФИО match (это наш ключ — берём fio из Jira displayName).
-        //   · audit log пишет author.name = ФИО → можно match'ить obratno.
-        //
-        // Cascade:
-        //   1) cql=user.fullname="<FIO>"  — точный match по ФИО (требует
-        //      fullname в input'ах, что мы передаём из state.employees.fio)
-        //   2) cql=user.fullname~"<FIO>"  — подстрока (lucene tilde-search)
-        //   3) /rest/api/user/search?username=<email-prefix>  — может сработать
-        //      если username совпадает с email-prefix (бывает у некоторых
-        //      сетапов LDAP).
-        //   4) cql=user.email = "..."     — последний fallback на DC, обычно empty.
-        //
-        // Из ответа берём username (LDAP-numeric) → cfAccountId.
-        try {
-          const prefix = email.split('@')[0];
-          const fioEsc = String(fullname || '').replace(/"/g, '\\"').trim();
-
-          const candidates = [];
-          if (fioEsc) {
-            // 1) ТОЧНЫЙ match по ФИО — самый надёжный для Sber CF.
-            candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.fullname = "${fioEsc}"`)}&limit=5`);
-            // 2) Подстрока ФИО — cheaper fallback (синтаксис `~` в DC).
-            candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.fullname ~ "${fioEsc}"`)}&limit=5`);
-          }
-          if (prefix) {
-            // 3) username-as-email-prefix lookup.
-            candidates.push(`${cfBase}/rest/api/user/search?username=${encodeURIComponent(prefix)}&limit=5`);
-          }
-          // 4) email cql — final fallback, обычно 0 в DC.
-          candidates.push(`${cfBase}/rest/api/search?cql=${encodeURIComponent(`user.email = "${email}"`)}&limit=5`);
-
-          const triedDebug = [];
-          // V20 S6.1 — early-break tracking. Если первые 2 candidate'а вернули
-          // 200 OK с пустым result — дальше пробовать бесполезно (CQL не
-          // настроен на этом instance). Сохраняем cascade time с ~12 мин до
-          // ~20-40 сек на 110 сотрудников при широком unsupported.
-          let consecutiveEmptyOk = 0;
-          for (const url of candidates) {
-            const r = await jiraForward({ targetUrl: url, method: 'GET', headers: { Authorization: cfAuth, Accept: 'application/json' }, allowInsecureTls: tls, timeoutMs: 8000 }).catch(e => ({ status: 0, text: String(e?.message || e) }));
-            triedDebug.push(`${url.replace(/\?.*$/, '...')} → ${r.status}`);
-            if (r.status === 401 || r.status === 403) return { ok: false, error: `HTTP ${r.status}: токен Confluence не имеет прав на user-search` };
-            if (r.status < 200 || r.status >= 300) continue;
-            let parsed; try { parsed = JSON.parse(r.text); } catch (_) { continue; }
-            const results = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.results) ? parsed.results : [];
-            // V20 S6.1 — если 200 OK + пустой результат → это «эндпоинт
-            // ответил, но не нашёл». 2 подряд таких → break cascade.
-            if (results.length === 0) {
-              consecutiveEmptyOk++;
-              if (consecutiveEmptyOk >= 2) break;
-              continue;
-            }
-            consecutiveEmptyOk = 0;
-            // V20 S7 B8 — collect all FIO matches, return ambiguous if >1.
-            // Раньше брали первого «по индексу» при тёзках — недетерминированно.
-            const fioMatches = [];
-            let exactEmailMatch = null;
-            for (const item of results) {
-              const u = item.user || item;
-              const u_email = String(u.email || u.emailAddress || '').toLowerCase().trim();
-              const u_fullname = String(u.displayName || u.publicName || u.name || u.title || '').trim();
-              const exactEmail = u_email && u_email === email;
-              const exactFio   = fioEsc && u_fullname && u_fullname.toLowerCase() === fioEsc.toLowerCase();
-              const username = u.username || u.name || u.userName || _extractUsernameFromCfUri(u);
-              if (!username) continue;
-              const candidate = {
-                accountId:   u.userKey || u.accountId || u.key || username,
-                username,
-                displayName: u_fullname || username,
-              };
-              if (exactEmail) { exactEmailMatch = { ...candidate, matchedBy: 'email' }; break; }
-              if (exactFio) fioMatches.push(candidate);
-              else if (results.length === 1) fioMatches.push(candidate);     // single — trust
-            }
-            if (exactEmailMatch) return { ok: true, ...exactEmailMatch };
-            if (fioMatches.length === 1) {
-              return { ok: true, ...fioMatches[0], matchedBy: 'fio' };
-            }
-            if (fioMatches.length > 1) {
-              // Ambiguous — несколько тёзок. Возвращаем кандидатов для UI choice.
-              return {
-                ok: false,
-                error: `ambiguous: ${fioMatches.length} тёзок с ФИО "${fioEsc}"`,
-                ambiguousCandidates: fioMatches.map(c => ({ username: c.username, displayName: c.displayName })),
-              };
-            }
-          }
-          return { ok: false, error: `не найден; tried ${triedDebug.length} endpoints (last: ${triedDebug[triedDebug.length-1] || 'none'})` };
-        } catch (e) { return { ok: false, error: _ppRedactSecretsInText(e.message || 'thrown', 100) }; }
-      };
-
-      // CF user-объект иногда даёт username не напрямую, а в URL self-ссылке.
-      // Пример: uri="https://confluence.../viewuser.action?username=19468503"
-      function _extractUsernameFromCfUri(u) {
-        const uri = u?._links?.self || u?.links?.self?.[0]?.href || u?.uri || '';
-        if (!uri) return '';
-        const m = String(uri).match(/[?&]username=([^&]+)/);
-        return m ? decodeURIComponent(m[1]) : '';
-      }
-
-      // Concurrency control: max 5 одновременно. Простой semaphore через
-      // worker-loop без зависимостей.
-      const CONCURRENCY = 5;
-      const results = new Array(items.length);
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < items.length) {
-          const i = cursor++;
-          const it = items[i];
-          const email    = String(it?.email    || '').trim().toLowerCase();
-          const fullname = String(it?.fullname || '').trim();
-          const key      = String(it?.key      || '').trim();
-          if (!email && !fullname) {
-            results[i] = { key, email: '', bb: { ok: false, error: 'нет email и fio' }, cf: { ok: false, error: 'нет email и fio' } };
-            continue;
-          }
-          const [bb, cf] = await Promise.all([
-            (bbConfigured && email) ? tryBbByEmail(email) : Promise.resolve({ ok: false, error: email ? 'BB не настроен' : 'нет email' }),
-            cfConfigured ? tryCfByEmail(email, fullname) : Promise.resolve({ ok: false, error: 'CF не настроен' }),
-          ]);
-          results[i] = { key, email, fullname, bb, cf };
-        }
-      };
-      const workers = Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker());
-      await Promise.all(workers);
-
-      const summary = {
-        total:       items.length,
-        bbResolved:  results.filter(r => r.bb?.ok).length,
-        cfResolved:  results.filter(r => r.cf?.ok).length,
-        noEmail:     results.filter(r => !r.email).length,
-      };
-      logger.event('integrations.resolve_identities', summary);
-      writeJson(res, 200, { results, summary });
-      return;
+      tried.push({ type: 'sprint-commit', pk, status: 200, sprints: sprintRecords.length });
+    } catch (e) {
+      tried.push({ type: 'sprint-commit', pk, status: e?.status || 0, error: String(e?.message || e).slice(0, 100) });
     }
-
-    // ── /api/integrations/verify-confluence ──────────────────
-    // V17.2 I2c — если заданы `confluenceSpaceKeys`, в первую очередь
-    //   проверяем что мы видим первое пространство (это содержательнее
-    //   чем абстрактный `/user/current`). Сбой → понятное сообщение
-    //   «не видно пространство DEV (HTTP 403)» вместо «токен сломан».
-    if (pathname === '/api/integrations/verify-confluence') {
-      if (!cfg.confluenceBaseUrl || !cfg.confluenceToken) { writeJson(res, 200, { ok: false, error: 'Confluence не настроена' }); return; }
-      const base = String(cfg.confluenceBaseUrl).replace(/\/+$/, '').replace(/\/wiki$/i, '');
-      const headers = { Authorization: makeAuthHeader(cfg.confluenceToken), Accept: 'application/json' };
-      const _spaceKeys = String(cfg.confluenceSpaceKeys || '').split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
-      const tried = [];
-      // Step 1: если есть spaceKeys — проверяем доступ к каждому
-      if (_spaceKeys.length) {
-        const accessible = [];
-        const denied = [];
-        for (const key of _spaceKeys.slice(0, 5)) {     // cap = 5 чтобы не спамить
-          const urls = [
-            `${base}/wiki/rest/api/space/${encodeURIComponent(key)}`,
-            `${base}/rest/api/space/${encodeURIComponent(key)}`,
-          ];
-          let foundIn = null;
-          for (const url of urls) {
-            const r = await jiraForward({ targetUrl: url, method: 'GET', headers, allowInsecureTls: tls }).catch((e) => ({ status: 0, text: String(e?.message || e) }));
-            tried.push({ url: url.replace(/\?.*$/, ''), status: r.status });
-            if (r.status >= 200 && r.status < 300) { foundIn = url; break; }
-            if (r.status === 401 || r.status === 403) {
-              denied.push({ key, status: r.status });
-              break;
-            }
-          }
-          if (foundIn) accessible.push(key);
-          else if (!denied.find(d => d.key === key)) denied.push({ key, status: '404' });
-        }
-        if (accessible.length) {
-          writeJson(res, 200, {
-            ok: true,
-            who: `${accessible.length}/${_spaceKeys.length} пространств доступно: ${accessible.join(', ')}${denied.length ? ' · нет доступа: ' + denied.map(d => `${d.key}(${d.status})`).join(', ') : ''}`,
-            spaces: { accessible, denied }, tried,
-          });
-          return;
-        }
-        if (denied.find(d => d.status === 401 || d.status === 403)) {
-          writeJson(res, 200, { ok: false, error: `Нет доступа ни к одному из пространств: ${denied.map(d => `${d.key}(${d.status})`).join(', ')}`, tried });
-          return;
-        }
-        // 404 на всех ключах — может, пространства не существуют в этом инстансе
-        writeJson(res, 200, { ok: false, error: `Пространства не найдены: ${_spaceKeys.join(', ')} (HTTP 404)`, tried });
-        return;
-      }
-      // Step 2: fallback на user/current (когда spaceKeys пустые).
-      // V18 P5 — переиспользует _cfPathCascade.
-      const fallbackCascade = await _cfPathCascade([
-        `${base}/wiki/rest/api/user/current`,
-        `${base}/rest/api/user/current`,
-        `${base}/wiki/rest/api/space?limit=1`,
-        `${base}/rest/api/space?limit=1`,
-      ], { headers, allowInsecureTls: tls });
-      const allTried = [...tried, ...fallbackCascade.tried];
-      if (fallbackCascade.authError) {
-        writeJson(res, 200, { ok: false, error: `Confluence HTTP ${fallbackCascade.authError} — токен просрочен или нет прав`, tried: allTried });
-        return;
-      }
-      if (fallbackCascade.ok) {
-        let who = '?';
-        try { const d = JSON.parse(fallbackCascade.text); who = d.displayName || d.username || d.name || (Array.isArray(d.results) ? `${d.results.length} space(s)` : '?'); } catch(_) {}
-        writeJson(res, 200, { ok: true, who, tried: allTried });
-        return;
-      }
-      writeJson(res, 200, { ok: false, error: `Confluence недоступен (попробовано ${allTried.length} URL)`, tried: allTried });
-      return;
-    }
-
-    writeJson(res, 404, { error: 'Unknown integrations endpoint' });
-  } catch(e) {
-    writeJson(res, 500, { error: e.message || String(e) });
-  }
+  }));
+  return { configured: true, byPk, tried };
 }
 
-function serveStatic(req, res) {
-  let urlPath = req.url.split('?')[0];
-  if (urlPath === '/') urlPath = '/index.html';
-  const filePath = path.join(ROOT, urlPath);
+// ============================================================
+// V18 extraction — wire up server/jira-api.js. All deps below are
+// defined earlier in this file (low-level helpers stay here per
+// the extraction plan). The destructure on the next line restores
+// in-file aliases so existing callsites
+// (jiraResolveSprintFieldId, jiraBuildAreaReport, _runPortfolioPulse,
+// etc.) keep using `jiraReadConfig()` / `jiraSanitizeAreas()` /
+// `jiraSanitizeConfig()` / `jiraWriteConfig()` unchanged.
+// ============================================================
+const jiraApi = require('./server/jira-api.js').create({
+  ROOT,
+  writeJson,
+  readBody,
+  isSameOriginRequest,
+  jiraSearchAll,
+  jiraRequest,
+  jiraBuildAreaReport,
+  jiraInvalidateRecentCache,
+  jiraPLimit,
+});
+const {
+  jiraReadConfig,
+  jiraWriteConfig,
+  jiraSanitizeConfig,
+  jiraSanitizeAreas,
+  jiraBuildReport,
+} = jiraApi;
 
-  // V12 audit recommendation #8 (FOUND_BUGS NEW-7) — `path.resolve` does
-  // NOT follow symlinks, so a symlink in ROOT pointing outside (e.g. to
-  // /etc) would let `GET /symlink/passwd` slip past the prefix check.
-  // `fs.realpath` resolves symlinks; we then re-check the prefix.
-  // We use sync API because serveStatic is already synchronous up to fs.readFile.
-  let resolvedFile;
-  try {
-    resolvedFile = fs.realpathSync(filePath);
-  } catch (_e) {
-    // ENOENT — file not found, continue to readFile to produce 404.
-    resolvedFile = path.resolve(filePath);
-  }
-  if (!resolvedFile.startsWith(ROOT + path.sep) && resolvedFile !== ROOT) {
-    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Forbidden');
-    return;
-  }
-  fs.readFile(filePath, (err, data) => {
-    if (err) {
-      if (err.code === 'ENOENT') {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end(`Not Found: ${urlPath}`);
-      } else {
-        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Server Error');
-      }
-      return;
-    }
-    const ext = path.extname(filePath).toLowerCase();
-    // V12 audit recommendation #6 — defense-in-depth security headers.
-    // CSP is intentionally permissive (`'self' 'unsafe-inline'` for inline
-    // styles and event handlers we already use throughout); tightening to
-    // strict-CSP would require a significant rewrite of the inline-render
-    // pattern. Even permissive CSP blocks classic stored-XSS via the 234
-    // raw-innerHTML lint warnings — script src must be 'self'.
-    //
-    // X-Frame-Options=DENY guards against clickjacking from external pages.
-    // X-Content-Type-Options=nosniff prevents MIME-sniff confusion attacks.
-    // Referrer-Policy=same-origin keeps token-bearing referrers from leaving
-    // the app. The intra-corporate use case doesn't need HSTS (no public TLS).
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      // V15 fix (errors-log report 2026-04-30): added 'wasm-unsafe-eval'
-      // to script-src — without it the browser refused to compile the
-      // sql.js WebAssembly module and SQLiteStore silently fell back to
-      // localStorage. The keyword is narrowly scoped to WASM compilation;
-      // it does NOT re-enable classic eval()/Function() of strings.
-      'Content-Security-Policy':
-        "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; " +
-        "style-src 'self' 'unsafe-inline'; " +
-        "img-src 'self' data: https:; " +
-        "connect-src 'self'; " +
-        "font-src 'self' data:; " +
-        "frame-ancestors 'none'",
-      'X-Frame-Options':        'DENY',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy':        'same-origin',
-      'Permissions-Policy':     'camera=(), microphone=(), geolocation=(), interest-cohort=()',
-    });
-    res.end(data);
-  });
-}
+// V18 extraction — Portfolio Pulse orchestrator (_runPortfolioPulse + cancel
+// registry helpers) вынесены в server/pulse-runner.js. Wired здесь, потому
+// что нужны:
+//   · jira-helpers (jiraResolveSprintFieldId, jiraResolveProjectId,
+//     jiraBuildAreaReport, jiraInvalidateRecentCache) — wired ВЫШЕ
+//   · jira-api (jiraSanitizeAreas) — wired только что
+//   · pp* fetcher'ы (ppFetchReopenRate / ppFetchSprintCommitVsDelivery /
+//     ppFetchStaleBranches / ppFetchHotFiles / ppFetchOnboardingHistory /
+//     ppFetchDevStatusForIssues / _ppMergeAuthorMaps) — async function
+//     declarations (hoisted), reference-safe.
+//   · _HTTP_CACHE / jiraPLimit / jiraRequest / jiraSearchAll / jiraForward
+//     — из upstream (тоже wired ВЫШЕ).
+const _pulseRunner = require('./server/pulse-runner.js').create({
+  // BB
+  ppFetchBitbucketActivity, ppFetchBitbucketGovernance, _bbFetchWithRetry,
+  // CF
+  ppFetchConfluenceActivity, ppFetchCfAuthorshipVelocity, ppFetchCfSpaceAcl,
+  ppFetchRetroClosure, ppFetchCfHealthMetrics, ppFetchStaleConfluence,
+  // Zephyr
+  ppFetchZephyrActivity,
+  // Jira-helpers
+  jiraResolveSprintFieldId, jiraResolveProjectId, jiraBuildAreaReport, jiraInvalidateRecentCache,
+  // Upstream
+  jiraRequest, jiraSearchAll, jiraForward, jiraPLimit, _HTTP_CACHE,
+  // server.js-local pp* fetchers (function declarations — hoisted)
+  ppFetchReopenRate, ppFetchSprintCommitVsDelivery, ppFetchStaleBranches,
+  ppFetchHotFiles, ppFetchOnboardingHistory, ppFetchDevStatusForIssues,
+  _ppMergeAuthorMaps,
+  // Auth + jira-api
+  _ppMakeAuthHeader,
+  jiraSanitizeAreas,
+});
+const {
+  _runPortfolioPulse,
+  pulseCancelRegister,
+  pulseCancelGet,
+  pulseCancelMark,
+  pulseAssertNotCancelled,
+} = _pulseRunner;
+
+// ============================================================
+// INTEGRATIONS API — V18 extraction (./server/integrations-api.js)
+// ============================================================
+// Большой switch по `/api/integrations/*` (~1045 LOC, 22 endpoints)
+// вынесен в отдельный модуль. Wired здесь, потому что зависит от
+// _pulseRunner (выше), jira-api, BD/TechInfo/Jenkins-helpers, и
+// upstream-helpers — всё пробрасывается через factory.
+const _integrationsApi = require("./server/integrations-api.js").create({
+  // Core io
+  writeJson, readBody,
+  // Jira config + helpers
+  jiraReadConfig, jiraSanitizeAreas,
+  jiraRequest, jiraSearchAll, jiraForward,
+  // Confluence path-cascade helper (server.js-local)
+  cfPathCascade: _cfPathCascade,
+  // Auth helpers
+  ppMakeAuthHeader: _ppMakeAuthHeader,
+  ppRedactSecretsInText: _ppRedactSecretsInText,
+  // Pulse runner (./pulse-runner.js)
+  runPortfolioPulse: _runPortfolioPulse,
+  pulseCreateJob, pulseGetJob, pulseRunJob,
+  pulseCancelRegister, pulseCancelMark, pulseAssertNotCancelled,
+  pulseDetailRateAllow, pulseDetailCacheGet, pulseDetailCacheSet,
+  PULSE_DETAIL_RATE_WINDOW_MS,
+  // Black-Dashboard
+  bdCreateJob, bdGetJob, bdRunJob,
+  buildBlackDashboard, sigmaCfgView,
+  // TechInfo
+  buildTechInfo,
+  // Jenkins probe + Phase-1 scan
+  handleJenkinsVerify,
+  handleJenkinsScan,
+});
+const { handleIntegrationsApi } = _integrationsApi;
 
 const server = http.createServer((req, res) => {
   const pathname = req.url.split('?')[0];
+  const _reqStartedAt = Date.now();
+
+  // V21 U — DAU tracking: каждый запрос с X-Client-Id обновляет last-seen.
+  recordClientSeen(req);
 
   // Hook the response so we can record metrics without touching every writer.
   const origWriteHead = res.writeHead.bind(res);
   res.writeHead = (code, ...rest) => { res._statusCode = code; return origWriteHead(code, ...rest); };
-  res.on('finish', () => recordRequest(pathname, res._statusCode || res.statusCode || 0));
+  res.on('finish', () => recordRequest(pathname, res._statusCode || res.statusCode || 0, Date.now() - _reqStartedAt));
 
   // Health & metrics — exempt from rate limit, no logging surprise.
   if (pathname === '/health') {
@@ -3255,17 +1566,140 @@ const server = http.createServer((req, res) => {
       now: new Date().toISOString(),
     });
   }
-  if (pathname === '/metrics') {
-    return writeJson(res, 200, {
+  // V21 BT (audit-05 §E #6) — /ready depth-check.
+  // Проверяет что сервер ГОТОВ обслуживать запросы:
+  //  · jira_config.json читается (ENOENT == ok если defaults)
+  //  · jobs persistence dir доступен
+  //  · LLM token cache в памяти не corrupted
+  // Возвращает 503 если хоть одна depth-check fail'нула — k8s/load-balancer
+  // выведет под из rotation.
+  if (pathname === '/ready') {
+    const checks = {};
+    let allOk = true;
+    // Check 1: jira_config.json readable (или absent).
+    try {
+      const cfg = jiraReadConfig();
+      checks.config = { ok: true, hasJira: !!cfg.jiraBaseUrl };
+    } catch (e) {
+      checks.config = { ok: false, error: String(e?.message || e).slice(0, 80) };
+      allOk = false;
+    }
+    // Check 2: persistence dir writable.
+    try {
+      const testFile = _pathLib.join(JOBS_PERSIST_BASE, '.ready-probe');
+      try { fs.mkdirSync(JOBS_PERSIST_BASE, { recursive: true }); } catch (_) {}
+      fs.writeFileSync(testFile, String(Date.now()));
+      fs.unlinkSync(testFile);
+      checks.persistence = { ok: true, dir: JOBS_PERSIST_BASE };
+    } catch (e) {
+      checks.persistence = { ok: false, error: String(e?.message || e).slice(0, 80) };
+      allOk = false;
+    }
+    // Check 3: in-memory metrics не сломались.
+    try {
+      checks.memory = { ok: true, mb: Math.round(process.memoryUsage().rss / 1024 / 1024) };
+    } catch (e) {
+      checks.memory = { ok: false };
+      allOk = false;
+    }
+    // Check 4: circuit-breaker map size — много open breaker'ов = degraded.
+    let openBreakers = 0;
+    try {
+      for (const [, b] of _breakers) if (b.openUntil > Date.now()) openBreakers++;
+    } catch (_) {}
+    checks.breakers = { ok: openBreakers < 3, openCount: openBreakers };
+    if (!checks.breakers.ok) allOk = false;
+    return writeJson(res, allOk ? 200 : 503, {
+      ready: allOk,
+      checks,
+      now: new Date().toISOString(),
+    });
+  }
+  if (pathname === '/metrics' || pathname === '/metrics/prom') {
+    // V21 U + PR-CX — реальные метрики:
+    // p50/p95/p99 latency, error-rate, DAU, recent client errors,
+    // circuit-breaker state per-host, cache sizes.
+    const lat = _metrics.latencies.filter(Number.isFinite);
+    const totalReqs = _metrics.requestsTotal || 1;
+    const now = Date.now();
+    // PR-CX — собираем breaker state per-host (open/closed + recent failures + openUntil).
+    const breakers = {};
+    for (const [host, b] of _breakers) {
+      if (!b) continue;
+      const recentFailures = (b.failures || []).filter(t => now - t < 60_000).length;
+      breakers[host] = {
+        open: !!(b.openUntil && now < b.openUntil),
+        openUntil: b.openUntil > 0 ? new Date(b.openUntil).toISOString() : null,
+        failuresLastMin: recentFailures,
+        totalFailureRecords: (b.failures || []).length,
+      };
+    }
+    const cacheSizes = {
+      http: _HTTP_CACHE.size,
+      recentBucket: _recentBucketCache.size,
+      llmBudgetUsers: llm.llmBudgetUserCount(),
+    };
+    const dau = _activeDaus();
+    const json = {
       ok: true,
-      uptimeSec: Math.round((Date.now() - _metrics.startedAt) / 1000),
+      uptimeSec: Math.round((now - _metrics.startedAt) / 1000),
       requestsTotal: _metrics.requestsTotal,
       requestsByPath: _metrics.requestsByPath,
       errors4xx: _metrics.errors4xx,
       errors5xx: _metrics.errors5xx,
+      errorRate: ((_metrics.errors4xx + _metrics.errors5xx) / totalReqs).toFixed(4),
       rateLimited: _metrics.rateLimited,
       memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
-    });
+      latencyMs: {
+        sampleSize: lat.length,
+        p50: _quantile(lat, 0.50),
+        p95: _quantile(lat, 0.95),
+        p99: _quantile(lat, 0.99),
+      },
+      dau24h: dau,
+      clientErrorsTotal: _metrics.clientErrors,
+      clientErrorsRecent: _metrics.clientErrorsRecent.slice(-10),
+      breakers,
+      cacheSizes,
+    };
+    if (pathname === '/metrics/prom') {
+      // PR-CX — Prometheus text exposition format.
+      // Любой scrape (Prometheus / VictoriaMetrics / OpenTelemetry) понимает.
+      const escLabel = (v) => String(v).replace(/[\\"\n]/g, c => c === '\n' ? '\\n' : '\\' + c);
+      const lines = [];
+      const push = (name, help, type, value, labels = '') => {
+        lines.push(`# HELP ${name} ${help}`);
+        lines.push(`# TYPE ${name} ${type}`);
+        lines.push(`${name}${labels} ${value}`);
+      };
+      const counter = (name, help, value, labels = '') => push(name, help, 'counter', value, labels);
+      const gauge   = (name, help, value, labels = '') => push(name, help, 'gauge',   value, labels);
+      counter('prisma_requests_total', 'Total HTTP requests', _metrics.requestsTotal);
+      counter('prisma_errors_4xx_total', '4xx responses count', _metrics.errors4xx);
+      counter('prisma_errors_5xx_total', '5xx responses count', _metrics.errors5xx);
+      counter('prisma_rate_limited_total', 'Rate-limited requests', _metrics.rateLimited);
+      counter('prisma_client_errors_total', 'Frontend errors reported', _metrics.clientErrors);
+      gauge('prisma_uptime_seconds', 'Process uptime in seconds', json.uptimeSec);
+      gauge('prisma_memory_mb', 'Process RSS in MB', json.memoryMB);
+      gauge('prisma_dau_24h', 'Distinct clients seen in 24h', dau);
+      gauge('prisma_latency_ms', 'Latency p50', json.latencyMs.p50, '{quantile="0.5"}');
+      gauge('prisma_latency_ms', 'Latency p95', json.latencyMs.p95, '{quantile="0.95"}');
+      gauge('prisma_latency_ms', 'Latency p99', json.latencyMs.p99, '{quantile="0.99"}');
+      gauge('prisma_cache_size', 'In-memory cache size', cacheSizes.http,         '{name="http"}');
+      gauge('prisma_cache_size', 'In-memory cache size', cacheSizes.recentBucket, '{name="recent_bucket"}');
+      gauge('prisma_cache_size', 'In-memory cache size', cacheSizes.llmBudgetUsers, '{name="llm_budget_users"}');
+      // Per-host circuit-breaker.
+      for (const [host, b] of Object.entries(breakers)) {
+        const lbl = `{host="${escLabel(host)}"}`;
+        gauge('prisma_circuit_breaker_open', '1 if breaker is open, 0 if closed', b.open ? 1 : 0, lbl);
+        gauge('prisma_circuit_breaker_failures_last_min', 'Recent failures (60s window)', b.failuresLastMin, lbl);
+      }
+      const body = lines.join('\n') + '\n';
+      res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+      res.end(body);
+      return;
+    }
+    return writeJson(res, 200, json);
   }
 
   // Rate limit (skip for static GETs to avoid breaking page loads under heavy
@@ -3283,19 +1717,61 @@ const server = http.createServer((req, res) => {
   // server logger.event() emits как structured log entry для ELK.
   // Body: { event: string, data?: object } | { events: [{event, data}, ...] }
   // Защищён rate-limit'ом (выше). Никаких side-effects кроме log entry.
+  // POST-Stage 8 fix — `handleTelemetry` ранее ссылался на missing function
+  // (pre-existing bug от observability extraction Stage 1 — модуль создан,
+  // но не wire'нут). Inline-implementation восстанавливает работу.
+  // TODO: после полной wiring `createObservability` factory — заменить
+  // на `obs.handleTelemetry(req, res)`.
   if (req.method === 'POST' && pathname === '/api/telemetry') {
-    handleTelemetry(req, res); return;
+    readBody(req, MAX_BODY).then((raw) => {
+      let body = {};
+      try { body = raw ? JSON.parse(raw) : {}; } catch (_) {}
+      const events = Array.isArray(body.events) ? body.events : (body.event ? [body] : []);
+      for (const e of events.slice(0, 50)) {
+        const evt = String(e?.event || '').slice(0, 80).replace(/[^a-z0-9._-]/gi, '');
+        if (!evt) continue;
+        const data = (e?.data && typeof e.data === 'object') ? e.data : {};
+        try { logger.event?.(evt, { ...data, src: 'browser' }); } catch (_) {}
+      }
+      writeJson(res, 200, { ok: true, accepted: events.length });
+    }).catch(() => writeJson(res, 400, { error: 'Invalid telemetry payload' }));
+    return;
+  }
+  // V21 U (audit-2026-05-03 §E R6) — client→server error reporter.
+  // Frontend posts { errors: [{ msg, source, level, at }] } batches.
+  // Сохраняем ring-buffer 50 последних в _metrics + warn-log.
+  if (req.method === 'POST' && pathname === '/api/client-error') {
+    readBody(req, MAX_BODY).then((raw) => {
+      let body = {};
+      try { body = raw ? JSON.parse(raw) : {}; } catch (_) {}
+      const errors = Array.isArray(body.errors) ? body.errors : (body.msg ? [body] : []);
+      for (const e of errors.slice(0, 20)) {
+        const msg = String(e?.msg || e?.message || '').slice(0, 500);
+        if (!msg) continue;
+        _metrics.clientErrors++;
+        _metrics.clientErrorsRecent.push({
+          at:    e?.at || new Date().toISOString(),
+          msg,
+          level: String(e?.level  || 'error').slice(0, 16),
+          src:   String(e?.source || '').slice(0, 80),
+        });
+        if (_metrics.clientErrorsRecent.length > 50) _metrics.clientErrorsRecent.shift();
+        try { logger.warn('client.error', { msg, level: e?.level, src: e?.source }); } catch (_) {}
+      }
+      writeJson(res, 200, { ok: true, accepted: errors.length });
+    }).catch((e) => writeJson(res, 400, { error: e.message || String(e) }));
+    return;
   }
   if (req.method === 'POST' && pathname === '/api/llm/chat') {
-    proxyChat(req, res); return;
+    llm.proxyChat(req, res); return;
   }
   if (pathname.startsWith('/api/jira/')) {
-    handleJiraApi(req, res, pathname); return;
+    jiraApi.handleJiraApi(req, res, pathname); return;
   }
   if (pathname.startsWith('/api/integrations/')) {
     handleIntegrationsApi(req, res, pathname); return;
   }
-  serveStatic(req, res);
+  serveStatic(req, res, ROOT);
 });
 
 let currentPort = PORT;
@@ -3316,10 +1792,33 @@ server.on('error', (err) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   const actualPort = server.address().port;
-  // Machine-readable marker so launch.js knows the real port.
-  // V19 E4 — startup-banner идёт через logger; LISTENING:N остаётся
-  // plain console.log потому что launch.js парсит его регексом для
-  // авто-detection порта (см. launch.js).
   console.log(`LISTENING:${actualPort}`);
-  logger.info('SBOF Planner started', { port: actualPort, url: `http://localhost:${actualPort}` });
+  logger.info('Prisma started', { port: actualPort, url: `http://localhost:${actualPort}` });
 });
+
+// V22 — `--profile` режим (codebase-04 audit §5 tooling).
+// launch.js шлёт SIGUSR2 каждые 30s; сервер пишет heap-snapshot в .profile/.
+// PRIZMA_PROFILE=1 выставляется родителем; вне profile-режима hook молчит.
+if (process.env.PRIZMA_PROFILE === '1') {
+  try {
+    const v8 = require('v8');
+    const fs = require('fs');
+    const path = require('path');
+    const profDir = path.join(__dirname, '.profile');
+    try { fs.mkdirSync(profDir, { recursive: true }); } catch (_) {}
+    let snapSeq = 0;
+    process.on('SIGUSR2', () => {
+      try {
+        snapSeq++;
+        const file = path.join(profDir, `heap-snapshot-${snapSeq}.heapsnapshot`);
+        v8.writeHeapSnapshot(file);
+        logger.info('heap-snapshot written', { file, seq: snapSeq });
+      } catch (e) {
+        logger.warn('heap-snapshot failed', { err: String(e?.message || e) });
+      }
+    });
+    logger.info('profile mode enabled', { dir: profDir });
+  } catch (e) {
+    logger.warn('profile mode setup failed', { err: String(e?.message || e) });
+  }
+}

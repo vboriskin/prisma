@@ -85,7 +85,7 @@ function startApp() {
     const root = path.resolve(__dirname, '..', '..');
     appProc = spawn('node', [path.join(root, 'server.js'), String(APP_PORT)], {
       cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, RATE_LIMIT_PER_MIN: '500' },
+      env: { ...process.env, RATE_LIMIT_PER_MIN: '500', INTEGRATION_ALLOW_LOOPBACK: '1' },
     });
     let booted = false;
     appProc.stdout.on('data', (d) => { if (!booted && /LISTENING:/.test(d.toString())) { booted = true; resolve(); } });

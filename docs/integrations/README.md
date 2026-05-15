@@ -10,7 +10,10 @@
 | **Jira Sigma** | Goal-эпики (квартальные цели) с Domain link | `integrations/blackDashboard*.js` | `/api/integrations/black-dashboard/*` | (не на сотрудника) |
 | **Bitbucket** | PR / commits за окно активности | `portfolioPulseApi.js` (внутри pulse) | внутри `/api/integrations/portfolio-pulse` | `bitbucketLogin`, `email` |
 | **Confluence** | Правки, комментарии, упоминания, аудит логинов | `portfolioPulseApi.js` (pulse) + sync `integrationsSync.js` | `/api/integrations/confluence-search`, `/api/integrations/confluence-resolve-user`, `/api/integrations/confluence-audit-logins` | `confluenceAccountId`, `email` |
+| **Jenkins** | Builds (number/result/timestamp/duration) + culprits/causes за 7д | `integrations/teamScanner2.js` (jenkins_attach block) | `/api/integrations/jenkins-verify`, `/api/integrations/jenkins-scan` | `jenkinsUserName`, `email` |
 | **GigaChat / OpenAI-compat** | LLM streaming для AI-ассистента | `app/llmAssistant.js` | `/api/llm/chat` | (не на сотрудника) |
+
+→ Подробнее про Jenkins: [`jenkins.md`](./jenkins.md)
 
 → Полный список endpoints: [`api-endpoints.md`](./api-endpoints.md)
 → Auth-flow и token-handling: [`auth-and-secrets.md`](./auth-and-secrets.md)

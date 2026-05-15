@@ -4,6 +4,7 @@
    ============================================================ */
 
 import { WORK_TYPES } from '../constants.js';
+import { tagToneIndex } from './tagInput.js';
 
 export const Multiselect = {
   _open: null,
@@ -28,7 +29,15 @@ export const Multiselect = {
       if (!currentValues||!currentValues.length) {
         const ph=document.createElement('span'); ph.className='ms-placeholder'; ph.textContent='Выбрать...'; chipsWrap.appendChild(ph);
       } else {
-        currentValues.forEach(v=>{ const c=document.createElement('span'); c.className='ms-chip'; c.textContent=v; chipsWrap.appendChild(c); });
+        currentValues.forEach(v=>{
+          const c=document.createElement('span');
+          c.className='ms-chip';
+          c.textContent=v;
+          // 2026-05-04 — 3-tone palette из брендбука (Information/Insight/Mist),
+          // согласовано с .tag-item. Стили — в styles.css по data-tone.
+          c.dataset.tone=String(tagToneIndex(v));
+          chipsWrap.appendChild(c);
+        });
       }
     }
     renderChips();

@@ -129,6 +129,13 @@ if (!res.ok) {
 
 ## `_scrubSecrets` policy
 
+> **V22 holistic-P4 (AUDIT_HOLISTIC.md §1 #12 / §7 P4):** введены два single-source-of-truth модуля
+> [`shared/pii.js`](../../shared/pii.js) и [`shared/secrets.js`](../../shared/secrets.js).
+> Они дают единый API для client + server + telemetry + LLM-payload и закрывают дрейф между
+> 3-мя параллельными scrubber'ами (`Utils.scrubPiiInText`, `CSV._scrubSecrets`, server `redactSecretsInText`).
+> Phase-2 миграция (~30 callsites) запланирована — пока существующие функции остаются как
+> backward-compat wrappers, поведение идентично. Новый код должен использовать `shared/*`.
+
 **Все** export-paths ОБЯЗАНЫ проходить через scrubber:
 
 ```js

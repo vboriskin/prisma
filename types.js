@@ -237,8 +237,9 @@
 /** @typedef {('high'|'medium'|'low'|'info'|'warning'|'success')} InsightSeverity */
 
 /**
- * One insight card. Used by both /views/metrics InsightsView and
- * portfolioPulseInsights.js.
+ * One insight card. Used by /views/dashboard.js DashboardView.renderSignals
+ * (room «Сигналы», бывший InsightsView, V21 tabs-consolidation вариант A)
+ * и portfolioPulseInsights.js.
  * @typedef {Object} Insight
  * @property {InsightSeverity}      severity
  * @property {string}               title

@@ -44,8 +44,26 @@ export function stuckListOf(p) {
  *   3. watch  — overload (issuesNow ≥ 3) ИЛИ stuck-but-active ИЛИ
  *               вчера активность была, сегодня тишина.
  *   4. moving — всё остальное (есть today или other-signal).
+ *
+ * V21 Phase 4 F2 — WeakMap-cache по participant + epoch для invalidation.
+ * Аудит code-performance: classifyPerson вызывается ~3× на одного
+ * participant за рендер (renderPersonRows + renderTeamGlance + insights).
+ * Логика чистая (не меняем пороги), оборачиваем результат.
+ *
+ * Сигнатура single-arg (p) — нет ctx, кэш-ключ = сам объект participant.
+ * Между рендерами participant-объекты могут жить (cache hit при re-render
+ * без refresh), при `refresh()` orchestrator вызывает bumpClassifyEpoch
+ * чтобы инвалидировать кэш (новые participant'ы могут иметь те же ссылки
+ * на old objects если model partial-update — epoch это покрывает).
  */
-export function classifyPerson(p) {
+const _classifyCache = new WeakMap();
+const _classifyEpoch = { current: 0 };
+
+export function bumpClassifyEpoch() {
+  _classifyEpoch.current = (_classifyEpoch.current + 1) | 0;
+}
+
+function _classifyPersonImpl(p) {
   const today = (p?.timelineToday    || []).length;
   const yest  = (p?.timelineYesterday || []).length;
   const wip   = (p?.issuesNow         || []).length;
@@ -75,6 +93,16 @@ export function classifyPerson(p) {
   if (today === 0 && yest > 0) return 'watch';
   // Moving.
   return 'moving';
+}
+
+export function classifyPerson(p) {
+  // Primitive / null-ish guard — WeakMap не принимает не-object.
+  if (p === null || (typeof p !== 'object')) return _classifyPersonImpl(p);
+  const cached = _classifyCache.get(p);
+  if (cached && cached.epoch === _classifyEpoch.current) return cached.value;
+  const value = _classifyPersonImpl(p);
+  _classifyCache.set(p, { epoch: _classifyEpoch.current, value });
+  return value;
 }
 
 /**

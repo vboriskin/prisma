@@ -15,6 +15,7 @@
    ============================================================ */
 
 import { state } from '../state.js';
+import { GANTT_LEGEND } from './gantt/legendContent.js';
 
 /* HTML-escape helper — needed for the export header where we
    stitch user-controlled text directly into innerHTML. */
@@ -22,6 +23,27 @@ function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* V21 Wave-3 — inline-SVG glyphs (Lucide-derived, 1.5px stroke).
+   Self-contained: файл шарится наружу и не имеет доступа к /app/icons.js.
+   Поэтому SVG-фрагменты дублируются здесь. Размер по умолчанию 14px,
+   `currentColor` → наследует цвет родителя. */
+function gexIcon(name, size = 14) {
+  const paths = {
+    'check':         '<polyline points="20 6 9 17 4 12"/>',
+    'check-circle':  '<circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>',
+    'lock':          '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    'moon':          '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    'sun':           '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+    'calendar':      '<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    'clipboard':     '<rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+    'users':         '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    'flag-off':      '<path d="M2 22V4"/><path d="M5 4h12l-2 4 2 4H5"/>', // unplanned (флаг с отметкой)
+  };
+  const p = paths[name];
+  if (!p) return '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.18em;display:inline-block">${p}</svg>`;
 }
 
 /* Pipe-or-comma split — same shape as views/employees.js so multi-assignee
@@ -185,8 +207,8 @@ function _buildAssigneeSummary(rows) {
   });
 
   const statusLabel = (t) => {
-    if (t.isDone)      return '<span class="gex-status gex-status-done">✅ Завершено</span>';
-    if (t.isUnplanned) return '<span class="gex-status gex-status-unplanned">⚐ Не запланирована</span>';
+    if (t.isDone)      return `<span class="gex-status gex-status-done">${gexIcon("check-circle")} Завершено</span>`;
+    if (t.isUnplanned) return `<span class="gex-status gex-status-unplanned">${gexIcon("flag-off")} Не запланирована</span>`;
     return '<span class="gex-status gex-status-active">● В работе</span>';
   };
   const periodLabel = (t) => {
@@ -308,8 +330,8 @@ function _buildUnassignedSummary(rows) {
     return `${esc(t.workStart || '?')} → ${esc(t.workEnd || '?')}`;
   };
   const statusLabel = (t) => {
-    if (t.isDone)      return '<span class="gex-status gex-status-done">✅ Завершено</span>';
-    if (t.isUnplanned) return '<span class="gex-status gex-status-unplanned">⚐ Не запланирована</span>';
+    if (t.isDone)      return `<span class="gex-status gex-status-done">${gexIcon("check-circle")} Завершено</span>`;
+    if (t.isUnplanned) return `<span class="gex-status gex-status-unplanned">${gexIcon("flag-off")} Не запланирована</span>`;
     return '<span class="gex-status gex-status-active">● В работе</span>';
   };
 
@@ -364,52 +386,54 @@ function _buildUnassignedSummary(rows) {
 function _buildLegend() {
   // V17.1 D1 — подсказки экспортного гантa теперь сворачиваемые
   // (<details open>): по умолчанию раскрыты, юзер может схлопнуть.
+  // Тексты — из shared `legendContent.js`, чтобы экспорт не расходился
+  // с живой панелью «Как читать?» (см. views/gantt.js#renderPillLegend).
+  const T = GANTT_LEGEND;
   return `<details class="gex-legend-details" open>
   <summary class="gex-legend-summary">Подсказки по визуализации</summary>
   <div class="gex-legend">
     <div class="gex-legend-section gex-legend-anatomy">
-      <div class="gex-legend-title">Пилюля задачи</div>
+      <div class="gex-legend-title">${T.sectionTitle.anatomy}</div>
       <div class="gex-legend-items">
         <span class="gex-legend-pill-demo">
           <span class="gex-legend-stripe"></span>
           <span class="gex-legend-pill-body">
             <span class="gex-legend-pill-row1">
-              <span class="gex-legend-pill-name">BE-модель</span>
+              <span class="gex-legend-pill-name">${T.anatomy.demoName}</span>
               <span class="gex-legend-pill-state-active"></span>
               <span class="gex-legend-pill-cmt"></span>
             </span>
-            <span class="gex-legend-pill-row2">Иванов · 01.05—15.05</span>
+            <span class="gex-legend-pill-row2">${T.anatomy.demoMeta}</span>
           </span>
         </span>
-        <span class="gex-legend-meta">слева: цвет = тип работы · справа: статус-точка и маркер коммента · снизу: исполнитель и период</span>
+        <span class="gex-legend-meta">${T.anatomy.description}</span>
       </div>
     </div>
     <div class="gex-legend-section">
-      <div class="gex-legend-title">Колодцы (цвет полосы)</div>
+      <div class="gex-legend-title">${T.sectionTitle.buckets}</div>
       <div class="gex-legend-items">
-        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:#4f46e5"></span> Релиз 1.20</span>
-        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:#059669"></span> Релиз 1.21</span>
-        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:#d97706"></span> Релиз 1.22</span>
-        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:#dc2626"></span> Овертайм</span>
+        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:var(--prizma-information)"></span> ${T.bucket.r120}</span>
+        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:var(--prizma-on-course)"></span> ${T.bucket.r121}</span>
+        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:var(--prizma-drift)"></span> ${T.bucket.r122}</span>
+        <span class="gex-legend-item"><span class="gex-legend-stripe-sample" style="background:var(--prizma-off-course)"></span> ${T.bucket.ot}</span>
       </div>
     </div>
     <div class="gex-legend-section">
-      <div class="gex-legend-title">Состояния</div>
+      <div class="gex-legend-title">${T.sectionTitle.states}</div>
       <div class="gex-legend-items">
-        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-active"></span> В работе</span>
-        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-done">✓</span> Завершено (название перечёркнуто)</span>
-        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-unplanned"></span> Не запланирована (пунктирные стрипа и кружок, italic)</span>
-        <span class="gex-legend-item"><span class="gex-legend-cmt-square gex-legend-cmt-transfer"></span> Перенос с комментарием (наведи на пилюлю)</span>
-        <span class="gex-legend-item"><span class="gex-legend-cmt-square gex-legend-cmt-add"></span> Добавлено в зафиксированный план</span>
-        <span class="gex-legend-item gex-legend-meta">На «не запланированной» пилюле маркеры становятся контурными того же цвета</span>
+        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-active"></span> ${T.state.active}</span>
+        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-done">✓</span> ${T.state.done}</span>
+        <span class="gex-legend-item"><span class="gex-legend-state gex-legend-state-unplanned"></span> ${T.state.unplanned}</span>
+        <span class="gex-legend-item"><span class="gex-legend-cmt-square gex-legend-cmt-transfer"></span> ${T.state.transferComment}</span>
+        <span class="gex-legend-item"><span class="gex-legend-cmt-square gex-legend-cmt-add"></span> ${T.state.addedAfterLock}</span>
       </div>
     </div>
     <div class="gex-legend-section">
-      <div class="gex-legend-title">Переносы</div>
+      <div class="gex-legend-title">${T.sectionTitle.transfers}</div>
       <div class="gex-legend-items">
-        <span class="gex-legend-item"><span class="gex-legend-icon">↗</span> Откуда перенесли</span>
-        <span class="gex-legend-item"><span class="gex-legend-icon">↘</span> Куда перенесли</span>
-        <span class="gex-legend-item gex-legend-meta">Каждая строка-переноса = одно действие; история сохраняется</span>
+        <span class="gex-legend-item"><span class="gex-legend-icon">↗</span> ${T.transfer.from}</span>
+        <span class="gex-legend-item"><span class="gex-legend-icon">↘</span> ${T.transfer.to}</span>
+        <span class="gex-legend-item gex-legend-meta">${T.transfer.meta}</span>
       </div>
     </div>
   </div>
@@ -457,10 +481,17 @@ const _REDRAW_ARROWS_JS = `
       // V16 (gantt-roadmap #4) — colour the arrow stroke + marker by
       // work-type accent (mirrors live drawPostponeArrows). Palette is
       // inlined here so the exported file is self-contained.
+      // AUDIT-ART #11 — values синхронизированы с brand light-палитрой
+      // (theme.css [data-theme="light"] --prizma-worktype-*) и с
+      // constants.js PHASE_COLORS. Раньше тут жила Tailwind-rainbow
+      // (#7c3aed / #0284c7 / #4f46e5 / #059669 / #d97706 / #dc2626 /
+      // #db2777 / #65a30d / #ea580c) — это создавало «два разных Ганта»
+      // (live: Mist↔Stone, export: tailwind). Любое расхождение здесь =
+      // визуальный split-brain — держать в синхроне с theme.css.
       const PHASE_COLORS = {
-        'бизнес аналитика':'#7c3aed','аналитика':'#0284c7','backend':'#4f46e5','frontend':'#059669',
-        'тестирование':'#d97706','внедрение':'#dc2626','миграция данных':'#db2777',
-        'стабилизация':'#65a30d','хотфикс':'#ea580c'
+        'бизнес аналитика':'#6A5E78','аналитика':'#5A5A6E','backend':'#2C5F88','frontend':'#3A8060',
+        'тестирование':'#8A6428','внедрение':'#705A40','миграция данных':'#456878',
+        'стабилизация':'#3A6850','хотфикс':'#8A4828'
       };
       const markerCache = {};
       function ensureMarker(color) {
@@ -533,11 +564,14 @@ const _REDRAW_ARROWS_JS = `
 const _THEME_JS = `
 (function () {
   const KEY = 'q2_gantt_export_theme';
+  // V21 Wave-3 — локальные inline-SVG icons для self-contained экспорта.
+  const _gexSun  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.18em;display:inline-block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
+  const _gexMoon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-0.18em;display:inline-block"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
   function apply(t) {
     const dark = t === 'dark';
     document.body.classList.toggle('theme-dark', dark);
     const btn = document.getElementById('gex-theme-btn');
-    if (btn) btn.textContent = dark ? '☀ Светлая' : '🌙 Тёмная';
+    if (btn) btn.innerHTML = dark ? (_gexSun + ' Светлая') : (_gexMoon + ' Тёмная');
   }
   let initial = null;
   try { initial = localStorage.getItem(KEY); } catch (_) {}
@@ -660,63 +694,105 @@ const _COLLAPSE_JS = `
 const _BASELINE_CSS = `
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; }
+
+/* V21 — inject Prизма-токены в standalone document. Раньше токены брались
+   из theme.css (не подключается в export), и var()-references фолбекались
+   на light hex даже в dark theme. Теперь токены доступны в обоих темах. */
+:root {
+  --prizma-bg: #FAFAF8;
+  --prizma-bg-elevated: #FFFFFF;
+  --prizma-bg-tertiary: #F0EDE5;
+  --prizma-text-primary: #1A1A22;
+  --prizma-text-secondary: #7A7A82;
+  --prizma-text-tertiary: #5A5A64;
+  --prizma-border: rgba(26, 26, 34, 0.08);
+  --prizma-border-strong: rgba(26, 26, 34, 0.15);
+  --prizma-on-course: #0F8A5F;
+  --prizma-on-course-bg: rgba(15, 138, 95, 0.1);
+  --prizma-drift: #B5670A;
+  --prizma-drift-bg: rgba(181, 103, 10, 0.1);
+  --prizma-off-course: #C13838;
+  --prizma-off-course-bg: rgba(193, 56, 56, 0.1);
+  --prizma-information: #1F6B96;
+  --prizma-information-bg: rgba(31, 107, 150, 0.1);
+}
+body.theme-dark {
+  --prizma-bg: #0A0A0F;
+  --prizma-bg-elevated: #1A1A22;
+  --prizma-bg-tertiary: #2A2A30;
+  --prizma-text-primary: #FFFFFF;
+  --prizma-text-secondary: #8E8E96;
+  --prizma-text-tertiary: #8A8A92;
+  --prizma-border: rgba(255, 255, 255, 0.08);
+  --prizma-border-strong: rgba(255, 255, 255, 0.15);
+  --prizma-on-course: #7FE8B5;
+  --prizma-on-course-bg: rgba(127, 232, 181, 0.12);
+  --prizma-drift: #FFB347;
+  --prizma-drift-bg: rgba(255, 179, 71, 0.12);
+  --prizma-off-course: #FF6B6B;
+  --prizma-off-course-bg: rgba(255, 107, 107, 0.12);
+  --prizma-information: #6EC1E4;
+  --prizma-information-bg: rgba(110, 193, 228, 0.12);
+}
+
 body {
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  background: #f0f2f7; color: #111827; line-height: 1.5;
+  background: var(--prizma-bg); color: var(--prizma-text-primary); line-height: 1.5;
   padding: 20px; min-height: 100vh;
   transition: background-color .15s, color .15s;
 }
-body.theme-dark { background: #0b1020; color: #e5e7eb; }
 
 .gex-page-header {
   display: flex; flex-direction: column; gap: 6px;
   margin-bottom: 20px;
   padding: 16px 20px;
-  background: #ffffff;
-  border: 1px solid #e4e7ec;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
   border-radius: 12px;
   box-shadow: 0 1px 4px rgba(0,0,0,.06);
 }
-body.theme-dark .gex-page-header { background: #121a2f; border-color: #25304d; }
+body.theme-dark .gex-page-header { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); box-shadow: none; }
 .gex-page-title { font-size: 18px; font-weight: 700; }
-.gex-page-meta { font-size: 12px; color: #6b7280; display: flex; gap: 14px; flex-wrap: wrap; }
-body.theme-dark .gex-page-meta { color: #94a3b8; }
+.gex-page-meta { font-size: 12px; color: var(--prizma-text-secondary); display: flex; gap: 14px; flex-wrap: wrap; }
 .gex-meta-item { display: inline-flex; gap: 5px; align-items: baseline; }
 .gex-meta-num { font-weight: 700; }
 .gex-readonly-badge {
   display: inline-block;
   padding: 2px 8px;
-  background: #fef3c7; color: #78350f;
-  border: 1px solid #f59e0b;
+  /* Wave1 P-GR §D7 — bare hex (#fef3c7/#78350f/#f59e0b) заменены на брендовые
+     токены через CSS-vars с fallback (standalone HTML-export не получает
+     prizma-vars из app, поэтому fallback-hex обязателен). */
+  background: var(--prizma-drift-bg, #fef3c7);
+  color: var(--prizma-drift-fg, #78350f);
+  border: 1px solid var(--prizma-drift, #f59e0b);
   border-radius: 4px;
   font-size: 11px; font-weight: 600;
   letter-spacing: .3px;
 }
-body.theme-dark .gex-readonly-badge { background: #422006; color: #fde68a; border-color: #92400e; }
+body.theme-dark .gex-readonly-badge { background: var(--prizma-drift-bg, #422006); color: var(--prizma-drift, #fde68a); border-color: var(--prizma-drift, #92400e); }
 
 #gex-theme-btn {
   margin-left: auto;
   padding: 4px 10px;
   font: inherit; font-size: 12px; font-weight: 600;
   background: transparent;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--prizma-border-strong, var(--prizma-border));
   border-radius: 6px;
   color: inherit;
   cursor: pointer;
   transition: background .15s, border-color .15s;
 }
 #gex-theme-btn:hover { background: rgba(127,127,127,.1); }
-body.theme-dark #gex-theme-btn { border-color: #475569; }
 
 .gex-card {
-  background: #ffffff;
-  border: 1px solid #e4e7ec;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
   border-radius: 12px;
   padding: 12px;
   box-shadow: 0 1px 4px rgba(0,0,0,.06);
   overflow: auto;
 }
-body.theme-dark .gex-card { background: #121a2f; border-color: #25304d; }
+body.theme-dark .gex-card { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); box-shadow: none; }
 
 /* ── Legend strip (above the gantt) ──────────────────── */
 .gex-legend {
@@ -725,19 +801,18 @@ body.theme-dark .gex-card { background: #121a2f; border-color: #25304d; }
   gap: 12px 20px;
   margin-bottom: 14px;
   padding: 12px 16px;
-  background: #ffffff;
-  border: 1px solid #e4e7ec;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0,0,0,.04);
 }
-body.theme-dark .gex-legend { background: #121a2f; border-color: #25304d; }
+body.theme-dark .gex-legend { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); box-shadow: none; }
 .gex-legend-section { display: flex; flex-direction: column; gap: 6px; }
 .gex-legend-title {
   font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .6px;
-  color: #6b7280;
+  color: var(--prizma-text-secondary);
 }
-body.theme-dark .gex-legend-title { color: #94a3b8; }
 .gex-legend-items {
   display: flex; flex-wrap: wrap; gap: 6px 12px;
   font-size: 11px;
@@ -745,9 +820,8 @@ body.theme-dark .gex-legend-title { color: #94a3b8; }
 .gex-legend-item {
   display: inline-flex; align-items: center; gap: 5px;
   white-space: nowrap;
-  color: #374151;
+  color: var(--prizma-text-primary);
 }
-body.theme-dark .gex-legend-item { color: #cbd5e1; }
 .gex-legend-icon {
   display: inline-block;
   min-width: 16px; text-align: center;
@@ -758,21 +832,20 @@ body.theme-dark .gex-legend-item { color: #cbd5e1; }
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px;
   border-radius: 50%;
-  background: #6366f1; color: #ffffff;
+  background: var(--prizma-information); color: #ffffff;
   font-size: 9px; font-weight: 700;
   font-family: 'Inter', system-ui, sans-serif;
   letter-spacing: 0;
 }
-.gex-legend-meta { color: #6b7280; font-style: italic; }
-body.theme-dark .gex-legend-meta { color: #94a3b8; }
+.gex-legend-meta { color: var(--prizma-text-secondary); font-style: italic; }
 
 /* Spine pill anatomy demo inside the legend (V15 redesign 2026-04-30). */
 .gex-legend-anatomy { grid-column: 1 / -1; }
 .gex-legend-pill-demo {
   display: inline-flex; align-items: stretch;
-  background: #ffffff;
-  border: 1px solid #e4e7ec;
-  border-left: 3px solid #4f46e5;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
+  border-left: 3px solid var(--prizma-information);
   border-radius: 6px;
   padding: 4px 7px 4px 6px;
   min-width: 140px;
@@ -780,26 +853,25 @@ body.theme-dark .gex-legend-meta { color: #94a3b8; }
   margin-right: 12px;
   vertical-align: middle;
 }
-body.theme-dark .gex-legend-pill-demo { background: #1a1d23; border-color: rgba(255,255,255,.08); }
+body.theme-dark .gex-legend-pill-demo { background: var(--prizma-bg-tertiary); border-color: var(--prizma-border); }
 .gex-legend-pill-body { display: flex; flex-direction: column; gap: 1px; }
 .gex-legend-pill-row1 {
   display: flex; align-items: center; gap: 4px;
   font-weight: 600;
 }
 .gex-legend-pill-row2 {
-  font-size: 9.5px; color: #6b7280; font-weight: 500;
+  font-size: 9.5px; color: var(--prizma-text-secondary); font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
-body.theme-dark .gex-legend-pill-row2 { color: #8a8f98; }
 .gex-legend-pill-state-active {
   display: inline-block; width: 8px; height: 8px;
   border-radius: 50%;
-  background: #4f46e5;
+  background: var(--prizma-information);
 }
 .gex-legend-pill-cmt {
   display: inline-block; width: 7px; height: 7px;
   border-radius: 1.5px;
-  background: #f59e0b;
+  background: var(--prizma-drift);
 }
 .gex-legend-stripe-sample {
   display: inline-block;
@@ -814,25 +886,25 @@ body.theme-dark .gex-legend-pill-row2 { color: #8a8f98; }
   font-size: 8px; font-weight: 800;
   border-radius: 50%;
 }
-.gex-legend-state-active   { background: #4f46e5; }
-.gex-legend-state-done     { background: #059669; color: #fff; }
+.gex-legend-state-active   { background: var(--prizma-information); }
+.gex-legend-state-done     { background: var(--prizma-on-course); color: #fff; }
 .gex-legend-state-unplanned {
   background: transparent;
-  border: 1.2px dashed #6b7280;
+  border: 1.2px dashed var(--prizma-text-secondary);
 }
 .gex-legend-cmt-square {
   display: inline-block; width: 8px; height: 8px;
   border-radius: 1.5px;
   vertical-align: middle; margin-right: 2px;
 }
-.gex-legend-cmt-transfer { background: #f59e0b; }
-.gex-legend-cmt-add      { background: #3b82f6; }
+.gex-legend-cmt-transfer { background: var(--prizma-drift); }
+.gex-legend-cmt-add      { background: var(--prizma-information); }
 
 /* ── Per-assignee summary ─────────────────────────────── */
 .gex-summary {
   margin-top: 24px;
-  background: #ffffff;
-  border: 1px solid #e4e7ec;
+  background: var(--prizma-bg-elevated);
+  border: 1px solid var(--prizma-border);
   border-radius: 12px;
   padding: 20px 24px;
   box-shadow: 0 1px 4px rgba(0,0,0,.06);
@@ -841,36 +913,31 @@ body.theme-dark .gex-legend-pill-row2 { color: #8a8f98; }
    manager's eye lands on the per-FIO summary first. */
 .gex-summary-unassigned {
   margin-top: 16px;
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--prizma-drift);
 }
-body.theme-dark .gex-summary-unassigned { border-left-color: #fbbf24; }
-body.theme-dark .gex-summary { background: #121a2f; border-color: #25304d; }
+body.theme-dark .gex-summary { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); box-shadow: none; }
 .gex-summary-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-.gex-summary-meta { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
-body.theme-dark .gex-summary-meta { color: #94a3b8; }
+.gex-summary-meta { font-size: 12px; color: var(--prizma-text-secondary); margin-bottom: 16px; }
 
 .gex-fio-group { margin-bottom: 24px; }
 .gex-fio-group:last-child { margin-bottom: 0; }
 .gex-fio-header {
   display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
   padding: 8px 0;
-  border-bottom: 1.5px solid #e4e7ec;
+  border-bottom: 1.5px solid var(--prizma-border);
   margin-bottom: 8px;
 }
-body.theme-dark .gex-fio-header { border-bottom-color: #334772; }
 .gex-fio-name { font-size: 14px; font-weight: 700; }
 .gex-fio-agg { font-size: 11px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
-.gex-fio-agg-meta { color: #6b7280; }
-body.theme-dark .gex-fio-agg-meta { color: #94a3b8; }
+.gex-fio-agg-meta { color: var(--prizma-text-secondary); }
 .gex-agg-pill {
   display: inline-block;
   padding: 1px 7px;
-  background: #eef2ff; color: #4338ca;
+  background: var(--prizma-information-bg); color: var(--prizma-information);
   border-radius: 4px;
   font-size: 11px; font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-body.theme-dark .gex-agg-pill { background: #202b4f; color: #c7d2fe; }
 
 .gex-table {
   width: 100%; border-collapse: collapse; font-size: 12px;
@@ -880,22 +947,18 @@ body.theme-dark .gex-agg-pill { background: #202b4f; color: #c7d2fe; }
   padding: 6px 10px;
   font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: .5px;
-  color: #6b7280;
-  border-bottom: 1px solid #e4e7ec;
+  color: var(--prizma-text-secondary);
+  border-bottom: 1px solid var(--prizma-border);
 }
-body.theme-dark .gex-table th { color: #94a3b8; border-bottom-color: #2b3d63; }
 .gex-table td {
   padding: 7px 10px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--prizma-border);
   vertical-align: middle;
 }
-body.theme-dark .gex-table td { border-bottom-color: #1a2440; }
 .gex-table tr:last-child td { border-bottom: none; }
-.gex-cell-team { color: #6b7280; font-size: 11px; white-space: nowrap; }
-body.theme-dark .gex-cell-team { color: #94a3b8; }
+.gex-cell-team { color: var(--prizma-text-secondary); font-size: 11px; white-space: nowrap; }
 .gex-cell-epic { font-weight: 600; }
-.gex-cell-wt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #374151; }
-body.theme-dark .gex-cell-wt { color: #cbd5e1; }
+.gex-cell-wt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--prizma-text-primary); }
 .gex-cell-period { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: nowrap; }
 .gex-bucket-pill {
   display: inline-block;
@@ -904,21 +967,17 @@ body.theme-dark .gex-cell-wt { color: #cbd5e1; }
   font-size: 11px; font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.gex-bucket-120 { background: #dbeafe; color: #1e40af; }
-.gex-bucket-121 { background: #d1fae5; color: #065f46; }
-.gex-bucket-122 { background: #fef3c7; color: #92400e; }
-.gex-bucket-OT  { background: #fee2e2; color: #991b1b; }
-body.theme-dark .gex-bucket-120 { background: #1b2348; color: #93c5fd; }
-body.theme-dark .gex-bucket-121 { background: #122f35; color: #6ee7b7; }
-body.theme-dark .gex-bucket-122 { background: #3a2c14; color: #fde68a; }
-body.theme-dark .gex-bucket-OT  { background: #331924; color: #fca5a5; }
+/* V21 — bucket pills и status colors через signal-tokens с fallback hex
+   (export — standalone document, theme.css не инжектируется, var() даёт
+   значение когда styles.css доступен, fallback — когда нет). */
+.gex-bucket-120 { background: var(--prizma-information-bg, #dbeafe); color: var(--prizma-information, #1e40af); }
+.gex-bucket-121 { background: var(--prizma-on-course-bg, #d1fae5); color: var(--prizma-on-course, #065f46); }
+.gex-bucket-122 { background: var(--prizma-drift-bg, #fef3c7); color: var(--prizma-drift, #92400e); }
+.gex-bucket-OT  { background: var(--prizma-off-course-bg, #fee2e2); color: var(--prizma-off-course, #991b1b); }
 .gex-status { font-weight: 600; font-size: 11px; }
-.gex-status-done      { color: #059669; }
-.gex-status-active    { color: #2563eb; }
-.gex-status-unplanned { color: #b45309; }
-body.theme-dark .gex-status-done      { color: #34d399; }
-body.theme-dark .gex-status-active    { color: #60a5fa; }
-body.theme-dark .gex-status-unplanned { color: #fbbf24; }
+.gex-status-done      { color: var(--prizma-on-course, #059669); }
+.gex-status-active    { color: var(--prizma-information, #2563eb); }
+.gex-status-unplanned { color: var(--prizma-drift, #b45309); }
 `;
 
 export const GanttHTMLExport = {
@@ -957,7 +1016,8 @@ export const GanttHTMLExport = {
     const teamCount = new Set(rows.map(r => r.team || '—').filter(Boolean)).size || 0;
     const doneCount = rows.filter(r => r.isDone).length;
     const lockBadge = state.planLocked
-      ? `<span class="gex-readonly-badge" style="background:#fef3c7;color:#78350f;border-color:#f59e0b;">🔒 План зафиксирован — ${esc(new Date(state.planLocked.at).toLocaleString('ru'))}</span>`
+      // Wave1 P-GR §D8 — inline hex заменены на CSS-vars c fallback (см. §D7).
+      ? `<span class="gex-readonly-badge" style="background:var(--prizma-drift-bg,#fef3c7);color:var(--prizma-drift-fg,#78350f);border-color:var(--prizma-drift,#f59e0b);">${gexIcon("lock")} План зафиксирован — ${esc(new Date(state.planLocked.at).toLocaleString('ru'))}</span>`
       : '';
     const summaryHtml    = _buildAssigneeSummary(rows);
     const unassignedHtml = _buildUnassignedSummary(rows);
@@ -968,7 +1028,7 @@ export const GanttHTMLExport = {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Гант — экспорт ${esc(new Date().toLocaleString('ru'))}</title>
+<title>Призма — Гант · ${esc(new Date().toLocaleString('ru'))}</title>
 <style>${_BASELINE_CSS}</style>
 <style>${cssText}</style>
 <style>
@@ -976,18 +1036,17 @@ export const GanttHTMLExport = {
 .gantt-pill { cursor: default !important; }
 .gantt-pill:hover { transform: none !important; }
 .gantt-cell { cursor: default !important; }
-.gex-chev { color: #6b7280; }
+.gex-chev { color: var(--prizma-text-secondary); }
 .gex-chev:hover { color: inherit !important; }
-body.theme-dark .gex-chev { color: #94a3b8; }
 
 /* V17.1 D1 — collapsible legend wrapper */
-.gex-legend-details { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; margin: 12px 0; overflow: hidden; }
-body.theme-dark .gex-legend-details { background: #121a2f; border-color: #25304d; }
+.gex-legend-details { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: 10px; margin: 12px 0; overflow: hidden; }
+body.theme-dark .gex-legend-details { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); }
 .gex-legend-summary {
   cursor: pointer; user-select: none;
   padding: 10px 16px; font-size: 11px; font-weight: 700;
   letter-spacing: .6px; text-transform: uppercase;
-  color: #4b5563; list-style: none;
+  color: var(--prizma-text-secondary); list-style: none;
   display: flex; align-items: center; gap: 8px;
 }
 .gex-legend-summary::-webkit-details-marker { display: none; }
@@ -995,39 +1054,35 @@ body.theme-dark .gex-legend-details { background: #121a2f; border-color: #25304d
   content: '▾'; transition: transform .15s; font-size: 10px;
 }
 .gex-legend-details:not([open]) .gex-legend-summary::before { transform: rotate(-90deg); }
-body.theme-dark .gex-legend-summary { color: #94a3b8; }
-.gex-legend-details .gex-legend { margin: 0; border: 0; border-top: 1px solid #e5e7eb; border-radius: 0; }
-body.theme-dark .gex-legend-details .gex-legend { border-top-color: #25304d; }
+.gex-legend-details .gex-legend { margin: 0; border: 0; border-top: 1px solid var(--prizma-border); border-radius: 0; }
 
 /* V17.1 D2 — current-release toggle */
 #gex-current-release-btn {
   margin-left: 4px;
-  padding: 6px 12px; border: 1px solid #d1d5db; background: transparent; color: inherit;
+  padding: 6px 12px; border: 1px solid var(--prizma-border-strong, var(--prizma-border)); background: transparent; color: inherit;
   border-radius: 8px; font-size: 12px; cursor: pointer;
   transition: background .14s, border-color .14s, color .14s;
 }
 #gex-current-release-btn:hover { background: rgba(127,127,127,.1); }
-#gex-current-release-btn.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
-body.theme-dark #gex-current-release-btn { border-color: #475569; }
-body.theme-dark #gex-current-release-btn.active { background: #6366f1; border-color: #6366f1; }
+#gex-current-release-btn.active { background: var(--prizma-information); color: #fff; border-color: var(--prizma-information); }
 </style>
 </head>
 <body>
 <div class="gex-page-header">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <div class="gex-page-title">Гант — экспорт</div>
+    <div class="gex-page-title">Призма — Гант</div>
     <span class="gex-readonly-badge">Только просмотр</span>
     ${lockBadge}
-    <button id="gex-theme-btn" type="button" title="Переключить тему">🌙 Тёмная</button>
+    <button id="gex-theme-btn" type="button" title="Переключить тему">${gexIcon("moon")} Тёмная</button>
     <!-- V17.1 D2 — toggle: показать только текущий релиз (тот, в чьём диапазоне
          today попадает) + колодец Овертайм. Остальные колодцы скрываются. -->
     <button id="gex-current-release-btn" type="button" title="Показать только текущий релиз и Овертайм">Текущий релиз</button>
   </div>
   <div class="gex-page-meta">
-    <span class="gex-meta-item">📅 ${esc(new Date().toLocaleString('ru'))}</span>
-    <span class="gex-meta-item">📋 <span class="gex-meta-num">${rows.length}</span> задач</span>
-    <span class="gex-meta-item">👥 <span class="gex-meta-num">${teamCount}</span> команд</span>
-    <span class="gex-meta-item">✅ <span class="gex-meta-num">${doneCount}</span> завершено</span>
+    <span class="gex-meta-item">${gexIcon("calendar")} ${esc(new Date().toLocaleString('ru'))}</span>
+    <span class="gex-meta-item">${gexIcon("clipboard")} <span class="gex-meta-num">${rows.length}</span> задач</span>
+    <span class="gex-meta-item">${gexIcon("users")} <span class="gex-meta-num">${teamCount}</span> команд</span>
+    <span class="gex-meta-item">${gexIcon("check-circle")} <span class="gex-meta-num">${doneCount}</span> завершено</span>
     <span class="gex-meta-item" style="opacity:.6">Клик на заголовок команды — свернуть/развернуть</span>
   </div>
 </div>

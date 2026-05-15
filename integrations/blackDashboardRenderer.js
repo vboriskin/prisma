@@ -2,11 +2,14 @@
 /* ============================================================
    BLACK DASHBOARD — RENDERER
    Pure rendering — strings only, no side effects. Three tabs:
-   🎯 Цели · 🔗 Покрытие · 📈 Метрики.
+   Goals · Coverage · Metrics. (V22 Brand pass — без эмодзи в UI.)
    ============================================================ */
 
 import { esc, trunc } from './portfolioPulseUtils.js';
 import { renderDonut, renderBars } from './portfolioPulseMetrics.js';
+import { Icons } from '../app/icons.js';
+import { Utils } from '../utils.js';
+import { prizmaLoaderMark } from '../app/prizmaUI.js';
 
 // URL-scheme allowlist — keeps href safe even if config has bad data.
 // Also strips trailing slashes so concatenation `${url}/browse/X` doesn't
@@ -28,6 +31,16 @@ function _coverageColorClass(pct) {
   if (pct >= 70) return 'bd-kpi-green';
   if (pct >= 40) return 'bd-kpi-yellow';
   return 'bd-kpi-red';
+}
+
+/* V22 Brand B5 — coverage-tier (signal-dot + label).
+   Брендбук §3 Signal: ≥70 on-course / 40-69 drift / <40 off-course.
+   Используется для coverage-row + KPI-плашек. Legacy bd-kpi-* классы
+   остаются рядом (для CSS fallback Brand-CSS-агент'а). */
+function _coverageTier(pct) {
+  if (pct >= 70) return { tier: 'high', signal: 'on-course',  label: 'На курсе' };
+  if (pct >= 40) return { tier: 'mid',  signal: 'drift',      label: 'Дрейф' };
+  return                  { tier: 'low', signal: 'off-course', label: 'Сбился с курса' };
 }
 
 /* ── Diagnostics panel — readable view of summary + diagnostics ────
@@ -176,16 +189,131 @@ function _renderDiagnosticsDetails(model) {
   </details>`;
 }
 
+/* ── Diagnostic Modal ─────────────────────────────────────── */
+
+/**
+ * Build a safe (scrubbed) JSON for BD diagnostics export.
+ * Tokens never leave the payload; summaries truncated; errors scrubbed.
+ */
+export function prepareBdDiagSafeJson(model) {
+  const d = model.diagnostics || {};
+  const ex = d.expand || {};
+  const cov = d.coverage || null;
+
+  const safeErrors = (model.errors || []).map(e => ({
+    scope:   e.scope || '',
+    message: Utils.redactSecretsInText(e.message || '', 300),
+  }));
+
+  const safeGoals = (model.goals || []).map(g => ({
+    key:           g.error ? '(error)' : g.key,
+    statusCat:     g.statusCat || '',
+    linkedCount:   (g.linkedIssues || []).filter(li => !li.notFound).length,
+    notFoundCount: (g.linkedIssues || []).filter(li => li.notFound).length,
+    hasError:      !!g.error,
+  }));
+
+  const out = {
+    _exportMode: 'safe',
+    _note: 'Безопасный экспорт: токены скрыты, имена/emails не включены',
+    generatedAt:  new Date().toISOString(),
+    fetchedAt:    model.fetchedAt || null,
+    summary:      model.summary || {},
+    coverageByTeam: (model.coverageByTeam || []).map(t => ({
+      pk:              t.pk,
+      name:            t.name,
+      total:           t.total,
+      linked:          t.linked,
+      excluded:        t.excluded || 0,
+      pct:             t.pct,
+      linkedFromGoals: t.linkedFromGoals || 0,
+    })),
+    goals:        safeGoals,
+    errors:       safeErrors,
+    diagnostics: {
+      totalMs:       d.totalMs || 0,
+      expand: {
+        seedCountTotal:     ex.seedCountTotal,
+        seedDroppedAtIntake: ex.seedDroppedAtIntake,
+        seedCount:          ex.seedCount,
+        expandedCount:      ex.expandedCount,
+        droppedOutOfDelta:  ex.droppedOutOfDelta,
+        levelsReached:      ex.levelsReached,
+        batches:            ex.batches,
+        exitReason:         ex.exitReason,
+        truncated:          ex.truncated,
+        followCloners:      ex.followCloners,
+        clonersProbeStatus: ex.clonersProbeStatus,
+        parallelProjects:   ex.parallelProjects,
+        chunkErrorCount:    (ex.chunkErrors || []).length,
+        chunkErrors:        (ex.chunkErrors || []).slice(0, 5).map(e => ({
+          level: e.level,
+          error: Utils.redactSecretsInText(e.error || '', 200),
+        })),
+        perProjectSummary: (ex.perProjectSummary || []).map(p => ({
+          pk: p.pk, seedCount: p.seedCount, expandedCount: p.expandedCount,
+          levels: p.levels, batches: p.batches, truncated: p.truncated,
+          exitReason: p.exitReason, error: p.error ? Utils.redactSecretsInText(p.error, 200) : null,
+        })),
+      },
+      coverage: cov ? {
+        totalIssuesScanned:              cov.totalIssuesScanned,
+        totalEpicsScanned:               cov.totalEpicsScanned,
+        excludedEpicsNoChildren:         cov.excludedEpicsNoChildren,
+        excludedEpicsAllNewStatus:       cov.excludedEpicsAllNewStatus,
+        excludedEpicsAllChildrenExcluded: cov.excludedEpicsAllChildrenExcluded,
+        excludedByRule:                  cov.excludedByRule || {},
+        quarterCutoff:                   cov.quarterCutoff || null,
+      } : null,
+    },
+  };
+  return JSON.stringify(out, null, 2);
+}
+
+/** Render the diagnostics modal HTML (injected into <body>). */
+export function renderBdDiagModal(model) {
+  const diagBody = _renderDiagnosticsDetails(model);
+  return `
+  <div class="bd-diag-modal-overlay" id="bd-diag-modal-overlay" role="dialog" aria-modal="true" aria-label="Диагностика Чёрного дашборда">
+    <div class="bd-diag-modal">
+      <div class="bd-diag-modal-head">
+        <span class="bd-diag-modal-title">${Icons.get('activity', { cls: 'btn-icon', size: 15 })} Диагностика — Чёрный дашборд</span>
+        <button class="bd-diag-modal-close" id="bd-diag-modal-close" title="Закрыть" aria-label="Закрыть">${Icons.get('x', { cls: 'btn-icon', size: 16 })}</button>
+      </div>
+      <div class="bd-diag-modal-body">
+        ${diagBody}
+      </div>
+      <div class="bd-diag-modal-foot">
+        <button class="int-btn int-btn-secondary int-btn-sm" id="bd-diag-export-btn">
+          ${Icons.get('download', { cls: 'btn-icon', size: 14 })} Безопасный JSON
+        </button>
+        <span class="bd-diag-modal-foot-hint">Токены скрыты. Отправь файл разработчику для диагностики.</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ── Top header (sub-tabs + refresh) ─────────────────────── */
 export function renderTopHeader(model, activeTab, fetchedAtLabel) {
   const tabs = [
-    { id: 'goals',    label: '🎯 Цели' },
-    { id: 'coverage', label: '🔗 Покрытие' },
-    { id: 'metrics',  label: '📈 Метрики' },
+    { id: 'goals',    label: 'Цели',     icon: 'target' },
+    { id: 'coverage', label: 'Покрытие', icon: 'link-2' },
+    { id: 'metrics',  label: 'Метрики',  icon: 'bar-chart-3' },
   ];
   const errBlock = model.errors?.length
-    ? `<div class="bd-error-banner">${model.errors.map(e => `<div>⚠ <b>${esc(e.scope || '?')}</b>: ${esc(e.message || '')}</div>`).join('')}</div>`
+    ? `<div class="bd-error-banner">${model.errors.map(e => `<div>${Icons.get('alert-triangle', { cls: 'btn-icon', size: 14 })} <b>${esc(e.scope || '?')}</b>: ${esc(e.message || '')}</div>`).join('')}</div>`
     : '';
+  // V22 C1 — SSO-redirect баннер. BD сам не дёргает Confluence, но Сканнер
+  // пишет последний `cfTriedSummary` в `window.TeamScanner2._lastRawDiag`
+  // (см. integrations/teamScanner2.js, V20 S7 B13). Читаем оттуда — если
+  // тимлид только что прогонял Сканнер и заметил 302-flag, то и в BD сразу
+  // увидит баннер (cross-feature visibility). Если данных нет (ни Сканнер
+  // не запускался, ни prepared diag) — баннер не показывается. graceful.
+  _ensureBdSsoBannerStyles();
+  let cfTried = null;
+  try { cfTried = (typeof window !== 'undefined' && window.TeamScanner2?._lastRawDiag?.cfTriedSummary) || null; }
+  catch (_) { cfTried = null; }
+  const ssoBanner = _renderBdSsoBanner(cfTried);
   // Diagnostics block — always rendered (collapsed by default), but
   // auto-expanded when there's an error so user sees context immediately.
   const hasErrors = !!(model.errors?.length);
@@ -193,21 +321,110 @@ export function renderTopHeader(model, activeTab, fetchedAtLabel) {
     .replace('<details class="bd-diag-details">', `<details class="bd-diag-details${hasErrors ? ' bd-diag-error' : ''}"${hasErrors ? ' open' : ''}>`);
   return `<div class="bd-header">
     <div class="bd-header-row">
-      <h3 class="bd-title">⚫ Чёрный дашборд</h3>
+      <h2 class="bd-title">${Icons.get('circle-dot', { cls: 'btn-icon', size: 16 })} Чёрный дашборд</h2>
       <div class="bd-header-meta">
         <span class="bd-fetched">обновлено: ${esc(fetchedAtLabel)}</span>
-        <button class="int-btn int-btn-primary int-btn-sm" id="bd-refresh-btn" title="Перезагрузить данные с серверов">↻ Обновить</button>
+        <button class="int-btn int-btn-ghost int-btn-sm" id="bd-diag-btn" title="Диагностика — почему данные такие, выгрузить JSON">${Icons.get('activity', { cls: 'btn-icon', size: 14 })} Диагностика</button>
+        <div class="bd-export-wrap">
+          <button class="int-btn int-btn-ghost int-btn-sm" id="bd-export-btn" title="Сохранить выгрузку HTML — выберите «Цели» или «Покрытие». Внутри файла можно фильтровать по команде / цели.">${Icons.get('download', { cls: 'btn-icon', size: 14 })} Выгрузить HTML</button>
+          <div class="bd-export-menu" id="bd-export-menu" hidden>
+            <button class="bd-export-item" type="button" data-bd-export="goals">${Icons.get('target', { cls: 'btn-icon', size: 14 })} Цели</button>
+            <button class="bd-export-item" type="button" data-bd-export="coverage">${Icons.get('link-2', { cls: 'btn-icon', size: 14 })} Покрытие</button>
+          </div>
+        </div>
+        <button class="int-btn int-btn-primary int-btn-sm" id="bd-refresh-btn" title="Перезагрузить данные с серверов">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 14 })} Обновить</button>
       </div>
     </div>
     ${errBlock}
+    ${ssoBanner}
     ${diagBlock}
     <div class="bd-tabs">
-      ${tabs.map(t => `<button class="bd-tab ${activeTab===t.id?'bd-tab-active':''}" data-bd-tab="${t.id}">${esc(t.label)}</button>`).join('')}
+      ${tabs.map(t => `<button class="bd-tab ${activeTab===t.id?'bd-tab-active':''}" data-bd-tab="${t.id}">${Icons.get(t.icon, { cls: 'btn-icon', size: 14 })} ${esc(t.label)}</button>`).join('')}
     </div>
   </div>`;
 }
 
-/* ── Tab: 🎯 Цели ─────────────────────────────────────────── */
+/* ── V22 C1 — SSO-redirect inline banner (BD side) ──────────────────
+   Аналог `renderConfluenceSsoBanner` из teamScanner2Renderer.js — копия
+   разметки, чтобы BD не зависел от Сканнера. Брендбук Spine-pill:
+   3px stripe-left, accent `--prizma-warning`, без gradients. */
+function _renderBdSsoBanner(cf) {
+  if (!cf || cf.suspectedSso !== true) return '';
+  const signal = cf.ssoSignal || 'redirect';
+  const redirCount = (cf.byStatus?.['302'] || 0) + (cf.byStatus?.['301'] || 0);
+  const subline = signal === 'redirect' && redirCount > 0
+    ? `${redirCount} из ${cf.total || '?'} запросов получили 302/301`
+    : (signal === 'html-200' ? 'Confluence отдаёт HTML вместо JSON (silent SSO interception)'
+      : 'Confluence отдаёт пустые ответы при 200 OK');
+  return `
+    <div class="bd-sso-banner" role="status" aria-live="polite">
+      <div class="bd-sso-banner-icon" aria-hidden="true">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 16 })}</div>
+      <div class="bd-sso-banner-body">
+        <div class="bd-sso-banner-title"><b>Confluence отвечает 302 redirect</b> — ваш токен возможно SSO-cookie, а не Personal Access Token (PAT).</div>
+        <div class="bd-sso-banner-sub">${esc(subline)}. Confluence → Profile → Personal Access Tokens → Create new → заменить в настройках.</div>
+      </div>
+      <button type="button" class="bd-sso-banner-cta" data-bd-open-settings="confluence" title="Открыть настройки интеграций → Confluence">Открыть настройки</button>
+    </div>
+  `;
+}
+
+function _ensureBdSsoBannerStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('bd-sso-banner-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'bd-sso-banner-styles';
+  s.textContent = `
+    .bd-sso-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin: 8px 0 0 0;
+      padding: 10px 14px;
+      background: var(--prizma-surface, var(--surf-1, #FFFFFF));
+      border: 1px solid var(--border-2, rgba(0,0,0,.08));
+      border-left: 3px solid var(--prizma-warning, #C97A1A);
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.4;
+      color: var(--prizma-text, var(--text-1, #1B1B1F));
+    }
+    .bd-sso-banner-icon {
+      flex: 0 0 auto;
+      color: var(--prizma-warning, #C97A1A);
+      padding-top: 1px;
+    }
+    .bd-sso-banner-body { flex: 1 1 auto; min-width: 0; }
+    .bd-sso-banner-sub {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--prizma-text-secondary, var(--text-2, #4A4A52));
+    }
+    .bd-sso-banner-cta {
+      flex: 0 0 auto;
+      align-self: center;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      background: transparent;
+      color: var(--prizma-warning, #C97A1A);
+      border: 1px solid var(--prizma-warning, #C97A1A);
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bd-sso-banner-cta:hover {
+      background: var(--prizma-warning, #C97A1A);
+      color: #FFFFFF;
+    }
+    .bd-sso-banner-cta:focus-visible {
+      outline: 2px solid var(--prizma-warning, #C97A1A);
+      outline-offset: 2px;
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+/* ── Tab: Цели ─────────────────────────────────────────── */
 export function renderGoalsTab(model) {
   const s = model.summary;
   const sigmaUrl = safeUrl(model.sigmaBaseUrl);
@@ -225,7 +442,7 @@ export function renderGoalsTab(model) {
 
   const goals = model.goals.map(g => {
     const goalLink = sigmaUrl
-      ? `<a class="bd-goal-key" href="${esc(sigmaUrl)}/browse/${esc(g.key)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(g.key)}</a>`
+      ? `<a class="bd-goal-key" href="${esc(sigmaUrl)}/browse/${esc(g.key)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${esc(g.key)}</a>`
       : `<span class="bd-goal-key">${esc(g.key)}</span>`;
     if (g.error) {
       return `<details class="bd-goal bd-goal-error">
@@ -254,7 +471,7 @@ export function renderGoalsTab(model) {
     const teamBlocks = (g.linkedByPk || []).map(team => {
       const rows = team.issues.map(li => {
         const issueLink = (!li.notFound && deltaUrl)
-          ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(li.key)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(li.key)}</a>`
+          ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(li.key)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${esc(li.key)}</a>`
           : `<span class="bd-issue-key${li.notFound?' bd-issue-key-missing':''}">${esc(li.key)}</span>`;
         const statusBit = li.notFound
           ? '<span class="bd-chip bd-chip-missing">не найдена</span>'
@@ -268,7 +485,7 @@ export function renderGoalsTab(model) {
       return `<div class="bd-team-block">
         <div class="bd-team-head">
           <b>${esc(team.projectName || team.pk)}</b>
-          <span class="bd-team-mini">✅ ${team.done} · ▶ ${team.wip} · ☐ ${team.todo}</span>
+          <span class="bd-team-mini"><span class="signal-dot signal-on-course" title="Завершено"></span>${team.done} · <span class="signal-dot signal-information" title="В работе"></span>${team.wip} · <span class="signal-dot signal-information signal-dot-pulse" style="opacity:.4" title="Не начато"></span>${team.todo}</span>
         </div>
         <div class="bd-team-issues">${rows}</div>
       </div>`;
@@ -291,7 +508,7 @@ export function renderGoalsTab(model) {
   </div>`;
 }
 
-/* ── Tab: 🔗 Покрытие ─────────────────────────────────────── */
+/* ── Tab: Покрытие ─────────────────────────────────────── */
 export function renderCoverageTab(model) {
   const s = model.summary;
   const deltaUrl = safeUrl(model.deltaBaseUrl);
@@ -323,25 +540,41 @@ export function renderCoverageTab(model) {
   // settings entries to the dashboard rows). For "all-excluded" teams
   // (total=0 but excluded>0), we surface the excluded count in the stats
   // column so 0/0 doesn't look like "team did nothing".
+  // V22 fix #13/#14 (2026-05-09 UX) — coverage-row перестроен в grid:
+  // name | progress-bar | PK (right-align ↦ к bar) | linked/total | (pct%) |
+  // excluded | signal. Все колонки фиксированной ширины ⇒ значения стоят
+  // ровными столбцами через все строки.
   const maxTotal = model.coverageByTeam.length ? Math.max(...model.coverageByTeam.map(t => t.total)) : 0;
   const coverageBars = model.coverageByTeam.map(t => {
     const friendlyDiffers = t.name && t.name !== t.pk;
-    const nameHtml = friendlyDiffers
-      ? `<span class="bd-cov-name-text">${esc(t.name)}</span><span class="bd-cov-pk" title="Project key">${esc(t.pk)}</span>`
-      : `<span class="bd-cov-name-text">${esc(t.name || t.pk)}</span>`;
-    const excludedNote = t.excluded > 0
-      ? ` <span class="bd-cov-excl" title="Задач исключено правилами (sub-task / bug / cancelled / done-before-quarter и т.п.)">искл. ${t.excluded}</span>`
+    const nameText = friendlyDiffers ? t.name : (t.name || t.pk);
+    const pkBadge = friendlyDiffers
+      ? `<span class="bd-cov-pk" title="Project key">${esc(t.pk)}</span>`
+      : '';
+    const excludedHtml = t.excluded > 0
+      ? `<span class="bd-cov-excl" title="Задач исключено правилами (sub-task / bug / cancelled / done-before-quarter и т.п.)">искл. ${t.excluded}</span>`
+      : `<span class="bd-cov-excl bd-cov-excl-empty">—</span>`;
+    const fromGoalsNote = (t.total === 0 && (t.linkedFromGoals || 0) > 0)
+      ? `<span class="bd-cov-from-goals" title="Delta не вернула задачи этой команды, но ${t.linkedFromGoals} задач привязаны к целям через Sigma (видны во вкладке «Цели»)">привязано через цели: ${t.linkedFromGoals}</span>`
       : '';
     const titleAttr = friendlyDiffers ? `${t.name} [${t.pk}]` : (t.name || t.pk);
+    const tier = _coverageTier(t.pct);
     return `
     <div class="bd-cov-row${t.total === 0 ? ' bd-cov-row-empty' : ''}">
-      <span class="bd-cov-name" title="${esc(titleAttr)}">${nameHtml}</span>
+      <span class="bd-cov-name" title="${esc(titleAttr)}">${esc(nameText)}</span>
       <div class="bd-cov-track">
-        <div class="bd-cov-fill ${_coverageColorClass(t.pct)}" style="width:${maxTotal ? (t.total/maxTotal)*100 : 0}%">
+        <div class="bd-cov-fill ${_coverageColorClass(t.pct)}" data-pct-tier="${tier.tier}" style="width:${maxTotal ? (t.total/maxTotal)*100 : 0}%">
           <div class="bd-cov-fill-inner" style="width:${t.total ? (t.linked/t.total)*100 : 0}%"></div>
         </div>
       </div>
-      <span class="bd-cov-stats">${t.linked}/${t.total} <b>(${t.pct}%)</b>${excludedNote}</span>
+      ${pkBadge || '<span class="bd-cov-pk-empty"></span>'}
+      <span class="bd-cov-stats-num"><b class="num-tnum">${t.linked}/${t.total}</b></span>
+      <span class="bd-cov-stats-pct num-tnum">(${t.pct}%)</span>
+      ${excludedHtml}
+      <span class="bd-cov-signal" title="${esc(tier.label)}">
+        <span class="signal-dot signal-${tier.signal}" aria-hidden="true"></span>${esc(tier.label)}
+      </span>
+      ${fromGoalsNote ? `<div class="bd-cov-from-goals-line">${fromGoalsNote}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -356,7 +589,7 @@ export function renderCoverageTab(model) {
           const more = t.unlinkedIssues.length > 80 ? `<div class="bd-more">…ещё ${t.unlinkedIssues.length - 80}</div>` : '';
           const rows = list.map(it => {
             const link = deltaUrl
-              ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(it.key)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(it.key)}</a>`
+              ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(it.key)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${esc(it.key)}</a>`
               : `<span class="bd-issue-key">${esc(it.key)}</span>`;
             return `<div class="bd-issue-row">
               ${link}
@@ -428,10 +661,10 @@ export function renderCoverageTab(model) {
         let exampleRow = '';
         if (r.exampleKey) {
           const link = deltaUrl
-            ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(r.exampleKey)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.exampleKey)}</a>`
+            ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(r.exampleKey)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${esc(r.exampleKey)}</a>`
             : `<span class="bd-issue-key">${esc(r.exampleKey)}</span>`;
           const linkedBadge = r.exampleLinked
-            ? '<span class="bd-chip bd-chip-good" title="Привязано к цели">✓ цель</span>'
+            ? `<span class="bd-chip bd-chip-good" title="Привязано к цели">${Icons.get('check', { cls: 'btn-icon', size: 12 })} цель</span>`
             : '<span class="bd-chip bd-chip-grey" title="Без цели">без цели</span>';
           exampleRow = `<tr class="bd-type-example-row">
             <td colspan="6">
@@ -465,7 +698,7 @@ export function renderCoverageTab(model) {
             <th>Привязано</th>
             <th>%</th>
             <th title="Исключено правилами">Искл.</th>
-            <th title="✓ Завершено · ◐ В работе · ○ Не начато">Статусы</th>
+            <th title="Завершено · В работе · Не начато">Статусы</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -542,7 +775,7 @@ export function renderCoverageTab(model) {
       const more = groupItems.length > 80 ? `<div class="bd-more">…ещё ${groupItems.length - 80}</div>` : '';
       const rows = list.map(it => {
         const link = deltaUrl
-          ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(it.key)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(it.key)}</a>`
+          ? `<a class="bd-issue-key" href="${esc(deltaUrl)}/browse/${esc(it.key)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${esc(it.key)}</a>`
           : `<span class="bd-issue-key">${esc(it.key)}</span>`;
         return `<div class="bd-issue-row bd-issue-row-excluded">
           ${link}
@@ -578,15 +811,27 @@ export function renderCoverageTab(model) {
     <div class="bd-cov-list">${coverageBars || '<div class="bd-empty">— нет команд</div>'}</div>
     ${typeBreakdownSection ? `<div class="bd-section-title">Детализация по типам задач</div><div class="bd-type-list">${typeBreakdownSection}</div>` : ''}
     <div class="bd-section-title">Не привязано к целям</div>
-    ${allLinked ? '<div class="bd-empty bd-empty-success">🎉 Все эпики/истории привязаны к целям!</div>' : (unlinkedSection || '<div class="bd-empty">— нет данных</div>')}
+    ${allLinked ? `<div class="bd-empty bd-empty-success">${Icons.get('check-circle', { cls: 'btn-icon', size: 14 })} Все эпики/истории привязаны к целям!</div>` : (unlinkedSection || '<div class="bd-empty">— нет данных</div>')}
     ${excludedSection}
   </div>`;
 }
 
-/* ── Tab: 📈 Метрики ──────────────────────────────────────── */
+/* ── Tab: Метрики ──────────────────────────────────────── */
 export function renderMetricsTab(model) {
   const m = model.metricBuckets;
-  return `<div class="bd-metrics-grid">
+  // V22 fix #15 (2026-05-09 UX) — howto-блок + унифицированные подзаголовки
+  // в духе брендбука (CAPS-eyebrow + 32px space, как в Сканнере).
+  const howto = `
+    <div class="bd-metrics-howto" role="note">
+      <div class="bd-metrics-howto-title">Что здесь:</div>
+      <div class="bd-metrics-howto-text">
+        Восемь визуализаций по покрытию целей. <b>Покрытие целями</b> — какая доля задач квартала привязана к Sigma-целям;
+        чем больше — тем больше работы команды отображается в Чёрном дашборде. <b>% покрытия по командам</b> — кто из команд
+        отстаёт по привязке. <b>Готовность по целям</b> — насколько каждая цель близка к финишу (по соотношению Done/всего).
+        Tone-on-tone заливка по брендбуку §11: насыщенный синий = on track (≥80%), приглушённый = drift, бледный = off course.
+      </div>
+    </div>`;
+  return `${howto}<div class="bd-metrics-grid">
     ${renderDonut('Покрытие целями',          m.donutCoverage)}
     ${renderDonut('Статусы привязанных задач', m.donutLinkedStatuses)}
     ${renderBars('% покрытия по командам',     m.barsCoveragePct, { suffix: '%' })}
@@ -601,7 +846,7 @@ export function renderMetricsTab(model) {
 /* ── Empty / loader / error states ────────────────────────── */
 export function renderNotConfigured() {
   return `<div class="bd-state">
-    <div class="bd-state-icon">⚙</div>
+    <div class="bd-state-icon">${Icons.get('settings', { size: 32 })}</div>
     <div class="bd-state-title">Sigma Jira не настроена</div>
     <div class="bd-state-sub">Откройте настройки и заполните блок «Sigma Jira» (URL + токен + ключи целей).</div>
     <button class="int-btn int-btn-primary" id="bd-open-settings">Открыть настройки</button>
@@ -609,71 +854,31 @@ export function renderNotConfigured() {
 }
 export function renderNotLoaded() {
   return `<div class="bd-state">
-    <div class="bd-state-icon">📥</div>
+    <div class="bd-state-icon">${Icons.get('inbox', { size: 32 })}</div>
     <div class="bd-state-title">Чёрный дашборд готов к загрузке</div>
     <div class="bd-state-sub">Sigma Jira настроена. Нажмите кнопку, чтобы получить данные.</div>
     <button class="int-btn int-btn-primary" id="bd-load-btn">Загрузить</button>
   </div>`;
 }
-/* V13 (11th pass): pp-style centered loader with rotating fun phrases.
-   V13 (12th pass): Чёрный-дашборд-themed visual — pitch-black background
-   with a face emerging from the dark (violet-glowing eyes + toothy grin),
-   nodding to the «black guy in the dark» meme that fits the tab's name.
-   Pure CSS, no images, fully animated:
-     · Eyes blink at ~5s intervals (slightly out of sync — uncanny effect)
-     · Whole face sways gently left↔right
-     · Fade-in on first paint
-   Two text rows below the face:
-     #bd-loader-phrase  — humorous phrase (rotated every ~2.6s by orchestrator)
-     #bd-loader-status  — functional status (elapsed time / phase, set on each /status poll)
-   Plus a cancel button so the user can bail out early instead of staring
-   at a frozen tab. */
+/* V22 Brand B2 — PrismaLoader L2 (page-level).
+   Заменяет «бывший» meme-grin (мерцающие глаза + светящаяся ухмылка
+   с feGaussianBlur-glow) на единый brand-glyph: 8-лучевая Призма-звезда
+   + крутящееся ring-кольцо + статичный caption. Брендбук §11 запрещает
+   круговой spinner и feGaussianBlur-свечение; §12 запрещает эмодзи.
+   #bd-loader-status — функциональный статус (elapsed-time, обновляется
+   через onProgress). Phrase-rotator в blackDashboard.js удалён. */
 export function renderLoader() {
-  return `<div class="bd-loader bd-loader-meme">
-    <div class="bd-meme-face" aria-hidden="true">
-      <div class="bd-meme-eye bd-meme-eye-l"></div>
-      <div class="bd-meme-eye bd-meme-eye-r"></div>
-      <!-- V13 (14th pass) → V13 (16th pass): теперь тонкий Cheshire-cat
-           полумесяц БЕЗ внутренних зубов-сепараторов. Глаза + узкая
-           ухмылка из темноты — больше попадает в эстетику мема
-           «черный в темноте», где издалека рот воспринимается как
-           одна светлая дуга, а не сетка зубов. -->
-      <svg class="bd-meme-grin" viewBox="0 0 200 50" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-        <defs>
-          <linearGradient id="bd-meme-grin-grad" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%"   stop-color="#ffffff"/>
-            <stop offset="55%"  stop-color="#e5e7eb"/>
-            <stop offset="100%" stop-color="#9ca3af"/>
-          </linearGradient>
-          <filter id="bd-meme-grin-glow" x="-25%" y="-25%" width="150%" height="150%">
-            <feGaussianBlur stdDeviation="1.6" result="b"/>
-            <feMerge>
-              <feMergeNode in="b"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        <!-- The crescent itself. Slim: top edge slightly bowed down,
-             bottom edge bowed deeper. Vertical span ~24px out of 50px
-             total viewBox = roughly half the previous height. -->
-        <path d="M 22 14 Q 100 14 178 14 Q 100 38 22 14 Z"
-              fill="url(#bd-meme-grin-grad)"
-              filter="url(#bd-meme-grin-glow)"/>
-        <!-- A whisper-thin highlight along the top edge — subtle
-             specular reflection that helps the smile read as 3D. -->
-        <path d="M 30 14 Q 100 17 170 14"
-              stroke="rgba(255,255,255,.6)" stroke-width="0.6" fill="none"/>
-      </svg>
-    </div>
-    <div class="bd-loader-phrase" id="bd-loader-phrase">⏳ Просыпаюсь, потягиваюсь…</div>
+  return `<div class="bd-loader">
+    ${prizmaLoaderMark()}
+    <div class="bd-loader-phrase phrase-in" id="bd-loader-phrase"></div>
     <div class="bd-loader-status" id="bd-loader-status">Идёт запрос к Sigma + Delta…</div>
     <div class="bd-loader-hint">Корп Jira может тормозить — это нормально, не закрывайте вкладку.</div>
-    <button class="int-btn int-btn-ghost int-btn-sm" id="bd-loader-cancel" type="button">✕ Отменить</button>
+    <button class="int-btn int-btn-ghost int-btn-sm" id="bd-loader-cancel" type="button">${Icons.get('x', { cls: 'btn-icon', size: 14 })} Отменить</button>
   </div>`;
 }
 export function renderError(message) {
   return `<div class="bd-state bd-state-error">
-    <div class="bd-state-icon">⚠</div>
+    <div class="bd-state-icon">${Icons.get('alert-triangle', { size: 32 })}</div>
     <div class="bd-state-title">Ошибка загрузки</div>
     <div class="bd-state-sub">${esc(message || 'Неизвестная ошибка')}</div>
     <button class="int-btn int-btn-primary" id="bd-retry-btn">Повторить</button>

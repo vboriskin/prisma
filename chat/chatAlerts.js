@@ -6,6 +6,10 @@
 
 import { state } from '../state.js';
 import { Utils } from '../utils.js';
+import { Icons } from '../app/icons.js';
+// AUDIT_ARCHITECTURE #15 — computeHealthScore moved to metricsEngine.js
+// (purely a metric, not UI). Re-exported below for backward-compat.
+import { computeHealthScore } from '../metricsEngine.js';
 
 const ALERT_SNAPSHOT_KEY = 'q2_alert_baseline_v1';
 const ALERT_THRESHOLD = {
@@ -16,20 +20,12 @@ const ALERT_THRESHOLD = {
   healthDrop:  10,  // alert if healthScore dropped by this % vs baseline
 };
 
-/* ── Health score (local formula) ────────────────────────── */
-
-export function computeHealthScore(rows) {
-  if (!rows || !rows.length) return 100;
-  const total     = rows.length;
-  const done      = rows.filter(r => r.isDone).length;
-  const blockers  = rows.filter(r => r.blockingDependency && !r.isDone).length;
-  const risky     = rows.filter(r => (r.riskFlags||[]).length && !r.isDone).length;
-  const noRelease = rows.filter(r => r.isUnassigned && r.scopeStatus === 'Да' && !r.isDone).length;
-  const active    = total - done;
-  if (active === 0) return 100;
-  const penalty = (blockers * 15 + risky * 8 + noRelease * 5) / active;
-  return Math.max(0, Math.round(100 - Math.min(100, penalty * 10)));
-}
+/* ── Health score (re-export) ─────────────────────────────── */
+/* AUDIT_ARCHITECTURE #15 — formula moved to metricsEngine.js. Existing
+   in-chat usage (chatExplain.js, buildHealthAlerts, saveAlertBaseline)
+   continues to import from './chatAlerts.js'; new code should import
+   from '../metricsEngine.js' directly. */
+export { computeHealthScore };
 
 /* ── Alert builders ───────────────────────────────────────── */
 
@@ -42,7 +38,7 @@ function buildBlockerAlerts(rows) {
     id: 'alert_blockers',
     type: 'blockers',
     severity: blockers.length >= 5 ? 'critical' : 'warning',
-    icon: '🚫',
+    iconKey: 'no-symbol',
     title: `${blockers.length} активных блокеров`,
     body: `${r120.length > 0 ? `В т.ч. ${r120.length} в 1.20. ` : ''}Команды: ${teams.slice(0, 3).join(', ')}${teams.length > 3 ? ` +${teams.length - 3}` : ''}`,
     count: blockers.length,
@@ -63,7 +59,7 @@ function buildRiskAlerts(rows) {
     id: 'alert_risks',
     type: 'risks',
     severity: grew > 0 ? 'warning' : 'info',
-    icon: '⚠️',
+    iconKey: 'alert-triangle',
     title: `${risky.length} рискованных задач${grew > 0 ? ` (+${grew} с последней проверки)` : ''}`,
     body: `Топ риски: ${[...new Set(risky.flatMap(r => r.riskFlags||[]))].slice(0, 3).join(', ') || 'разные'}`,
     count: risky.length,
@@ -107,7 +103,7 @@ function buildOverloadAlerts(rows) {
     id: 'alert_overload',
     type: 'overload',
     severity: 'info',
-    icon: '🔥',
+    iconKey: 'flame',
     title: `${overloaded.length} исполнителей с высокой нагрузкой`,
     body: overloaded.map(([n, c]) => `${n}: ${c}`).join(' · '),
     count: overloaded.length,
@@ -179,7 +175,7 @@ export function renderAlertBar(alerts) {
     const explBtn  = `<button class="chat-alert-btn" data-prompt="${esc(a.drillPrompt)}">Объяснить</button>`;
     const fixBtn   = `<button class="chat-alert-btn chat-alert-btn-fix" data-prompt="${esc(a.fixPrompt)}">Предложить исправление</button>`;
     return `<div class="chat-alert-card ${severityClass(a.severity)}">
-      <span class="chat-alert-icon">${a.icon}</span>
+      <span class="chat-alert-icon">${Icons.get(a.iconKey || 'alert-triangle', { size: 16 })}</span>
       <div class="chat-alert-body">
         <div class="chat-alert-title">${esc(a.title)}</div>
         <div class="chat-alert-sub">${esc(a.body)}</div>

@@ -523,6 +523,7 @@ function createBlackDashboard(deps) {
     if (!keys.length) return new Map();
     const fields = ['summary', 'status', 'issuetype', 'project'];
     const out = new Map();
+    const errors = [];
     const CHUNK = 200;
     for (let i = 0; i < keys.length; i += CHUNK) {
       const chunk = keys.slice(i, i + CHUNK);
@@ -541,9 +542,15 @@ function createBlackDashboard(deps) {
           });
         }
       } catch (e) {
-        console.warn(`[sigma] delta-batch chunk failed (${chunk.length} keys):`, e.message);
+        // H7: было только console.warn — UI не получал сигнала, рендерил
+        // notFound:true для всех ключей в chunk'е. Теперь errors[] возвращается
+        // вместе с map, caller может surface'ить в out.errors.
+        const msg = `delta-batch chunk failed (${chunk.length} keys, first=${chunk[0]}): ${e.message || String(e)}`;
+        console.warn(`[sigma] ${msg}`);
+        errors.push({ scope: 'delta-batch', chunkSize: chunk.length, firstKey: chunk[0], message: e.message || String(e) });
       }
     }
+    out._errors = errors;     // attach без побочки на остальной API
     return out;
   }
 
@@ -822,10 +829,10 @@ function createBlackDashboard(deps) {
           // in the error message — without it, "все JQL уровня упали" was
           // opaque and forced users to dig in server logs to debug.
           const firstErr = result.chunkErrors?.[0]?.error || '';
-          const errSuffix = firstErr ? ` Причина: ${firstErr}.` : '';
+          const cleanedReason = firstErr || (result.exitReason === 'time-budget' ? 'вышло время' : result.exitReason === 'failures' ? 'JQL упал' : 'превышен лимит задач');
           out.errors.push({
             scope:   'expand',
-            message: `Раскрытие дерева задач прервано (${result.exitReason === 'time-budget' ? 'превышен бюджет 240с' : result.exitReason === 'failures' ? 'все JQL уровня упали' : 'cap по числу задач'}).${errSuffix} Покрытие посчитано по ${expandedDeltaKeys.size} ключам из частично раскрытого дерева.`,
+            message: `Дерево задач раскрыто частично — вышло время. Причина: ${cleanedReason}`,
           });
         }
       } catch (e) {
@@ -871,6 +878,10 @@ function createBlackDashboard(deps) {
     // 4) Batch-resolve SEED keys from Delta (used by `goal.linkedIssues` —
     //    UI surface stays «what's literally in Domain link»).
     const deltaMap = await sigmaFetchDeltaIssuesByKeys(cfg, Array.from(seedDeltaKeys));
+    // H7: chunk-failures surfaced through deltaMap._errors (см. sigmaFetchDeltaIssuesByKeys).
+    if (Array.isArray(deltaMap._errors) && deltaMap._errors.length) {
+      for (const e of deltaMap._errors) out.errors.push(e);
+    }
 
     // 5) Hydrate each goal with linked issue details. Filter the goal's
     //    `domainLinks` to delta-projects only — keys outside scope get a
@@ -953,11 +964,25 @@ function createBlackDashboard(deps) {
         // Also include `resolutiondate` for the «done-before-quarter» rule.
         const fields = ['summary', 'status', 'issuetype', 'project', 'parent', 'resolutiondate'];
         if (deltaEpicLinkFieldId) fields.push(deltaEpicLinkFieldId);
-        const jql = `project in (${deltaProjectKeys.map(k => `"${k}"`).join(',')})`;
-        // 120s budget (was 60s) — matches the V13 retry-tolerant policy.
-        // jiraRequest now waits up to ~85s on sustained 429; coverage scan
-        // pages through up to 5000 issues, so generous budget is needed.
-        const issues = await jiraSearchAll(cfg, jql, fields, [], 5000, 120000);
+        // BUGFIX: раньше был один общий JQL `project in (...)` с cap=5000 на ВСЁ.
+        // Большие проекты (SMECM, SMEND) съедали весь cap до того как пагинация
+        // доходила до остальных — SMEAM/SMECIS/SBOFPLCORE/ATRON приходили пустыми
+        // даже когда там реально были задачи. Теперь per-project параллельный
+        // fetch: каждый проект получает свой cap=5000, итого до 30k задач.
+        const PER_PROJECT_CAP = 5000;
+        const PER_PROJECT_TIMEOUT = 60000;
+        const perProjectResults = await Promise.all(
+          deltaProjectKeys.map(async (pk) => {
+            try {
+              const projectJql = `project = "${pk}"`;
+              return await jiraSearchAll(cfg, projectJql, fields, [], PER_PROJECT_CAP, PER_PROJECT_TIMEOUT);
+            } catch (e) {
+              out.errors.push({ scope: 'delta', message: `project=${pk}: ${e.message || String(e)}` });
+              return [];
+            }
+          })
+        );
+        const issues = perProjectResults.flat();
 
         // ── V13 (10th pass): typed-exclusion rules ──────────────
         // User-defined "should-not-count-toward-coverage" issuetypes,

@@ -1,0 +1,143 @@
+{
+  "$schema": "https://design-tokens.org/draft/format",
+  "$description": "Motion-токены Призмы. Четыре базовых жеста знака + переходы для лоадеров и splash.",
+  "easing": {
+    "calm": {
+      "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "use": "Default ease-out для emerge, переходов между страницами"
+    },
+    "spring": {
+      "value": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+      "use": "Только для жеста Align — небольшой overshoot при настройке звезды на новый контекст"
+    },
+    "smooth": {
+      "value": "ease-in-out",
+      "use": "Breathe (idle), переходы между темами"
+    },
+    "decel": {
+      "value": "ease-out",
+      "use": "Расширение кольца Pulse"
+    }
+  },
+  "gestures": {
+    "emerge": {
+      "$description": "Первое появление знака — splash, page load, intro в onboarding.",
+      "totalDuration": "1100ms",
+      "easing": "calm",
+      "sequence": [
+        { "step": "core", "delay": "0ms", "duration": "400ms", "from": "scale(0)", "to": "scale(1)" },
+        { "step": "mainRays (top, bottom)", "delay": "300ms", "duration": "700ms", "from": "scale(0.2) opacity(0)", "to": "scale(1) opacity(1)" },
+        { "step": "sideRays (left, right)", "delay": "500ms", "duration": "700ms", "from": "scale(0.2) opacity(0)", "to": "scale(1) opacity(0.7)" },
+        { "step": "diagonalRays (4)", "delay": "650-800ms (50ms stagger)", "duration": "700ms", "from": "scale(0.2) opacity(0)", "to": "scale(1) opacity(0.45)" }
+      ]
+    },
+    "breathe": {
+      "$description": "Idle-состояние — всегда включено. Звезда никогда не статична в продукте.",
+      "totalDuration": "4000ms",
+      "easing": "smooth",
+      "loop": true,
+      "keyframes": [
+        { "offset": "0%", "transform": "scale(1)", "opacity": 0.85 },
+        { "offset": "50%", "transform": "scale(1.04)", "opacity": 1 },
+        { "offset": "100%", "transform": "scale(1)", "opacity": 0.85 }
+      ]
+    },
+    "pulse": {
+      "$description": "Сигнал внимания — нотификация, обнаружен дрейф.",
+      "totalDuration": "1600ms",
+      "easing": "decel",
+      "loop": true,
+      "element": "кольцо вокруг звезды",
+      "keyframes": [
+        { "offset": "0%", "transform": "scale(0.4)", "opacity": 0.8 },
+        { "offset": "100%", "transform": "scale(1.6)", "opacity": 0 }
+      ]
+    },
+    "align": {
+      "$description": "Смена контекста — модуль, команда, проект.",
+      "totalDuration": "1600ms",
+      "easing": "spring",
+      "loop": false,
+      "keyframes": [
+        { "offset": "0%", "rotation": "-12deg" },
+        { "offset": "50%", "rotation": "2deg" },
+        { "offset": "100%", "rotation": "0deg" }
+      ]
+    }
+  },
+  "splash": {
+    "$description": "Всего 2400ms. Проигрывается до конца, даже если приложение готово раньше.",
+    "totalDuration": "2400ms",
+    "phases": [
+      { "name": "EMERGE", "from": "0ms", "to": "1000ms", "action": "Звезда собирается через жест emerge" },
+      { "name": "SETTLE", "from": "1200ms", "to": "2000ms", "action": "Wordmark появляется с letter-spacing 14px → 8px, tagline через 400ms после" },
+      { "name": "EXIT", "from": "2000ms", "to": "2400ms", "action": "Одно полное дыхание, затем плавный выход в приложение" }
+    ]
+  },
+  "loaders": {
+    "level1Inline": {
+      "$description": "Действие в процессе — сохранение, поиск, фильтр.",
+      "duration": "1400ms",
+      "easing": "smooth",
+      "loop": true,
+      "size": "16-24px",
+      "useCase": "Действие пользователя, ожидание 300ms-2s",
+      "keyframes": [
+        { "offset": "0%", "transform": "scale(0.85)", "opacity": 0.5 },
+        { "offset": "50%", "transform": "scale(1)", "opacity": 1 },
+        { "offset": "100%", "transform": "scale(0.85)", "opacity": 0.5 }
+      ]
+    },
+    "level2Page": {
+      "$description": "Загрузка страницы — навигация, инициализация дашборда.",
+      "components": {
+        "star": { "uses": "жест breathe", "size": "48-64px" },
+        "ring": {
+          "duration": "2400ms",
+          "easing": "decel",
+          "loop": true,
+          "keyframes": [
+            { "offset": "0%", "r": 4, "opacity": 0.6 },
+            { "offset": "100%", "r": 30, "opacity": 0 }
+          ]
+        },
+        "caption": { "text": "Устанавливаем курс", "below": "звезда + кольцо" }
+      },
+      "useCase": "Загрузка экрана, ожидание 2-6s"
+    },
+    "level3Skeleton": {
+      "$description": "Тяжёлая загрузка данных, отчёт, сложный запрос.",
+      "shimmer": {
+        "duration": "1600ms",
+        "easing": "linear",
+        "loop": true,
+        "gradient": "linear-gradient(90deg, #1A1A22 0%, #2A2A30 50%, #1A1A22 100%)",
+        "backgroundSize": "200% 100%",
+        "from": "200% 0",
+        "to": "-200% 0"
+      },
+      "starInCorner": "Маленькая иконка звезды в углу как маркер бренда",
+      "lineRadius": "4px",
+      "useCase": "Тяжёлая загрузка, ожидание >6s"
+    }
+  },
+  "hierarchy": {
+    "$description": "Когда какой лоадер. Строгое правило.",
+    "below300ms": "NONE — не показывать ничего. Лоадер на 100ms раздражает больше, чем результат на 300ms.",
+    "300msTo2s": "Level 1 — inline pulse рядом с триггером действия",
+    "2sTo6s": "Level 2 — центральный page loader: breathe + ring + caption",
+    "above6s": "Level 3 — skeleton с shimmer + маркер-звезда"
+  },
+  "themeTransition": {
+    "$description": "Переключение между тёмной и светлой темами.",
+    "duration": "240ms",
+    "easing": "decel",
+    "method": "Изменение CSS custom property, без crossfade. Fill звезды анимируется с #FFFFFF на #1A1A22 (или наоборот) через тот же transition."
+  },
+  "principles": [
+    "Спокойствие важнее эффектов. Никаких bounce, jump (кроме align с лёгким spring).",
+    "Уважать prefers-reduced-motion: breathe и pulse останавливаются.",
+    "Одна анимация за раз. Emerge → Breathe (default) → Pulse при сигнале → Align при смене контекста.",
+    "Breathe всегда включён. Это default idle-состояние. Другие жесты проигрываются поверх breathe и возвращают в него."
+  ]
+}

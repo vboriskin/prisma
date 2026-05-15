@@ -61,10 +61,10 @@ describe('_buildLegend (V15 Spine redesign)', () => {
   });
 
   test('lists every bucket as coloured stripe sample', () => {
-    assert.match(html, /background:#4f46e5/);
-    assert.match(html, /background:#059669/);
-    assert.match(html, /background:#d97706/);
-    assert.match(html, /background:#dc2626/);
+    assert.match(html, /background:var\(--prizma-information\)/);
+    assert.match(html, /background:var\(--prizma-on-course\)/);
+    assert.match(html, /background:var\(--prizma-drift\)/);
+    assert.match(html, /background:var\(--prizma-off-course\)/);
   });
 
   test('describes all three pill states', () => {

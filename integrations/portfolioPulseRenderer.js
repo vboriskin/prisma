@@ -10,6 +10,10 @@ import {
   typeBucket, typeBucketLabel, groupByBucket, formatHrs,
 } from './portfolioPulseUtils.js';
 import { renderDonut, renderBars, renderAgeHistogram } from './portfolioPulseMetrics.js';
+import { prizmaLoaderMark } from '../app/prizmaUI.js';
+// AUDIT_ARTDIRECTION #34 — миграция timeline-events / severity-pills с эмодзи
+// на Lucide-иконки (Icons.get) и signal-dot'ы (брендбук §1 spine-pill ban).
+import { Icons } from '../app/icons.js';
 
 /* ── Generic chips/issue-rows ──────────────────────────── */
 
@@ -29,15 +33,15 @@ export function setRenderContext(ctx) {
   if (_renderCtx.jiraBaseUrl) _renderCtx.jiraBaseUrl = String(_renderCtx.jiraBaseUrl).replace(/\/+$/, '');
 }
 
-// Jira-style icons for the four issue type buckets. Emoji rendering matches
-// the classic Jira UI conventions: green book = Story, red bug = Bug,
-// blue check = Task, sub-task arrow = Sub-task. (#1.6)
+// AUDIT_ARTDIRECTION #34 — Lucide-иконки вместо эмодзи (брендбук §1 spine-pill).
+// Раньше: green book = Story, red bug = Bug, blue check = Task, sub-task arrow = Sub-task.
+// Теперь: line-glyph иконки одного веса, цвет наследуется от контейнера.
 const TYPE_ICON = {
-  story:   '📗',
-  task:    '✅',
-  bug:     '🐞',
-  subtask: '↳',
-  other:   '🧩',
+  story:   Icons.get('file-text',  { size: 14 }),
+  task:    Icons.get('check',      { size: 14 }),
+  bug:     Icons.get('alert-circle', { size: 14 }),
+  subtask: Icons.get('chevron-right', { size: 14 }),
+  other:   Icons.get('layout-grid', { size: 14 }),
 };
 
 // Map of timeline event kinds to inline icons. Used by `renderTimeline` (per-day
@@ -47,18 +51,19 @@ const TYPE_ICON = {
 // Wave 2: created
 // Wave 4a: assignee-change, attachment, link, field-change
 // Wave 4b: mention
+// AUDIT_ARTDIRECTION #34 — иконки заменены на Lucide через Icons.get.
 const TL_KIND_ICON = (k) => ({
-  closed:            '✅',
-  transition:        '↪',
-  comment:           '💬',
-  worklog:           '⏱',
-  created:           '➕',
-  'assignee-change': '👤',
-  attachment:        '📎',
-  link:              '🔗',
-  'field-change':    '✏️',
-  mention:           '📣',
-})[k] || '·';
+  closed:            Icons.get('check-circle',   { size: 14 }),
+  transition:        Icons.get('rotate-cw',      { size: 14 }),
+  comment:           Icons.get('message-circle', { size: 14 }),
+  worklog:           Icons.get('hourglass',      { size: 14 }),
+  created:           Icons.get('plus',           { size: 14 }),
+  'assignee-change': Icons.get('user',           { size: 14 }),
+  attachment:        Icons.get('clipboard',      { size: 14 }),
+  link:              Icons.get('link-2',         { size: 14 }),
+  'field-change':    Icons.get('pencil',         { size: 14 }),
+  mention:           Icons.get('send',           { size: 14 }),
+})[k] || `<span class="pp-tl-icon-dot" aria-hidden="true">·</span>`;
 
 // Priority icons — Jira uses up/down arrows + colour. We mimic with unicode
 // arrows; `pp-prio-*` CSS class keeps the colour. (#1.7)
@@ -200,9 +205,10 @@ function renderDiagnostics(model) {
     + (failCount ? `<span class="pp-diag-fail">${failCount} ошибок</span>` : '<span class="pp-diag-ok">без ошибок</span>')
     + (slowCount ? ` · <span class="pp-diag-slow">${slowCount} медленных (&gt;15с)</span>` : '');
 
+  // AUDIT_ARTDIRECTION #34 — `✓ / ⚠` → signal-dot'ы (брендбук §3 Signal).
   const pkRows = perPk.map(p => `
     <div class="pp-diag-row ${p.ok ? 'pp-diag-row-ok' : 'pp-diag-row-fail'}">
-      <span class="pp-diag-mark">${p.ok ? '✓' : '⚠'}</span>
+      <span class="pp-diag-mark"><span class="signal-dot ${p.ok ? 'signal-on-course' : 'signal-off-course'}" aria-hidden="true"></span></span>
       <span class="pp-diag-pk">${esc(p.pk)}</span>
       <span class="pp-diag-ms">${p.ms || 0}мс</span>
       <span class="pp-diag-issues">${p.issues || 0} задач</span>
@@ -218,13 +224,21 @@ function renderDiagnostics(model) {
     .slice(0, 8);
   // Dev-status (Phase 1) — separate diagnostic line so the user sees how
   // many extra PRs/commits Jira's panel found that the repo-walk missed.
+  // AUDIT_ARTDIRECTION #34 — 📡 → satellite-link иконка.
   const ds = bb.devStatus || {};
   const devStatusLine = (ds.scanned || ds.prs || ds.commits) ? `
-    <div class="pp-diag-log-line">📡 <b>Dev-status Jira</b>: ${ds.scanned||0} вызовов · ${ds.prs||0} PR · ${ds.commits||0} commits ${ds.scanned===0?'(нет hot issues)':''}</div>` : '';
+    <div class="pp-diag-log-line">${Icons.get('link-2', { size: 12 })} <b>Dev-status Jira</b>: ${ds.scanned||0} вызовов · ${ds.prs||0} PR · ${ds.commits||0} commits ${ds.scanned===0?'(нет hot issues)':''}</div>` : '';
 
+  // AUDIT_ARTDIRECTION #34 — статусная иконка → signal-dot.
+  const _statusDot = (state) => {
+    if (state === 'err') return `<span class="signal-dot signal-off-course" aria-hidden="true"></span>`;
+    if (state === 'ok')  return `<span class="signal-dot signal-on-course"  aria-hidden="true"></span>`;
+    return ''; // configured===false → текстовое «— не настроен»
+  };
+  const bbStatus = bb.error ? _statusDot('err') : (bb.configured === false ? '— не настроен' : _statusDot('ok'));
   const bbBlock = (bb.tried || bb.error || bbAuthorsList.length) ? `
     <div class="pp-diag-section">
-      <div class="pp-diag-log-title">Bitbucket ${bb.error ? '⚠' : (bb.configured === false ? '— не настроен' : '✓')}${bb.configured !== false ? ` · ${bbTotalEvents} событий · ${bbAuthorsList.length} авторов` : ''}</div>
+      <div class="pp-diag-log-title">Bitbucket ${bbStatus}${bb.configured !== false ? ` · ${bbTotalEvents} событий · ${bbAuthorsList.length} авторов` : ''}</div>
       ${bb.error ? `<div class="pp-diag-err">${esc(bb.error)}</div>` : ''}
       ${devStatusLine}
       ${(bb.tried || []).slice(0, 80).map(t => `
@@ -237,7 +251,8 @@ function renderDiagnostics(model) {
   // contributors). Helps explain why pill totals are larger than per-card sums.
   const cfAuthors = Object.values(cf.authors || {});
   const cfTotal   = cfAuthors.reduce((s, a) => s + (a.edits || 0), 0);
-  const cfStatus  = cf.error ? '⚠' : (cf.configured === false ? '— не настроен' : '✓');
+  // AUDIT_ARTDIRECTION #34 — `⚠ / ✓` → signal-dot.
+  const cfStatus  = cf.error ? _statusDot('err') : (cf.configured === false ? '— не настроен' : _statusDot('ok'));
   const cfTopAuthors = cfAuthors
     .map(a => ({ name: a.displayName || '?', n: a.edits || 0 }))
     .filter(a => a.n > 0)
@@ -254,7 +269,7 @@ function renderDiagnostics(model) {
 
   const logLines = (d.log || []).slice(-25).map(l => `<div class="pp-diag-log-line">${esc(l)}</div>`).join('');
   return `<details class="pp-diag">
-    <summary class="pp-diag-summary">📋 Диагностика загрузки — ${summary}</summary>
+    <summary class="pp-diag-summary">${Icons.get('clipboard', { size: 14 })} Диагностика загрузки — ${summary}</summary>
     <div class="pp-diag-body">
       <div class="pp-diag-rows">${pkRows}</div>
       ${bbBlock}
@@ -596,16 +611,19 @@ export function renderParticipantCard(p) {
   const renderBbItems = (items) => items.map(it => {
     const isPr     = it.kind === 'pr';
     const isReview = it.kind === 'review';
-    // Wave 4d — review icons by action: ✓ approved, ⚠ needs-work, ✗ declined, 💬 commented.
+    // Wave 4d — review icons by action.
+    // AUDIT_ARTDIRECTION #34 — Lucide-иконки + signal-dot для approved (zero color).
     const reviewIcon = (action) => {
       const a = String(action || '').toUpperCase();
-      if (a === 'APPROVED')  return '✓';
-      if (a === 'REVIEWED')  return '⚠';
-      if (a === 'DECLINED')  return '✗';
-      if (a === 'COMMENTED') return '💬';
-      return '👁';
+      if (a === 'APPROVED')  return Icons.get('check',          { size: 12 });
+      if (a === 'REVIEWED')  return Icons.get('alert-triangle', { size: 12 });
+      if (a === 'DECLINED')  return Icons.get('x',              { size: 12 });
+      if (a === 'COMMENTED') return Icons.get('message-circle', { size: 12 });
+      return Icons.get('eye', { size: 12 });
     };
-    const icon = isReview ? reviewIcon(it.action) : (isPr ? '🔀' : '⬢');
+    const icon = isReview
+      ? reviewIcon(it.action)
+      : (isPr ? Icons.get('rotate-cw', { size: 12 }) : Icons.get('circle-dot', { size: 12 }));
     const titleEsc = esc(trunc(it.title || (isPr ? 'Pull Request' : isReview ? 'PR review' : 'commit'), 100));
     const repoEsc  = esc(it.repo || '');
     const dt       = it.at ? `${(it.at).slice(0,10)} ${(it.at).slice(11,16)}` : '';
@@ -1142,7 +1160,7 @@ export function renderSummaryTab(model, activePk) {
       <div class="pp-yesterday-list">${
         yest.map(a => `
           <div class="pp-timeline-row">
-            <span class="pp-timeline-icon">${a.kind==='closed'?'✅':a.kind==='transition'?'↪':a.kind==='comment'?'💬':a.kind==='worklog'?'⏱':'·'}</span>
+            <span class="pp-timeline-icon">${TL_KIND_ICON(a.kind)}</span>
             <div class="pp-timeline-body">
               <div class="pp-timeline-text"><b>${esc(a.who||'')}</b>${a.text ? ' — '+esc(trunc(a.text, 140)) : ''}</div>
               <div>${renderIssueRow(a.issue)}</div>
@@ -1207,10 +1225,17 @@ export function renderInsightsTab(insights, activePk) {
       <div class="pp-empty-title">Сигналов нет</div>
       <div class="pp-empty-sub">Портфель ${activePk?'пространства '+activePk:''} в норме.</div></div>`;
   }
+  // AUDIT_ARTDIRECTION #34 — severity-pills (🔴/🟡/🔵) → signal-dot'ы.
+  const _sevDot = (sev) => {
+    const cls = sev === 'critical' ? 'signal-off-course'
+              : sev === 'warning'  ? 'signal-drift'
+              :                      'signal-information';
+    return `<span class="signal-dot ${cls}" aria-hidden="true"></span>`;
+  };
   return `<div class="pp-insights-grid">${insights.map(ins => `
     <div class="pp-ins-card pp-ins-${esc(ins.severity)}">
       <div class="pp-ins-card-head">
-        <span class="pp-ins-icon">${ins.severity==='critical'?'🔴':ins.severity==='warning'?'🟡':'🔵'}</span>
+        <span class="pp-ins-icon">${_sevDot(ins.severity)}</span>
         <span class="pp-ins-card-title">${esc(ins.title)}</span>
         ${ins.target ? `<span class="pp-ins-target" data-pk="${esc(ins.target)}">${esc(ins.target)}</span>` : ''}
       </div>
@@ -1330,9 +1355,10 @@ export function renderBacklogTab(bl, blInsights, activePk, subTab='summary') {
 
 export function renderErrorBanner(model) {
   if (!model.errors || !model.errors.length) return '';
+  // UX скв.4 — эмодзи ⚠ заменено на Lucide-иконку 'alert-triangle'.
   return `<div class="pp-errors">${model.errors.map(e => `
     <div class="pp-err-card">
-      <div class="pp-err-pk">⚠ ${esc(e.projectKey)}</div>
+      <div class="pp-err-pk">${Icons.get('alert-triangle', { size: 14 })} ${esc(e.projectKey)}</div>
       <div class="pp-err-msg">${esc(e.error||'')}</div>
     </div>`).join('')}</div>`;
 }
@@ -1347,28 +1373,36 @@ export function renderSkeleton(message) {
   // functional status — so the user sees both "we're alive" AND what
   // phase we're on. The orchestrator manages a setInterval that updates
   // #pp-skel-phrase every ~2.6s.
+  // V21 — legacy circular spinner + ⏳/✕ emoji removed; brand star (breathe + ring)
+  // per BRAND_BOOK §11. Caption / phrase / hint / cancel сохраняем.
   return `<div class="pp-loader">
-    <div class="pp-loader-spinner" aria-hidden="true"></div>
-    <div class="pp-loader-phrase" id="pp-skel-phrase">⏳ Просыпаюсь, потягиваюсь…</div>
+    ${prizmaLoaderMark()}
+    <div class="pp-loader-phrase" id="pp-skel-phrase">Просыпаюсь, потягиваюсь…</div>
     <div class="pp-loader-title" id="pp-skel-text">${esc(message||'Запрашиваю задачи из Jira…')}</div>
     <div class="pp-loader-hint">Обычно занимает 5–30 секунд. При большом количестве проектов — до 1–1.5 мин.</div>
-    <button class="int-btn int-btn-ghost int-btn-sm" id="pp-skel-cancel" type="button">✕ Отменить</button>
+    <button class="int-btn int-btn-ghost int-btn-sm" id="pp-skel-cancel" type="button">Отменить</button>
   </div>`;
 }
 
 export function renderEmpty(reason) {
+  // UX скв.4 — эмодзи 📡 / ⚙ заменены на Lucide-иконки 'radio' / 'settings'.
+  const settingsIcon = Icons.get('settings', { size: 14 });
+  const reasonText = reason
+    ? esc(reason)
+    : `Укажите ключи проектных пространств: ${settingsIcon} Настройки → Интеграции → Jira → «Ключи проектных пространств».`;
   return `<div class="pp-empty">
-    <div class="pp-empty-icon">📡</div>
+    <div class="pp-empty-icon">${Icons.get('radio', { size: 32 })}</div>
     <div class="pp-empty-title">Нет данных Сканнера команд</div>
-    <div class="pp-empty-sub">${esc(reason || 'Укажите ключи проектных пространств: ⚙ Настройки → Интеграции → Jira → «Ключи проектных пространств».')}</div>
+    <div class="pp-empty-sub">${reasonText}</div>
   </div>`;
 }
 
 export function renderError(message, retry=true) {
+  // UX скв.4 — эмодзи ⚠ / ↺ заменены на Lucide-иконки 'alert-triangle' / 'rotate-cw'.
   return `<div class="pp-empty">
-    <div class="pp-empty-icon">⚠</div>
+    <div class="pp-empty-icon">${Icons.get('alert-triangle', { size: 32 })}</div>
     <div class="pp-empty-title">Не удалось получить данные</div>
     <div class="pp-empty-sub">${esc(message||'Ошибка запроса')}</div>
-    ${retry ? `<div style="margin-top:14px"><button class="int-btn int-btn-primary" id="pp-retry-btn">↺ Повторить</button></div>` : ''}
+    ${retry ? `<div style="margin-top:14px"><button class="int-btn int-btn-primary" id="pp-retry-btn">${Icons.get('rotate-cw', { size: 14 })} Повторить</button></div>` : ''}
   </div>`;
 }

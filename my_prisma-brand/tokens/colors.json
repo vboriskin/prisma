@@ -1,0 +1,57 @@
+{
+  "$schema": "https://design-tokens.org/draft/format",
+  "$description": "Цветовые токены Призмы. Светлая тема НЕ является инверсией тёмной — каждый цвет имеет парного двойника на той же hue-оси.",
+  "core": {
+    "dark": {
+      "night": { "value": "#0A0A0F", "role": "Главный фон. 60% всех поверхностей.", "pair": "paper" },
+      "twilight": { "value": "#1A1A22", "role": "Карты и второй слой на тёмном.", "pair": "snow" },
+      "star": { "value": "#FFFFFF", "role": "Сам знак. Текст на тёмном.", "pair": "ink" },
+      "mist": { "value": "#5A5A64", "role": "Подписи, второстепенный текст.", "pair": "stone" }
+    },
+    "light": {
+      "paper": { "value": "#FAFAF8", "role": "Главный фон. Тёплый off-white, не чисто белый.", "pair": "night" },
+      "snow": { "value": "#FFFFFF", "role": "Карты на Paper. Создаёт второй слой.", "pair": "twilight" },
+      "linen": { "value": "#F0EDE5", "role": "Третий слой. Тонкие разделители.", "pair": null },
+      "ink": { "value": "#1A1A22", "role": "Знак и заголовки. Мягче чем #000.", "pair": "star" },
+      "stone": { "value": "#7A7A82", "role": "Подписи, второстепенный текст.", "pair": "mist" }
+    }
+  },
+  "signal": {
+    "$description": "Семантические цвета. Используются ТОЛЬКО для статуса курса, никогда как декорация. На светлой теме они тёмные и насыщенные, на тёмной — яркие и светящиеся. Та же hue-ось, разная светлота.",
+    "dark": {
+      "onCourse": { "value": "#7FE8B5", "meaning": "Команда придерживается курса." },
+      "drift": { "value": "#FFB347", "meaning": "Замечен дрейф." },
+      "offCourse": { "value": "#FF6B6B", "meaning": "Курс потерян, нужно вмешательство." },
+      "information": { "value": "#6EC1E4", "meaning": "Нейтральный сигнал, контекст." },
+      "insight": { "value": "#B084CC", "meaning": "Найден неочевидный паттерн." }
+    },
+    "light": {
+      "onCourse": { "value": "#0F8A5F", "meaning": "Команда придерживается курса." },
+      "drift": { "value": "#B5670A", "meaning": "Замечен дрейф." },
+      "offCourse": { "value": "#C13838", "meaning": "Курс потерян, нужно вмешательство." },
+      "information": { "value": "#1F6B96", "meaning": "Нейтральный сигнал, контекст." },
+      "insight": { "value": "#6B4488", "meaning": "Найден неочевидный паттерн." }
+    }
+  },
+  "proportions": {
+    "$description": "Пропорции цветов в интерфейсе. Строгое правило.",
+    "background": "60%",
+    "cards": "20%",
+    "text": "15%",
+    "signal": "5%"
+  },
+  "rules": {
+    "allowed": [
+      "Star на Night",
+      "Star на Paper (вариант знака)",
+      "Ink на Paper",
+      "Mist на Twilight",
+      "Stone на Snow"
+    ],
+    "forbidden": [
+      "Signal-цвета как декорация — только для статуса курса",
+      "Чистый чёрный (#000000) — используйте Ink (#1A1A22)",
+      "Чистый белый (#FFFFFF) на светлом фоне — используйте Snow как карты на Paper"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Призма — App Icon iOS (1024×1024 master)
+  Фон: Night (#0A0A0F). Знак: Star (#FFFFFF).
+  Apple применит squircle-маску автоматически (radius ~22.37%).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Призма">
+  <title>Призма</title>
+  <rect width="1024" height="1024" fill="#0A0A0F"/>
+  <g transform="translate(512,512)" fill="#FFFFFF">
+    <polygon points="0,-320 22,-22 0,0 -22,-22"/>
+    <polygon points="0,320 22,22 0,0 -22,22"/>
+    <polygon points="-320,0 -22,-22 0,0 -22,22" opacity="0.7"/>
+    <polygon points="320,0 22,-22 0,0 22,22" opacity="0.7"/>
+    <polygon points="-205,-205 -17,-32 0,0 -32,-17" opacity="0.45"/>
+    <polygon points="205,-205 17,-32 0,0 32,-17" opacity="0.45"/>
+    <polygon points="-205,205 -17,32 0,0 -32,17" opacity="0.45"/>
+    <polygon points="205,205 17,32 0,0 32,17" opacity="0.45"/>
+    <circle r="20"/>
+  </g>
+</svg>

@@ -15,41 +15,267 @@
    ============================================================ */
 
 import { Utils } from '../utils.js';
+import { Icons } from '../app/icons.js';
+import { Services } from '../app/services.js';
+import { prizmaLoaderMark } from '../app/prizmaUI.js';
+// 2026-05-11 — Jira Hygiene Engine (V23). 12 правил качества данных.
+import { runHygieneRules } from './jiraHygiene.js';
+// 2026-05-12 — Tier 0 phase 2: Common helpers extracted to dedicated file.
+// Re-export fmtDuration for backward-compat (existing consumers).
+import {
+  esc,
+  plural,
+  fmtHours,
+  fmtDuration,
+  renderSparkline,
+  renderDelta,
+  bucketByHour,
+  dotStrip,
+  emptyDayLanguage,
+} from './teamScanner2RendererCommon.js';
+export { fmtDuration } from './teamScanner2RendererCommon.js';
+// V21 identity-coverage banner — нужен EmployeeFactory.detectBlocked/Ghost
+// и state для подсчёта incomplete identity.
+import { EmployeeFactory } from '../rowFactory.js';
+import { state } from '../state.js';
 
-const esc = (v) => Utils.escapeHtml(String(v == null ? '' : v));
+// 2026-05-12 — `esc` импортирован из ./teamScanner2RendererCommon.js (Tier 0 phase 2).
 
-/* V18.1 P7-S1.4 — render-context для построения кликабельных URL'ов
-   к внешним системам (Jira /browse/KEY). Устанавливается orchestrator'ом
-   через setRenderContext({ jiraBaseUrl }) перед каждым _renderFull. */
-let _renderContext = { jiraBaseUrl: '' };
-export function setRenderContext(ctx) {
-  _renderContext = { ..._renderContext, ...(ctx || {}) };
+/* V18.1 P7-S1.4 — render-context перенесён в teamScanner2RendererCommon.js
+   2026-05-12 (Tier 0 phase 5). Re-export сохранён для back-compat
+   с orchestrator'ом teamScanner2.js, который зовёт setRenderContext. */
+export {
+  setRenderContext,
+  getRenderContext as _getRenderContext,
+} from './teamScanner2RendererCommon.js';
+import { getRenderContext } from './teamScanner2RendererCommon.js';
+
+/* Phase 3 C2 — Inverted pyramid sub-tab «Сегодня» / «Глубже».
+   V21 — добавлена 3-я подвкладка «Тренды» с ECharts-дашбордом
+   (внутренний data-scanner-tab="metrics" сохранён для совместимости —
+   именно метрик-команд во времени; AUDIT_HOLISTIC O7 — переименование
+   visible-label, отделение от top-level views/metrics.js portfolio-метрик).
+   Брендбук §1 — компас/курс/ориентир: front-page = здесь и сейчас, drill-down
+   = «Глубже», метрики = «глубокий вид». Tab-state хранится на уровне
+   renderer-модуля (один Сканнер на странице). Сбрасывается на 'today' при
+   смене команды (см. resetScannerTab).
+   Click-handler делегирован в `_bindEvents` (через global click listener). */
+let _scannerTab = 'today'; // 'today' | 'deeper' | 'metrics' | 'hygiene'
+export function getScannerTab()        { return _scannerTab; }
+export function setScannerTab(tab) {
+  if (tab === 'deeper' || tab === 'metrics' || tab === 'hygiene') _scannerTab = tab;
+  else _scannerTab = 'today';
 }
-function jiraIssueLink(key) {
-  if (!key) return '';
-  const base = _renderContext.jiraBaseUrl || '';
-  if (!base) return `<strong>${esc(key)}</strong>`;
-  // Внешняя ссылка с rel=noopener — не передаём referrer внутрь Jira.
-  return `<a class="ts2-issue-link" href="${esc(base)}/browse/${esc(key)}" target="_blank" rel="noopener noreferrer" title="Открыть ${esc(key)} в Jira">${esc(key)}</a>`;
+export function resetScannerTab() { _scannerTab = 'today'; }
+
+// AUDIT_SCANNER #01 — sub-tab registry DSL. Регистрировать новые tab'ы через
+// единый API, не trogать switch/case в render. Пока — shim, постепенная миграция.
+// Visible-label «Графики» (F-DUP-1) применяется ТОЛЬКО в registry; legacy
+// _renderScannerTabBar по-прежнему рендерит «Тренды» (см. строку выше).
+const SUB_TAB_REGISTRY = [
+  { id: 'today',   label: 'Сегодня',  render: null /* legacy: inline в renderTeamGlance */ },
+  { id: 'deeper',  label: 'Глубже',   render: null },
+  { id: 'metrics', label: 'Графики',  render: null },  // F-DUP-1 — переименовано из «Метрики»
+  // 2026-05-11 — V23 Jira Hygiene Engine. 12 правил качества данных:
+  // без assignee / без эстимейта / без эпика / >5 дней In-Progress / zombie review / etc.
+  // Render через registered helper в renderHygieneTab (см. renderer ниже).
+  { id: 'hygiene', label: 'Гигиена',  render: null },
+];
+export function registerScannerSubTab(entry) {
+  if (!entry || !entry.id) return;
+  if (!SUB_TAB_REGISTRY.find(t => t.id === entry.id)) SUB_TAB_REGISTRY.push(entry);
 }
+export function getScannerSubTabRegistry() { return SUB_TAB_REGISTRY.slice(); }
+
+/* Tab-bar markup. Кнопки — `data-scanner-tab="today|deeper|metrics"`. */
+/* 2026-05-11 — V23 Jira Hygiene Engine renderer. Запускает runHygieneRules,
+   отображает score 0-100 + список violations grouped by rule. Каждое violation —
+   collapsible <details> со списком issue'ов. Issue → ссылка на Jira.
+
+   Score color:
+     90-100: green (отлично)
+     70-89:  amber (norm)
+     50-69:  warning
+     <50:    danger (требует разговора)
+*/
+export function renderHygieneView(model) {
+  if (!model) {
+    return `<div class="ts2-hygiene-empty"><i>Сначала запустите fetch — гигиена считается по active issues.</i></div>`;
+  }
+  const result = runHygieneRules(model);
+  const { score, violations } = result;
+  const tier = score >= 90 ? 'good' : score >= 70 ? 'mid' : score >= 50 ? 'warn' : 'bad';
+  const tierLabel = score >= 90 ? 'отлично' : score >= 70 ? 'норма' : score >= 50 ? 'требует внимания' : 'требует разговора';
+  const totalViolations = violations.reduce((s, v) => s + v.count, 0);
+  const _ctx = getRenderContext();
+  const jiraBase = (_ctx?.jiraBaseUrl) ? String(_ctx.jiraBaseUrl).replace(/\/+$/, '') : '';
+
+  const violationBlocks = violations
+    .sort((a, b) => (b.weight * b.count) - (a.weight * a.count))
+    .map(v => {
+      const issueRows = v.items.map(it => {
+        const keyLink = jiraBase
+          ? `<a class="ts2-hyg-issue-key" href="${esc(jiraBase)}/browse/${esc(it.key)}" target="_blank" rel="noopener noreferrer">${esc(it.key)}</a>`
+          : `<span class="ts2-hyg-issue-key">${esc(it.key)}</span>`;
+        return `<li class="ts2-hyg-issue-row">
+          ${keyLink}
+          <span class="ts2-hyg-issue-summary" title="${esc(it.summary)}">${esc((it.summary || '').slice(0, 80))}</span>
+          <span class="ts2-hyg-issue-meta">${esc(it.type || '')} · ${esc(it.status || '')}${it.assignee ? ' · ' + esc(it.assignee) : ''}</span>
+        </li>`;
+      }).join('');
+      const sevClass = v.severity === 'warn' ? 'ts2-hyg-rule-warn' : 'ts2-hyg-rule-info';
+      const moreLine = v.truncated ? `<li class="ts2-hyg-issue-more">…ещё ${v.items.length} (всего ${v.count}, показано 50)</li>` : '';
+      return `<details class="ts2-hyg-rule ${sevClass}">
+        <summary class="ts2-hyg-rule-summary">
+          <span class="ts2-hyg-rule-id">${esc(v.rule)}</span>
+          <span class="ts2-hyg-rule-label">${esc(v.label)}</span>
+          <span class="ts2-hyg-rule-count">${v.count}</span>
+        </summary>
+        <ul class="ts2-hyg-issue-list">${issueRows}${moreLine}</ul>
+      </details>`;
+    }).join('');
+
+  return `
+    <div class="ts2-hygiene-howto" role="note">
+      <div class="ts2-hygiene-howto-title">Гигиена данных Jira</div>
+      <div class="ts2-hygiene-howto-text">
+        12 правил качества данных: без assignee, без эстимейта, zombie в review, carry-over между спринтами и др.
+        Score 100 = всё чисто. Под каждым правилом — список затронутых задач со ссылками в Jira.
+      </div>
+    </div>
+    <div class="ts2-hyg-score-block ts2-hyg-score-${tier}">
+      <div class="ts2-hyg-score-num">${score}</div>
+      <div class="ts2-hyg-score-side">
+        <div class="ts2-hyg-score-lab">/ 100 — ${tierLabel}</div>
+        <div class="ts2-hyg-score-sub">${totalViolations} ${plural(totalViolations, ['нарушение', 'нарушения', 'нарушений'])} в ${violations.length} ${plural(violations.length, ['правиле', 'правилах', 'правилах'])}</div>
+      </div>
+    </div>
+    <div class="ts2-hyg-rules-list">
+      ${violations.length ? violationBlocks : '<div class="ts2-hygiene-empty">✓ Все правила пройдены. Команда — образец.</div>'}
+    </div>
+  `;
+}
+
+export function _renderScannerTabBar() {
+  const t = _scannerTab;
+  return `
+    <div class="ts2-tab-bar" role="tablist" aria-label="Уровни Сканнера команд">
+      <button class="ts2-tab-bar-btn ${t==='today'?'is-active':''}" type="button"
+              role="tab" aria-selected="${t==='today'}"
+              data-scanner-tab="today">Сегодня</button>
+      <button class="ts2-tab-bar-btn ${t==='deeper'?'is-active':''}" type="button"
+              role="tab" aria-selected="${t==='deeper'}"
+              data-scanner-tab="deeper">Глубже</button>
+      <button class="ts2-tab-bar-btn ${t==='metrics'?'is-active':''}" type="button"
+              role="tab" aria-selected="${t==='metrics'}"
+              aria-label="Тренды команд (графики во времени)"
+              data-scanner-tab="metrics">Тренды</button>
+      <button class="ts2-tab-bar-btn ${t==='hygiene'?'is-active':''}" type="button"
+              role="tab" aria-selected="${t==='hygiene'}"
+              aria-label="Гигиена данных Jira (без assignee, без эстимейта, и т.п.)"
+              data-scanner-tab="hygiene">Гигиена</button>
+    </div>
+  `;
+}
+/* V22 — linkifyIssueKeys/jiraIssueLink + BB-popover hover-listener
+   перенесены в teamScanner2RendererCommon.js 2026-05-12 (Tier 0 phase 5)
+   чтобы Hero/Insights/PersonRows могли использовать без circular import.
+   Импорт ниже сохраняет внутренние вызовы внутри main renderer'а. */
+import { linkifyIssueKeys, jiraIssueLink } from './teamScanner2RendererCommon.js';
+
+// AUDIT_SCANNER #35 + UX-feedback 2026-05-09/2026-05-10 — print to PDF.
+// История проблемы:
+//   v1: @media print + body.is-printing-scanner с display:none на parents
+//       → печатался белый лист (parent #int-root скрывался каскадно).
+//   v2 (текущая): открываем NEW WINDOW с inline HTML+CSS только из #int-root,
+//       вызываем window.print() в новом окне. Plus: парент-цепочка не мешает,
+//       минус: всё ещё print-dialog (без vendored PDF lib иначе нельзя).
+// Кнопке оставлен title «Сохранить как PDF (откроется print-dialog → Save as PDF)».
+function _printScanner() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  const root = document.getElementById('int-root');
+  if (!root) {
+    try { window.print(); } catch (_) { /* ignore */ }
+    return;
+  }
+  // Собираем все <link rel="stylesheet"> и <style> из исходного документа,
+  // чтобы новое окно унаследовало визуал Сканнера.
+  let cssBlock = '';
+  try {
+    const heads = document.querySelectorAll('link[rel="stylesheet"], style');
+    cssBlock = Array.from(heads).map(node => {
+      if (node.tagName === 'LINK' && node.href) {
+        return `<link rel="stylesheet" href="${node.href}">`;
+      }
+      if (node.tagName === 'STYLE') {
+        return `<style>${node.textContent || ''}</style>`;
+      }
+      return '';
+    }).join('\n');
+  } catch (_) { cssBlock = ''; }
+  const printOnly = `
+    <style>
+      @page { margin: 12mm; }
+      body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+      .ts2-btn-print, .ts2-btn, .ts2-kebab-wrap, #ts2-refresh-btn,
+      .ts2-tab-bar, .ts2-stale-banner, .ts2-search-wrap,
+      .ts2-fab, .assistant-fab, #obsidian-fab-mascot { display: none !important; }
+      .ts2-glance { box-shadow: none !important; }
+      a { color: inherit !important; text-decoration: none !important; }
+      .ts2-panel, .ts2-glance, .ts2-row { page-break-inside: avoid; }
+    </style>
+  `;
+  let html;
+  try {
+    html = `<!doctype html><html><head><meta charset="utf-8"><title>Сканнер команд — PDF</title>${cssBlock}${printOnly}</head><body><div id="int-root">${root.innerHTML}</div><script>window.addEventListener('load', function(){ setTimeout(function(){ try { window.focus(); window.print(); } catch(e){} }, 250); });<\/script></body></html>`;
+  } catch (_) { return; }
+  let win;
+  try { win = window.open('', '_blank', 'width=1200,height=800'); }
+  catch (_) { win = null; }
+  if (!win) {
+    // Pop-up заблокирован → fallback на legacy in-place print.
+    try { window.print(); } catch (_) { /* ignore */ }
+    return;
+  }
+  try {
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (_) { /* ignore */ }
+}
+if (typeof window !== 'undefined') window._ts2PrintScanner = _printScanner;
 
 /* ── helpers ─────────────────────────────────────────── */
 
-function plural(n, forms) {
-  // forms = ['человек', 'человека', 'человек']
-  const a = Math.abs(n) % 100;
-  const b = a % 10;
-  if (a > 10 && a < 20) return forms[2];
-  if (b > 1 && b < 5)   return forms[1];
-  if (b === 1)          return forms[0];
-  return forms[2];
-}
+// 2026-05-12 — `plural`, `fmtHours` импортированы из ./teamScanner2RendererCommon.js
 
-function fmtHours(seconds) {
-  if (!seconds || seconds <= 0) return '0';
-  const h = seconds / 3600;
-  return h < 10 ? h.toFixed(1) : Math.round(h).toString();
-}
+/**
+ * V20 S10.2 — Format dwell-duration (input: hours, not seconds).
+ *
+ * Pilot finding (тимлид, S10): «1642ч» нечитаемо — мозг не парсит большие
+ * часы. После ~24ч переходим на «дни», после ~1000ч (≈42 дня) часы теряют
+ * смысл, оставляем только дни.
+ *
+ * Format table:
+ *   < 24ч       → «18ч»          (округление, как было)
+ *   24..999ч    → «Xд Yч» / «Xд» (если Y=0)
+ *   ≥ 1000ч     → «Xд»           (часы не дописываем)
+ *   < 0 / NaN   → «—»            (defensive: clock-skew)
+ *
+ * Граница ровно 24.0 → «1д» (>=, не >).
+ *
+ * V20 S11.1 BUG-9 — ВНИМАНИЕ: НЕ использовать fmtDuration() в путях
+ * сериализации (snapshot/history/diagnostic JSON export). История и
+ * diagnostic должны хранить **raw часы (число)**, иначе:
+ *   · смена UI-формата ломает snapshot diff (ложно-positive «изменения»)
+ *   · scrub-policy/A11y readers не разбирают «68д»
+ * Если нужно показать форматированно в diagnostic — вычисляй на чтении,
+ * не на записи. Этот комментарий — barrier для будущих PR.
+ *
+ * @param {number} h — часы (integer или float)
+ * @returns {string}
+ */
+// 2026-05-12 — fmtDuration импортируется и re-export'ится сверху (Common).
 
 /**
  * V19 C2 — Mini-sparkline для history-серии (14 дней).
@@ -58,51 +284,13 @@ function fmtHours(seconds) {
  * @param {number[]} series — values, ASC-by-day
  * @param {object}   [opts] — { width=80, height=18, lastIsBad?: bool }
  */
-function renderSparkline(series, opts = {}) {
-  if (!Array.isArray(series) || series.length < 2) return '';
-  const w = Number(opts.width)  || 80;
-  const h = Number(opts.height) || 18;
-  const max = Math.max(1, Math.max(...series));
-  const min = Math.min(0, Math.min(...series));
-  const range = max - min || 1;
-  const stepX = w / (series.length - 1);
-  const points = series.map((v, i) => {
-    const x = Math.round(i * stepX);
-    const y = Math.round(h - ((v - min) / range) * (h - 2) - 1);
-    return `${x},${y}`;
-  }).join(' ');
-  // Цвет последней точки: lastIsBad → red если возрастает, иначе accent.
-  const last = series[series.length - 1];
-  const prev = series[series.length - 2];
-  const trendUp = last > prev;
-  const dotCls = (opts.lastIsBad && trendUp) ? 'ts2-spark-dot-bad'
-              : (opts.lastIsBad && !trendUp) ? 'ts2-spark-dot-good'
-              : 'ts2-spark-dot';
-  const lastX = Math.round((series.length - 1) * stepX);
-  const lastY = Math.round(h - ((last - min) / range) * (h - 2) - 1);
-  return `
-    <svg class="ts2-sparkline-svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
-      <polyline class="ts2-sparkline-line" fill="none" points="${points}"/>
-      <circle class="${dotCls}" cx="${lastX}" cy="${lastY}" r="2"/>
-    </svg>
-  `;
-}
+// 2026-05-12 — renderSparkline импортируется из Common.
 
 /** V18.1 P7-S4.2 — render trend-delta arrow для PO/руководителя.
  *  positiveIsBad=true → ↑ red (orphans, stop), ↑ green (moving, progress).
  *  Returns '' если нет prev или delta=0.
  */
-function renderDelta(curr, prev, opts = {}) {
-  if (typeof prev !== 'number') return '';
-  const delta = curr - prev;
-  if (delta === 0) return '';
-  const positiveIsBad = !!opts.positiveIsBad;
-  const arrow = delta > 0 ? '↑' : '↓';
-  const cls = positiveIsBad
-    ? (delta > 0 ? 'ts2-delta-bad'  : 'ts2-delta-good')
-    : (delta > 0 ? 'ts2-delta-good' : 'ts2-delta-bad');
-  return `<span class="ts2-delta ${cls}" title="вчера было ${prev}">${arrow}${Math.abs(delta)}</span>`;
-}
+// 2026-05-12 — renderDelta импортируется из Common.
 
 /**
  * Bucket events by local hour-of-day (0..23). Each bucket = number of events
@@ -111,34 +299,7 @@ function renderDelta(curr, prev, opts = {}) {
  * NB: в P1 используем server local time (как и весь Pulse). TZ-skew issue
  * подсветим в P3 — нужно решение по browser TZ vs server TZ.
  */
-function bucketByHour(events) {
-  const out = new Array(24).fill(0);
-  for (const e of (events || [])) {
-    const t = String(e?.at || '');
-    if (!t) continue;
-    // ISO «2026-05-01T14:23:45.123Z» → парсим Date, берём local hour.
-    const d = new Date(t);
-    if (isNaN(d.getTime())) continue;
-    const h = d.getHours();
-    if (h >= 0 && h < 24) out[h]++;
-  }
-  return out;
-}
-
-/** 24 cells × 14px высоты strip. Каждый bucket — 4×4 dot с opacity по плотности. */
-function dotStrip(hourBuckets, ariaLabel) {
-  const cells = hourBuckets.map((n, h) => {
-    let opacity;
-    if (n === 0)      opacity = 0.10;     // пустой час — почти прозрачный точечный
-    else if (n === 1) opacity = 0.45;
-    else if (n === 2) opacity = 0.70;
-    else if (n === 3) opacity = 0.90;
-    else              opacity = 1.0;       // 4+
-    const cls = n >= 4 ? 'ts2-dot ts2-dot-busy' : 'ts2-dot';
-    return `<span class="ts2-cell" title="${h.toString().padStart(2, '0')}:00 — ${n} ${plural(n, ['событие', 'события', 'событий'])}"><span class="${cls}" style="opacity:${opacity}"></span></span>`;
-  }).join('');
-  return `<span class="ts2-strip" role="img" aria-label="${esc(ariaLabel || '')}">${cells}</span>`;
-}
+// 2026-05-12 — bucketByHour + dotStrip импортируются из Common.
 
 /** Product-language вместо "0 событий" — снимаем обвиняющий тон (HR-роль).
  *  V18.1 P7-S1.3 — учитывает все 4 источника, не только Jira+CF.
@@ -147,31 +308,17 @@ function dotStrip(hourBuckets, ariaLabel) {
  *  До фикса: senior с 0 jira-events + 5 PR-reviews видел «Нет следа», что
  *  ложно и унизительно.
  */
-function emptyDayLanguage(p, day) {
-  // day = 'today' | 'yesterday' (пока не используется — P3 будет per-day language)
-  const reviewSig = (p.badges?.reviews || 0) + (p.badges?.approves || 0);
-  const commits   = p.badges?.commits48h || 0;
-  const prs       = p.badges?.pr48h || 0;
-  const cfN       = (p.cfItems || []).length;
-  const bbN       = (p.bbItems || []).length;
-  const zephyrN   = ((p.zephyrTestsCreatedRecent  || []).length
-                  +  (p.zephyrTestsExecutedRecent || []).length);
-
-  // Order matters — самый специфичный сигнал выигрывает.
-  if (reviewSig > 0)               return 'Фокус на код-ревью';
-  if (commits > 0 && prs === 0)    return 'Коммиты без транзишенов';
-  if (prs > 0)                     return 'Работа с PR';
-  if (zephyrN > 0)                 return 'Тестовые прогоны';
-  if (cfN > 0)                     return 'Документация / комментарии';
-  if (bbN > 0)                     return 'Активность в Bitbucket';
-  return 'Нет следа в Jira / BB / CF';
-}
+// 2026-05-12 — emptyDayLanguage импортируется из Common.
 
 /** P3 helper: единый «stuck-list» для участника — blockers (если P3
     enrichment запущен) ИЛИ stale (P1/P2 fallback). Это позволяет
     classifier'у работать одинаково для enriched и non-enriched model. */
 // V20 S8 #15 — extracted to teamScanner2Classifier.js (single source of truth).
 import { classifyPerson as _classifyPerson, stuckListOf as _stuckListOf, statusOfPerson as _statusOfPerson } from './teamScanner2Classifier.js';
+// AUDIT_SCANNER #22 — hygiene thresholds (config), #28 — components как hygiene-критерий.
+import { HYGIENE_THRESHOLDS } from './teamScanner2Config.js';
+// V20 S12 — Insights pure-helpers (I1, I2, I7).
+import { buildDailyBrief, buildActionQueue, detectZombies, buildYesterdayGroupMap, composePersonNarrative, composeNarrativeMarkdown, buildBurnupData, buildYesterdayDigest, buildScopeChurnDetail, computePrCycleTime, computeCrQueueDepth, computeCrLoadGini, weekdayAdjustedAnomaly, detectStalePrs, detectStaleBranches, analyzeChangelogPatterns, computeEstimateAccuracy, detectSoloAuthorFiles, computeOnboardingRamp, computeBlockerMTTR, computeTeamHealthScore, composeDailyBriefMarkdown, buildCrossTeamDeps, computeSprintConfidence, computeCarryOverRate, computeBugInjectionRate, computeUnplannedWork, computeBlockedTimeAggregate } from './teamScanner2Insights.js';
 const stuckListOf = _stuckListOf;
 
 // V20 S8 #15 — statusOfPerson переехал в teamScanner2Classifier.js.
@@ -202,370 +349,440 @@ const stuckListOf = _stuckListOf;
 // Re-export сохраняет публичный API для existing consumers.
 export const classifyPerson = _classifyPerson;
 
-/** V18.1 P7-S3.2 — HR-language: «Стоп» → «Требует разговора»
- *  (HR panel: «Стоп» = приговор; «Требует разговора» = операционный
- *  сигнал, не оценка человека). */
-const GROUP_META = {
-  stop:   { label: 'Требует разговора', desc: 'Висят без движения — нужен разговор сегодня' },
-  watch:  { label: 'Под наблюдением',   desc: 'Триггеры: перегрузка, тишина или старое тянется' },
-  moving: { label: 'Движется',          desc: 'Есть активность сегодня, без красных флагов' },
-  idle:   { label: 'Без активности',     desc: 'Нет следов в Jira / BB / CF' },
-};
+/** V18.1 P7-S3.2 / V22 (2026-05-09) — HR-language: «Стоп» → «Требует разговора»
+ *  → «Требует внимания» (operational signal, без HR-конотации). Person-row тип
+ *  stop остаётся в classify; меняется только presentational layer. */
+// 2026-05-12 — GROUP_META перенесён в teamScanner2RendererPersonRows.js
+// (используется только renderGroup внутри renderPersonRows). После
+// Phase 4 extract'а main больше не нуждается в этой константе.
 
-/* ── Top bar ─────────────────────────────────────────── */
+/* ── Hero block extracted 2026-05-12 (Tier 0 phase 5) ───────
+   1306 LOC → integrations/teamScanner2RendererHero.js. Здесь:
+     · re-export public API для orchestrator'а (renderTopBar etc.)
+     · import internal helpers, используемых в renderSprintHealth
+       и renderMultiTeamView ниже (renderBurnupSparkline,
+       _ensureScannerRoomStyles).
+   ──────────────────────────────────────────────────────── */
+export {
+  renderTopBar,
+  renderVelocityComparison,
+  renderTeamSwitcher,
+  renderSprintLagBreakdown,
+  renderTeamGlance,
+  renderConfluenceSsoBanner,
+  _ensureSsoBannerStyles,
+} from './teamScanner2RendererHero.js';
+import {
+  renderBurnupSparkline,
+  _ensureScannerRoomStyles,
+  renderSprintLagBreakdown,
+  renderVelocityComparison,
+} from './teamScanner2RendererHero.js';
 
-export function renderTopBar(model, ctx = {}) {
-  const fetchedAt = model?.fetchedAt
-    ? new Date(model.fetchedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-    : '—';
-  const pkCount = (model?.projectKeys || []).length;
-  // V18.1 P6 — graduated из preview, pill «v2 preview» убран. v1 живёт
-  // как «legacy» сабтаб рядом, переключение через subtab-bar.
-  // V18.1 P7-S2.1 — Sprint Goal gauge (правее заголовка). Сигнал #1 из
-  // synthesis-плана: PO защищает у CTO «где квартальные цели».
-  const sg = model?.scannerV2?.sprintGoal;
-  const prevSprint = ctx.prev?.sprintGoal;
-  // V20 S7 A4 — slope из history (если ≥3 точек). ctx.history уже прокидывается из orchestrator.
-  const sprintSlope = ctx.sprintGoalSlope || null;
-  const sprintGauge = sg && sg.aggregateTotal > 0 ? renderSprintGauge(sg, prevSprint, sprintSlope) : '';
-  // V20 S1.5 — stale-banner: cache > 5min → подсветить fetchedAt + CTA.
-  const staleBanner = ctx.isStale
-    ? `<div class="ts2-stale-banner" role="status">
-         <span class="ts2-stale-icon" aria-hidden="true">⏱</span>
-         <span class="ts2-stale-text">Данные ${esc(_humanizeAge(ctx.cacheAgeMs))} назад</span>
-         <button class="ts2-btn ts2-btn-ghost ts2-stale-refresh-btn" id="ts2-stale-refresh" type="button">обновить</button>
-       </div>`
-    : '';
+
+/**
+ * V20 S14 I9 — Stale PR list (>3д без активности).
+ */
+/* PR-CQ — Sankey зависимостей между командами.
+   Изменения: палитра 8-цветная per-source PK (узлы и потоки одного цвета),
+   градиент потока от source-цвета к target-цвету, hover подсвечивает связь
+   и тушит остальные, метки PK снаружи узлов (не наезжают), легенда снизу. */
+
+/* 2026-05-12 — Tier 0 phase 3: insights tile renderers выделены в
+   teamScanner2RendererInsights.js (~1030 LOC). Здесь re-imports для
+   internal usage (renderSleepingDataInsights вызывается из renderTeamGlance
+   ниже). _renderDeeperEmptyState тоже доступен через локальный alias. */
+import {
+  renderSleepingDataInsights,
+  renderTile_componentLoad,
+  _renderDependencySankey,
+  _renderDeeperEmptyState,
+} from './teamScanner2RendererInsights.js';
+
+
+function renderStalePrs(model) {
+  const stale = detectStalePrs(model);
+  if (stale.length === 0) return '';
+  const items = stale.map(s => `
+    <li class="ts2-stale-pr-row">
+      <span class="ts2-stale-pr-id">PR #${esc(String(s.prId))}</span>
+      <span class="ts2-stale-pr-age">▌${s.ageDays}д</span>
+      <span class="ts2-stale-pr-author">${esc(s.author)}</span>
+      <span class="ts2-stale-pr-title">${esc(s.title || '—')}</span>
+    </li>
+  `).join('');
   return `
-    <div class="ts2-topbar">
-      <div class="ts2-topbar-title">
-        <span class="ts2-h1">Сканнер команд</span>
-        ${sprintGauge}
-      </div>
-      <div class="ts2-topbar-meta">
-        <span class="ts2-meta-item">${pkCount} ${plural(pkCount, ['проект', 'проекта', 'проектов'])}</span>
-        <span class="ts2-meta-sep">·</span>
-        <span class="ts2-meta-item ${ctx.isStale ? 'ts2-meta-stale' : ''}" title="${ctx.isStale ? 'Кэш устарел (> 5 мин)' : 'Свежие данные'}">обновлено ${esc(fetchedAt)}</span>
-        <!-- V20 S8 #5 — Kebab overflow. Pилот feedback: «7 кнопок, использую 3».
-             В прямой видимости: 📋 Диагностика, ↻ Обновить (всегда).
-             В kebab: ❓ Как считается, ⚙ Настройка команд, 👥 По командам. -->
-        <!-- V20 S8.5 #19 — badge с числом known-issues. Тимлид заходит в diag
-             раз в 2 недели, может пропустить свежие проблемы (CF=0%, jobId expired).
-             ctx.knownIssuesCount передаётся orchestrator'ом. -->
-        <button class="ts2-btn ts2-btn-ghost ts2-diag-btn-with-badge" id="ts2-diag-btn" type="button" title="Диагностика: почему по BB / Conf / Jira нет данных + JSON-экспорт для разработчика" aria-label="Диагностика">📋 Диагностика${ctx.knownIssuesCount > 0 ? `<span class="ts2-diag-btn-badge" title="${ctx.knownIssuesCount} известных проблем требуют внимания">${ctx.knownIssuesCount}</span>` : ''}</button>
-        <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">↻ Обновить</button>
-        <div class="ts2-kebab-wrap">
-          <button class="ts2-btn ts2-btn-ghost ts2-kebab-btn" id="ts2-kebab-btn" type="button"
-                  title="Дополнительные действия" aria-label="Меню" aria-haspopup="menu" aria-expanded="false">⋯</button>
-          <div class="ts2-kebab-menu" id="ts2-kebab-menu" role="menu" hidden>
-            <button class="ts2-kebab-item" id="ts2-how-btn" type="button" role="menuitem">❓ Как считается</button>
-            <button class="ts2-kebab-item" id="ts2-config-btn" type="button" role="menuitem">⚙ Настройка команд</button>
-            ${pkCount >= 2 ? `<button class="ts2-kebab-item ${ctx.activeView === 'multi' ? 'ts2-kebab-item-active' : ''}" id="ts2-view-toggle" type="button" role="menuitem">👥 ${ctx.activeView === 'multi' ? 'Одна команда' : 'По командам'}</button>` : ''}
-          </div>
-        </div>
-      </div>
-      ${staleBanner}
-    </div>
+    <details class="ts2-stale-pr">
+      <summary class="ts2-stale-pr-summary">
+        <span>PR без сигнала <span class="ts2-stale-pr-count">${stale.length}</span></span>
+        <span class="ts2-stale-pr-hint">— открыты >3д без активности</span>
+      </summary>
+      <ul class="ts2-stale-pr-list">${items}</ul>
+    </details>
   `;
 }
 
-/** V20 S1.5 — humanize cache age для stale-banner: «3 мин», «12 мин», «1 ч». */
-function _humanizeAge(ms) {
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-  const sec = Math.round(ms / 1000);
-  if (sec < 60) return `${sec} сек`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min} мин`;
-  const hr = Math.round(min / 60);
-  return `${hr} ч`;
+/* 2026-05-12 — Jira changelog pattern surface.
+   Patterns: frequent reassign / severity-downgrade / sprint-hopping / scope-flip.
+   Used in Operations section. */
+function renderChangelogPatterns(model) {
+  const patterns = analyzeChangelogPatterns(model);
+  if (!patterns.length) return '';
+  const labelOf = (p) => ({
+    'churn-frequent-reassign': 'Частая смена assignee',
+    'severity-downgrade':      'Severity понижена без resolution',
+    'sprint-hopping':           'Переходит между спринтами',
+    'scope-flip':               'Выкинута из scope',
+  })[p] || p;
+  const items = patterns.map(p => `
+    <li class="ts2-stale-pr-row">
+      <span class="ts2-stale-pr-id">${esc(p.key)}</span>
+      <span class="ts2-stale-pr-author">${esc(labelOf(p.pattern))}</span>
+      <span class="ts2-stale-pr-title">${esc(p.evidence)}</span>
+    </li>
+  `).join('');
+  return `
+    <details class="ts2-stale-pr ts2-changelog-patterns">
+      <summary class="ts2-stale-pr-summary">
+        <span>Подозрительные паттерны changelog <span class="ts2-stale-pr-count">${patterns.length}</span></span>
+        <span class="ts2-stale-pr-hint">— churn / sprint-hopping / scope-flip / severity-downgrade</span>
+      </summary>
+      <ul class="ts2-stale-pr-list">${items}</ul>
+    </details>
+  `;
 }
 
-const PACE_LABEL = {
-  'ahead':    'опережает',
-  'on-track': 'по плану',
-  'behind':   'отстаёт',
-  'no-data':  'нет дат',
-};
+/* 2026-05-12 — Stale branches detector (BB untapped data). Surface long-living
+   feature branches (>14d без commits) — risk merge-conflict + забытая работа. */
+function renderStaleBranches(model) {
+  const stale = detectStaleBranches(model, 14);
+  if (!stale.length) return '';
+  const items = stale.map(s => `
+    <li class="ts2-stale-pr-row">
+      <span class="ts2-stale-pr-id" title="${esc(s.repo || '')}">${esc(s.branch.slice(0, 40))}</span>
+      <span class="ts2-stale-pr-age">▌${s.daysStale}д</span>
+      <span class="ts2-stale-pr-author">${esc(s.author)}</span>
+      <span class="ts2-stale-pr-title">last commit: ${esc(s.lastCommitAt || '?')}</span>
+    </li>
+  `).join('');
+  return `
+    <details class="ts2-stale-pr ts2-stale-branches">
+      <summary class="ts2-stale-pr-summary">
+        <span>Долгоживущие branches <span class="ts2-stale-pr-count">${stale.length}</span></span>
+        <span class="ts2-stale-pr-hint">— нет коммитов >14 дней (риск merge-conflict)</span>
+      </summary>
+      <ul class="ts2-stale-pr-list">${items}</ul>
+    </details>
+  `;
+}
 
-/** V18.1 P7-S2.1 + S4.4 — Sprint Goal gauge: aggregate + per-pk pills.
- *  Anna PO pilot finding: «aggregate скрывает асимметрию, если Backend
- *  behind а Platform ahead — aggregatePace='behind' и я не понимаю кого
- *  тянуть. Per-pk breakdown в gauge'е нет — приходится открывать
- *  tooltip и копать sg.sprints[]».
- *
- *  S4.4 fix: если несколько спринтов → показываем per-pk пилюли рядом
- *  с aggregate. Если один — старое поведение (одиночный gauge).
- */
 /**
- * V20 S8 #10 — Narrative builder для PO/CTO meeting. Возвращает 1-2 предложения
- * «say-this-string» которое PO может скопировать в Slack/слайды.
+ * V20 S14 I10 — Estimate accuracy rolling 30d.
  */
-function _buildSprintNarrative(sg, slope) {
-  if (!sg || !sg.sprints?.length) return '';
-  const pct = sg.aggregateProgress;
-  const pace = sg.aggregatePace;
-  const lines = [];
-  // Pace claim.
-  if (pace === 'behind')   lines.push(`Команда отстаёт от плана (${pct}% сделано).`);
-  else if (pace === 'ahead')   lines.push(`Команда опережает план (${pct}%).`);
-  else if (pace === 'on-track') lines.push(`Команда идёт по плану (${pct}%).`);
-  else                          lines.push(`Прогресс ${pct}% (даты спринтов не настроены).`);
-  // Asymmetry: most-behind sprint pulls down.
-  if (sg.sprints.length > 1) {
-    const sorted = [...sg.sprints].sort((a, b) => (a.progressPct || 0) - (b.progressPct || 0));
-    const worst = sorted[0];
-    const best  = sorted[sorted.length - 1];
-    if (worst && best && (best.progressPct - worst.progressPct) >= 25) {
-      lines.push(`${worst.pk} тянет вниз (${worst.progressPct}%), ${best.pk} впереди (${best.progressPct}%).`);
-    }
-  }
-  // Slope.
-  if (slope && slope.trend === 'up')   lines.push(`Тренд за ${slope.days} дней — ускорение (+${slope.slope}%/день).`);
-  else if (slope && slope.trend === 'down') lines.push(`Тренд за ${slope.days} дней — замедление (${slope.slope}%/день).`);
-  return lines.join(' ');
-}
-
-function renderSprintGauge(sg, prevSg, slope) {
-  const pct = sg.aggregateProgress;
-  const pace = sg.aggregatePace;
-  const paceLabel = PACE_LABEL[pace] || '—';
-  // V20 S8 #10 — narrative for PO. Передаётся в title gauge'а — hover открывает.
-  const narrative = _buildSprintNarrative(sg, slope);
-  const firstSprint = sg.sprints[0];
-  const daysLeft    = firstSprint?.daysLeft;
-  const daysSuffix  = (typeof daysLeft === 'number')
-    ? ` · ${daysLeft} ${plural(daysLeft, ['день', 'дня', 'дней'])}`
-    : '';
-  // V18.1 P7-S4.2 — sprint progress delta vs previous snapshot.
-  const dProgress = prevSg ? renderDelta(pct, prevSg.aggregateProgress) : '';
-  // V20 S7 A4 — slope arrow если есть данные за ≥3 дня.
-  // V20 S8 #8 — слово «стагнация» зарезервировано для flat. Падение → «падение».
-  // V20 S8.5 #9 — единое слово «→ ровно» для flat (раньше было «стагнация» здесь
-  // и «flat» в slopeMini — пилот заметил несогласованность).
-  const slopeChip = (slope && slope.trend !== 'no-data')
-    ? `<span class="ts2-sprint-slope ts2-sprint-slope-${slope.trend}" title="Тренд за ${slope.days} ${plural(slope.days, ['день', 'дня', 'дней'])} · R²=${slope.r2}">${
-        slope.trend === 'up'   ? `↗ +${slope.slope}%/день` :
-        slope.trend === 'down' ? `↘ ${slope.slope}%/день — падение` :
-                                  '→ ровно'
-      }</span>`
-    : '';
-  // V20 S7 A4 — sprint-mean (sprint-weighted) рядом с aggregate (issue-weighted).
-  // Раскрывает асимметрию: spring-200/10% vs sprint-20/90% → mean=50% vs aggregate=18%.
-  const meanChip = (sg.sprintMeanProgress != null && sg.sprintMeanProgress !== sg.aggregateProgress && sg.sprints.length > 1)
-    ? `<span class="ts2-sprint-mean" title="Sprint-weighted mean (без issue-weighting) — раскрывает асимметрию между большими и малыми спринтами">~${sg.sprintMeanProgress}%</span>`
-    : '';
-
-  // Один sprint — без перегрузки UI, оставляем legacy single-gauge.
-  if (sg.sprints.length <= 1) {
-    const sprintName  = firstSprint?.name ? esc(firstSprint.name) : '';
-    const tipShort = narrative
-      ? `${narrative}\n— — —\n${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}`
-      : `Sprint Goal: ${sg.aggregateDone}/${sg.aggregateTotal} done · pace: ${paceLabel}${daysSuffix}`;
+function renderEstimateAccuracy(model) {
+  const arr = computeEstimateAccuracy(model);
+  if (arr.length === 0) return '';
+  const items = arr.slice(0, 6).map(e => {
+    const cls = e.tendency === 'good' ? 'ts2-est-good'
+              : e.tendency === 'underestimate' ? 'ts2-est-under'
+              : 'ts2-est-over';
+    const txt = e.tendency === 'good' ? 'точно'
+              : e.tendency === 'underestimate' ? 'недооценивает'
+              : 'переоценивает';
     return `
-      <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="${esc(tipShort)}">
-        <span class="ts2-sprint-label">Спринт</span>
-        <span class="ts2-sprint-name">${sprintName}</span>
-        <span class="ts2-sprint-bar">
-          <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
-        </span>
-        <span class="ts2-sprint-pct">${pct}%</span>${dProgress}${slopeChip}
-        <span class="ts2-sprint-pace">${paceLabel}${daysSuffix}</span>
-      </div>
-    `;
-  }
-
-  // Несколько спринтов — aggregate сверху + per-pk пилюли снизу.
-  const pkPills = sg.sprints.map(s => {
-    const sPace = s.pace || 'no-data';
-    const sPaceLabel = PACE_LABEL[sPace] || '—';
-    const sDays = (typeof s.daysLeft === 'number')
-      ? ` · ${s.daysLeft}д`
-      : '';
-    return `
-      <span class="ts2-sprint-pk-pill ts2-sprint-pace-${sPace}" title="${esc(s.pk)} «${esc(s.name || '')}» · ${s.done}/${s.total} done · ${sPaceLabel}${sDays}">
-        <span class="ts2-sprint-pk-pill-key">${esc(s.pk)}</span>
-        <span class="ts2-sprint-pk-pill-pct">${s.progressPct}%</span>
-      </span>
+      <li class="ts2-est-row ${cls}">
+        <button type="button" class="ts2-lag-person-link" data-jump-key="${esc(e.key)}">${esc(e.label)}</button>
+        <span class="ts2-est-ratio">${e.medianRatio}×</span>
+        <span class="ts2-est-tendency">${txt}</span>
+        <span class="ts2-est-n">N=${e.sampleSize}</span>
+      </li>
     `;
   }).join('');
-
   return `
-    <div class="ts2-sprint-gauge-multi">
-      <div class="ts2-sprint-gauge ts2-sprint-pace-${pace}" title="${esc(narrative ? narrative + '\n— — —\n' + 'Aggregate: ' + sg.aggregateDone + '/' + sg.aggregateTotal + ' · ' + paceLabel : 'Aggregate Sprint Goal: ' + sg.aggregateDone + '/' + sg.aggregateTotal + ' done · pace: ' + paceLabel + daysSuffix)}">
-        <span class="ts2-sprint-label">Спринты</span>
-        <span class="ts2-sprint-name">${sg.sprints.length}×</span>
-        <span class="ts2-sprint-bar">
-          <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
-        </span>
-        <span class="ts2-sprint-pct">${pct}%</span>${meanChip}${dProgress}${slopeChip}
-        <span class="ts2-sprint-pace">${paceLabel}</span>
-      </div>
-      <div class="ts2-sprint-pk-pills">${pkPills}</div>
-    </div>
+    <details class="ts2-est">
+      <summary class="ts2-est-summary"><span>Estimate accuracy <span class="ts2-est-count">${arr.length}</span></span> <span class="ts2-est-hint">— median actual/estimate за 30д</span></summary>
+      <ul class="ts2-est-list">${items}</ul>
+    </details>
   `;
 }
 
-/* ── Team glance — single-line summary ─────────────── */
-
-export function renderTeamGlance(model, ctx = {}) {
-  const parts = model?.participants || [];
-  // V18.1 P2 — counts per classified group. Дают prevailing read'у тимлида
-  // за 1 секунду: «куда смотреть в первую очередь?»
-  const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
-  let commits48h = 0, prs48h = 0, conf48h = 0;
-  for (const p of parts) {
-    counts[classifyPerson(p)]++;
-    commits48h += p.badges?.commits48h || 0;
-    prs48h     += p.badges?.pr48h      || 0;
-    // V18.1 P6.2 — Confluence info теперь видна в team-glance.
-    conf48h    += p.badges?.conf48h    || 0;
-  }
-  // V18.1 P7-S4.2 — trend-deltas из prev snapshot (если есть).
-  const prev = ctx.prev || null;
-  const dMoving = prev ? renderDelta(counts.moving, prev.counts?.moving) : '';
-  const dWatch  = prev ? renderDelta(counts.watch,  prev.counts?.watch,  { positiveIsBad: true }) : '';
-  const dStop   = prev ? renderDelta(counts.stop,   prev.counts?.stop,   { positiveIsBad: true }) : '';
-  // V20 S7 A5 — anomaly badges (Z-score). Если today сильно отличается от
-  // среднего за 14 дней (|z| > 2) — подсвечиваем counter с иконкой ⚠.
-  const zStop   = ctx.anomalies?.stop;
-  const zWatch  = ctx.anomalies?.watch;
-  const zMoving = ctx.anomalies?.moving;
-  const zIdle   = ctx.anomalies?.idle;
-  // V20 S8 #1 — human-language anomaly. «×4 от нормы» вместо «z=+4.2».
-  // Z-score сохраняем в title для гиков. Pилот: «не до статистики в 9:30».
-  const anomalyBadge = (z) => {
-    if (!z?.anomalous) return '';
-    const ratio = z.mean > 0 ? (z.today / z.mean) : 0;
-    let label;
-    if (z.today === 0)               label = 'упало до 0';
-    else if (ratio >= 1.5)           label = `×${ratio.toFixed(1)} от нормы`;
-    else if (ratio > 0 && ratio < 0.7) label = `−${Math.round((1 - ratio) * 100)}% от нормы`;
-    else                              label = `аномально ${z.z > 0 ? 'много' : 'мало'}`;
-    // V20 S8.5 #7 + #20 — расширенный tooltip + clickable для mini-chart sparkline.
-    return `<button type="button" class="ts2-glance-anomaly ts2-glance-anomaly-${z.z > 0 ? 'up' : 'down'}" data-anomaly-metric="${esc(label)}" title="Сегодня: ${z.today} · Среднее за 14 дней: ${z.mean} ± ${z.std} · Z-score: ${z.z}. Клик → мини-график.">⚠ ${esc(label)}</button>`;
-  };
-
-  // V18.3 A5a — group-counts кликабельны → scroll-jump к соответствующей
-  // группе. Anna PO finding: «Я вижу «1 требует разговора», но чтобы
-  // найти кого — скроллю. Anchor-jump к ts2-group-stop напрашивается».
-  const jumpBtn = (groupKey, content) =>
-    `<button type="button" class="ts2-glance-jump" data-jump-group="${groupKey}" title="Прыгнуть к группе">${content}</button>`;
-  const segs = [];
-  if (counts.moving > 0) segs.push(jumpBtn('moving', `<span class="ts2-glance-num">${counts.moving}</span>${dMoving}${anomalyBadge(zMoving)}<span class="ts2-glance-lab">движется</span>`));
-  if (counts.watch  > 0) segs.push(jumpBtn('watch',  `<span class="ts2-glance-num ts2-glance-num-watch">${counts.watch}</span>${dWatch}${anomalyBadge(zWatch)}<span class="ts2-glance-lab">наблюдение</span>`));
-  if (counts.stop   > 0) segs.push(jumpBtn('stop',   `<span class="ts2-glance-stuck">▌<span class="ts2-glance-num-stop">${counts.stop}</span>${dStop}${anomalyBadge(zStop)} ${plural(counts.stop, ['стоп', 'стоп', 'стоп'])}</span>`));
-  if (counts.idle   > 0) segs.push(jumpBtn('idle',   `<span class="ts2-glance-num ts2-glance-num-muted">${counts.idle}</span>${anomalyBadge(zIdle)}<span class="ts2-glance-lab">без активности</span>`));
-  const groupLine = segs.length ? segs.join(`<span class="ts2-glance-sep">·</span>`) : `<span class="ts2-glance-lab">Нет данных</span>`;
-  // V18.1 P7-S2.1.5 — risk shelf: orphans + out-of-sprint.
-  // Закрывает сигналы #6 + #7 из synthesis-плана для PO/SM.
-  const risks = model?.scannerV2?.risks;
-  const orphans  = risks?.totalOrphans     || 0;
-  const oos      = risks?.totalOutOfSprint || 0;
-  const oosRatio = risks?.outOfSprintRatio || 0;
-  // V18.1 P7-S4.2 — risk-deltas: orphans/oos increasing = bad.
-  const dOrphans = prev ? renderDelta(orphans, prev.risks?.totalOrphans, { positiveIsBad: true }) : '';
-  const dOos     = prev ? renderDelta(oos,     prev.risks?.totalOutOfSprint, { positiveIsBad: true }) : '';
-  const riskBlocks = [];
-  if (orphans > 0) {
-    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-stop">${orphans}</span>${dOrphans} ${plural(orphans, ['без assignee', 'без assignee', 'без assignee'])}</span>`);
-  }
-  if (oos > 0) {
-    const pct = Math.round(oosRatio * 100);
-    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-watch">${oos}</span>${dOos} out-of-sprint ${pct > 0 ? `(${pct}%)` : ''}</span>`);
-  }
-  const riskLine = riskBlocks.length ? riskBlocks.join(`<span class="ts2-glance-sep">·</span>`) : '';
-
-  // V18.3 A5b — filter-badge показывает что view filtered по pk + дает
-  // кнопку clear filter.
-  const pkFilter = ctx.pkFilter || '';
-  const filterBadge = pkFilter
-    ? `<div class="ts2-pk-filter-badge">
-         <span class="ts2-pk-filter-label">Фильтр:</span>
-         <span class="ts2-pk-filter-pk">${esc(pkFilter)}</span>
-         <button class="ts2-pk-filter-clear" id="ts2-pk-filter-clear" type="button" title="Сбросить фильтр">✕</button>
-       </div>`
-    : '';
-  // V19 C2 — history sparklines (PO ask «какие новости?»).
-  // Показываем только если у нас ≥ 2 daily snapshots; иначе скрыто.
-  const history = Array.isArray(ctx.history) ? ctx.history : [];
-  const trendRow = history.length >= 2 ? renderHistoryTrendRow(history) : '';
-  // V20 S7 A1 — CRV aggregate. Median по всем reviewers — даёт «общую скорость
-  // ревью команды». Если нет данных (CRV пустой) — не отображаем.
-  const crv = model?.scannerV2?.codeReviewVelocity || {};
-  const crvKeys = Object.keys(crv);
-  const crvMedians = crvKeys.map(k => crv[k].medianHours).filter(Number.isFinite);
-  crvMedians.sort((a, b) => a - b);
-  const crvMedian = crvMedians.length ? crvMedians[Math.floor(crvMedians.length / 2)] : null;
-  // V20 S8 #4 — compact-полоска: «команда: ↗ · CR 6ч · 80% PR»
-  // Pилот feedback: «три элемента конкурируют за внимание». Объединяем.
-  // CR-badge кликабельный (S8 #2) → drill-down в slow-reviewers.
-  const crvBadge = crvMedian != null
-    ? `<button type="button" class="ts2-glance-crv ts2-glance-crv-${crvMedian > 24 ? 'slow' : crvMedian > 8 ? 'warn' : 'ok'}" id="ts2-glance-crv-drilldown" title="Медиана времени до первого ревью. Клик — список самых долгих ревью.">CR ${crvMedian}ч</button>`
-    : '';
-  // V20 S7 A1 — PR throughput aggregate. Подсчитываем sum opened/merged за 7 дней.
-  const prT = model?.scannerV2?.prThroughput || {};
-  let prOpened = 0, prMerged = 0, prOverloadCount = 0;
-  for (const k of Object.keys(prT)) {
-    prOpened += prT[k].opened || 0;
-    prMerged += prT[k].merged || 0;
-    if (prT[k].flag === 'overload') prOverloadCount++;
-  }
-  const prRate = prOpened > 0 ? Math.round(prMerged / prOpened * 100) : 0;
-  const prBadge = prOpened > 0
-    ? `<span class="ts2-glance-pr-throughput" title="${prMerged} merged из ${prOpened} opened за 7 дней (${prRate}%). ${prOverloadCount > 0 ? prOverloadCount + ' человек(а) перегружены (>5 PR, mergeRate <0.4)' : 'Все merge-rate в норме'}">${prMerged}/${prOpened} PR · ${prRate}%${prOverloadCount ? ` · ⚠ ${prOverloadCount}` : ''}</span>`
-    : '';
-  // V20 S8 #4 — slope из ctx (передаётся orchestrator'ом из history).
-  const slope = ctx.sprintGoalSlope;
-  const slopeMini = (slope && slope.trend !== 'no-data')
-    ? `<span class="ts2-glance-slope ts2-glance-slope-${slope.trend}" title="Sprint goal тренд за ${slope.days} дней · R²=${slope.r2}. Клик «Как считается» → секция «Тренды».">${
-        slope.trend === 'up'   ? `↗ +${slope.slope}%/день` :
-        slope.trend === 'down' ? `↘ ${slope.slope}%/день` :
-                                 '→ ровно'
-      }</span>`
-    : '';
-
+/**
+ * V20 S14 I12 — Onboarding ramp (для новичков <90д).
+ */
+function renderOnboardingRamp(model) {
+  const arr = computeOnboardingRamp(model);
+  if (arr.length === 0) return '';
+  const items = arr.map(o => `
+    <li class="ts2-onb-row">
+      <button type="button" class="ts2-lag-person-link" data-jump-key="${esc(o.key)}">${esc(o.label)}</button>
+      <span class="ts2-onb-tenure">${o.tenureDays}д tenure</span>
+      <span class="ts2-onb-stat">commit: ${o.daysToFirstCommit ?? '—'}д</span>
+      <span class="ts2-onb-stat">PR: ${o.daysToFirstPr ?? '—'}д</span>
+      <span class="ts2-onb-stat">review: ${o.daysToFirstReview ?? '—'}д</span>
+    </li>
+  `).join('');
   return `
-    <div class="ts2-glance">
-      ${filterBadge}
-      <div class="ts2-glance-line">
-        ${groupLine}
-        <span class="ts2-glance-sep">·</span>
-        <span class="ts2-glance-num">${commits48h}</span>
-        <span class="ts2-glance-lab">${plural(commits48h, ['коммит', 'коммита', 'коммитов'])} (48ч)</span>
-        <span class="ts2-glance-sep">·</span>
-        <span class="ts2-glance-num">${prs48h}</span>
-        <span class="ts2-glance-lab">PR (48ч)</span>
-        <span class="ts2-glance-sep">·</span>
-        <span class="ts2-glance-num">${conf48h}</span>
-        <span class="ts2-glance-lab">${plural(conf48h, ['CF-правка', 'CF-правки', 'CF-правок'])} (48ч)</span>
-      </div>
-      ${riskLine ? `<div class="ts2-glance-line ts2-glance-risk-row">${riskLine}</div>` : ''}
-      ${(crvBadge || prBadge || slopeMini) ? `<div class="ts2-glance-line ts2-glance-velocity-row">
-        <span class="ts2-glance-velocity-label">Команда:</span>
-        ${slopeMini}
-        ${slopeMini && crvBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
-        ${crvBadge}
-        ${crvBadge && prBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
-        ${prBadge}
-      </div>` : ''}
-      ${trendRow}
-    </div>
+    <details class="ts2-onb">
+      <summary class="ts2-onb-summary"><span>Онбординг <span class="ts2-onb-count">${arr.length}</span></span> <span class="ts2-onb-hint">— новички &lt;90д · дни до первого commit / PR / review</span></summary>
+      <ul class="ts2-onb-list">${items}</ul>
+    </details>
   `;
 }
+
+/**
+ * V20 S14 I11 — Solo-author files / bus-factor.
+ */
+function renderSoloAuthorFiles(model) {
+  const solo = detectSoloAuthorFiles(model);
+  if (solo.length === 0) return '';
+  const items = solo.map(s => `
+    <li class="ts2-solo-row">
+      <code class="ts2-solo-path">${esc(s.path)}</code>
+      <span class="ts2-solo-author">${esc(s.author)}</span>
+    </li>
+  `).join('');
+  return `
+    <details class="ts2-solo">
+      <summary class="ts2-solo-summary"><span>Bus-factor 1 <span class="ts2-solo-count">${solo.length}</span></span> <span class="ts2-solo-hint">— файлы с одним автором за 90д</span></summary>
+      <ul class="ts2-solo-list">${items}</ul>
+    </details>
+  `;
+}
+
+/**
+ * V20 S13 I4 — Scope churn detail: раскрываемый список added/removed
+ * по каждому pk. Показывается только если есть изменения.
+ */
+function renderScopeChurnDetail(model, history) {
+  const churns = buildScopeChurnDetail(model, history);
+  if (churns.length === 0) return '';
+  const blocks = churns.map(c => {
+    const addedList = c.added.length > 0
+      ? `<div class="ts2-churn-list ts2-churn-added"><span class="ts2-churn-key">+ ${c.added.length}:</span> ${c.added.map(k => jiraIssueLink(k)).join(', ')}</div>`
+      : '';
+    const removedList = c.removed.length > 0
+      ? `<div class="ts2-churn-list ts2-churn-removed"><span class="ts2-churn-key">− ${c.removed.length}:</span> ${c.removed.map(k => jiraIssueLink(k)).join(', ')}</div>`
+      : '';
+    return `
+      <div class="ts2-churn-block">
+        <div class="ts2-churn-head">
+          <span class="ts2-churn-pk">${esc(c.pk)}</span>
+          <span class="ts2-churn-name" title="${esc(c.sprintName || '')}">${esc(c.sprintName || '')}</span>
+          <span class="ts2-churn-ratio ts2-churn-ratio-${c.ratio >= 20 ? 'high' : c.ratio >= 10 ? 'mid' : 'low'}">${c.ratio}% churn</span>
+          <span class="ts2-churn-meta">из ${c.initialSize} initial</span>
+        </div>
+        ${addedList}
+        ${removedList}
+      </div>
+    `;
+  }).join('');
+  return `
+    <details class="ts2-churn">
+      <summary class="ts2-churn-summary-toggle">
+        <span>Scope churn спринта <span class="ts2-churn-count">${churns.length}</span></span>
+        <span class="ts2-churn-hint">— что добавлено / удалено после старта спринта</span>
+      </summary>
+      ${blocks}
+    </details>
+  `;
+}
+
+/**
+ * V20 S12 I7 — Zombie issue detector: задачи открыты >30д без транзишенов.
+ *
+ * Раскрывается через <details>. Не отвлекает в default-state, но даёт
+ * массовое actionable «можно закрыть N тикетов на retro».
+ */
+function renderZombieIssues(model) {
+  const zombies = detectZombies(model);
+  if (zombies.length === 0) return '';
+  const items = zombies.slice(0, 8).map(z => `
+    <li class="ts2-zombie-row">
+      <span class="ts2-zombie-key">${jiraIssueLink(z.key)}</span>
+      <span class="ts2-zombie-status">${esc(z.status)}</span>
+      <span class="ts2-zombie-dwell" title="dwell-time = в текущем статусе">▌${fmtDuration(z.dwellHours)}</span>
+      <span class="ts2-zombie-owner">${esc(z.owner)}</span>
+      <span class="ts2-zombie-summary">${esc(z.summary)}</span>
+    </li>
+  `).join('');
+  return `
+    <details class="ts2-zombie-block">
+      <summary class="ts2-zombie-summary-toggle">
+        <span>Зомби-задачи <span class="ts2-zombie-count">${zombies.length}</span></span>
+        <span class="ts2-zombie-hint">— открыты >30 дней без движения, кандидаты на закрытие</span>
+      </summary>
+      <ul class="ts2-zombie-list">${items}</ul>
+    </details>
+  `;
+}
+
+/**
+ * V20 S12 — Sprint health composite block:
+ *   · S1 Sprint Goal narrative (из Jira sprint description/goal)
+ *   · S3 Mid-sprint checkpoint (на каком % спринта, expected vs actual)
+ *   · S4 Scope churn (diff vs первый snapshot после старта)
+ *   · S6 Hygiene flags (без assignee/priority/description)
+ *
+ * Рендерится только если есть >=1 спринт. Под team-glance — это второй
+ * приоритет после group-counts.
+ */
+function renderSprintHealth(model, history) {
+  const sg = model?.scannerV2?.sprintGoal;
+  if (!sg?.sprints?.length) return '';
+  const blocks = sg.sprints.map(s => {
+    // S1 — goal narrative (если у sprint есть goal field)
+    const goalBlock = s.goal
+      ? `<div class="ts2-sh-goal" title="Sprint Goal из Jira sprint description"><span class="ts2-sh-goal-prefix">Цель:</span> ${esc(s.goal.slice(0, 200))}${s.goal.length > 200 ? '…' : ''}</div>`
+      : '';
+    // S3 — mid-sprint checkpoint
+    let checkpoint = '';
+    if (Number.isFinite(s.daysTotal) && Number.isFinite(s.daysLeft) && s.daysTotal > 0) {
+      const dayIdx  = Math.max(0, s.daysTotal - s.daysLeft);
+      const pctTime = Math.round((dayIdx / s.daysTotal) * 100);
+      // Mid-sprint = 40-60% времени. На 50%-метке — особый сигнал.
+      const isMid = pctTime >= 40 && pctTime <= 60;
+      const cls = isMid ? 'ts2-sh-checkpoint ts2-sh-checkpoint-mid' : 'ts2-sh-checkpoint';
+      checkpoint = `<span class="${cls}" title="Прошло ${dayIdx} из ${s.daysTotal} дней спринта (${pctTime}%). Mid-sprint = good time для review scope.">
+        День ${dayIdx}/${s.daysTotal} (${pctTime}%)${isMid ? ' · MID' : ''}
+      </span>`;
+    }
+    // S4 — scope churn vs first snapshot
+    let churn = '';
+    if (Array.isArray(history) && history.length >= 2 && Array.isArray(s.sprintIssueKeys)) {
+      // Найти первый snapshot за текущий спринт. Берём snapshot с тем же
+      // sprintsByPk[pk].name == s.name (если name изменился — не сравниваем).
+      const firstSnap = history.find(h =>
+        h?.sprintGoal?.sprintsByPk?.[s.pk]?.name === s.name
+      );
+      const initialKeys = firstSnap?.sprintGoal?.sprintsByPk?.[s.pk]?.keys || [];
+      if (initialKeys.length > 0) {
+        const initialSet = new Set(initialKeys);
+        const currentSet = new Set(s.sprintIssueKeys);
+        const added   = s.sprintIssueKeys.filter(k => !initialSet.has(k)).length;
+        const removed = initialKeys.filter(k => !currentSet.has(k)).length;
+        if (added > 0 || removed > 0) {
+          const churnRatio = Math.round(((added + removed) / initialKeys.length) * 100);
+          const cls = churnRatio >= 20 ? 'ts2-sh-churn ts2-sh-churn-high' : 'ts2-sh-churn';
+          churn = `<span class="${cls}" title="Scope churn: ${added} добавлено + ${removed} удалено / ${initialKeys.length} initial = ${churnRatio}%. Норма ≤15%.">
+            scope: <span class="ts2-sh-churn-add">+${added}</span> · <span class="ts2-sh-churn-rem">−${removed}</span> · <span class="ts2-sh-churn-pct">${churnRatio}%</span>
+          </span>`;
+        }
+      }
+    }
+    // S6 — hygiene flags. AUDIT_SCANNER #22 — пороги вынесены в HYGIENE_THRESHOLDS.
+    // AUDIT_SCANNER #28 — добавлен chip "Без компонента" (если model отдаёт hy.noComponent).
+    const hy = s.hygiene || {};
+    const hygieneItems = [];
+    if (hy.noAssignee > HYGIENE_THRESHOLDS.noAssignee)
+      hygieneItems.push(`<span class="ts2-sh-hy ts2-sh-hy-warn" title="Задач без assignee — назначить до stand-up'а">${hy.noAssignee} без assignee</span>`);
+    if (hy.noPriority > HYGIENE_THRESHOLDS.noPriority)
+      hygieneItems.push(`<span class="ts2-sh-hy" title="Задач без priority — обсудить на planning">${hy.noPriority} без приоритета</span>`);
+    if (hy.noDescription > HYGIENE_THRESHOLDS.noDescription)
+      hygieneItems.push(`<span class="ts2-sh-hy" title="Задач с короткой/пустой description (<30 chars) — нет AC?">${hy.noDescription} без описания</span>`);
+    if (hy.noEpic > HYGIENE_THRESHOLDS.noEpic)
+      hygieneItems.push(`<span class="ts2-sh-hy" title="Задач без эпика — нет привязки к цели">${hy.noEpic} без эпика</span>`);
+    if (hy.noComponent > HYGIENE_THRESHOLDS.noEpic) // AUDIT_SCANNER #28
+      hygieneItems.push(`<span class="ts2-sh-hy" title="Задач без компонента — теряется ownership при cross-team триаже">${hy.noComponent} без компонента</span>`);
+    const hygieneBlock = hygieneItems.length > 0
+      ? `<div class="ts2-sh-hygiene">${hygieneItems.join(' · ')}</div>`
+      : '';
+
+    // V20 S13 S2 — goal-critical progress separately.
+    let goalCriticalBlock = '';
+    const gc = s.goalCritical || {};
+    if (gc.total > 0) {
+      const cls = gc.progressPct === 100 ? 'ts2-sh-gc-done' : (gc.progressPct >= 50 ? 'ts2-sh-gc-mid' : 'ts2-sh-gc-low');
+      goalCriticalBlock = `<div class="ts2-sh-gc ${cls}" title="Issues с label «goal-critical» — прогресс по ним важнее общего %.">
+        <span class="ts2-sh-gc-key">Goal-critical:</span>
+        <span class="ts2-sh-gc-num">${gc.done}/${gc.total}</span>
+        <span class="ts2-sh-gc-pct">(${gc.progressPct}%)</span>
+      </div>`;
+    }
+    if (!goalBlock && !checkpoint && !churn && !hygieneBlock && !goalCriticalBlock) return '';
+    // V20 S13 S5 — Burnup sparkline (scope/done/ideal). Mini-version рядом с head.
+    const burnup = buildBurnupData(history, s.pk, s);
+    const burnupBlock = burnup.status === 'ok'
+      ? `<span class="ts2-sh-burnup" title="Burnup за ${burnup.points.length} дней. Линии: ideal (тонкая) · scope · done.">${renderBurnupSparkline(burnup)}</span>`
+      : '';
+    return `
+      <div class="ts2-sh-block">
+        <div class="ts2-sh-head">
+          <span class="ts2-sh-pk">${esc(s.pk)}</span>
+          <span class="ts2-sh-name">${esc(s.name || '')}</span>
+          ${checkpoint}
+          ${churn}
+          ${burnupBlock}
+        </div>
+        ${goalBlock}
+        ${goalCriticalBlock}
+        ${hygieneBlock}
+      </div>
+    `;
+  }).filter(Boolean).join('');
+
+  if (!blocks) return '';
+  // V21 S15 S8-S11 — sprint quality metrics row (один общий summary).
+  const carry = computeCarryOverRate(model, history);
+  const bugInj = computeBugInjectionRate(model);
+  const unplan = computeUnplannedWork(model);
+  const blockedTime = computeBlockedTimeAggregate(model);
+  const qChips = [];
+  if (carry.ratio != null) {
+    const cls = carry.ratio >= 0.3 ? 'ts2-sh-q-warn' : '';
+    qChips.push(`<span class="ts2-sh-q ${cls}" title="Carry-over: задачи перешли из предыдущего спринта (${carry.count}/${carry.total} = ${Math.round(carry.ratio*100)}%). Норма ≤30%, выше = chronic over-commitment.">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 12 })} carry: ${Math.round(carry.ratio*100)}%</span>`);
+  }
+  if (bugInj.count > 0) {
+    qChips.push(`<span class="ts2-sh-q ts2-sh-q-warn" title="Bug injection rate: ${bugInj.count} баг(ов) создано в ходе спринта. Сигнал качества DoD.">▌ bugs in: ${bugInj.count}</span>`);
+  }
+  if (unplan.ratio != null) {
+    const cls = unplan.ratio >= 0.2 ? 'ts2-sh-q-warn' : '';
+    qChips.push(`<span class="ts2-sh-q ${cls}" title="Unplanned work: задачи созданные после старта спринта (${unplan.count}/${unplan.total} = ${Math.round(unplan.ratio*100)}%). Защита фокуса.">+ unplanned: ${Math.round(unplan.ratio*100)}%</span>`);
+  }
+  if (blockedTime.totalHours > 0) {
+    qChips.push(`<span class="ts2-sh-q" title="Blocked-time aggregate: сумма dwellHours всех блокеров (${blockedTime.count} штук). Системный impediment-сигнал.">σ blocked: ${fmtDuration(blockedTime.totalHours)}</span>`);
+  }
+  const qualityRow = qChips.length > 0
+    ? `<div class="ts2-sh-quality">${qChips.join('')}</div>`
+    : '';
+  return `
+    <details class="ts2-sprint-health" open>
+      <summary class="ts2-sh-summary"><span class="ts2-sh-toggle-label">Курс спринта</span> <span class="ts2-sh-toggle-hint">— цель, checkpoint, churn, гигиена, качество</span></summary>
+      ${blocks}
+      ${qualityRow}
+    </details>
+  `;
+}
+
+// PR-CP — `renderWhoNeedsHelp` (compact top-3 в glance) удалён: дублировал
+// `renderActionQueue` (полный список) ниже, в feedback-обзоре назван
+// «два блока с одинаковым названием».
 
 /**
  * V19 C2 — История 14 дней: 3 sparkline'а в одном ряду.
  * Без зависимостей: pure inline-SVG, ~14×3=42 polyline points max.
  */
-function renderHistoryTrendRow(history) {
+export function renderHistoryTrendRow(history) {
   // Series ASC-by-day. 3 metrics: stop count, OOS count, sprint progress.
   const stopSeries     = history.map(h => h?.counts?.stop || 0);
   const oosSeries      = history.map(h => h?.risks?.totalOutOfSprint || 0);
   const progressSeries = history.map(h => h?.sprintGoal?.aggregateProgress || 0);
   const days = history.length;
+  // 2026-05-12 — Date-picker для просмотра «что было N дней назад».
+  // Min/max — from history.day diapason. Onchange — emit event для orchestrator
+  // (`ts2-history-date-change`), который перерисует с loadHistoryAtDate(date).
+  const minDay = history[0]?.day || '';
+  const maxDay = history[history.length - 1]?.day || '';
+  const datePicker = (minDay && maxDay) ? `
+      <span class="ts2-glance-trend-datepicker" title="Просмотреть состояние на конкретную дату из истории">
+        <label for="ts2-history-date" class="ts2-sr-only">Дата для history snapshot</label>
+        <input type="date" id="ts2-history-date" class="ts2-history-date-input"
+               min="${minDay}" max="${maxDay}" value="${maxDay}"
+               data-ts2-history-date title="Загрузить snapshot на эту дату" />
+      </span>` : '';
   return `
     <div class="ts2-glance-line ts2-glance-trend-row">
       <span class="ts2-glance-trend-label">${days} ${plural(days, ['день', 'дня', 'дней'])}:</span>
+      ${datePicker}
       <span class="ts2-glance-trend-item" title="Stop count за ${days} дней — должен снижаться">
         <span class="ts2-glance-trend-mini-lab">▌stop</span>
         ${renderSparkline(stopSeries, { lastIsBad: true })}
@@ -616,7 +833,7 @@ export function renderTeamConfigModal(model, currentConfig, presets) {
         <div class="modal-box">
           <div class="modal-header">
             <h3>Настройка команд</h3>
-            <button class="modal-close-btn" data-close-modal>✕</button>
+            <button class="modal-close-btn" data-close-modal>${Icons.get('x', { size: 14 })}</button>
           </div>
           <div class="ae-modal-body">
             <div class="ts2-empty-text">Сначала загрузите данные Сканнера: проектные ключи не известны.</div>
@@ -660,7 +877,7 @@ export function renderTeamConfigModal(model, currentConfig, presets) {
       <div class="modal-box modal-box-wide">
         <div class="modal-header">
           <h3>Настройка команд — пороги dwell-time</h3>
-          <button class="modal-close-btn" data-close-modal>✕</button>
+          <button class="modal-close-btn" data-close-modal>${Icons.get('x', { size: 14 })}</button>
         </div>
         <div class="ae-modal-body">
           <div class="ts2-config-help">
@@ -771,234 +988,110 @@ export function renderMultiTeamView(model) {
           ${t.activeSprintName ? `<span class="ts2-team-sprint-name">«${esc(t.activeSprintName)}»</span>` : ''}
         </span>
         <span class="ts2-team-groups">${groupChips}</span>
-        <span class="ts2-team-wip" title="Total WIP в команде">${t.wipTotal} WIP</span>
+        <span class="ts2-team-wip" title="Сколько задач в пути по команде">${t.wipTotal} в пути</span>
         ${sprintCell}
         <span class="ts2-team-risks">${risks || '—'}</span>
       </div>
     `;
   }).join('');
-  return `
+  // V22 (2026-05-09 UX) — секция «Операции» переехала из team-view в multi-view.
+  // Tile'ы (sprint health, scope churn, stale PRs, estimate accuracy, onboarding,
+  // solo author, zombie issues, sprint lag) агрегируют по всем командам — их
+  // место в +Все, не в team-view (где раньше путали отсутствием фильтрации).
+  _ensureScannerRoomStyles();
+  const operationsBlocks = [
+    renderSprintHealth(model, []),
+    renderScopeChurnDetail(model, []),
+    renderStalePrs(model),
+    renderStaleBranches(model),
+    renderChangelogPatterns(model),
+    renderEstimateAccuracy(model),
+    renderOnboardingRamp(model),
+    renderSoloAuthorFiles(model),
+    renderZombieIssues(model),
+    renderSprintLagBreakdown(model?.scannerV2?.sprintGoal, model),
+  ].filter(Boolean).join('');
+  const operationsSection = operationsBlocks
+    ? `<section class="ts2-room ts2-room-ops" aria-labelledby="ts2-multi-room-ops-eyebrow">
+         <div class="ts2-room-eyebrow" id="ts2-multi-room-ops-eyebrow">Операции (по всем командам)</div>
+         <details class="ts2-section-ops" data-key="ts2-multi-l4-ops">
+           <summary class="ts2-section-ops-summary">Раскрыть <span class="ts2-section-ops-hint">— спринт, ревью, гигиена данных по всем PK сразу</span></summary>
+           ${operationsBlocks}
+         </details>
+       </section>`
+    : '';
+  // V22 fix #11 (2026-05-09 UX) — multi-view получил tab-bar (Сегодня/Глубже/Тренды).
+  // Раньше эти вкладки были только в team-view. Теперь в +Все:
+  //   · «Сегодня»  — список команд + Операции (как и раньше)
+  //   · «Глубже»   — cross-team плитки (Resolution split, Big-metrics, PR, DORA, ...)
+  //   · «Тренды»   — cross-team ECharts dashboard
+  const teamListBlock = `
     <div class="ts2-multi-team">
       <div class="ts2-multi-team-head">
         <span>Команда</span>
         <span>Контекст</span>
         <span>Группы</span>
-        <span>WIP</span>
+        <span>В пути</span>
         <span>Спринт</span>
         <span>Риски</span>
       </div>
       <div class="ts2-multi-team-rows">${rows}</div>
-    </div>
+    </div>`;
+
+  // V22 fix #11 — multi-view: team-list рендерится ВСЕГДА (чтобы клик по
+  // команде работал на любом tab'е), Глубже/Тренды добавляются снизу.
+  let extraPane = '';
+  if (_scannerTab === 'deeper') {
+    const sleepingHtml = renderSleepingDataInsights(model, { scope: 'multi' });
+    const paneBody = sleepingHtml || _renderDeeperEmptyState(model, { scope: 'multi' });
+    extraPane = `
+      <div class="ts2-multi-deeper">
+        <div class="ts2-deeper-howto" role="note">
+          <div class="ts2-deeper-howto-title">Что здесь:</div>
+          <div class="ts2-deeper-howto-text">
+            Cross-team аналитика по всем PK сразу: Resolution split, готовность релизов, метрики PR (cycle-time / first-review), DORA-proxy,
+            Big-metrics (reopen-rate, sprint-commit, stale). Для team-specific плиток выберите конкретную команду из таблицы выше.
+          </div>
+        </div>
+        <div class="ts2-deeper-pane">${paneBody}</div>
+      </div>`;
+  } else if (_scannerTab === 'metrics') {
+    extraPane = `
+      <div class="ts2-multi-metrics">
+        <div class="ts2-metrics-howto" role="note">
+          <div class="ts2-metrics-howto-title">Что здесь:</div>
+          <div class="ts2-metrics-howto-text">
+            Графики динамики метрик по всем командам сразу. Восходящие линии по PR-cycle и stale-задачам = организация замедляется.
+            Чтобы посмотреть тренды по конкретной команде — выберите её из таблицы выше.
+          </div>
+        </div>
+        <div class="ts2-metrics-pane" id="ts2-metrics-mount"></div>
+      </div>`;
+  } else {
+    // 'today' tab — добавляется секция Операции
+    extraPane = operationsSection;
+  }
+  return `
+    ${_renderScannerTabBar()}
+    ${teamListBlock}
+    ${extraPane}
   `;
 }
 
 /* ── Per-person rows ──────────────────────────────────── */
 
-export function renderPersonRows(model, ctx = {}) {
-  const parts = model?.participants || [];
-  if (!parts.length) {
-    return `<div class="ts2-empty">Нет данных по участникам за выбранные проекты.</div>`;
-  }
-  // V18.1 P2 — group by classifyPerson. Внутри группы сортируем по
-  // timelineToday desc, потом yesterday desc.
-  const groups = { stop: [], watch: [], moving: [], idle: [] };
-  for (const p of parts) groups[classifyPerson(p)].push(p);
-  const sortFn = (a, b) => {
-    const aT = (a.timelineToday    || []).length;
-    const bT = (b.timelineToday    || []).length;
-    if (aT !== bT) return bT - aT;
-    return (b.timelineYesterday || []).length - (a.timelineYesterday || []).length;
-  };
-  groups.stop.sort(sortFn);
-  groups.watch.sort(sortFn);
-  groups.moving.sort(sortFn);
-  groups.idle.sort(sortFn);
-  // V20 S8 #3 — Triage-pill для большой stop-группы. Пилот feedback:
-  // «79 строк без приоритизации = тимлид теряется». Сортируем stop по
-  // максимальному dwellHours (чем дольше висит — тем выше). Топ-3
-  // отображаются как pill-row перед списком.
-  const stopTriage = groups.stop
-    .filter(p => (p.blockers || []).some(b => Number(b.dwellHours) > 0))
-    .map(p => ({
-      p,
-      maxDwell: Math.max(0, ...(p.blockers || []).map(b => Number(b.dwellHours) || 0)),
-    }))
-    .sort((a, b) => b.maxDwell - a.maxDwell)
-    .slice(0, 3);
 
-  const expandedKey = ctx.expandedKey || '';
-  // V20 S7 A2 — pass v2 metrics-maps (для chip'ов в row).
-  const metricsMaps = {
-    crv: model?.scannerV2?.codeReviewVelocity || {},
-    prT: model?.scannerV2?.prThroughput || {},
-  };
-  // V20 S8 #3 + S8.5 #6 — триаж-pill теперь срабатывает по count ≥ 5 OR maxDwell ≥ 48ч.
-  // Pилот feedback: «4 stop с одним 96ч — pill спрячется, пропущу самый болезненный кейс».
-  const maxAnyDwell = Math.max(0, ...stopTriage.map(t => t.maxDwell));
-  const showTriage = stopTriage.length > 0 && (groups.stop.length >= 5 || maxAnyDwell >= 48);
-  const triagePillHtml = showTriage ? `
-    <div class="ts2-triage-pill" role="region" aria-label="Топ блокеров в Стопе">
-      <span class="ts2-triage-pill-label">⚠ Топ ${stopTriage.length} в Стопе сегодня:</span>
-      <span class="ts2-triage-pill-items">
-        ${stopTriage.map(({ p, maxDwell }) => `
-          <span class="ts2-triage-pill-group">
-            <button type="button" class="ts2-triage-pill-item" data-jump-key="${esc(p.key)}" title="Перейти к карточке · максимальный dwell ${maxDwell}ч">
-              ${esc(p.label || p.key)}
-              <span class="ts2-triage-pill-dwell">▌${maxDwell}ч</span>
-            </button>
-            <!-- V20 S8.5 #18 — inline 1:1 button прямо в pill, без захода в карточку.
-                 Pилот: «утром у меня 30 секунд — копирую talking-points за 1 клик». -->
-            <button type="button" class="ts2-triage-pill-1on1" data-1on1-key="${esc(p.key)}" title="Скопировать talking-points для разговора 1:1 в TG/Slack" aria-label="Обсудить 1:1">💬</button>
-          </span>
-        `).join('')}
-      </span>
-    </div>` : '';
-  const renderGroup = (key) => {
-    const arr = groups[key];
-    if (!arr.length) return '';
-    const meta = GROUP_META[key];
-    const rows = arr.map(p => renderRow(p, expandedKey === p.key, metricsMaps)).join('');
-    const head = `
-      <div class="ts2-group-head">
-        <span class="ts2-group-label">${esc(meta.label)}</span>
-        <span class="ts2-group-count" title="${esc(meta.desc)}">${arr.length}</span>
-      </div>`;
-    if (key === 'idle') {
-      // Сворачиваемая, по умолчанию закрыта — снимает шум с главного экрана.
-      return `
-        <details class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
-          <summary class="ts2-group-summary">${head}</summary>
-          <div class="ts2-rows-inner">${rows}</div>
-        </details>`;
-    }
-    return `
-      <div class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
-        ${head}
-        <div class="ts2-rows-inner">${rows}</div>
-      </div>`;
-  };
+/* 2026-05-12 — Tier 0 phase 4: PersonRows функции выделены в
+   teamScanner2RendererPersonRows.js (~280 LOC). Re-export + SRC_*
+   константы для local use в detail panel renderer ниже. */
+import { renderPersonRows, SRC_LABELS, SRC_NAMES, SRC_KEYS } from './teamScanner2RendererPersonRows.js';
+export { renderPersonRows };
 
-  // Порядок групп = приоритет внимания тимлида утром.
-  return `
-    <div class="ts2-rows">
-      ${triagePillHtml}
-      ${renderGroup('stop')}
-      ${renderGroup('watch')}
-      ${renderGroup('moving')}
-      ${renderGroup('idle')}
-    </div>
-  `;
-}
-
-function renderRow(p, isExpanded, metricsMaps = {}) {
-  const hToday = bucketByHour(p.timelineToday);
-  const hYest  = bucketByHour(p.timelineYesterday);
-  const todayN = (p.timelineToday    || []).length;
-  const yestN  = (p.timelineYesterday || []).length;
-  // V18.1 P7-S3.2 — убираем red ▌ stripe слева от имени (HR panel:
-  // «дублирует функцию dwellBadge ▌Nh справа, один из двух уберите»).
-  // Оставляем spacer для grid-выравнивания. Stop-сигнал идёт через
-  // принадлежность к группе «Требует разговора» с red stripe-left
-  // на уровне группы — это уже сильный визуальный маркер.
-  const blockerMark = `<span class="ts2-blocker-spacer"></span>`;
-
-  const todayBlock = todayN > 0
-    ? dotStrip(hToday, `Сегодня: ${todayN} событий`)
-    : `<span class="ts2-strip-empty">${esc(emptyDayLanguage(p, 'today'))}</span>`;
-
-  const yestBlock = yestN > 0
-    ? dotStrip(hYest,  `Вчера: ${yestN} событий`)
-    : `<span class="ts2-strip-empty ts2-strip-empty-y">—</span>`;
-
-  const prsCount    = (p.badges?.pr48h || 0);
-  // V18.1 P3 — distinct issue keys из enrichment вместо ручного Set'а.
-  // Fallback на P1-логику если enrichment не запущен (defensive).
-  const tasksTouchN = (p.contextSwitches?.distinctIssueKeys ?? new Set([
-    ...(p.timelineToday || []),
-    ...(p.timelineYesterday || []),
-  ].map(e => e?.issue?.key).filter(Boolean)).size);
-  const hoursToday  = fmtHours(p.loggedTodaySec || 0);
-  // V18.1 P7-S4.3 — WIP counter (issuesNow). Manager + Anna + Dmitry
-  // pilot finding: «Команды равномерно загружены? — не закрыто. WIP-counter
-  // в classifier работает (≥3 → watch), но числом не показан».
-  // ≥3 → подсвечиваем amber (overcommit signal).
-  const wipN  = (p.issuesNow || []).length;
-  const wipCls = wipN >= 4 ? 'ts2-counter ts2-counter-warn' : (wipN >= 3 ? 'ts2-counter ts2-counter-amber' : 'ts2-counter');
-  // V18.1 P7-S4.5 — B/C/Z source-indicators в row (inline после имени).
-  // Pilot finding (Vasiliy + Elena consensus): «multi-source signal должен
-  // быть в строке, а не только в side-panel — heatmap 72×4 хорош, но это
-  // «уровень 3», а решение принимается на «уровне 2»».
-  // Counts из p.bbItems / cfItems / zephyr — все за 72ч окно.
-  const bbN = (p.bbItems || []).length;
-  const cfN = (p.cfItems || []).length;
-  const zN  = ((p.zephyrTestsCreatedRecent || []).length
-            + (p.zephyrTestsExecutedRecent || []).length);
-  const srcChip = (label, n, cls) => n > 0
-    ? `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${label} активность за 72ч: ${n} событий"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`
-    : '';
-  const srcChips = (bbN || cfN || zN)
-    ? `<span class="ts2-row-src-chips">${srcChip('Bitbucket', bbN, 'b')}${srcChip('Confluence', cfN, 'c')}${srcChip('Zephyr', zN, 'z')}</span>`
-    : '';
-
-  // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
-  const switches = p.contextSwitches?.switchEvents?.length || 0;
-  const maxDwell = (p.blockers && p.blockers[0]?.dwellHours) || 0;
-  // V18.1 P7-S4.6 — switch-index ↻N теперь опционален через
-  // localStorage-флаг q2_scanner_hide_productivity. Pilot finding (Dmitry):
-  // «↻N switch-badge выглядит как watchdog, тимлиды учуют». ▌Nh dwell-badge
-  // НЕ скрывается — это операционный blocker-сигнал, не productivity-tracking.
-  const hideProductivity = (() => {
-    try { return localStorage.getItem('q2_scanner_hide_productivity') === '1'; } catch (_) { return false; }
-  })();
-  const switchBadge = (!hideProductivity && switches >= 3)
-    ? `<span class="ts2-badge ts2-badge-switch" title="Переключений между задачами за 72ч (gap < 30 мин). Скрыть: localStorage.q2_scanner_hide_productivity = '1'">↻${switches}</span>`
-    : '';
-  const dwellBadge = maxDwell >= 24
-    ? `<span class="ts2-badge ts2-badge-dwell" title="Максимальный dwell-time блокера (часов в текущем статусе)">▌${maxDwell}ч</span>`
-    : '';
-  // V20 S7 A2 — CRV + PR throughput chips per-row.
-  const myCrv = metricsMaps.crv?.[p.key];
-  const crvChip = myCrv && myCrv.count >= 2
-    ? `<span class="ts2-badge ts2-badge-crv ts2-badge-crv-${myCrv.threshold}" title="Median time-to-first-review для этого ревьюера за 14 дней (N=${myCrv.count})">CR ${myCrv.medianHours}ч</span>`
-    : '';
-  const myPrT = metricsMaps.prT?.[p.key];
-  const prChip = myPrT && myPrT.opened > 0
-    ? `<span class="ts2-badge ts2-badge-prT ts2-badge-prT-${myPrT.flag}" title="${myPrT.merged} merged из ${myPrT.opened} opened за 7 дней (${Math.round(myPrT.mergeRate*100)}%) · flag: ${myPrT.flag}">${myPrT.opened}↗ ${Math.round(myPrT.mergeRate*100)}%</span>`
-    : '';
-  const badges = (switchBadge || dwellBadge || crvChip || prChip)
-    ? `<span class="ts2-row-badges">${dwellBadge}${switchBadge}${crvChip}${prChip}</span>`
-    : `<span class="ts2-row-badges-spacer"></span>`;
-
-  // V18.1 P7-S3.1 — aria-controls связывает row с panel id (=ts2-panel-main),
-  // SR анонсирует «связан с panel'ью «Детализация по сотруднику»».
-  return `
-    <div class="ts2-row ${isExpanded ? 'ts2-row-expanded' : ''}" data-key="${esc(p.key)}" tabindex="0" role="button" aria-expanded="${isExpanded}" aria-controls="ts2-panel-main">
-      ${blockerMark}
-      <span class="ts2-name-block">
-        <span class="ts2-name" title="${esc(p.label)}">${esc(p.label || '—')}</span>
-        ${srcChips}
-      </span>
-      <span class="ts2-strip-wrap ts2-strip-wrap-today">${todayBlock}</span>
-      <span class="ts2-strip-wrap ts2-strip-wrap-yest">${yestBlock}</span>
-      ${badges}
-      <span class="ts2-counters">
-        <span class="${wipCls}" title="Активные задачи (WIP). Норма ≤2, перегрузка ≥3."><span class="ts2-counter-num">${wipN}</span><span class="ts2-counter-lab">WIP</span></span>
-        <span class="ts2-counter" title="PR за 48ч"><span class="ts2-counter-num">${prsCount}</span><span class="ts2-counter-lab">PR</span></span>
-        <span class="ts2-counter" title="Задач затронуто за 72ч"><span class="ts2-counter-num">${tasksTouchN}</span><span class="ts2-counter-lab">задач</span></span>
-        <span class="ts2-counter" title="Залогировано сегодня (часов)"><span class="ts2-counter-num">${hoursToday}</span><span class="ts2-counter-lab">ч</span></span>
-      </span>
-      <span class="ts2-chev">${isExpanded ? '▾' : '›'}</span>
-    </div>
-  `;
-}
 
 /* ── Detail panel (V18.1 P5) — slide-in 480px справа ────── */
 
-// V18.3 A2 — Zephyr split на Created (Zc) и Executed (Ze).
-// Pilot finding (Ilia QA): семантически разные — план vs прогон.
-const SRC_LABELS = ['J',    'B',         'C',          'Zc',             'Ze'];
-const SRC_NAMES  = ['Jira', 'Bitbucket', 'Confluence', 'Zephyr-планы',   'Zephyr-прогоны'];
-const SRC_KEYS   = ['j',    'b',         'c',          'zc',             'ze'];
+// 2026-05-12 — SRC_LABELS/SRC_NAMES/SRC_KEYS импортируются из PersonRows
+// (Tier 0 phase 4). См. начало файла, блок import re-export.
 
 /**
  * Side-panel с heatmap 72×4, sparkline, blockers, событиями и фильтрами.
@@ -1010,8 +1103,8 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
   const p = (model?.participants || []).find(x => x.key === key);
   if (!p) {
     return `
-      <div class="ts2-panel ts2-panel-empty">
-        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+      <div class="ts2-panel ts2-panel-modal ts2-panel-empty">
+        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">${Icons.get('x', { size: 14 })}</button>
         <div class="ts2-empty-text">Участник не найден.</div>
       </div>
     `;
@@ -1056,15 +1149,222 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
     crossTeam:  model?.scannerV2?.crossTeamDeps?.[key]      || null,
   };
   return `
-    <div class="ts2-panel" id="ts2-panel-main" role="dialog" aria-modal="true"
+    <div class="ts2-panel ts2-panel-modal" id="ts2-panel-main" role="dialog" aria-modal="true"
          aria-labelledby="ts2-panel-title" tabindex="-1">
       ${renderPanelHeader(p, tToday, tYest, tPrev, ctxMetrics)}
+      ${renderPersonNarrative(p)}
       ${renderCounters(p)}
+      ${renderPersonMetricsPanel(p, model)}
       ${renderHeatmap72x4(heat72, filters)}
       ${renderFilters(filters, heat72.rowTotals)}
       ${renderBlockersShelf(blockers)}
       ${renderEventsFeed(filteredTl)}
       ${renderSwitchesNote(cs)}
+    </div>
+  `;
+}
+
+/**
+ * V20 S13 N1-N5 — Per-employee narrative (3-5 предложений).
+ *
+ * Pилот: «5 минут утра — нужны 3-5 предложений «что человек делает / делал»
+ * без таблиц». Включает:
+ *   N1: 3-5 предложений нарратив
+ *   N2: кнопка «скопировать для 1:1» (markdown в clipboard)
+ *   N3: 24h rolling по умолчанию
+ *   N4: empty-state с гипотезой («возможно отпуск»)
+ *   N5: фокус на задачах, не на человеке
+ */
+function renderPersonNarrative(p) {
+  const narrative = composePersonNarrative(p);
+  if (narrative.sentences.length === 0) return '';
+  // V22 (2026-05-09 UX) — структурированный список вместо одной строки.
+  // Каждое предложение нарратива (Сегодня / Блокер / Вчера / Confluence)
+  // — отдельный <li> с label-prefix bold для сканируемости.
+  const labeledItems = narrative.sentences.map(s => {
+    const text = String(s || '');
+    const m = text.match(/^([^:]+):\s*(.*)$/);
+    if (!m) {
+      return `<li class="ts2-narrative-item ts2-narrative-item-plain">${linkifyIssueKeys(esc(text))}</li>`;
+    }
+    const label = m[1].trim();
+    const body = m[2].trim();
+    const slug = label.toLowerCase().replace(/[^a-zа-яё0-9]+/g, '-');
+    return `
+      <li class="ts2-narrative-item ts2-narrative-item-${esc(slug)}">
+        <span class="ts2-narrative-label">${esc(label)}:</span>
+        <span class="ts2-narrative-text">${linkifyIssueKeys(esc(body))}</span>
+      </li>`;
+  }).join('');
+  const hypothesis = narrative.hypothesis
+    ? `<p class="ts2-narrative-hypothesis">${esc(narrative.hypothesis)}</p>`
+    : '';
+  const stale = narrative.isStaleData
+    ? `<span class="ts2-narrative-stale" title="Данные старше суток. Открой кнопку «Обновить».">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 12 })} устаревшие</span>`
+    : '';
+  // N2: copy button с pre-built markdown в data-attr (escapeHtml защищает).
+  const md = composeNarrativeMarkdown(p, narrative);
+  return `
+    <div class="ts2-panel-section ts2-narrative-section" role="region" aria-label="Сводка по сотруднику">
+      <div class="ts2-panel-section-title">
+        Сводка за последние 24 часа
+        <button type="button" class="ts2-narrative-copy" data-narrative-md="${esc(md)}"
+                title="Скопировать сводку для вставки в Telegram/Slack" aria-label="Скопировать">${Icons.get('copy', { cls: 'btn-icon', size: 12 })} Копировать</button>
+        ${stale}
+      </div>
+      <ul class="ts2-narrative-list">${labeledItems}</ul>
+      ${hypothesis}
+    </div>
+  `;
+}
+
+/**
+ * V20 S11 — Per-person metrics panel (Z1, Z2, Z3, Z6, Z8, Z9, Z10).
+ *
+ * Все метрики — composite chips в одной секции под counters. Показывается
+ * только когда `p.personMetrics` присутствует (после applyPersonMetrics в
+ * enrichment). Каждая метрика — chip с tooltip-объяснением формулы.
+ *
+ * Burnout flag (Z10) подсвечивается ▌ stripe и аккуратно объясняет сигналы.
+ */
+function renderPersonMetricsPanel(p, model) {
+  const m = p?.personMetrics;
+  // V22 (2026-05-09 UX) — раньше при !m возвращали '' и теряли CF/Z chips.
+  // Теперь рендерим хотя бы CF/Z (всегда доступны через cfItems / timeline72h).
+  // Z1-Z10 chips остаются скрыты пока applyPersonMetrics не отработал.
+  // Z1 — productivity score
+  const prod = m?.productivity;
+  const prodTooltip = prod ? `Сегодня (48ч): ${prod.breakdown.commits}c · ${prod.breakdown.prs}PR · ${prod.breakdown.conf}CF · ${prod.breakdown.reviewsDone}reviews · ${prod.breakdown.testsCreated}+${prod.breakdown.testsExecuted}Z · ${prod.breakdown.closedToday} закрыто. Формула: c×1 + PR×3 + CF×1.5 + reviews×2 + tests_c×2 + tests_e×1 + closed×5.` : '';
+  const prodChip = prod ? `<span class="ts2-pm-chip ts2-pm-chip-prod" data-pm-formula="${esc(prodTooltip)}" title="Клик — полная формула">
+    <span class="ts2-pm-chip-key">PROD</span>
+    <span class="ts2-pm-chip-num">${prod.score}</span>
+  </span>` : '';
+
+  // Z2 — first/last activity
+  const fl = m?.firstLast;
+  const flChip = !fl ? '' : (fl.first && fl.last)
+    ? (() => {
+        const f = fl.first.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        const l = fl.last.toLocaleTimeString('ru-RU',  { hour: '2-digit', minute: '2-digit' });
+        return `<span class="ts2-pm-chip" title="Первая и последняя активность за rolling 24ч (${fl.count} событий, span ${fl.span}ч). Источник: timeline + bb + cf + zephyr. Browser-local TZ.">
+          <span class="ts2-pm-chip-key">АКТИВ</span>
+          <span class="ts2-pm-chip-num">${esc(f)}–${esc(l)}</span>
+          <span class="ts2-pm-chip-lab">${fl.span}ч</span>
+        </span>`;
+      })()
+    : `<span class="ts2-pm-chip ts2-pm-chip-empty" title="Нет событий за последние 24ч"><span class="ts2-pm-chip-key">АКТИВ</span><span class="ts2-pm-chip-num">—</span></span>`;
+
+  // Z3 — context switch rate
+  const cs = m?.contextSwitches;
+  const csChip = !cs ? '' : cs.total > 0
+    ? `<span class="ts2-pm-chip" title="Переключений между задачами за 72ч: ${cs.total} (${cs.distinctIssueKeys} уникальных). Норма ≤ 0.5/час.">
+        <span class="ts2-pm-chip-key">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 12 })} SWITCH</span>
+        <span class="ts2-pm-chip-num">${cs.perHour}</span>
+        <span class="ts2-pm-chip-lab">/час</span>
+      </span>`
+    : '';
+
+  // Z6 — LOC delta
+  const loc = m?.loc;
+  const locChip = !loc ? '' : loc.estimated
+    ? `<span class="ts2-pm-chip ts2-pm-chip-estimated" title="Приближённо ≈ commits × ${50} (нет diff-stats от BB API). Реальные числа доступны при hydration линий из commits diff.">
+        <span class="ts2-pm-chip-key">~LOC</span>
+        <span class="ts2-pm-chip-num">${loc.added}</span>
+        <span class="ts2-pm-chip-lab">≈48ч</span>
+      </span>`
+    : `<span class="ts2-pm-chip" title="Линии кода за 48ч: +${loc.added} / −${loc.removed}, net ${loc.net}.">
+        <span class="ts2-pm-chip-key">LOC</span>
+        <span class="ts2-pm-chip-num">+${loc.added} / −${loc.removed}</span>
+      </span>`;
+
+  // Z8 — hours logged
+  const h = m?.hoursLogged;
+  const hoursChip = !h ? '' : (h.todaySec > 0 || h.weekSec > 0)
+    ? `<span class="ts2-pm-chip" title="Залогировано в Jira: сегодня ${fmtHours(h.todaySec)}ч · вчера ${fmtHours(h.yesterdaySec)}ч · неделя ${fmtHours(h.weekSec)}ч.">
+        <span class="ts2-pm-chip-key">Σ ЛОГ</span>
+        <span class="ts2-pm-chip-num">${fmtHours(h.todaySec)}</span>
+        <span class="ts2-pm-chip-lab">сегодня</span>
+      </span>`
+    : '';
+
+  // Z9 — first-response time
+  const frt = m?.firstResponse;
+  const frtChip = !frt ? '' : (frt.medianHours != null)
+    ? `<span class="ts2-pm-chip" title="Медиана dwell-time для issue в open/todo статусе (proxy на FRT). N=${frt.count}.">
+        <span class="ts2-pm-chip-key">FRT</span>
+        <span class="ts2-pm-chip-num">${fmtDuration(frt.medianHours)}</span>
+      </span>`
+    : '';
+
+  // Z10 — burnout flag (видит только тимлид; в Сканнере self-view нет → safe)
+  const bo = m?.burnout;
+  const burnoutChip = !bo ? '' : (bo.level !== 'none')
+    ? `<span class="ts2-pm-chip ts2-pm-chip-burnout ts2-pm-chip-burnout-${bo.level}" data-pm-formula="Composite burnout-сигнал: ${bo.signals.map(s => `${s.kind}=${s.value}`).join(' · ')}. Confidence: ${bo.confidence}. Сигналы: weekend>25%, lateNight>15%, WIP≥4, 5+д без коммитов. ВНИМАНИЕ: использовать для разговора, не для performance review." title="${esc('Burnout-композит — клик для подробной формулы')}">
+        <span class="ts2-pm-chip-key">▌ BURNOUT</span>
+        <span class="ts2-pm-chip-num">${bo.level === 'high' ? 'ВЫСОКИЙ' : 'СРЕДНИЙ'}</span>
+        <span class="ts2-pm-chip-lab">${bo.signals.length} сигн.</span>
+      </span>`
+    : '';
+
+  // V22 (2026-05-09 UX) — добавлены Confluence и Zephyr-chips: тимлиду
+  // важно сразу видеть «есть ли активность в документации/тестах» без
+  // прокрутки до events feed.
+  const cfCount = Array.isArray(p?.cfItems) ? p.cfItems.length : 0;
+  const cfChip = `<span class="ts2-pm-chip ${cfCount === 0 ? 'ts2-pm-chip-empty' : ''}" data-pm-formula="Правки в Confluence за 48ч: ${cfCount}. Источник — cfItems (edit + create + comment). Если 0 при наличии активности в Jira/BB — возможно сотрудник не документирует свою работу.">
+    <span class="ts2-pm-chip-key">CF</span>
+    <span class="ts2-pm-chip-num">${cfCount}</span>
+    <span class="ts2-pm-chip-lab">правок 48ч</span>
+  </span>`;
+  // V22 fix #9 — Z-count из тех же полей, что использует per-row chip:
+  // zephyrTestsCreatedRecent + zephyrTestsExecutedRecent. Раньше брали
+  // из несуществующего zephyrItems → всегда 0.
+  const zCreated  = Array.isArray(p?.zephyrTestsCreatedRecent)  ? p.zephyrTestsCreatedRecent.length  : 0;
+  const zExecuted = Array.isArray(p?.zephyrTestsExecutedRecent) ? p.zephyrTestsExecutedRecent.length : 0;
+  const zFromTimeline = Array.isArray(p?.timeline72h) ? p.timeline72h.filter(e => e?.src === 'zephyr').length : 0;
+  const zCount = (zCreated + zExecuted) || zFromTimeline;
+  const zChip = `<span class="ts2-pm-chip ${zCount === 0 ? 'ts2-pm-chip-empty' : ''}" data-pm-formula="Активность в Zephyr за 72ч: ${zCount} (создано тестов: ${zCreated}, прогонов: ${zExecuted}). Источник — zephyrTestsCreatedRecent + zephyrTestsExecutedRecent (fallback: timeline.src='zephyr'). Если 0 при QA-роли — стоит уточнить, где идёт регрессия.">
+    <span class="ts2-pm-chip-key">Z</span>
+    <span class="ts2-pm-chip-num">${zCount}</span>
+    <span class="ts2-pm-chip-lab">тестов 72ч</span>
+  </span>`;
+
+  // Phase-1 Jenkins MVP (2026-05-10) — J chip. Источник: model.jenkins.perAuthor
+  // → matched по точному name (whitespace-trim, case-insensitive). Если 0 при
+  // роли DevOps/SRE — указываем как чинить (jenkinsUserName в Сотрудниках или
+  // Auto-Resolve). НЕ использовать для performance review.
+  const jBuilds = p?.jenkinsBuilds48h || 0;
+  const jFails  = p?.jenkinsFailures48h || 0;
+  const jFolder = model?.jenkins?.folder || 'sbof';
+  // 2026-05-11 — error-aware variant. Если model.jenkins.error → показываем
+  // J⚠ с reason'ом в tooltip вместо misleading 0 builds.
+  const jErrPm = (model?.jenkins && model.jenkins.error) ? String(model.jenkins.error) : '';
+  const jChip = jErrPm
+    ? `<span class="ts2-pm-chip ts2-pm-chip-warn" data-pm-formula="Jenkins недоступен: ${esc(jErrPm)}. Чип отображается с ⚠ потому что мы не можем отличить «нет билдов» от «нет данных» — открывайте Diagnostic-modal → секция Jenkins для деталей.">
+    <span class="ts2-pm-chip-key">J</span>
+    <span class="ts2-pm-chip-num" aria-label="недоступен">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 11 })}</span>
+    <span class="ts2-pm-chip-lab">недоступен</span>
+  </span>`
+    : `<span class="ts2-pm-chip ${jBuilds === 0 ? 'ts2-pm-chip-empty' : ''}" data-pm-formula="Jenkins за 48ч: ${jBuilds} билдов, ${jFails} fail. Источник — culprits / actions.causes.userName из folder ${esc(jFolder)}. Если 0 при роли DevOps/SRE — проверьте jenkinsUserName в Сотрудниках или запустите Auto-Resolve.">
+    <span class="ts2-pm-chip-key">J</span>
+    <span class="ts2-pm-chip-num">${jBuilds}</span>
+    <span class="ts2-pm-chip-lab">${jFails > 0 ? jFails + ' fail' : 'билдов 48ч'}</span>
+  </span>`;
+
+  return `
+    <div class="ts2-panel-section ts2-pm-section">
+      <div class="ts2-panel-section-title">Метрики сотрудника <span class="ts2-panel-section-hint">клик по chip — формула</span></div>
+      <div class="ts2-pm-chips">
+        ${prodChip}
+        ${flChip}
+        ${csChip}
+        ${locChip}
+        ${hoursChip}
+        ${frtChip}
+        ${cfChip}
+        ${zChip}
+        ${jChip}
+        ${burnoutChip}
+      </div>
     </div>
   `;
 }
@@ -1087,8 +1387,9 @@ function maskEmail(email) {
 }
 
 function renderPanelHeader(p, tToday, tYest, tPrev, metrics = {}) {
+  // V22 (2026-05-09 UX) — email-masking убран по UX-фидбеку: внутренний
+  // tool, всё внутри корп-сети, masking только мешал тимлиду.
   const emailFull = p.email || '';
-  const emailMasked = maskEmail(emailFull);
   // V20 S7 A3 — cross-team chip + CRV/PRT детальные метрики в panel header.
   const m = metrics || {};
   const crvChip = m.crv && m.crv.count >= 2
@@ -1104,13 +1405,25 @@ function renderPanelHeader(p, tToday, tYest, tPrev, metrics = {}) {
   // дайте кнопку обсудить 1:1 которая копирует контекст в clipboard для Telegram».
   const overloadAction = m.prT?.flag === 'overload'
     ? `<button class="ts2-panel-metric ts2-panel-metric-action" id="ts2-detail-spawn-1on1" type="button"
-              title="Скопировать контекст для разговора 1:1 в TG/Slack">💬 Обсудить 1:1</button>`
+              title="Скопировать контекст для разговора 1:1 в TG/Slack">${Icons.get('message-circle', { cls: 'btn-icon', size: 12 })} Обсудить 1:1</button>`
     : '';
   const metricRow = (crvChip || prtChip || ctChip || overloadAction)
     ? `<div class="ts2-panel-metrics-row">${crvChip}${prtChip}${ctChip}${overloadAction}</div>`
     : '';
+  // 2026-05-11 — breadcrumb с контекстом (команда + sprint). Помогает не
+  // потерять «откуда я пришёл» после drill-down в person-row.
+  const teamCtx = p.team || p.pk || '';
+  const sprintCtx = p.activeSprintName || '';
+  const breadcrumb = (teamCtx || sprintCtx)
+    ? `<div class="ts2-panel-breadcrumb" aria-label="Контекст">
+        <button class="ts2-panel-back" type="button" data-close-modal aria-label="Назад к Сканнеру">← Назад</button>
+        ${teamCtx ? `<span class="ts2-panel-bc-sep">·</span><span class="ts2-panel-bc-team">${esc(teamCtx)}</span>` : ''}
+        ${sprintCtx ? `<span class="ts2-panel-bc-sep">·</span><span class="ts2-panel-bc-sprint">${esc(sprintCtx)}</span>` : ''}
+      </div>`
+    : '';
   return `
     <div class="ts2-panel-head">
+      ${breadcrumb}
       <div class="ts2-panel-titleblock">
         <div class="ts2-panel-name" id="ts2-panel-title">${esc(p.label || '—')}</div>
         <div class="ts2-panel-sub">
@@ -1118,11 +1431,10 @@ function renderPanelHeader(p, tToday, tYest, tPrev, metrics = {}) {
           <span class="ts2-panel-meta">вчера ${tYest}</span>
           <span class="ts2-panel-meta">позавчера ${tPrev}</span>
           ${emailFull ? `
-            <button class="ts2-panel-email" data-email-toggle type="button"
-                    aria-label="Email сотрудника, нажать чтобы показать целиком"
-                    title="Click — показать целиком"
-                    data-email-full="${esc(emailFull)}"
-                    data-email-masked="${esc(emailMasked)}">${esc(emailMasked)}</button>` : ''}
+            <a class="ts2-panel-email" href="mailto:${esc(emailFull)}"
+               data-email-full="${esc(emailFull)}"
+               aria-label="Email сотрудника (mailto-ссылка); кликните чтобы раскрыть"
+               title="Написать ${esc(maskEmail(emailFull))} (клик — раскрыть полностью)">${esc(maskEmail(emailFull))}</a>` : ''}
         </div>
         ${metricRow}
       </div>
@@ -1132,11 +1444,11 @@ function renderPanelHeader(p, tToday, tYest, tPrev, metrics = {}) {
         <!-- V20 S8.5 #8 — расширенный hint что попадёт в clipboard. -->
         <button class="ts2-btn ts2-btn-ghost ts2-panel-tgcopy" id="ts2-detail-tgcopy" type="button"
                 title="Копирует 5-7 строк plain-text для чата:&#10;• имя сотрудника&#10;• счётчики событий (сегодня/вчера/WIP)&#10;• топ-3 блокера с dwell-time&#10;• активность 48ч (commits / PR / CF)&#10;• ссылка на эту карточку"
-                aria-label="Копировать для Telegram">📋 TG</button>
+                aria-label="Копировать для Telegram">${Icons.get('send', { cls: 'btn-icon', size: 12 })} TG</button>
         <button class="ts2-btn ts2-btn-ghost ts2-panel-share" id="ts2-detail-share" type="button"
                 title="Скопировать ссылку на этот вид (для async-команды можно отправить в TG/Slack)"
-                aria-label="Скопировать ссылку на детализацию">🔗</button>
-        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">✕</button>
+                aria-label="Скопировать ссылку на детализацию">${Icons.get('link-2', { size: 14 })}</button>
+        <button class="ts2-btn ts2-btn-ghost ts2-panel-close" id="ts2-detail-close" type="button" aria-label="Закрыть">${Icons.get('x', { size: 14 })}</button>
       </div>
     </div>
   `;
@@ -1149,15 +1461,30 @@ function renderCounters(p) {
   const hours = (p.loggedTodaySec     || 0) / 3600 +
                 (p.loggedYesterdaySec || 0) / 3600 +
                 (p.loggedDayBeforeSec || 0) / 3600;
+  // UX feedback 2026-05-10 (Sc4) — большие бледно-коричневые hero-карточки
+  // вместо мелких counter cells. Структура та же (4 значения), но визуал
+  // заметно крупнее: bronze tint, 28px цифра, CAPS-eyebrow подпись, 16-20px
+  // padding. Класс `ts2-panel-counters-hero` отдельный — старый
+  // `.ts2-panel-counter` стиль остаётся для backward-compat (не используется
+  // здесь, но не удалён, чтобы не сломать другие места).
   return `
-    <div class="ts2-panel-counters">
-      ${counterCell(com48, 'коммитов', '48ч')}
-      ${counterCell(prs48, 'PR',       '48ч')}
-      ${counterCell(tasks, 'задач',    '72ч')}
-      ${counterCell(hours.toFixed(1), 'часов', '72ч')}
+    <div class="ts2-panel-counters ts2-panel-counters-hero">
+      ${heroCounterCell(com48, 'коммитов', '48ч')}
+      ${heroCounterCell(prs48, 'PR',       '48ч')}
+      ${heroCounterCell(tasks, 'задач',    '72ч')}
+      ${heroCounterCell(hours.toFixed(1), 'часов', '72ч')}
     </div>
   `;
 }
+function heroCounterCell(num, lab, sub) {
+  return `<div class="ts2-panel-counter ts2-panel-counter-hero">
+    <div class="ts2-panel-counter-lab">${esc(lab)}</div>
+    <div class="ts2-panel-counter-num">${esc(num)}</div>
+    <div class="ts2-panel-counter-sub">${esc(sub)}</div>
+  </div>`;
+}
+// Backward-compat: legacy small variant (если где-то ещё вызывается).
+// eslint-disable-next-line no-unused-vars
 function counterCell(num, lab, sub) {
   return `<div class="ts2-panel-counter">
     <div class="ts2-panel-counter-num">${esc(num)}</div>
@@ -1180,19 +1507,35 @@ function renderHeatmap72x4(h, filters) {
   const rows = h.grid.map((row, srcIdx) => {
     const visible = filters[SRC_KEYS[srcIdx]] !== false;
     const peak = row.length ? Math.max(...row) : 0;
+    // V22 S-16 (audit-experts-2026-05-15 Heinz C4) — динамический max + sqrt
+    // нормировка. Раньше step-jumps были перцептивно инвертированы:
+    //   0→1: +0.25 (+250% яркости) — «было/не было» выглядит огромным
+    //   3→4: +0.15 (+18%) — «много/очень много» — почти неразличимо
+    // Это нарушает Stevens' power law (perceived ~ stim^0.5).
+    // Теперь: sqrt-нормировка против row-max. Шаги 0→1 видно, но НЕ так
+    // драматично; 3→4→8→12 различимы благодаря квадратному корню.
+    const _saturatedThreshold = Math.max(4, Math.ceil(peak * 0.85));
+    const _rowMaxForScale = Math.max(_saturatedThreshold, 1);
     const cells = row.map((n, hourIdx) => {
-      // V18.1 P7-S3.3 — density scale rebalanced: 0.06→0.45 был рваный
-      // (4× прыжок). Новый: 0.10/0.35/0.60/0.85/1.0 + outline для
-      // saturation (>=4 events). Saturation outline решает проблему
-      // «при 200 events/час неотличимо от 4-х» (QA finding).
+      // sqrt(n / rowMax) даёт perceptually-linear opacity: 0→0, 1→0.50,
+      // 4→0.71, 9→0.94, 16→1.0 (для rowMax=16). На малых rowMax кривая
+      // сглаживается. Min 0.08 для n=0 чтобы клетка читалась как «cell»,
+      // а не «дыра в ряду».
       let op, isHigh = false;
-      if (n === 0)      op = 0.10;
-      else if (n === 1) op = 0.35;
-      else if (n === 2) op = 0.60;
-      else if (n === 3) op = 0.85;
-      else            { op = 1.0; isHigh = true; }
+      if (n === 0) op = 0.08;
+      else {
+        const ratio = Math.min(1, n / _rowMaxForScale);
+        op = 0.20 + 0.80 * Math.sqrt(ratio);
+        if (n >= _saturatedThreshold) isHigh = true;
+      }
       const isPeak = h.peakCell && h.peakCell.srcIdx === srcIdx && h.peakCell.hourIndex === hourIdx;
-      const classes = ['ts2-hcell'];
+      // 2026-05-11 — 5-color palette: per-source цвет вместо единого синего.
+      // Раньше все источники J/B/C/Z = одинаковый цвет, на 72×5 grid нельзя
+      // быстро увидеть «вторник 0 коммитов, но есть CF» — паттерны замешаны.
+      // Теперь каждая строка визуально отличается:
+      //   J=Jira (blue), B=Bitbucket (green), C=Confluence (amber),
+      //   Zc=Zephyr-tests (purple), Ze=Zephyr-runs (rose).
+      const classes = ['ts2-hcell', `ts2-hcell-src-${SRC_KEYS[srcIdx]}`];
       if (isPeak) classes.push('ts2-hcell-peak');
       if (isHigh) classes.push('ts2-hcell-saturated');
       const hoursAgo = 71 - hourIdx;
@@ -1269,16 +1612,18 @@ function renderBlockersShelf(blockers) {
   // чтобы PO/SM понимали ПОЧЕМУ задача в blocker'ах.
   const items = blockers.slice(0, 8).map(b => {
     const threshold = b.thresholdHours;
+    // V20 S10.2 — fmtDuration: «1642ч» → «68д 10ч». Порог остаётся в часах
+    // (всегда small ≤72ч, к тому же threshold-as-hours = терминология).
     const dwellLabel = (threshold && threshold !== 24)
-      ? `${b.dwellHours}ч <span class="ts2-blockers-threshold">(порог ${threshold}ч)</span>`
-      : `${b.dwellHours}ч`;
+      ? `${fmtDuration(b.dwellHours)} <span class="ts2-blockers-threshold">(порог ${threshold}ч)</span>`
+      : fmtDuration(b.dwellHours);
     return `
     <li class="ts2-blockers-li">
       <span class="ts2-blockers-stripe"></span>
       <span class="ts2-blockers-key">${jiraIssueLink(b.key)}</span>
       <span class="ts2-blockers-status">${esc(b.status)}</span>
       <span class="ts2-blockers-dwell">${dwellLabel}</span>
-      <span class="ts2-blockers-summary">${esc((b.summary || '').slice(0, 80))}</span>
+      <span class="ts2-blockers-summary">${linkifyIssueKeys(esc((b.summary || '').slice(0, 80)))}</span>
     </li>`;
   }).join('');
   return `
@@ -1296,65 +1641,206 @@ function renderEventsFeed(timeline72h) {
   if (!timeline72h.length) {
     return `
       <div class="ts2-panel-section ts2-panel-section-tight">
-        <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч</span></div>
-        <div class="ts2-empty-text">Нет событий за 72ч (или все источники в фильтре выключены).</div>
+        <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">за 72 часа</span></div>
+        <div class="ts2-empty-text">Нет событий за 72 часа (или все источники в фильтре выключены).</div>
       </div>
     `;
   }
-  const items = timeline72h.slice(0, 40).map(renderEventLine).join('');
+  // V22 (2026-05-09 UX) — убран top-40 limit и группировка по дате.
+  // Раньше «top 40 · все источники» путало (всё равно невозможно понять
+  // что отрезано). Теперь — все события 72ч, сгруппированные по дню.
+  const HOUR_MS = 3600 * 1000;
+  const now = Date.now();
+  const todayStart   = (() => { const d = new Date(now); d.setHours(0,0,0,0); return d.getTime(); })();
+  const yestStart    = todayStart - 24 * HOUR_MS;
+  const beforeStart  = todayStart - 48 * HOUR_MS;
+  const buckets = { today: [], yesterday: [], dayBefore: [], older: [] };
+  for (const e of timeline72h) {
+    const ms = e?.at ? Date.parse(e.at) : NaN;
+    if (!Number.isFinite(ms)) { buckets.older.push(e); continue; }
+    if      (ms >= todayStart)  buckets.today.push(e);
+    else if (ms >= yestStart)   buckets.yesterday.push(e);
+    else if (ms >= beforeStart) buckets.dayBefore.push(e);
+    else                         buckets.older.push(e);
+  }
+  const renderBucket = (label, evs) => {
+    if (!evs.length) return '';
+    // V22 (2026-05-10 UX) — idx по позиции в timeline72h позволяет click-to-expand
+    // надёжно адресовать событие даже если события в bucket пересекаются
+    // по времени с другими bucket'ами.
+    const items = evs.map((e) => renderEventLine(e, timeline72h.indexOf(e))).join('');
+    return `
+      <div class="ts2-events-bucket">
+        <div class="ts2-events-bucket-head">
+          <span class="ts2-events-bucket-label">${esc(label)}</span>
+          <span class="ts2-events-bucket-count">${evs.length} ${plural(evs.length, ['событие', 'события', 'событий'])}</span>
+        </div>
+        <ul class="ts2-recent ts2-recent-feed">${items}</ul>
+      </div>
+    `;
+  };
+  const body = [
+    renderBucket('Сегодня',     buckets.today),
+    renderBucket('Вчера',       buckets.yesterday),
+    renderBucket('Позавчера',   buckets.dayBefore),
+    renderBucket('Раньше 72ч',  buckets.older),
+  ].join('');
   return `
-    <div class="ts2-panel-section ts2-panel-section-tight">
-      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">72ч · top 40 · все источники</span></div>
-      <ul class="ts2-recent ts2-recent-feed">${items}</ul>
+    <div class="ts2-panel-section ts2-panel-section-tight ts2-events-section">
+      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">за 72 часа · ${timeline72h.length} ${plural(timeline72h.length, ['запись', 'записи', 'записей'])}</span></div>
+      ${body}
     </div>
   `;
 }
 
-/** Render one event row — different per src. V18.1 P6.2. */
-function renderEventLine(e) {
+/** Render one event row — different per src. V18.1 P6.2.
+ *  V22 (2026-05-10 UX) — для Jira ВСЕГДА показываем action label после даты,
+ *  чтобы пустые e.text не превращали ленту в безмолвные строки. Для
+ *  field/attribute изменений показываем badge с именем поля + diff
+ *  доступен через click-to-expand (см. data-event-idx). */
+function renderEventLine(e, idx) {
   const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
   const src = e?.src || 'jira';
   const srcBadge = renderSrcBadge(src, e?.kind);
   let body = '';
+  let expandable = '';   // если есть details — html для inline-expansion (li > .ts2-recent-detail)
   // V18.1 P7-S1.4 — все references на issue/PR/page кликабельны через
   // настоящие <a href>. Без этого инструмент только смотрит, не работает.
   if (src === 'jira') {
     const issueKey = e?.issue?.key ? jiraIssueLink(e.issue.key) : '';
-    const text = esc(e.text || e.kind || '');
-    body = `${issueKey} <span class="ts2-recent-text">${text}</span>`;
+    const action = _jiraActionLabel(e);
+    const actionHtml = `<span class="ts2-recent-action ts2-recent-action-${esc(action.severity)}" title="${esc(action.kind)}">${esc(action.label)}</span>`;
+    const fieldName = e.field || e.fieldName || '';
+    const isFieldChange = action.kind === 'field-change' || action.kind === 'attribute_change' || action.kind === 'field_change' || !!fieldName;
+    const fieldBadge = (isFieldChange && fieldName)
+      ? `<span class="ts2-recent-attr-badge" title="Поле Jira">Поле «${esc(fieldName)}»</span>`
+      : '';
+    // Preview справа — только если есть e.text и он не дублирует action.label.
+    const rawText = String(e.text || '').trim();
+    const isDup = rawText && (rawText.toLowerCase() === action.label.toLowerCase());
+    const previewText = (rawText && !isDup) ? rawText.slice(0, 60) + (rawText.length > 60 ? '…' : '') : '';
+    const preview = previewText
+      ? ` <span class="ts2-recent-text">${linkifyIssueKeys(esc(previewText))}</span>`
+      : '';
+    body = `${actionHtml} ${issueKey}${fieldBadge ? ' ' + fieldBadge : ''}${preview}`;
+    // Click-to-expand: показываем from→to diff если есть.
+    if (isFieldChange && (e.from || e.to)) {
+      const fromS = String(e.from || '').slice(0, 200);
+      const toS   = String(e.to   || '').slice(0, 200);
+      expandable = `<div class="ts2-recent-diff">`
+        + (fromS ? `<div class="ts2-recent-diff-from"><span class="ts2-recent-diff-tag">было</span> ${linkifyIssueKeys(esc(fromS))}</div>` : '')
+        + (toS   ? `<div class="ts2-recent-diff-to"><span class="ts2-recent-diff-tag">стало</span> ${linkifyIssueKeys(esc(toS))}</div>` : '')
+        + (rawText && (fromS || toS) ? `<div class="ts2-recent-diff-text">${linkifyIssueKeys(esc(rawText))}</div>` : '')
+        + `</div>`;
+    } else if (rawText && rawText.length > 60) {
+      // Длинный коммент / описание — показываем полный текст в expansion.
+      expandable = `<div class="ts2-recent-fulltext">${linkifyIssueKeys(esc(rawText))}</div>`;
+    }
   } else if (src === 'bb') {
     // bbItem: { kind: 'pr'|'commit'|'review', title, url, repo, status? }
+    // UX feedback 2026-05-10 (Sc6) — status (open/merged/declined) теперь
+    // СЛЕВА от repo/title, как маленький badge. Раньше шёл в конце через
+    // « · open» — терялся в длинной строке.
     const kind = e.kind || '';
     const repo = e.repo ? `<span class="ts2-recent-meta">${esc(e.repo)}</span>` : '';
-    const status = e.status ? ` · ${esc(e.status)}` : '';
+    const status = e.status
+      ? `<span class="ts2-recent-status ts2-recent-status-${esc(String(e.status).toLowerCase())}">${esc(e.status)}</span>`
+      : '';
     const titleText = (e.title || '').slice(0, 80);
     const titleHtml = e.url
-      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(titleText)}</a>`
-      : esc(titleText);
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${repo} <span class="ts2-recent-text">${titleHtml}${status}</span>`;
+      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${linkifyIssueKeys(esc(titleText))}</a>`
+      : linkifyIssueKeys(esc(titleText));
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${status} ${repo} <span class="ts2-recent-text">${titleHtml}</span>`;
   } else if (src === 'cf') {
     // cfItem: { kind: 'edit'|'create'|'comment', title, spaceName, spaceKey, url }
     const kind = e.kind || 'edit';
     const space = e.spaceName || e.spaceKey ? `<span class="ts2-recent-meta">${esc(e.spaceName || e.spaceKey)}</span>` : '';
+    const status = e.status
+      ? `<span class="ts2-recent-status ts2-recent-status-${esc(String(e.status).toLowerCase())}">${esc(e.status)}</span>`
+      : '';
     const titleText = (e.title || '').slice(0, 80);
     const titleHtml = e.url
-      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${esc(titleText)}</a>`
-      : esc(titleText);
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${space} <span class="ts2-recent-text">${titleHtml}</span>`;
+      ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${linkifyIssueKeys(esc(titleText))}</a>`
+      : linkifyIssueKeys(esc(titleText));
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${status} ${space} <span class="ts2-recent-text">${titleHtml}</span>`;
+    // Click-to-expand: для CF-edit показываем diff URL + space name.
+    const cfDetails = [];
+    if (e.spaceName || e.spaceKey) cfDetails.push(`<div><span class="ts2-recent-diff-tag">space</span> ${esc(e.spaceName || e.spaceKey)}</div>`);
+    if (e.diffUrl) cfDetails.push(`<div><span class="ts2-recent-diff-tag">diff</span> <a class="ts2-issue-link" href="${esc(e.diffUrl)}" target="_blank" rel="noopener noreferrer">открыть в Confluence</a></div>`);
+    if (e.title && e.title.length > 80) cfDetails.push(`<div><span class="ts2-recent-diff-tag">title</span> ${esc(e.title)}</div>`);
+    if (cfDetails.length) expandable = `<div class="ts2-recent-diff">${cfDetails.join('')}</div>`;
   } else if (src === 'zephyr') {
     // V18.3 A2 — kind ∈ {test, testSet} → Zc badge; иначе Ze.
+    // Sc6 — result (PASS/FAIL/etc) перенесён слева от title как badge.
     const kind = e.kind || 'testExec';
-    const result = e.result ? ` · ${esc(e.result)}` : '';
+    const result = e.result
+      ? `<span class="ts2-recent-status ts2-recent-status-${esc(String(e.result).toLowerCase())}">${esc(e.result)}</span>`
+      : '';
     const slimKey = e?.slim?.key;
     const titleText = (e?.slim?.summary || e.title || '').slice(0, 80);
     const titleHtml = slimKey
-      ? `${jiraIssueLink(slimKey)} <span class="ts2-recent-text">${esc(titleText)}${result}</span>`
-      : `<span class="ts2-recent-text">${esc(titleText)}${result}</span>`;
-    body = `<span class="ts2-recent-kind">${esc(kindLabel('zephyr', kind))}</span> ${titleHtml}`;
+      ? `${jiraIssueLink(slimKey)} <span class="ts2-recent-text">${esc(titleText)}</span>`
+      : `<span class="ts2-recent-text">${esc(titleText)}</span>`;
+    body = `<span class="ts2-recent-kind">${esc(kindLabel('zephyr', kind))}</span> ${result} ${titleHtml}`;
+    // Click-to-expand: для test execution показываем result + comment.
+    const zDetails = [];
+    if (e.result)  zDetails.push(`<div><span class="ts2-recent-diff-tag">результат</span> ${esc(e.result)}</div>`);
+    if (e.comment) zDetails.push(`<div><span class="ts2-recent-diff-tag">коммент</span> ${linkifyIssueKeys(esc(String(e.comment).slice(0, 240)))}</div>`);
+    if (e?.slim?.summary && e.slim.summary.length > 80) zDetails.push(`<div><span class="ts2-recent-diff-tag">summary</span> ${esc(e.slim.summary)}</div>`);
+    if (zDetails.length) expandable = `<div class="ts2-recent-diff">${zDetails.join('')}</div>`;
   } else {
     body = esc(e.text || '');
   }
-  return `<li class="ts2-recent-li">${srcBadge}<span class="ts2-recent-at">${esc(at)}</span> ${body}</li>`;
+  // V22 (2026-05-10 UX) — click-to-expand: если есть expandable details,
+  // навешиваем data-event-idx + cursor:pointer + chevron. Handler сидит
+  // в _bindPanelEvents (teamScanner2.js) — делегированный click-listener.
+  const hasDetail = !!expandable;
+  const idxAttr = hasDetail ? ` data-event-idx="${idx}"` : '';
+  const liCls = hasDetail ? 'ts2-recent-li ts2-recent-expandable' : 'ts2-recent-li';
+  const chevron = hasDetail ? `<span class="ts2-recent-chevron" aria-hidden="true">›</span>` : '';
+  const detailHtml = hasDetail
+    ? `<div class="ts2-recent-detail" hidden>${expandable}</div>`
+    : '';
+  return `<li class="${liCls}"${idxAttr}>${srcBadge}<span class="ts2-recent-at">${esc(at)}</span> ${body}${chevron}${detailHtml}</li>`;
+}
+
+/** V22 (2026-05-10 UX) — Mapping Jira event → action label + severity.
+ *  Обеспечивает что после даты ВСЕГДА есть видимое действие, даже
+ *  если e.text пустой (раньше attribute_change рендерились пустыми). */
+function _jiraActionLabel(e) {
+  const kind = String(e?.kind || '').toLowerCase();
+  const text = String(e?.text || '');
+  // Поле для field-change — сначала e.field, потом fieldName, потом разбор text.
+  const field = e?.field || e?.fieldName || '';
+  if (kind === 'comment' || kind === 'mention') {
+    return { label: kind === 'mention' ? 'упоминание' : 'комментарий', severity: 'neutral', kind };
+  }
+  if (kind === 'transition') {
+    const to = e?.to || '';
+    return { label: to ? `статус → ${String(to).slice(0, 30)}` : 'переход', severity: 'info', kind };
+  }
+  if (kind === 'closed' || kind === 'resolved') {
+    const to = e?.to || '';
+    return { label: to ? `закрыл → ${String(to).slice(0, 30)}` : 'закрыл', severity: 'success', kind };
+  }
+  if (kind === 'reopened') return { label: 'переоткрыл', severity: 'warning', kind };
+  if (kind === 'assignee-change' || kind === 'assignment') {
+    const to = e?.to || '';
+    return { label: to ? `назначен: ${String(to).slice(0, 30)}` : 'снят исполнитель', severity: 'info', kind };
+  }
+  if (kind === 'created') return { label: 'создал', severity: 'info', kind };
+  if (kind === 'worklog') {
+    // text вида "Залогировано 1.5ч" — извлечём часы.
+    const m = /(\d+(?:[.,]\d+)?)\s*ч/.exec(text);
+    return { label: m ? `лог времени: ${m[1]}ч` : 'лог времени', severity: 'neutral', kind };
+  }
+  if (kind === 'attachment') return { label: 'вложение', severity: 'neutral', kind };
+  if (kind === 'link')       return { label: 'связь', severity: 'neutral', kind };
+  if (kind === 'field-change' || kind === 'attribute_change' || kind === 'field_change' || kind === 'edit') {
+    return { label: field ? `изменил ${String(field).toLowerCase()}` : 'правка', severity: 'warning', kind: kind || 'field-change' };
+  }
+  // Default fallback: показываем raw kind, чтобы юзер не видел пустую строку.
+  return { label: kind || 'событие', severity: 'neutral', kind: kind || 'unknown' };
 }
 
 function renderSrcBadge(src, kind) {
@@ -1415,14 +1901,11 @@ export function renderSkeleton(initialMsg) {
   const msg = esc(initialMsg || 'Запрашиваю данные из Jira…');
   return `
     <div class="ts2-skeleton">
-      <div class="ts2-skel-line ts2-skel-line-lg"></div>
-      <div class="ts2-skel-line"></div>
-      <div class="ts2-skel-line"></div>
-      <div class="ts2-skel-line"></div>
-      <div class="ts2-skel-line"></div>
+      ${prizmaLoaderMark()}
+      <div class="ts2-skel-phrase phrase-in" id="ts2-skel-phrase"></div>
       <div class="ts2-skel-status">
         <span id="ts2-skel-text">${msg}</span>
-        <button class="ts2-btn ts2-btn-ghost" id="ts2-skel-cancel" type="button">отмена</button>
+        <button class="ts2-btn ts2-btn-ghost" id="ts2-skel-cancel" type="button">Отмена</button>
       </div>
     </div>
   `;
@@ -1436,8 +1919,9 @@ export function renderEmpty(mode = 'no-config') {
   if (mode === 'no-data') {
     return `
       <div class="ts2-empty-state ts2-empty-hero">
-        <div class="ts2-empty-icon" aria-hidden="true">📡</div>
-        <div class="ts2-empty-title">Сканнер готов к работе</div>
+        <div class="ts2-empty-icon" aria-hidden="true"></div>
+        <div class="ts2-empty-title">Призма ждёт первый ориентир</div>
+        <div class="ts2-empty-sub">Загрузите данные — увидите активность команды.</div>
         <div class="ts2-empty-text">
           Данные не загружены. Нажмите кнопку чтобы запросить активность
           из Jira / Bitbucket / Confluence — по умолчанию за последние 72ч.
@@ -1445,18 +1929,22 @@ export function renderEmpty(mode = 'no-config') {
         <div class="ts2-empty-actions">
           <button class="ts2-btn ts2-btn-primary ts2-btn-lg" type="button"
                   id="ts2-load-initial">
-            ↻ Загрузить данные команды
+            Загрузить данные команды
+          </button>
+          <button class="ts2-btn ts2-btn-outline ts2-btn-lg" type="button"
+                  id="ts2-load-demo" title="Запустить с локальной демо-фикстурой — никаких запросов в Jira не делается">
+            Посмотреть демо
           </button>
         </div>
         <div class="ts2-empty-hint">
           Окно активности (24 / 72 / 168 ч) и пороги dwell-time можно
-          настроить в шестерёнке ⚙ после первой загрузки.
+          настроить в шестерёнке после первой загрузки.
         </div>
         <!-- V20 — secondary actions доступны ДО первой загрузки.
              Особенно «Диагностика» — нужна КОГДА данные не приходят. -->
         <div class="ts2-empty-secondary">
-          <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" type="button" id="ts2-empty-how-btn">❓ Как считается</button>
-          <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" type="button" id="ts2-empty-diag-btn">📋 Диагностика</button>
+          <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" type="button" id="ts2-empty-how-btn">Как считается</button>
+          <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" type="button" id="ts2-empty-diag-btn">Диагностика</button>
         </div>
       </div>
     `;
@@ -1465,6 +1953,8 @@ export function renderEmpty(mode = 'no-config') {
   // «empty state без CTA = anti-pattern, пользователь сам должен идти
   // в шапку → settings»). Кнопка имеет data-action для глобального
   // settings-modal handler'а.
+  // V21 π5 — добавлена secondary CTA «Посмотреть демо» — позволяет показать
+  // сканер новому пользователю до того как настроены интеграции.
   return `
     <div class="ts2-empty-state">
       <div class="ts2-empty-title">Нужны проектные ключи</div>
@@ -1476,6 +1966,10 @@ export function renderEmpty(mode = 'no-config') {
         <button class="ts2-btn ts2-btn-primary" type="button"
                 data-int-action="settings" data-tab="jira">
           Открыть настройки интеграций
+        </button>
+        <button class="ts2-btn ts2-btn-outline" type="button"
+                id="ts2-load-demo" title="Запустить с локальной демо-фикстурой — никаких запросов в Jira не делается">
+          Посмотреть демо
         </button>
       </div>
     </div>
@@ -1501,7 +1995,7 @@ export function renderError(msg, retryable) {
    PO panel предоставила формулировки в человекочитаемом виде.
    ──────────────────────────────────────────────────────── */
 
-const HOW_SECTIONS = [
+export const HOW_SECTIONS = [
   {
     id: 'groups',
     head: 'Группы: Стоп / Watch / Движется / Без активности',
@@ -1554,7 +2048,7 @@ const HOW_SECTIONS = [
       · <b>In Progress</b>: 48 ч<br>
       · <b>To Do / Open</b>: 72 ч<br>
       · <b>прочие статусы</b>: 24 ч<br><br>
-      Пороги переопределяются per-team в шестерёнке ⚙ (preset «research» — расслабленные пороги,
+      Пороги переопределяются per-team в кнопке «Настройка команд» (preset «research» — расслабленные пороги,
       «hotfix» — жёсткие). Per-team config приоритетнее default'ов.
     `,
   },
@@ -1596,894 +2090,207 @@ const HOW_SECTIONS = [
       между браузерами.
     `,
   },
+  {
+    id: 'hot-files',
+    head: 'Hot-files и Bus-factor',
+    body: `
+      <b>Hot-files</b> — top-15 файлов с наибольшим числом коммитов за окно (по умолчанию 90 дней,
+      настраивается через <code>HOT_FILES_DAYS</code>). Источник: Bitbucket commits → diff →
+      file paths.<br><br>
+      <b>Bus-factor</b> — для каждого файла считается сколько уникальных авторов его трогали.
+      Файлы с bus-factor=1 — single-point-of-failure: только один человек знает этот код.<br><br>
+      <b>Выборка</b>: top-5 репозиториев × до 1000 коммитов за 90 дней (PR-CZ; раньше было 200/30д).
+      Если у вас 50 репозиториев — это ~10% выборка, абсолютные числа стоит читать как «не меньше N».
+    `,
+  },
+  {
+    id: 'code-review',
+    head: 'Code review: velocity / depth / reciprocity',
+    body: `
+      <b>Code-review velocity</b> — для каждого ревьюера медиана времени между
+      «PR opened» и его первой review-action (approve / comment / needs-work).<br>
+      · <i>fast</i> &lt; 8 ч · <i>warn</i> 8–24 ч · <i>slow</i> &gt; 24 ч.<br><br>
+      <b>Review depth</b> — среднее число комментариев reviewer'а на один PR.
+      Высокий = глубокое ревью, низкий = «approve без чтения».<br><br>
+      <b>Reciprocity ratio</b> — для каждого автора: сколько ревью он сделал чужих PR vs
+      сколько ревью получил на свои. Близко к 1 = здоровый баланс. Сильно &lt; 1 = автор
+      «дёргает других», но сам не ревьюит.
+    `,
+  },
+  {
+    id: 'pr-cycle',
+    head: 'PR cycle-time / first-review-latency',
+    body: `
+      <b>cycle-time</b> = (mergedAt − openedAt) для merged PR. Считаем p50 и p90 за окно.<br><br>
+      <b>first-review-latency</b> = (firstReviewAt − openedAt). Если PR открыли в 10:00 а первую
+      review-action поставили в 14:00 — латентность 4ч.<br><br>
+      <b>review depth (avg comments)</b> — среднее число COMMENTED activity по PR из окна.
+      Источник для всех трёх — Bitbucket Server <code>/pull-requests/{id}/activities</code> stream
+      (cap 30 PR, concurrency 4).
+    `,
+  },
+  {
+    id: 'reviewer-load',
+    head: 'Reviewer overload / Idle reviewers',
+    body: `
+      <b>Reviewer overload</b> — top-5 авторов по числу assigned reviews. Если кто-то на 50%+
+      ревью — это burnout signal. Cap'ы конфигурируются:
+      <code>prOverloadOpenedThreshold=5</code>, <code>prOverloadRateThreshold=40%</code>.<br><br>
+      <b>Idle reviewer</b> — человек попал в <code>reviewers[]</code> PR, но за окно не оставил ни
+      approve, ни comment, ни needs-work. Сидит на ревью, но не действует — задерживает merge.<br><br>
+      Источник — те же Bitbucket activities. Идея: тимлид может перераспределить нагрузку.
+    `,
+  },
+  {
+    id: 'after-hours',
+    head: 'After-hours ratio / Перегрузка',
+    body: `
+      Доля коммитов / PR / правок Confluence за «нерабочие часы» (вечер 21:00 – утро 09:00 локального
+      времени, выходные включены).<br><br>
+      <b>afterHoursRatio</b> = (events outside business hours) / (total events). Высокая ratio (&gt; 30%)
+      устойчиво на нескольких неделях — сигнал риска выгорания.<br><br>
+      <b>${Icons.get('alert-triangle', { cls: 'btn-icon', size: 12 })} Manager-only</b> — это HR-чувствительная метрика. Используется для анонимной агрегации,
+      не для конкретных диалогов с сотрудником без явного его согласия.<br><br>
+      <i>Известное ограничение</i> (PR-CE backlog): расчёт идёт по UTC; для Москвы добавляется +3ч офсет.
+      DST не учитывается. Будет исправлено передачей <code>tzOffsetMin</code> с клиента.
+    `,
+  },
+  {
+    id: 'knowledge',
+    head: 'Knowledge breadth / Spreaders / Siloed',
+    body: `
+      <b>Specialist Gini</b> — для каждого автора смотрим распределение его коммитов по файлам.
+      Близко к 0 = пишет везде понемногу (broad). Близко к 1 = весь код в 1–2 файлах (siloed).<br><br>
+      <b>Knowledge spreader</b> — автор у которого CF-страницы в ≥3 разных spaces. Распространяет
+      знание, не сидит в своей зоне. Promote-кандидат.<br><br>
+      <b>Siloed author</b> — большинство коммитов в одном файле / папке за окно. Не плохо само
+      по себе, но в сочетании с bus-factor=1 — блокер для succession planning.
+    `,
+  },
+  {
+    id: 'doc-debt',
+    head: 'Doc-debt: orphan ratio / stale / ACL',
+    body: `
+      <b>Orphan-страницы</b> — CF-страницы у которых автор больше не в команде (deactivated [X])
+      ИЛИ автор не сматчился с identity-таблицей.<br><br>
+      <b>Stale &gt; 1 год</b> — страницы которые не обновлялись больше 12 месяцев. Доля в общем
+      числе страниц = doc-debt indicator.<br><br>
+      <b>ACL anomalies</b> — страницы с пермиссиями anonymous/closed (отличаются от типичного
+      space default). Помечаются как требующие ручной review.
+    `,
+  },
+  {
+    id: 'sprint-metrics',
+    head: 'Sprint: commitment vs delivery / scope churn / carry-over',
+    body: `
+      <b>Sprint commitment vs delivery</b> — Σ(SP в начале спринта) vs Σ(closed SP в конце).
+      Тренд по 6 спринтам показывает консистентность планирования.<br><br>
+      <b>Scope churn</b> — разница между sprint at start и sprint at end по 3 категориям:
+      <code>added / removed / modified</code> (basis: changelog walk через Jira API).<br><br>
+      <b>Carry-over age</b> — сколько раз issue переносилась из спринта в спринт. Issues с
+      carry-over ≥ 3 — кандидаты на rework / split / cancel.<br><br>
+      <b>Code churn per sprint</b> — Σ(added lines + deleted lines) из BB diff. Высокий churn
+      может говорить о rework, refactor или нестабильных требованиях.
+    `,
+  },
+  {
+    id: 'estimation',
+    head: 'Estimation calibration (CoV)',
+    body: `
+      <b>CoV (coefficient of variation)</b> = stdev(actual / estimate) / mean(actual / estimate).
+      Если разработчик оценивает в 5 SP, а реально получается то 5, то 3, то 8 SP — CoV высокий
+      (≥ 0.5). Если стабильно (4–6 SP) — низкий.<br><br>
+      Берётся последние 30 closed issues с заполненным <code>customfield_estimate</code> и
+      <code>aggregatetimespent</code>. CoV ≥ 0.5 показывается жёлтым, ≥ 0.8 — красным.<br><br>
+      <i>Известное ограничение</i> (PR backlog #11): сейчас per-person + per-PK. Team-rollup
+      (CoV команды) запрошен PO — отложен.
+    `,
+  },
+  {
+    id: 'dora-proxy',
+    head: 'DORA proxy: deploy / lead-time / MTTR / change-fail',
+    body: `
+      «Реальный» DORA требует CI/CD интеграцию (deployment events). У нас её нет, поэтому
+      используются <b>proxy</b>:<br><br>
+      <b>Deploy frequency</b> ≈ число merged PR в master/main за окно ÷ дни.<br>
+      <b>Lead time</b> ≈ медиана (mergedAt − firstCommitAt) для merged PR.<br>
+      <b>MTTR</b> ≈ медиана dwell-time в статусе «Blocker» для bug-issues.<br>
+      <b>Change-fail rate</b> ≈ доля reverted commits + bug-issues с label
+      <code>regression</code> / <code>hotfix</code>.<br><br>
+      Числа имеют доверительный интервал ±20%. Для C-level важен <i>тренд</i>, не абсолют.
+    `,
+  },
 ];
 
-/* ════════════════════════════════════════════════════════════
-   ─── V20 S8.5 #23: SPLIT BOUNDARY ──────────────────────────
-   Всё ниже до конца файла — diagnostic-view функции.
-   В будущей итерации (S9) — extract в отдельный файл
-   `teamScanner2DiagnosticView.js`. Сейчас логически отделено
-   markers, чтобы IDE/grep могли найти границу.
 
-   Files of this section:
-     - renderDiagnosticModal + 9 _diagSection* helpers
-     - renderDiagnosticDisclaimer
-     - renderProbeResults
-     - renderSensitivityResults
-     - renderIdentityResolvePreview
-     - renderHowCalculatedModal
-     - renderCrvDrilldownModal      (V20 S8 #2)
-     - renderAnomalyMiniChart       (V20 S8.5 #20)
-     ~ 1000 строк, можно вырезать целиком в новый файл.
-   ════════════════════════════════════════════════════════════ */
+/* 2026-05-11 — Tier 0 Renderer split phase 1: diagnostic-view функции
+   вынесены в `teamScanner2RendererDiag.js` (~1330 LOC). Здесь — только
+   re-export'ы для backward-compat (existing imports работают без правок).
+   Spec: docs/feature-specs/renderer-split.md. */
+export {
+  renderDiagnosticModal,
+  renderDiagnosticDisclaimer,
+  renderProbeResults,
+  renderIdentityResolvePreview,
+  renderSensitivityResults,
+  renderCrvDrilldownModal,
+  renderAnomalyMiniChart,
+  renderHowCalculatedModal,
+} from './teamScanner2RendererDiag.js';
+// 2026-05-11 — renderVelocityCompareModal остаётся в main (использует
+// renderVelocityComparison локально, чтобы избежать circular import'а с
+// diag-extract). Benchmarks helper импортируется обратно из diag.
+import { _renderCrossTeamBenchmarks } from './teamScanner2RendererDiag.js';
 
-/* ── V20 S2.3 — Diagnostic modal ──────────────────────────────
-   User finding: «нет артефактов из BB / Conf — почему?»
-   Решение — accordion-modal с 5+ секциями + 2-button JSON export
-   (B3 consent flow: безопасный по умолчанию, полный с disclaimer'ом).
-   ──────────────────────────────────────────────────────── */
-
-export function renderDiagnosticModal(state, opts = {}) {
-  const sections = [
-    _diagSectionHeader(state.header, state.tzSkew),
-    _diagSectionKnownIssues(state),                    // V20 S8 #12 — pilot quick-help
-    _diagSectionConfig(state.config),
-    _diagSectionConnection(state.connection),
-    _diagSectionSources(state.sources),
-    _diagSectionIdentity(state.identity),
-    _diagSectionThresholds(state.thresholds),
-    _diagSectionSnapshot(state.snapshot),
-    _diagSectionModelSummary(state.modelSummary),
-    _diagSectionBots(state.botsFilteredOut || []),     // V20 S7 B10
-  ].join('');
-
-  const auditCount = (opts.auditEntries || []).length;
-  const auditHint = auditCount
-    ? `За последний период было ${auditCount} ${plural(auditCount, ['экспорт', 'экспорта', 'экспортов'])}. Все логированы.`
-    : 'Журнал экспортов пуст.';
-
+export function renderVelocityCompareModal(model, history = [], ctx = {}) {
+  const velocityInner = renderVelocityComparison(model, history, ctx) ||
+    `<div class="ts2-velocity-empty">Нужно ≥ 2 команды с активными спринтами для сравнения.</div>`;
+  // 2026-05-11 — V23 Cross-team Benchmarks subtab. Матрица команды × метрики.
+  const benchmarksInner = _renderCrossTeamBenchmarks(model, history);
   return `
-    <div class="ts2-diag-modal-overlay" id="ts2-diag-modal" role="presentation">
-      <div class="ts2-diag-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-diag-title">
-        <div class="ts2-diag-header">
-          <h3 class="ts2-diag-title" id="ts2-diag-title">📋 Диагностика Сканнера команд</h3>
-          <button class="ts2-diag-close" type="button" data-close-modal aria-label="Закрыть">✕</button>
-        </div>
-        <div class="ts2-diag-body">
-          <div class="ts2-diag-intro">
-            Если по BB / Jira / Confluence не приходят данные — ниже причины и как починить.
-            <br>Кликните на заголовок секции чтобы развернуть.
-          </div>
-          ${sections}
-          <div class="ts2-diag-export-section">
-            <h4 class="ts2-diag-export-title">Экспортировать для разработчика</h4>
-            <p class="ts2-diag-export-hint">
-              Если проблему не удалось решить — отправьте JSON с диагностикой.
-              Безопасный экспорт скрывает email / accountId / названия задач.
-            </p>
-            <div class="ts2-diag-export-buttons">
-              <button class="ts2-btn ts2-btn-primary" id="ts2-diag-export-safe" type="button">
-                📋 Безопасный экспорт
-              </button>
-              <button class="ts2-btn ts2-btn-warn" id="ts2-diag-export-raw" type="button">
-                ⚠️ Полный экспорт (PII)
-              </button>
-            </div>
-            <div class="ts2-diag-audit-hint">
-              <span aria-hidden="true">🔒</span> ${esc(auditHint)}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/** V20 S2.3 — disclaimer перед raw-экспортом. B3 consent flow. */
-export function renderDiagnosticDisclaimer() {
-  return `
-    <div class="ts2-diag-disclaimer-overlay" id="ts2-diag-disclaimer" role="presentation">
-      <div class="ts2-diag-disclaimer" role="dialog" aria-modal="true" aria-labelledby="ts2-diag-disclaimer-title">
-        <div class="ts2-diag-disclaimer-header">
-          <span class="ts2-diag-disclaimer-icon" aria-hidden="true">⚠️</span>
-          <h3 class="ts2-diag-disclaimer-title" id="ts2-diag-disclaimer-title">Полный экспорт содержит персональные данные</h3>
-        </div>
-        <div class="ts2-diag-disclaimer-body">
-          <p>JSON будет содержать <b>в открытом виде</b>:</p>
-          <ul class="ts2-diag-disclaimer-list">
-            <li>email сотрудников (полностью, не маскированный)</li>
-            <li>jiraAccountId / bitbucketLogin / confluenceAccountId</li>
-            <li>имена сотрудников (displayName)</li>
-            <li>названия задач Jira и страниц Confluence (полностью)</li>
-          </ul>
-          <p>Токены интеграций (Bearer / Authorization) <b>всегда</b> скрыты — даже здесь.</p>
-          <p class="ts2-diag-disclaimer-warning">
-            Отправляйте этот JSON <b>только напрямую разработчику</b>, которому вы доверяете
-            (1:1 chat / личная почта). Не загружайте в публичные баги, не пересылайте через
-            групповые чаты.
-          </p>
-          <p class="ts2-diag-disclaimer-audit">
-            Факт экспорта будет залогирован в localStorage этого браузера
-            (только timestamp + размер, без содержимого).
-          </p>
-          <!-- V20 S8.5 #21 — counter оставшегося consent (auto-show если ещё активен). -->
-          <p class="ts2-diag-disclaimer-counter" id="ts2-diag-consent-counter" style="display:none;"></p>
-          <!-- V20 S7 B6 — обязательный consent checkbox перед раскрытием PII.
-               Compliance: HR-аудит может запросить доказательство явного согласия.
-               V20 S8 #6 — добавлен «запомнить на 24ч» (q2_diag_consent_until). -->
-          <label class="ts2-diag-disclaimer-consent">
-            <input type="checkbox" id="ts2-diag-disclaimer-consent">
-            <span>Я понимаю что JSON содержит персональные данные сотрудников
-                  и обязуюсь передать его только конкретному доверенному
-                  разработчику. Не буду пересылать в групповые чаты, баги
-                  или публичные системы.</span>
-          </label>
-          <label class="ts2-diag-disclaimer-remember">
-            <input type="checkbox" id="ts2-diag-disclaimer-remember">
-            <span>Запомнить согласие на 24 часа (для срочных передач без повторного клика). Audit-log сохранит факт автоматического consent'а.</span>
-          </label>
-        </div>
-        <div class="ts2-diag-disclaimer-actions">
-          <button class="ts2-btn ts2-btn-ghost" type="button" data-close-modal>Отмена</button>
-          <button class="ts2-btn ts2-btn-warn" type="button" id="ts2-diag-disclaimer-confirm" disabled>
-            Понял риски — продолжить
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/* Section helpers — каждая возвращает <div class="ts2-diag-section">…</div> */
-
-function _diagSection(id, head, body, opts = {}) {
-  const open = opts.openByDefault ? 'ts2-diag-section-open' : '';
-  return `
-    <div class="ts2-diag-section ${open}" data-section="${esc(id)}">
-      <button class="ts2-diag-section-head" type="button">
-        <span class="ts2-diag-section-chev" aria-hidden="true">▸</span>
-        <span class="ts2-diag-section-title">${esc(head)}</span>
-        ${opts.statusPill ? `<span class="ts2-diag-status-pill ts2-diag-status-${esc(opts.statusKind || 'neutral')}">${esc(opts.statusPill)}</span>` : ''}
-      </button>
-      <div class="ts2-diag-section-body">${body}</div>
-    </div>
-  `;
-}
-
-function _kv(label, value, hint) {
-  const v = (value === null || value === undefined || value === '') ? '—' : String(value);
-  return `<div class="ts2-diag-kv"><span class="ts2-diag-kv-label">${esc(label)}</span><span class="ts2-diag-kv-value">${esc(v)}</span>${hint ? `<span class="ts2-diag-kv-hint">${esc(hint)}</span>` : ''}</div>`;
-}
-
-function _diagSectionHeader(h, tz) {
-  // V20 S3.3 — TZ skew block.
-  let tzBlock = '';
-  if (tz?.available) {
-    const flag = tz.skewSuspicious ? `<span class="ts2-diag-flag">⚠ ${esc(String(tz.skewSeconds))}s skew</span>` : '';
-    tzBlock = `
-      <div class="ts2-diag-subhead">Time skew (browser ↔ server)</div>
-      ${_kv('Browser timezone', tz.browserTzLabel)}
-      ${_kv('Server fetchedAt',  tz.serverTs)}
-      ${_kv('Browser now',       tz.browserNow)}
-      ${_kv('Age кэша (server→now)', `${tz.skewSeconds} сек`, flag)}
-      ${tz.skewSuspicious ? `<div class="ts2-diag-callout">
-        Расхождение > 5 мин может указывать на:<br>
-        1) <b>Часы клиента или сервера ушли</b> — проверьте System Time на обеих сторонах.<br>
-        2) <b>VPN маршрутизация</b> — запрос идёт через другой регион/ДЦ.<br>
-        3) <b>Старый кэш</b> — нажмите ↻ Обновить, чтобы увидеть свежий fetchedAt.
-      </div>` : ''}
-    `;
-  }
-  return _diagSection('header', 'Окружение', `
-    ${_kv('Время отчёта', h.generatedAt)}
-    ${_kv('Build', h.appBuild)}
-    ${_kv('Browser', h.userAgent.slice(0, 80) + (h.userAgent.length > 80 ? '…' : ''))}
-    ${_kv('Locale', h.locale)}
-    ${_kv('TZ offset (мин)', h.tzOffsetMin)}
-    ${tzBlock}
-  `, { openByDefault: true, statusPill: tz?.skewSuspicious ? 'TZ skew' : null, statusKind: tz?.skewSuspicious ? 'warn' : null });
-}
-
-function _diagSectionConfig(c) {
-  const bad = !c.projectKeys.length;
-  return _diagSection('config', 'Конфигурация',
-    `${_kv('projectKeys (Jira)', c.projectKeys.join(', ') || '—', c.projectKeys.length ? `${c.projectKeys.length} шт.` : 'нет')}
-     ${_kv('bbProjectKeys (Bitbucket)', c.bbProjectKeys.join(', ') || '—', c.bbProjectKeys.length ? `${c.bbProjectKeys.length} шт.` : 'будет искать по всем')}
-     ${_kv('spaceKeys (Confluence)', c.spaceKeys.join(', ') || '—', c.spaceKeys.length ? `${c.spaceKeys.length} шт.` : 'будет искать по всем доступным')}
-     ${_kv('Окно активности', c.activityWindowHours + ' ч')}
-     ${_kv('sinceDate', c.sinceDate)}
-     ${_kv('Jira токен', c.hasJiraToken ? 'настроен' : 'НЕ настроен', c.jiraBaseUrl)}
-     ${_kv('Bitbucket токен', c.hasBitbucketToken ? 'настроен' : 'НЕ настроен', c.bitbucketBaseUrl)}
-     ${_kv('Confluence токен', c.hasConfluenceToken ? 'настроен' : 'НЕ настроен', c.confluenceBaseUrl)}
-     ${_kv('insecureTls', c.allowInsecureTls ? 'разрешён (self-signed)' : 'строгая проверка')}`,
-    { statusPill: bad ? 'нет projectKeys' : null, statusKind: bad ? 'err' : 'ok', openByDefault: bad });
-}
-
-function _diagSectionConnection(c) {
-  // V20 S3.1 — connection probe matrix UI. Кнопка вне зависимости от
-  // fetchPerformed — даже без cache можно прогнать verify-endpoints.
-  const probeUI = `
-    <div class="ts2-diag-subhead">Live probe</div>
-    <div class="ts2-diag-probe-controls">
-      <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" id="ts2-diag-probe-run" type="button">▶ Прогнать все 3 интеграции</button>
-      <span class="ts2-diag-probe-hint">Параллельно дёргает /verify-* endpoints, измеряет latency client-side.</span>
-    </div>
-    <div class="ts2-diag-probe-results" id="ts2-diag-probe-results"></div>
-  `;
-  if (!c.fetchPerformed) {
-    return _diagSection('connection', 'Подключение / fetch',
-      `<div class="ts2-diag-empty">Pulse-данные ещё не загружались (lazy mode). Нажмите «Загрузить данные команды» в основном экране — или прогоните live-probe ниже.</div>${probeUI}`,
-      { statusPill: 'не запускался', statusKind: 'warn' });
-  }
-  const errCount = (c.perPkErrors || []).length;
-  const errBlock = errCount ? `
-    <div class="ts2-diag-subhead">Ошибки по проектам (${errCount}):</div>
-    ${c.perPkErrors.map(e => `
-      <div class="ts2-diag-err-row">
-        <code class="ts2-diag-pk">${esc(e.projectKey)}</code>
-        <span class="ts2-diag-err-msg">${esc(e.error)}</span>
-      </div>
-    `).join('')}
-  ` : `<div class="ts2-diag-ok">Все per-PK fetch'и прошли без ошибок.</div>`;
-  // V20 S7 B11 — jobId expiration display.
-  const jobExpInfo = c.jobExpired
-    ? '<span class="ts2-diag-flag">истёк — drill-down не работает</span>'
-    : (c.jobExpiresInMs != null ? `осталось ${Math.round(c.jobExpiresInMs / 60000)} мин` : '');
-  return _diagSection('connection', 'Подключение / fetch', `
-    ${_kv('Время загрузки', c.fetchedAt)}
-    ${_kv('Возраст кэша', c.cacheAgeMs != null ? Math.round(c.cacheAgeMs / 1000) + ' сек' : '—')}
-    ${_kv('Latency last fetch', c.fetchLatencyMs != null ? c.fetchLatencyMs + ' мс' : '—')}
-    ${_kv('jobId (TTL 120 мин)', c.jobId || '—', jobExpInfo)}
-    ${errBlock}
-    ${probeUI}
-  `, { statusPill: errCount ? `${errCount} ошибок` : (c.jobExpired ? 'jobId истёк' : 'OK'), statusKind: errCount ? 'err' : (c.jobExpired ? 'warn' : 'ok'), openByDefault: errCount > 0 || c.jobExpired });
-}
-
-/** V20 S3.1 — render probe results после клика «Прогнать». */
-export function renderProbeResults(probe) {
-  if (!probe) return '<div class="ts2-diag-empty">Нет результатов probe.</div>';
-  const row = (r) => {
-    const kind = r.ok ? 'ok' : 'err';
-    const icon = r.ok ? '✓' : '✗';
-    const detail = r.ok
-      ? (r.who ? esc(r.who) : 'OK')
-      : esc(r.error || 'unknown');
-    return `
-      <div class="ts2-diag-probe-row ts2-diag-probe-${kind}">
-        <span class="ts2-diag-probe-icon" aria-hidden="true">${icon}</span>
-        <code class="ts2-diag-probe-source">${esc(r.source)}</code>
-        <span class="ts2-diag-probe-latency">${esc(String(r.latencyMs))} мс</span>
-        <span class="ts2-diag-probe-detail">${detail}</span>
-      </div>`;
-  };
-  return `
-    <div class="ts2-diag-probe-grid">
-      ${row(probe.jira)}
-      ${row(probe.bitbucket)}
-      ${row(probe.confluence)}
-    </div>
-    <div class="ts2-diag-probe-meta">Probe выполнен ${esc(probe.generatedAt)}</div>
-  `;
-}
-
-function _diagSectionSources(s) {
-  const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('ru-RU') : '—';
-  if (!s.jira && !s.bitbucket && !s.confluence) {
-    return _diagSection('sources', 'Артефакты по источникам',
-      `<div class="ts2-diag-empty">Нет данных — fetch не запускался.</div>`,
-      { statusKind: 'neutral' });
-  }
-  // Highlight «нет данных» по каждому источнику.
-  const bbZero = s.bitbucket && s.bitbucket.totalItems === 0;
-  const cfZero = s.confluence && s.confluence.totalItems === 0;
-  const warnings = [];
-  if (bbZero) warnings.push('Bitbucket: 0 артефактов');
-  if (cfZero) warnings.push('Confluence: 0 артефактов');
-  return _diagSection('sources', 'Артефакты по источникам', `
-    <div class="ts2-diag-subhead">Jira</div>
-    ${_kv('Назначенные задачи (issuesNow)', fmt(s.jira?.issuesAssignedNow))}
-    ${_kv('События timeline 72ч', fmt(s.jira?.timelineEvents72h))}
-    ${_kv('Комментарии recent', fmt(s.jira?.commentsRecent))}
-    ${_kv('Project spaces в model', fmt(s.jira?.perPkSpaces))}
-    <div class="ts2-diag-subhead">Bitbucket ${bbZero ? '<span class="ts2-diag-flag">⚠ нулевые</span>' : ''}</div>
-    ${_kv('Всего items', fmt(s.bitbucket?.totalItems))}
-    ${_kv('Commits', fmt(s.bitbucket?.commits))}
-    ${_kv('Pull Requests', fmt(s.bitbucket?.prs))}
-    ${_kv('Reviews', fmt(s.bitbucket?.reviews))}
-    <div class="ts2-diag-subhead">Confluence ${cfZero ? '<span class="ts2-diag-flag">⚠ нулевые</span>' : ''}</div>
-    ${_kv('Items (правки + страницы + комменты)', fmt(s.confluence?.totalItems))}
-    <div class="ts2-diag-subhead">Zephyr</div>
-    ${_kv('Тесты создано', fmt(s.zephyr?.testsCreated))}
-    ${_kv('Тесты выполнено', fmt(s.zephyr?.testsExecuted))}
-    ${(bbZero || cfZero) ? `<div class="ts2-diag-callout">
-      Нулевые артефакты обычно означают одну из:<br>
-      1) <b>Identity coverage</b> — у сотрудников не заполнены <code>bitbucketLogin</code> / <code>confluenceAccountId</code> в реестре. См. секцию «Identity coverage» ниже.<br>
-      2) <b>Окно слишком короткое</b> — попробуйте увеличить «Окно активности» в настройках до 168ч.<br>
-      3) <b>Token / permission</b> — проверьте кнопками «Проверить подключение» в настройках.
-    </div>` : ''}
-    ${s.rawDiag ? `
-      <div class="ts2-diag-subhead">RAW counts (до identity-attribution)</div>
-      ${_kv('BB authors (raw)', s.rawDiag.bbAuthorsCount, s.rawDiag.bbItemsTotal + ' items total')}
-      ${_kv('CF authors (raw)', s.rawDiag.cfAuthorsCount, s.rawDiag.cfItemsTotal + ' items total')}
-      ${_kv('Zephyr authors (raw)', s.rawDiag.zephyrAuthorsCount, `${s.rawDiag.zephyrTestCasesScanned} test cases · ${s.rawDiag.zephyrTestRunsScanned} test runs · ${s.rawDiag.zephyrProjectsResolved} projects`)}
-      ${s.rawDiag.bbAuthorsCount > 0 && (s.bitbucket?.totalItems || 0) === 0
-        ? '<div class="ts2-diag-flag">⚠ BB вернул данные, но 0 attribution — это identity gap</div>'
-        : ''}
-      ${s.rawDiag.cfAuthorsCount > 0 && (s.confluence?.totalItems || 0) === 0
-        ? '<div class="ts2-diag-flag">⚠ CF вернул данные, но 0 attribution — это identity gap</div>'
-        : ''}
-      ${s.rawDiag.perPk?.length ? `
-        <div class="ts2-diag-subhead">Per-PK</div>
-        <table class="ts2-diag-table">
-          <thead><tr><th>PK</th><th>Issues</th><th>Sprints</th><th>Status</th></tr></thead>
-          <tbody>
-            ${s.rawDiag.perPk.map(pk => `<tr>
-              <td><code>${esc(pk.pk)}</code></td>
-              <td>${pk.issuesCount}</td>
-              <td>${pk.sprintCount}</td>
-              <td>${pk.hasError ? `<span class="ts2-diag-flag">${esc(pk.error || 'error')}</span>` : 'OK'}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>` : ''}
-    ` : ''}
-  `, { statusPill: warnings.length ? warnings.length + ' предупр.' : 'OK', statusKind: warnings.length ? 'warn' : 'ok', openByDefault: warnings.length > 0 });
-}
-
-function _diagSectionIdentity(i) {
-  if (!i.teamSize) {
-    return _diagSection('identity', 'Identity coverage',
-      `<div class="ts2-diag-empty">Команда пуста — нечего проверять.</div>`);
-  }
-  const c = i.coverage;
-  const bar = (label, c) => `
-    <div class="ts2-diag-bar-row">
-      <span class="ts2-diag-bar-label">${esc(label)}</span>
-      <div class="ts2-diag-bar"><div class="ts2-diag-bar-fill ts2-diag-bar-${c.pct >= 80 ? 'ok' : c.pct >= 50 ? 'warn' : 'err'}" style="width:${c.pct}%"></div></div>
-      <span class="ts2-diag-bar-count">${c.count}/${i.teamSize} (${c.pct}%)</span>
-    </div>`;
-  const incomplete = (i.incomplete || []).slice(0, 20);
-  const incompleteHtml = incomplete.length ? `
-    <div class="ts2-diag-subhead">Сотрудники с неполной identity (${i.incomplete.length}, показано первые 20):</div>
-    <ul class="ts2-diag-incomplete-list">
-      ${incomplete.map(p => `<li><b>${esc(p.label || p.key)}</b> — нет: ${(p.missing || []).map(esc).join(', ')}</li>`).join('')}
-    </ul>
-  ` : `<div class="ts2-diag-ok">У всех сотрудников identity-поля заполнены.</div>`;
-  const lowest = Math.min(c.email?.pct ?? 100, c.jiraId?.pct ?? 100, c.bbLogin?.pct ?? 100, c.cfId?.pct ?? 100);
-  // V20 S4 — кнопка автo-резолва. Видна только когда есть неполные identity'и
-  // И при условии что есть email-coverage > 0 (иначе нечем матчить).
-  const canResolve = (i.incomplete || []).length > 0 && (c.email?.pct ?? 0) > 0;
-  const resolveUI = canResolve ? `
-    <div class="ts2-diag-subhead">Авторазрешение через email</div>
-    <div class="ts2-diag-resolve-controls">
-      <button class="ts2-btn ts2-btn-primary ts2-btn-sm" id="ts2-diag-resolve-btn" type="button">
-        🔍 Авторазрешить bbLogin / cfAccountId по email
-      </button>
-      <span class="ts2-diag-resolve-hint">
-        Ищет каждого сотрудника в Bitbucket и Confluence по его email из реестра.
-        Конкурентность 5, до 8 сек на источник на сотрудника.
-      </span>
-    </div>
-    <div class="ts2-diag-resolve-results" id="ts2-diag-resolve-results"></div>
-  ` : '';
-  return _diagSection('identity', 'Identity coverage', `
-    ${bar('email',          c.email)}
-    ${bar('jiraAccountId',  c.jiraId)}
-    ${bar('bitbucketLogin', c.bbLogin)}
-    ${bar('confluenceId',   c.cfId)}
-    ${incompleteHtml}
-    ${resolveUI}
-  `, { statusPill: lowest + '% мин', statusKind: lowest >= 80 ? 'ok' : lowest >= 50 ? 'warn' : 'err', openByDefault: lowest < 80 });
-}
-
-/**
- * V20 S4 — Preview-modal для identity-resolve diff'а.
- * Показывает таблицу: ФИО / email / current → proposed для каждого
- * resolved сотрудника. Highlight changed rows. Save / Cancel.
- *
- * @param {object[]} diff — массив { empKey, fio, email, before:{bb,cf}, after:{bb,cf}, status }
- * @param {object} summary — { total, bbResolved, cfResolved, noEmail }
- */
-export function renderIdentityResolvePreview(diff, summary) {
-  const changed = diff.filter(d => d.status === 'change');
-  const unchanged = diff.filter(d => d.status === 'unchanged');
-  const failed = diff.filter(d => d.status === 'failed');
-  const noEmail = diff.filter(d => d.status === 'no-email');
-
-  const row = (d) => {
-    const bbChanged = d.before.bb !== d.after.bb;
-    const cfChanged = d.before.cf !== d.after.cf;
-    return `
-      <tr class="ts2-resolve-row ts2-resolve-row-${d.status}">
-        <td class="ts2-resolve-fio">${esc(d.fio || '')}</td>
-        <td class="ts2-resolve-email">${esc(d.email || '—')}</td>
-        <td class="${bbChanged ? 'ts2-resolve-cell-changed' : ''}">
-          ${d.before.bb ? `<s class="ts2-resolve-old">${esc(d.before.bb)}</s>` : '<span class="ts2-resolve-empty">—</span>'}
-          ${bbChanged ? '→' : ''}
-          ${d.after.bb ? `<b class="ts2-resolve-new">${esc(d.after.bb)}</b>` : (bbChanged ? '<span class="ts2-resolve-empty">не найден</span>' : '')}
-        </td>
-        <td class="${cfChanged ? 'ts2-resolve-cell-changed' : ''}">
-          ${d.before.cf ? `<s class="ts2-resolve-old">${esc(d.before.cf)}</s>` : '<span class="ts2-resolve-empty">—</span>'}
-          ${cfChanged ? '→' : ''}
-          ${d.after.cf ? `<b class="ts2-resolve-new">${esc(d.after.cf)}</b>` : (cfChanged ? '<span class="ts2-resolve-empty">не найден</span>' : '')}
-        </td>
-      </tr>
-    `;
-  };
-
-  return `
-    <div class="ts2-resolve-modal-overlay" id="ts2-resolve-modal" role="presentation">
-      <div class="ts2-resolve-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-resolve-title">
-        <div class="ts2-resolve-header">
-          <h3 class="ts2-resolve-title" id="ts2-resolve-title">🔍 Identity Auto-Resolve — preview</h3>
-          <button class="ts2-resolve-close" type="button" data-close-modal aria-label="Закрыть">✕</button>
-        </div>
-        <div class="ts2-resolve-summary">
-          <span class="ts2-resolve-stat ts2-resolve-stat-ok">✓ <b>${changed.length}</b> изменений</span>
-          <span class="ts2-resolve-stat">≡ ${unchanged.length} без изменений</span>
-          <span class="ts2-resolve-stat ${failed.length > changed.length ? 'ts2-resolve-stat-err' : 'ts2-resolve-stat-warn'}">✗ <b>${failed.length}</b> не найдено</span>
-          ${noEmail.length ? `<span class="ts2-resolve-stat ts2-resolve-stat-muted">⊘ ${noEmail.length} без email</span>` : ''}
-          <span class="ts2-resolve-stat-meta">BB: ${summary.bbResolved}/${summary.total} · CF: ${summary.cfResolved}/${summary.total}</span>
-        </div>
-        ${failed.length > changed.length ? `<div class="ts2-resolve-warn-banner">
-          ⚠️ Найдено меньше чем не найдено (${changed.length} vs ${failed.length}).
-          Возможные причины: неправильный фокус ФИО (см. раздел «не найдено» ниже),
-          CF не индексирует email/fullname, или нет прав у токена.
-        </div>` : ''}
-        <div class="ts2-resolve-body">
-          ${changed.length ? `
-            <table class="ts2-resolve-table">
-              <thead><tr>
-                <th>ФИО</th><th>email</th><th>bitbucketLogin</th><th>confluenceAccountId</th>
-              </tr></thead>
-              <tbody>${changed.map(row).join('')}</tbody>
-            </table>
-          ` : `<div class="ts2-diag-empty">Нет изменений — всё уже сматчено.</div>`}
-          ${failed.length ? `
-            <details class="ts2-resolve-details" ${failed.length > changed.length ? 'open' : ''}>
-              <summary>Не найдено в API (${failed.length}) — раскрыть</summary>
-              <ul class="ts2-resolve-failed-list">
-                ${failed.slice(0, 30).map(d => `<li><b>${esc(d.fio || d.empKey)}</b> · ${esc(d.email)} — bb: ${esc(d.bbError || '?')} / cf: ${esc(d.cfError || '?')}</li>`).join('')}
-              </ul>
-            </details>
-          ` : ''}
-        </div>
-        <div class="ts2-resolve-actions">
-          <button class="ts2-btn ts2-btn-ghost" type="button" data-close-modal>Отмена</button>
-          <button class="ts2-btn ts2-btn-primary" type="button" id="ts2-resolve-save"${changed.length ? '' : ' disabled'}>
-            ✓ Сохранить ${changed.length} изменений
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function _diagSectionThresholds(t) {
-  const d = t.defaultDwell || {};
-  const perTeamCount = t.perTeam ? Object.keys(t.perTeam).length : 0;
-  // V20 S3.2 — sensitivity preview: 4 input'а + кнопка «пересчитать».
-  // Реакция в _bindDiagModalEvents: пересчитываем simulateThresholds()
-  // и обновляем span'ы results без перерендера всей модалки.
-  const sensitivityUI = `
-    <div class="ts2-diag-subhead">«Что если…» — sensitivity preview</div>
-    <div class="ts2-diag-sens-controls">
-      <label class="ts2-diag-sens-input">Code Review (ч)<input type="number" min="1" max="200" value="${d.codeReview}" data-sens-field="codeReview"></label>
-      <label class="ts2-diag-sens-input">QA (ч)<input type="number" min="1" max="200" value="${d.qa}" data-sens-field="qa"></label>
-      <label class="ts2-diag-sens-input">In Progress (ч)<input type="number" min="1" max="500" value="${d.inProgress}" data-sens-field="inProgress"></label>
-      <label class="ts2-diag-sens-input">To Do (ч)<input type="number" min="1" max="500" value="${d.todo}" data-sens-field="todo"></label>
-    </div>
-    <div class="ts2-diag-sens-controls">
-      <button class="ts2-btn ts2-btn-ghost ts2-btn-sm" id="ts2-diag-sens-run" type="button">▶ Пересчитать blockers</button>
-      <span class="ts2-diag-sens-hint">Не сохраняет — только preview эффекта на counts.</span>
-    </div>
-    <div class="ts2-diag-sens-results" id="ts2-diag-sens-results"></div>
-  `;
-  return _diagSection('thresholds', 'Пороги (dwell-time)', `
-    <div class="ts2-diag-subhead">Default (часы)</div>
-    ${_kv('Code Review',  d.codeReview)}
-    ${_kv('QA / Testing', d.qa)}
-    ${_kv('In Progress',  d.inProgress)}
-    ${_kv('To Do / Open', d.todo)}
-    ${_kv('Прочие',       d.default)}
-    ${perTeamCount ? `<div class="ts2-diag-subhead">Per-team overrides (${perTeamCount})</div>
-      <pre class="ts2-diag-pre">${esc(JSON.stringify(t.perTeam, null, 2))}</pre>` : `<div class="ts2-diag-empty">Нет per-team override'ов — используются default.</div>`}
-    ${sensitivityUI}
-  `, { statusPill: perTeamCount ? `${perTeamCount} команд override` : 'default', statusKind: 'neutral' });
-}
-
-/** V20 S3.2 — render результатов sensitivity preview. */
-export function renderSensitivityResults(sim, currentCounts) {
-  if (!sim) return '<div class="ts2-diag-empty">Нет результатов.</div>';
-  const c = sim.counts || {};
-  const cur = currentCounts || {};
-  const delta = (a, b) => Number.isFinite(a - b) ? (a - b) : 0;
-  const fmt = (d) => d > 0 ? `+${d}` : (d < 0 ? `${d}` : '0');
-  const cellClass = (d) => d > 0 ? 'ts2-diag-sens-up' : d < 0 ? 'ts2-diag-sens-down' : 'ts2-diag-sens-flat';
-  // V20 S6.2.6 — показ warning'а если часть participants ушли в fallback.
-  const coverageWarning = sim.coverageInfo
-    ? `<div class="ts2-diag-callout">${esc(sim.coverageInfo)}. Гипотетические пороги к ним не применяются — данные показывают default-классификацию.</div>`
-    : '';
-  return `
-    ${coverageWarning}
-    <div class="ts2-diag-sens-summary">
-      Blockers всего: <b>${sim.blockersTotal}</b>
-    </div>
-    <table class="ts2-diag-table">
-      <thead><tr><th>Группа</th><th>Сейчас</th><th>Симуляция</th><th>Δ</th></tr></thead>
-      <tbody>
-        ${['stop', 'watch', 'moving', 'idle'].map(k => {
-          const d = delta(c[k] || 0, cur[k] || 0);
-          return `<tr>
-            <td>${esc({ stop: 'Стоп', watch: 'Watch', moving: 'Движется', idle: 'Без активности' }[k])}</td>
-            <td>${cur[k] ?? '—'}</td>
-            <td><b>${c[k] ?? '—'}</b></td>
-            <td class="${cellClass(d)}">${fmt(d)}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-    </table>
-  `;
-}
-
-function _diagSectionSnapshot(s) {
-  const c = s.current?.counts || {};
-  const p = s.prev?.counts || {};
-  const delta = (a, b) => Number.isFinite(a) && Number.isFinite(b) ? (a - b) : null;
-  const fmt = (d) => d == null ? '—' : (d > 0 ? `+${d}` : `${d}`);
-  const ageH = s.prev?.ageHours;
-  const histStat = s.history?.entries
-    ? `${s.history.entries} snap. (${s.history.earliest || '?'} → ${s.history.latest || '?'})`
-    : 'нет истории';
-  // V20 S7 A6 — EMA / WoW / anomaly блок если есть trends.
-  const t = s.trends || {};
-  const trendCell = (label, ema, anom) => {
-    const wowSign = ema?.wowDelta > 0 ? '+' : '';
-    const wowClass = ema?.wowDelta > 0 ? 'ts2-diag-sens-up' : (ema?.wowDelta < 0 ? 'ts2-diag-sens-down' : 'ts2-diag-sens-flat');
-    const anomChip = anom?.anomalous ? `<span class="ts2-diag-flag">⚠ z=${anom.z > 0 ? '+' : ''}${anom.z}</span>` : '';
-    return `<tr>
-      <td>${esc(label)}</td>
-      <td>${ema?.emaToday ?? '—'}</td>
-      <td>${ema?.emaLastWeek ?? '—'}</td>
-      <td class="${wowClass}">${ema?.wowDelta != null ? wowSign + ema.wowDelta : '—'}</td>
-      <td>${anomChip}</td>
-    </tr>`;
-  };
-  const trendsBlock = (Object.keys(t).length) ? `
-    <div class="ts2-diag-subhead">EMA + Week-over-Week (α=0.3, ≥8 точек)</div>
-    <table class="ts2-diag-table">
-      <thead><tr><th>Метрика</th><th>EMA today</th><th>EMA 7d ago</th><th>WoW Δ</th><th>Anomaly</th></tr></thead>
-      <tbody>
-        ${trendCell('Стоп',        t.stopEma,    t.stopAnomaly)}
-        ${trendCell('Движется',    t.movingEma,  t.movingAnomaly)}
-        ${trendCell('Sprint progress', t.progressEma, null)}
-      </tbody>
-    </table>
-  ` : '';
-  return _diagSection('snapshot', 'Snapshot delta vs вчера', `
-    ${ageH != null ? `<div class="ts2-diag-subhead">Прошлый snapshot: ${ageH} ч назад</div>` : `<div class="ts2-diag-empty">Прошлый snapshot не найден или старше 24 ч.</div>`}
-    <table class="ts2-diag-table">
-      <thead><tr><th>Группа</th><th>Сейчас</th><th>Раньше</th><th>Δ</th></tr></thead>
-      <tbody>
-        <tr><td>Стоп</td><td>${c.stop ?? '—'}</td><td>${p.stop ?? '—'}</td><td>${fmt(delta(c.stop, p.stop))}</td></tr>
-        <tr><td>Watch</td><td>${c.watch ?? '—'}</td><td>${p.watch ?? '—'}</td><td>${fmt(delta(c.watch, p.watch))}</td></tr>
-        <tr><td>Движется</td><td>${c.moving ?? '—'}</td><td>${p.moving ?? '—'}</td><td>${fmt(delta(c.moving, p.moving))}</td></tr>
-        <tr><td>Без активности</td><td>${c.idle ?? '—'}</td><td>${p.idle ?? '—'}</td><td>${fmt(delta(c.idle, p.idle))}</td></tr>
-      </tbody>
-    </table>
-    <div class="ts2-diag-subhead">Multi-day история</div>
-    <div class="ts2-diag-kv-row">${esc(histStat)}</div>
-    ${trendsBlock}
-  `);
-}
-
-function _diagSectionModelSummary(ms) {
-  if (!ms) {
-    return _diagSection('model', 'Model summary',
-      `<div class="ts2-diag-empty">Нет model'и — fetch не запускался.</div>`);
-  }
-  return _diagSection('model', 'Model summary', `
-    ${_kv('participants', ms.participantsCount)}
-    ${_kv('активных спринтов', ms.activeSprintsCount)}
-    ${_kv('spaces в model', ms.spaceKeys.join(', ') || '—')}
-    <div class="ts2-diag-subhead">Risks</div>
-    ${_kv('orphans (всего)',  ms.risks.totalOrphans)}
-    ${_kv('orphans (real)',   ms.risks.totalRealOrphans, 'in-sprint OR fresh+high-priority')}
-    ${_kv('out-of-sprint',    ms.risks.totalOutOfSprint)}
-    ${_kv('outOfSprintRatio', (ms.risks.outOfSprintRatio * 100).toFixed(1) + '%', 'unique-keys basis')}
-    <div class="ts2-diag-subhead">Sprint Goal (агрегат)</div>
-    ${_kv('progress',         ms.sprintGoal.aggregateProgress + '%')}
-    ${_kv('sprint-mean',      (ms.sprintGoal.sprintMeanProgress ?? 0) + '%')}
-    ${_kv('pace',             ms.sprintGoal.aggregatePace, ms.sprintGoal.aggregatePaceSource || '')}
-    ${_kv('спринтов',         ms.sprintGoal.sprintsCount)}
-  `);
-}
-
-/**
- * V20 S8 #12 — Known Issues section. Whitelist типичных проблем пилота +
- * подсветка «ваш случай» если condition сматчился. UX feedback: «нужен
- * actionable next-step «CF=0% это normal in Sber DC»».
- */
-function _diagSectionKnownIssues(state) {
-  const i = state.identity || {};
-  const c = state.config || {};
-  const conn = state.connection || {};
-  const tz = state.tzSkew || {};
-  const issues = [];
-
-  // 1) CF coverage 0% — известная проблема Sber DC.
-  if ((i.coverage?.cfId?.pct || 0) === 0 && (i.teamSize || 0) > 0) {
-    issues.push({
-      severity: 'normal',
-      title: 'Confluence coverage 0% — известная проблема Sber DC',
-      body: `Sber Confluence DC использует numeric LDAP usernames (не email-prefix). API <code>cql=user.email = "..."</code> не индексируется в DC. После V20 S5 cascade пробует <code>cql=user.fullname = "ФИО"</code> — но ФИО должно быть точно как в CF.<br>
-            <b>Что делать:</b> 1) Проверьте что <code>fio</code> у сотрудников совпадает с CF профилем символ-в-символ (включая суффиксы [B] / [external]). 2) Если не помогает — заполнить <code>confluenceAccountId</code> вручную (это numeric LDAP-ID, видно в URL CF при наведении на автора).`,
-    });
-  }
-
-  // 2) BB coverage низкий.
-  if ((i.coverage?.bbLogin?.pct || 100) < 30 && c.hasBitbucketToken) {
-    issues.push({
-      severity: 'warn',
-      title: `BB coverage ${i.coverage?.bbLogin?.pct || 0}% — низко`,
-      body: `<b>Что делать:</b> Откройте Identity Auto-Resolve (кнопка ниже в этой секции). Sber Stash возвращает slug по email-фильтру — должен сматчить большинство.`,
-    });
-  }
-
-  // 3) sinceDate слишком широкий.
-  const sinceMs = c.sinceDate ? Date.parse(c.sinceDate) : NaN;
-  if (Number.isFinite(sinceMs) && (Date.now() - sinceMs) > 365 * 86400 * 1000) {
-    issues.push({
-      severity: 'warn',
-      title: 'sinceDate шире 1 года → высокая latency + много orphan-issues',
-      // V20 S8.5 #1 — XSS guard: sinceDate приходит из user-config (settings UI),
-      // нельзя интерполировать в HTML без esc(). Тот же класс что мы фиксили в S6/probe.
-      body: `Текущий <code>sinceDate=${esc(c.sinceDate)}</code>. Это влияет на: 1) <code>totalOrphans</code> (пилот 2513 — backlog с 2025); 2) Jira fetch latency (видим 50+ сек). <b>Рекомендация:</b> поднять до текущего квартала (например <code>2026-01-01</code>).`,
-    });
-  }
-
-  // 4) TZ skew suspicious.
-  if (tz?.skewSuspicious) {
-    issues.push({
-      severity: 'warn',
-      title: `TZ skew ${esc(String(tz.skewSeconds))}с — часы расходятся`,
-      body: `Browser=${esc(tz.browserTzLabel || '')}, server timestamp ${esc(tz.serverTs || '')}. Если skew > 5 мин и vы не на VPN — проверьте system clock (ntp).`,
-    });
-  }
-
-  // 5) jobId expired (drill-down не работает).
-  if (conn?.jobExpired) {
-    issues.push({
-      severity: 'err',
-      title: 'jobId истёк — нажмите ↻ Обновить',
-      body: 'Server pulse-job TTL = 120 мин. После истечения drill-down по сотрудникам не работает — нужен новый fetch.',
-    });
-  }
-
-  // 6) Нет projectKeys — empty config.
-  if (!c.projectKeys?.length) {
-    issues.push({
-      severity: 'err',
-      title: 'projectKeys пустой',
-      body: 'Заполните <code>jiraProjectKeys</code> в настройках Jira. Без них fetch не запустится.',
-    });
-  }
-
-  if (!issues.length) {
-    return _diagSection('known-issues', 'Известные проблемы',
-      `<div class="ts2-diag-ok">Всё чисто — известных проблем не обнаружено.</div>`,
-      { statusPill: 'OK', statusKind: 'ok' });
-  }
-
-  const errCount = issues.filter(i => i.severity === 'err').length;
-  const warnCount = issues.filter(i => i.severity === 'warn').length;
-  const body = issues.map(iss => `
-    <div class="ts2-diag-callout ts2-diag-known-${iss.severity}">
-      <div class="ts2-diag-known-title">${iss.severity === 'err' ? '🔴' : iss.severity === 'warn' ? '🟡' : 'ℹ️'} ${esc(iss.title)}</div>
-      <div class="ts2-diag-known-body">${iss.body}</div>
-    </div>
-  `).join('');
-  return _diagSection('known-issues', 'Известные проблемы (auto-detect)', body, {
-    statusPill: errCount ? `${errCount} крит.` : (warnCount ? `${warnCount} предупр.` : 'info'),
-    statusKind: errCount ? 'err' : (warnCount ? 'warn' : 'neutral'),
-    openByDefault: errCount > 0 || warnCount >= 2,
-  });
-}
-
-/** V20 S7 B10 — botsFilteredOut section. Тимлид может видеть кого мы исключили
- *  и оспорить ложные срабатывания. */
-function _diagSectionBots(bots) {
-  const count = (bots || []).length;
-  if (!count) {
-    return _diagSection('bots', 'Service-аккаунты (исключены из counts)',
-      `<div class="ts2-diag-empty">Не найдено сервисных аккаунтов.</div>`,
-      { statusPill: '0', statusKind: 'neutral' });
-  }
-  const groupedBySource = {};
-  for (const b of bots) {
-    const src = b.source || 'pattern';
-    if (!groupedBySource[src]) groupedBySource[src] = [];
-    groupedBySource[src].push(b);
-  }
-  const rows = Object.entries(groupedBySource).map(([src, list]) => `
-    <div class="ts2-diag-subhead">Источник: ${esc(src)} (${list.length})</div>
-    <ul class="ts2-diag-incomplete-list">
-      ${list.slice(0, 30).map(b => `<li><code>${esc(b.key)}</code> — ${esc(b.label || '?')}</li>`).join('')}
-    </ul>
-  `).join('');
-  return _diagSection('bots', 'Service-аккаунты (исключены из counts)', `
-    <div class="ts2-diag-callout">
-      Pattern auto-detect: cab-sa-*, sbt-*, out-*, svc-*, bot-*, system-*, и infix -api-/-bot-/-svc-.
-      Если кто-то попал сюда ошибочно — снимите флаг <code>isServiceAccount</code> в карточке сотрудника.
-    </div>
-    ${rows}
-  `, { statusPill: `${count} excl.`, statusKind: 'neutral' });
-}
-
-/**
- * V20 S8 #2 — CR-drill-down modal: список самых долгих ревью per reviewer.
- * Pилот feedback: «6ч медиана для отчёта директору. Мне нужны имена и PR».
- *
- * Сейчас у нас данные по reviewer'ам (codeReviewVelocity), но без per-PR
- * details. Показываем top-15 reviewer'ов с медианой > 8h, sorted by median desc.
- * При наличии prT.openItems — добавим конкретные PR (S9 ext).
- */
-export function renderCrvDrilldownModal(crv, employees) {
-  const empByKey = new Map((employees || []).map(e => [String(e.jiraAccountId || '').toLowerCase(), e]));
-  const rows = Object.entries(crv || {})
-    .map(([k, v]) => ({
-      key: k,
-      median: v.medianHours,
-      count: v.count,
-      threshold: v.threshold,
-      label: empByKey.get(String(k).toLowerCase())?.fio || k,
-    }))
-    .sort((a, b) => b.median - a.median)
-    .slice(0, 15);
-
-  if (!rows.length) {
-    return `
-      <div class="ts2-crv-modal-overlay" id="ts2-crv-drilldown" role="presentation">
-        <div class="ts2-crv-modal" role="dialog" aria-modal="true">
-          <div class="ts2-resolve-header">
-            <h3 class="ts2-resolve-title">Скорость код-ревью</h3>
-            <button class="ts2-resolve-close" type="button" data-close-modal>✕</button>
-          </div>
-          <div class="ts2-resolve-body"><div class="ts2-diag-empty">Нет данных за последние 14 дней.</div></div>
-        </div>
-      </div>`;
-  }
-  const slowCount = rows.filter(r => r.threshold === 'slow').length;
-  const warnCount = rows.filter(r => r.threshold === 'warn').length;
-  return `
-    <div class="ts2-crv-modal-overlay" id="ts2-crv-drilldown" role="presentation">
-      <div class="ts2-crv-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-crv-title">
-        <div class="ts2-resolve-header">
-          <h3 class="ts2-resolve-title" id="ts2-crv-title">Скорость код-ревью — топ-15</h3>
-          <button class="ts2-resolve-close" type="button" data-close-modal>✕</button>
-        </div>
-        <div class="ts2-resolve-summary">
-          <span class="ts2-resolve-stat ts2-resolve-stat-warn">⚠ ${slowCount} медленных (>24ч)</span>
-          <span class="ts2-resolve-stat">${warnCount} средних (8-24ч)</span>
-          <span class="ts2-resolve-stat-meta">14 дней · sorted by median desc</span>
-        </div>
-        <div class="ts2-resolve-body">
-          <table class="ts2-resolve-table">
-            <thead><tr><th>Ревьюер</th><th>Медиана</th><th>Ревью</th><th>Статус</th></tr></thead>
-            <tbody>
-              ${rows.map(r => `
-                <tr class="ts2-resolve-row ts2-resolve-row-${r.threshold === 'slow' ? 'failed' : 'change'}">
-                  <td class="ts2-resolve-fio">${esc(r.label)}</td>
-                  <td><b>${r.median}ч</b></td>
-                  <td>${r.count}</td>
-                  <td>${r.threshold === 'slow' ? '🔴 медленно' : r.threshold === 'warn' ? '🟡 средне' : '🟢 ок'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-          <div class="ts2-how-footnote">
-            Threshold: &lt;8ч ok / 8-24ч warn / &gt;24ч slow.<br>
-            Подробности по конкретным PR — в карточке сотрудника (клик по строке в дашборде).
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/**
- * V20 S8.5 #20 — Anomaly mini-chart modal. Показывает sparkline за 14 дней
- * с baseline (μ ± σ) и подсветкой today как outlier.
- *
- * @param {Array<{ts, value}>} series — daily values
- * @param {object} z — z-score результат (mean, std, today, z)
- * @param {string} metricLabel — «stop», «watch», etc.
- */
-export function renderAnomalyMiniChart(series, z, metricLabel) {
-  if (!Array.isArray(series) || series.length < 2) {
-    return `<div class="ts2-anomaly-modal-overlay" id="ts2-anomaly-modal" role="presentation">
-      <div class="ts2-anomaly-modal" role="dialog" aria-modal="true">
-        <div class="ts2-resolve-header">
-          <h3 class="ts2-resolve-title">Аномалия в группе «${esc(metricLabel)}»</h3>
-          <button class="ts2-resolve-close" type="button" data-close-modal>✕</button>
-        </div>
-        <div class="ts2-resolve-body"><div class="ts2-diag-empty">Недостаточно истории для графика (нужно ≥2 точек).</div></div>
-      </div>
-    </div>`;
-  }
-  // Inline SVG sparkline: 360×80px, 14 days max.
-  const W = 360, H = 80, P = 8;
-  const vals = series.slice(-14);
-  const minV = Math.min(...vals, z.mean - z.std);
-  const maxV = Math.max(...vals, z.mean + z.std);
-  const range = Math.max(1, maxV - minV);
-  const xStep = (W - 2 * P) / Math.max(1, vals.length - 1);
-  const yScale = (v) => H - P - ((v - minV) / range) * (H - 2 * P);
-  const points = vals.map((v, i) => `${P + i * xStep},${yScale(v)}`).join(' ');
-  const meanY  = yScale(z.mean);
-  const upperY = yScale(z.mean + z.std);
-  const lowerY = yScale(z.mean - z.std);
-  const todayX = P + (vals.length - 1) * xStep;
-  const todayY = yScale(z.today);
-
-  return `<div class="ts2-anomaly-modal-overlay" id="ts2-anomaly-modal" role="presentation">
-    <div class="ts2-anomaly-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-anomaly-title">
-      <div class="ts2-resolve-header">
-        <h3 class="ts2-resolve-title" id="ts2-anomaly-title">Аномалия в группе «${esc(metricLabel)}»</h3>
-        <button class="ts2-resolve-close" type="button" data-close-modal>✕</button>
-      </div>
-      <div class="ts2-resolve-body">
-        <div class="ts2-anomaly-stats">
-          <span><b>Сегодня:</b> ${z.today}</span>
-          <span><b>Среднее за ${vals.length} дней:</b> ${z.mean} ± ${z.std}</span>
-          <span class="ts2-anomaly-z"><b>Z-score:</b> ${z.z} ${z.anomalous ? '🔴 аномалия' : ''}</span>
-        </div>
-        <svg class="ts2-anomaly-chart" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" aria-label="Sparkline за 14 дней с baseline">
-          <!-- baseline ±σ -->
-          <rect x="${P}" y="${upperY}" width="${W - 2 * P}" height="${lowerY - upperY}" fill="rgba(100,100,100,0.07)"/>
-          <line x1="${P}" y1="${meanY}" x2="${W - P}" y2="${meanY}" stroke="rgba(100,100,100,0.4)" stroke-dasharray="3,3"/>
-          <!-- series polyline -->
-          <polyline points="${points}" fill="none" stroke="var(--accent, #2563eb)" stroke-width="2"/>
-          <!-- today marker -->
-          <circle cx="${todayX}" cy="${todayY}" r="5" fill="${z.anomalous ? 'var(--danger, #dc2626)' : 'var(--accent, #2563eb)'}"/>
-        </svg>
-        <div class="ts2-anomaly-legend">
-          Линия — daily values. Серая зона — μ ± σ (норма). Точка справа — сегодня.
-          ${z.anomalous ? '<br><b>Сегодня выходит за σ-зону:</b> z=' + z.z + ', |z|>2 = аномалия.' : ''}
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
-export function renderHowCalculatedModal() {
-  const sections = HOW_SECTIONS.map(s => `
-    <div class="ts2-how-section" data-section="${esc(s.id)}">
-      <button class="ts2-how-section-head" type="button" aria-expanded="false">
-        <span class="ts2-how-section-chev" aria-hidden="true">▸</span>
-        <span class="ts2-how-section-title">${esc(s.head)}</span>
-      </button>
-      <div class="ts2-how-section-body">${s.body}</div>
-    </div>
-  `).join('');
-  return `
-    <div class="ts2-how-modal-overlay" id="ts2-how-modal" role="presentation">
-      <div class="ts2-how-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-how-title">
+    <div class="ts2-how-modal-overlay" id="ts2-velocity-modal" role="presentation">
+      <div class="ts2-how-modal" role="dialog" aria-modal="true" aria-labelledby="ts2-velocity-title">
         <div class="ts2-how-header">
-          <h3 class="ts2-how-title" id="ts2-how-title">Как считаются метрики Сканнера команд</h3>
-          <button class="ts2-how-close" type="button" data-close-modal aria-label="Закрыть">✕</button>
+          <h3 class="ts2-how-title" id="ts2-velocity-title">Сравнение команд</h3>
+          <button class="ts2-how-close" type="button" data-close-modal aria-label="Закрыть">${Icons.get('x', { size: 14 })}</button>
+        </div>
+        <div class="ts2-compare-tabs" role="tablist" aria-label="Виды сравнения">
+          <button class="ts2-compare-tab is-active" type="button" role="tab" aria-selected="true" data-compare-tab="velocity">Velocity</button>
+          <button class="ts2-compare-tab" type="button" role="tab" aria-selected="false" data-compare-tab="benchmarks">Benchmarks</button>
         </div>
         <div class="ts2-how-body">
-          <div class="ts2-how-intro">
-            Раздел отвечает на вопрос «откуда взялась эта цифра / почему этот сотрудник в группе X».
-            Кликните на заголовок секции чтобы развернуть.
+          <div class="ts2-compare-pane is-active" data-compare-pane="velocity">
+            ${velocityInner}
           </div>
-          ${sections}
-          <div class="ts2-how-footnote">
-            Видны странные значения? Откройте кнопку <b>📋 Диагностика</b> (появится в одном из
-            следующих обновлений) — там per-PK timing и per-source raw-данные.
+          <div class="ts2-compare-pane" data-compare-pane="benchmarks" hidden>
+            ${benchmarksInner}
           </div>
         </div>
       </div>
     </div>
   `;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   Phase 3 E2 — Anchor-scroll target-highlight helper
+   ───────────────────────────────────────────────────────────
+   Брендбук §9 #3 (pulse) + готовый класс `.ts2-btn-flash` (1s ease-out 2x).
+   Когда Сканнер делает scrollIntoView к якорю (action queue → person row,
+   anomaly → mini-chart) — пользователю нужен визуальный «вот сюда я привёл
+   взгляд». 1s mostly hidden = почти 2 секунды двойного flash'а.
+   Wire — после scrollIntoView в teamScanner2.js (V18.3 A5). Phase 4
+   подключит вызов в orchestrator'е, helper уже доступен.
+   ═══════════════════════════════════════════════════════════ */
+export function flashAnchorTarget(el) {
+  if (!el || typeof el.classList?.add !== 'function') return;
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  } catch (_) { /* SSR/test env — игнорируем */ }
+  el.classList.remove('ts2-btn-flash');
+  // force reflow для restart-анимации, если повторный flash на том же элементе
+  // eslint-disable-next-line no-unused-expressions
+  el.offsetHeight;
+  el.classList.add('ts2-btn-flash');
+  setTimeout(() => el.classList.remove('ts2-btn-flash'), 2000);
 }

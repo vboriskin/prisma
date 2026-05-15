@@ -1,63 +1,91 @@
 'use strict';
 /* ============================================================
-   LOADER PHRASES — V13 (added 2026-04, 11th pass)
+   LOADER PHRASES — V22.1
 
-   Shared pool of friendly humorous phrases used by long-running
-   integrations loaders (Сканнер команд, Чёрный дашборд). Picks
-   a phrase non-repeatedly until pool is exhausted, then re-shuffles.
+   Два набора фраз: для Сканнера команд и Чёрного дашборда.
+   Вращаются каждые 2.5с; анимация fade задана в styles.css
+   (.ts2-skel-phrase, .bd-loader-phrase — @keyframes pp-phrase-fade).
+
+   startPhraseRotator(elementId, phrases, intervalMs) — универсальный
+   хелпер; возвращает timerId для clearInterval в finally-блоке.
    ============================================================ */
 
-export const LOADER_PHRASES = [
-  '🤖 Беру у джуна интервью…',
-  '☕ Завариваю кофе для нейронки…',
-  '🐌 Ловлю улитку с задачами Jira…',
-  '🎯 Целюсь в спринт, не дрогни рукой…',
-  '📜 Читаю комменты, ужасаюсь…',
-  '🔎 Ищу того, кто двигал дедлайн…',
-  '🧠 Грею GPU. Зимой это бонус…',
-  '🐘 Втаскиваю слона из бэклога…',
-  '🛸 Запускаю CEO-режим, держитесь…',
-  '🪄 Умножаю риски на оптимизм…',
-  '☁️ Стучусь в Confluence, никто не дома…',
-  '🧩 Складываю пазл из эпиков…',
-  '⏳ Ещё чуть-чуть. Серьёзно.',
-  '🎲 Спрашиваю у Jira, она думает…',
-  '🐙 Связываю всё со всем (8 рук)…',
-  '📡 Звоню в Bitbucket, длинные гудки…',
-  '🥷 Ниндзя-менеджер обходит блокеры…',
-  '🪜 Подбираю эпику Domain link…',
-  '🛠 Заколачиваю гвоздь в JQL…',
-  '🦥 Ленивая загрузка, но честная…',
-  '🎩 Достаю из шляпы пропавшие задачи…',
-  '🚀 Прогреваю ракету для покрытия…',
-  '🐢 Иду медленно, но верно…',
-  '🍿 Релиз 1.20.0 смотрит, как мы тащим…',
-  '🪴 Поливаю эпики, чтоб росли…',
-  '🎸 Соло на Jira API, попсу не люблю…',
-  '🔍 Под микроскопом разглядываю Domain link…',
-  '🛰 Сканирую команды на радаре…',
-  '🦉 Сова смотрит в глаза 429-й ошибке…',
-  '🎭 Маскирую токены, чтоб не утекли…',
-  '🪤 Ставлю ловушку на потеряшки…',
-  '🏗 Строю граф зависимостей. Без касок не входить…',
-  '🧹 Подметаю sub-task’и в угол…',
-  '🦦 Калибрую счётчики, выдра свидетель…',
-  '🐉 Дрессирую Cloners-цепочку…',
-  '⚓ Якорю эпики к целям…',
-  '🌿 Расщепляю backlog на молекулы…',
+export const SCANNER_PHRASES = [
+  'Допрашиваю Jira со светом в лицо…',
+  'Считаю чьи коммиты в 23:59…',
+  'Ищу задачи без assignee. Их много…',
+  'Будю In Progress с позапрошлой недели…',
+  'Провожу внеплановый стендап с API…',
+  'Проверяю кто не смержил ветку с Q3…',
+  'Подслушиваю активность в тихий час…',
+  'Калибрую оптимизм к реальности…',
+  'Строю радар угроз по дедлайну…',
+  'Ищу блокеры под конец спринта…',
+  'Пью кофе, пока Jira раздумывает…',
+  'Сканирую всех. Никто не скроется…',
+  'Суммирую активность за 72 часа…',
+  'Объясняю Bitbucket зачем мы сюда пришли…',
+  'Рисую команду на карте рисков…',
+  'Прощупываю PR-очередь на выходных…',
+  'Ловлю отставание до того как оно выросло…',
+  'Смотрю сколько часов в Code Review. Много…',
+];
+
+export const BD_PHRASES = [
+  'Синхронизирую цели с реальностью…',
+  'Запрашиваю Sigma. Молчит. Пробую ещё раз…',
+  'Сверяю курс квартала с компасом…',
+  'Ищу эпики без цели — их надо привязать…',
+  'Запускаю CEO-режим на полную…',
+  'Читаю между строк метрик…',
+  'Собираю сигналы со всех проектов…',
+  'Готовлю сводку к следующему CTO-review…',
+  'Корп Jira медитирует. Ждём вместе…',
+  'Разбираю стратегический туман…',
+  'Связываю Delta с планами квартала…',
+  'Ищу разрыв между целями и бэклогом…',
+  'Прогреваю дашборд для топ-стрима…',
+  'Суммирую квартальный прогресс по OKR…',
+  'Привязываю эпики к горизонту…',
+  'Проверяю scope-дрейф относительно целей…',
+  'Считаю сколько из OKR реально движется…',
 ];
 
 /**
- * Returns a function that yields the next phrase non-repeatedly.
- * After cycling through all phrases, re-shuffles and starts over.
- * Stable across calls within the same closure.
+ * Запускает ротацию фраз с fade-анимацией.
+ * @param {string}   elementId   — id DOM-элемента (span/div) для вывода фразы
+ * @param {string[]} phrases     — массив фраз
+ * @param {number}   [ms=2500]   — интервал смены, мс
+ * @returns {number}  timerId — передать в clearInterval() при остановке
  */
+export function startPhraseRotator(elementId, phrases, ms = 2500) {
+  if (!phrases || !phrases.length) return 0;
+  const pool = phrases.slice().sort(() => Math.random() - 0.5);
+  let idx = 0;
+
+  const tick = () => {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    el.classList.remove('phrase-in');
+    // trigger reflow для перезапуска анимации
+    void el.offsetWidth;
+    el.textContent = pool[idx % pool.length];
+    el.classList.add('phrase-in');
+    idx++;
+  };
+
+  tick(); // показать первую фразу сразу
+  return setInterval(tick, ms);
+}
+
+/** @deprecated V22 — kept for legacy import compatibility */
+export const LOADER_PHRASES = [...SCANNER_PHRASES, ...BD_PHRASES];
+
+/** @deprecated V22 */
 export function makePhraseFeeder() {
   let pool = [];
   return () => {
-    if (!pool.length) {
-      pool = LOADER_PHRASES.slice().sort(() => Math.random() - 0.5);
-    }
+    if (!pool.length) pool = LOADER_PHRASES.slice().sort(() => Math.random() - 0.5);
     return pool.shift();
   };
 }

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://design-tokens.org/draft/format",
+  "$description": "Типографическая шкала Призмы. Primary — SF Pro Display, secondary — JetBrains Mono для чисел.",
+  "$note": "Кириллица: SF Pro Display поддерживает её на macOS/iOS. Для других систем fallback на Inter (поддерживает кириллицу) и системные шрифты.",
+  "fontFamilies": {
+    "primary": {
+      "value": "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif",
+      "use": "Заголовки, основной текст, навигация, весь UI"
+    },
+    "secondary": {
+      "value": "'JetBrains Mono', 'SF Mono', Menlo, monospace",
+      "use": "Числа в дашбордах, координаты курса, технические подписи"
+    }
+  },
+  "scale": {
+    "display": {
+      "fontFamily": "primary",
+      "fontSize": "72px",
+      "fontWeight": 200,
+      "lineHeight": 1.05,
+      "letterSpacing": "0",
+      "use": "Hero-текст на лендинге, главные заголовки страниц"
+    },
+    "headline": {
+      "fontFamily": "primary",
+      "fontSize": "32px",
+      "fontWeight": 300,
+      "lineHeight": 1.2,
+      "letterSpacing": "0",
+      "use": "Заголовки разделов, заголовки страниц внутри приложения"
+    },
+    "subtitle": {
+      "fontFamily": "primary",
+      "fontSize": "18px",
+      "fontWeight": 500,
+      "lineHeight": 1.4,
+      "letterSpacing": "0",
+      "use": "Заголовки карточек, пункты навигации"
+    },
+    "body": {
+      "fontFamily": "primary",
+      "fontSize": "15px",
+      "fontWeight": 400,
+      "lineHeight": 1.6,
+      "letterSpacing": "0",
+      "use": "Основной текст для чтения, описания"
+    },
+    "bodySmall": {
+      "fontFamily": "primary",
+      "fontSize": "13px",
+      "fontWeight": 400,
+      "lineHeight": 1.5,
+      "letterSpacing": "0",
+      "use": "Второстепенный текст, подсказки"
+    },
+    "caption": {
+      "fontFamily": "primary",
+      "fontSize": "11px",
+      "fontWeight": 500,
+      "lineHeight": 1.4,
+      "letterSpacing": "1.5px",
+      "textTransform": "uppercase",
+      "use": "Метки, метаданные, системные подписи"
+    },
+    "wordmarkLogo": {
+      "fontFamily": "primary",
+      "fontSize": "32px",
+      "fontWeight": 200,
+      "lineHeight": 1,
+      "letterSpacing": "8px",
+      "text": "ПРИЗМА",
+      "use": "Wordmark рядом со звездой",
+      "note": "На splash-анимации letter-spacing анимируется с 14px до 8px"
+    },
+    "monoNumber": {
+      "fontFamily": "secondary",
+      "fontSize": "24px",
+      "fontWeight": 300,
+      "lineHeight": 1,
+      "letterSpacing": "-0.5px",
+      "use": "Большие числа в карточках дашборда (значения KPI)"
+    }
+  }
+}

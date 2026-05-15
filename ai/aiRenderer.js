@@ -6,6 +6,8 @@
    ============================================================ */
 
 import { Utils } from '../utils.js';
+import { prizmaEmptyGlyph, prizmaLoaderMark, renderEmptyState as renderEmptyStateBase } from '../app/prizmaUI.js';
+import { Icons } from '../app/icons.js';
 const esc = s => Utils.escapeHtml(String(s ?? ''));
 
 /* ── severity helpers ───────────────────────────────────────── */
@@ -33,15 +35,32 @@ function scoreRing(score, status) {
 }
 
 /* ── block header ───────────────────────────────────────────── */
+// AUDIT_ARTDIRECTION #21+#28 — block.icon теперь iconKey-строка (Lucide-имя),
+// а не emoji-литерал. Renderer вызывает Icons.get(iconKey). Если block.icon
+// — старый emoji (legacy saved-state), оставляем raw esc(...) как safety-net.
+function _renderBlockIcon(iconKey) {
+  if (!iconKey) return '';
+  const v = String(iconKey).trim();
+  if (/^[a-z][a-z0-9-]+$/.test(v)) {
+    return Icons.get(v, { size: 16 });
+  }
+  // Legacy emoji — экранируем как raw (для старых saved-states).
+  return esc(v);
+}
 function blockHeader(block) {
+  // V21 audit 07-ai-analysis §2: ✨ AI emoji-badge заменён на SVG sparkles
+  // (CLAUDE.md §«без эмодзи в production UI»).
+  const aiBadge = block.aiEnhanced
+    ? `<span class="ai-enhanced-badge"><span class="ai-enhanced-sparkle" aria-hidden="true">${Icons.get('sparkles', { size: 10 })}</span>AI</span>`
+    : '';
   return `
   <div class="ai-block-header">
-    <span class="ai-block-icon">${esc(block.icon)}</span>
+    <span class="ai-block-icon" aria-hidden="true">${_renderBlockIcon(block.icon)}</span>
     <div class="ai-block-meta">
       <h3 class="ai-block-title">${esc(block.title)}</h3>
       <div class="ai-block-badges">
         ${statusBadge(block.status)}
-        ${block.aiEnhanced ? '<span class="ai-enhanced-badge">✨ AI</span>' : ''}
+        ${aiBadge}
         ${block.confidence ? `<span class="ai-conf-badge">уверенность: ${esc(CONF_LABEL[String(block.confidence||'').toLowerCase()] || block.confidence)}</span>` : ''}
       </div>
     </div>
@@ -51,13 +70,16 @@ function blockHeader(block) {
 
 /* ── block actions ──────────────────────────────────────────── */
 function blockActions(block) {
+  // V21 audit 07-ai-analysis §11: ↺ unicode заменён на Icons.rotate-cw
+  // (screen-reader читал «counterclockwise» по-английски).
+  const refreshIcon = `<span class="ai-btn-icon" aria-hidden="true">${Icons.get('rotate-cw', { size: 12 })}</span>`;
   const showBtn = block.filterPayload || (block.recommendations||[]).some(r=>r.filter)
-    ? `<button class="ai-btn ai-btn-show" data-ai-action="show" data-block-id="${esc(block.id)}">Показать задачи</button>` : '';
+    ? `<button class="ai-btn ai-btn-show" data-ai-action="show" data-block-id="${esc(block.id)}" aria-label="Показать задачи блока ${esc(block.title || '')}">Показать задачи</button>` : '';
   return `
   <div class="ai-block-actions">
     ${showBtn}
-    <button class="ai-btn ai-btn-explain"  data-ai-action="explain"  data-block-id="${esc(block.id)}">Объяснить</button>
-    <button class="ai-btn ai-btn-refresh"  data-ai-action="refresh"  data-block-id="${esc(block.id)}">↺ Обновить AI-анализ</button>
+    <button class="ai-btn ai-btn-explain"  data-ai-action="explain"  data-block-id="${esc(block.id)}" aria-label="Объяснить ${esc(block.title || '')}">Объяснить</button>
+    <button class="ai-btn ai-btn-refresh"  data-ai-action="refresh"  data-block-id="${esc(block.id)}" aria-label="Обновить AI-анализ блока ${esc(block.title || '')}">${refreshIcon}Обновить AI-анализ</button>
   </div>`;
 }
 
@@ -79,7 +101,7 @@ function recsList(recs, blockId) {
         <div class="ai-rec-title">${esc(r.title)}</div>
         ${r.action ? `<div class="ai-rec-action">${esc(r.action)}</div>` : ''}
       </div>
-      ${r.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(blockId)}" data-filter='${JSON.stringify(r.filter)}'>→ Показать</button>` : ''}
+      ${r.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(blockId)}" data-filter="${esc(JSON.stringify(r.filter))}">→ Показать</button>` : ''}
     </div>`).join('')}
   </div>`;
 }
@@ -89,11 +111,13 @@ function recsList(recs, blockId) {
    ════════════════════════════════════════════════════════════ */
 
 function renderHealth(b) {
+  // V21 audit 07-ai-analysis §3: 🔴/🟡/🔵 emoji удалены — severity уже
+  // выражена через 3px stripe-left на `.ai-sev-*` (CLAUDE.md §«без эмодзи»).
+  // §13: data-filter теперь HTML-escape'нут.
   const probItems = (b.problems||[]).map(p => `
-  <div class="ai-problem-item ai-sev-${p.severity}">
-    <span class="ai-problem-icon">${p.severity==='critical'?'🔴':p.severity==='warning'?'🟡':'🔵'}</span>
+  <div class="ai-problem-item ai-sev-${esc(p.severity)}">
     <span>${esc(p.title)}</span>
-    ${p.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(b.id)}" data-filter='${JSON.stringify(p.filter)}'>→</button>` : ''}
+    ${p.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(b.id)}" data-filter="${esc(JSON.stringify(p.filter))}">→</button>` : ''}
   </div>`).join('');
   return `${blockHeader(b)}
   <p class="ai-summary">${esc(b.summary)}</p>
@@ -122,11 +146,13 @@ function renderForecast(b) {
 }
 
 function renderScenarios(b) {
+  // AUDIT_ARTDIRECTION #28 — s.icon теперь iconKey, не emoji.
+  // ⚖ tradeoff-glyph заменён на «·» — semantically нейтрален.
   const cards = (b.scenarios||[]).map(s => `
   <div class="ai-scenario ai-scenario-${esc(s.color)}">
-    <div class="ai-scenario-header">${esc(s.icon)} <strong>${esc(s.label)}</strong> <span class="ai-scenario-risk">Риск: ${esc(s.risk)}</span></div>
+    <div class="ai-scenario-header"><span class="ai-scenario-icon" aria-hidden="true">${_renderBlockIcon(s.icon)}</span> <strong>${esc(s.label)}</strong> <span class="ai-scenario-risk">Риск: ${esc(s.risk)}</span></div>
     <ul class="ai-scenario-what">${s.what.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>
-    <div class="ai-scenario-tradeoff">⚖ ${esc(s.tradeoff)}</div>
+    <div class="ai-scenario-tradeoff">${esc(s.tradeoff)}</div>
   </div>`).join('');
   return `${blockHeader(b)}
   <p class="ai-summary">${esc(b.summary)}</p>
@@ -149,11 +175,13 @@ function renderBottlenecks(b) {
 }
 
 function renderNarratives(b) {
+  // AUDIT_ARTDIRECTION #28 — 💡 emoji glyph заменён на SVG lightbulb-icon.
+  const lightbulb = Icons.get('lightbulb', { size: 12 });
   const cards = (b.narratives||[]).map(n => `
   <div class="ai-narrative-card">
     <div class="ai-narrative-title">${esc(n.title)}</div>
     <p class="ai-narrative-story">${esc(n.story)}</p>
-    <div class="ai-narrative-fix">💡 ${esc(n.howToFix)}</div>
+    <div class="ai-narrative-fix"><span aria-hidden="true">${lightbulb}</span> ${esc(n.howToFix)}</div>
     ${n.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(b.id)}" data-filter='${JSON.stringify(n.filter)}'>→ Показать задачи</button>` : ''}
   </div>`).join('');
   return `${blockHeader(b)}
@@ -179,9 +207,10 @@ function renderPrioritization(b) {
 }
 
 function renderDashboard(b) {
+  // AUDIT_ARTDIRECTION #28 — c.icon теперь iconKey-строка.
   const cards = (b.dashboardCards||[]).map(c => `
   <div class="ai-dash-card ai-dash-${c.severity}">
-    <div class="ai-dash-icon">${esc(c.icon)}</div>
+    <div class="ai-dash-icon" aria-hidden="true">${_renderBlockIcon(c.icon)}</div>
     <div class="ai-dash-value">${esc(String(c.value))}</div>
     <div class="ai-dash-label">${esc(c.label)}</div>
     <div class="ai-dash-title">${esc(c.title)}</div>
@@ -194,11 +223,13 @@ function renderDashboard(b) {
 }
 
 function renderAnomalies(b) {
+  // AUDIT_ARTDIRECTION #28 — ✓ glyph заменён на SVG check-icon.
+  const checkIcon = Icons.get('check', { size: 12 });
   const items = (b.anomalies||[]).map(a => `
   <div class="ai-anomaly-item ${SEV_CLASS[a.severity]||''}">
     <div class="ai-anomaly-title">${esc(a.title)}</div>
     <div class="ai-anomaly-detail">${esc(a.detail)}</div>
-    ${a.check ? `<div class="ai-anomaly-check">✓ ${esc(a.check)}</div>` : ''}
+    ${a.check ? `<div class="ai-anomaly-check"><span aria-hidden="true">${checkIcon}</span> ${esc(a.check)}</div>` : ''}
     ${a.filter ? `<button class="ai-btn ai-btn-xs" data-ai-action="filter" data-block-id="${esc(b.id)}" data-filter='${JSON.stringify(a.filter)}'>→ Показать</button>` : ''}
   </div>`).join('');
   return `${blockHeader(b)}
@@ -228,7 +259,9 @@ function renderSecondOpinion(b) {
     <span class="ai-finding-risk ai-imp-${f.risk==='high'?'high':f.risk==='medium'?'med':'low'}">${esc(f.risk)}</span>
     <div><strong>${esc(f.issue)}</strong><br><span class="ai-finding-detail">${esc(f.detail)}</span></div>
   </div>`).join('');
-  const sItems = (b.safeSpots||[]).map(s=>`<li class="ai-safe-spot">✓ ${esc(s)}</li>`).join('');
+  // AUDIT_ARTDIRECTION #28 — ✓ glyph заменён на SVG check-icon.
+  const safeIcon = Icons.get('check', { size: 12 });
+  const sItems = (b.safeSpots||[]).map(s=>`<li class="ai-safe-spot"><span aria-hidden="true">${safeIcon}</span> ${esc(s)}</li>`).join('');
   return `${blockHeader(b)}
   <p class="ai-summary">${esc(b.summary)}</p>
   <div class="ai-findings">${fItems}</div>
@@ -240,11 +273,11 @@ function renderSecondOpinion(b) {
 function renderRecommendations(b) {
   const items = (b.recs||[]).map(r => `
   <div class="ai-feed-item ai-feed-${r.severity}">
-    <div class="ai-feed-icon">${r.severity==='critical'?'🔴':r.severity==='warning'?'🟡':r.severity==='ok'?'✅':'🔵'}</div>
+    <div class="ai-feed-icon"><span class="signal-dot ${r.severity==='critical'?'signal-off-course':r.severity==='warning'?'signal-drift':r.severity==='ok'?'signal-on-course':'signal-information'}" aria-hidden="true"></span></div>
     <div class="ai-feed-body">
       <div class="ai-feed-title">${esc(r.title)}</div>
       <div class="ai-feed-exp">${esc(r.explanation)}</div>
-      ${r.impact ? `<div class="ai-feed-impact">📈 ${esc(r.impact)}</div>` : ''}
+      ${r.impact ? `<div class="ai-feed-impact">${Icons.get('trending-up', { size: 12 })} ${esc(r.impact)}</div>` : ''}
       ${r.nextStep ? `<div class="ai-feed-next">→ ${esc(r.nextStep)}</div>` : ''}
     </div>
     ${r.filter ? `<button class="ai-btn ai-btn-show" data-ai-action="filter" data-block-id="${esc(b.id)}" data-filter='${JSON.stringify(r.filter)}'>Показать</button>` : ''}
@@ -316,73 +349,143 @@ function _wrapBody(html) {
 export function renderBlock(block) {
   const fn = RENDERERS[block.id] || renderGeneric;
   const inner = _wrapBody(fn(block));
-  return `<div class="ai-block" id="ai-block-${esc(block.id)}" data-status="${esc(block.status)}">${inner}</div>`;
+  // AUDIT_ARTDIRECTION #20 — data-source маркирует AI vs rule-based для
+  // AI-frame primitive (insight-stripe).
+  const source = esc(block.aiEnhanced ? 'ai' : (block.source || 'rule-based'));
+  return `<div class="ai-block" id="ai-block-${esc(block.id)}" data-status="${esc(block.status)}" data-source="${source}">${inner}</div>`;
 }
 
-/* ── loading skeleton ───────────────────────────────────────── */
+/* ── loading state ──────────────────────────────────────────── */
+// V21 — legacy ⏳ emoji + custom progress-bar заменены на brand L2 loader
+// (звезда + breathe + ring) per BRAND_BOOK §11.
 export function renderBlockLoading(blockId, title) {
   return `<div class="ai-block ai-block-loading" id="ai-block-${esc(blockId)}">
     <div class="ai-block-header">
-      <span class="ai-block-icon">⏳</span>
       <div class="ai-block-meta"><h3 class="ai-block-title">${esc(title||'AI-анализ')}</h3></div>
     </div>
-    <div class="ai-loading-bar"><div class="ai-loading-fill"></div></div>
-    <p class="ai-summary ai-loading-text">Запрос к AI…</p>
+    <div class="ai-block-loading-body">
+      ${prizmaLoaderMark()}
+      <p class="ai-summary ai-loading-text">Запрос к AI…</p>
+    </div>
   </div>`;
 }
 
 /* ── empty state (no data) ──────────────────────────────────── */
+// V21 audit 07-ai-analysis §12/§25: добавлен role="status" + aria-live.
+// AUDIT_ARTDIRECTION #27 — для AI-empty-state используем маскот-hibernate
+// (а не star-breathe). Caption «Призма пока не видит курс» — брендбук
+// continuity (маскот спит, а не error-state).
 export function renderEmptyState() {
-  return `<div class="ai-empty-state">
-    <div class="ai-empty-icon">🤖</div>
-    <h3>Нет данных для анализа</h3>
-    <p>Загрузите данные плана (CSV или XLSX) чтобы включить AI-аналитику.</p>
-  </div>`;
+  const action = `
+    <button class="ai-btn ai-btn-primary" data-ai-empty-action="import-xlsx">Импортировать XLSX</button>
+    <button class="ai-btn" data-ai-empty-action="demo-template">Шаблон демо</button>`;
+  return `<div class="ai-empty-state" role="status" aria-live="polite">${
+    renderEmptyStateBase({
+      title: 'Призма пока не видит курс',
+      hint: 'Загрузите данные плана (CSV или XLSX) — Призма проснётся и начнёт смотреть.',
+      illustration: 'mascot-hibernate',
+      action,
+    })
+  }</div>`;
+}
+
+/* ── hero block selection (AUDIT_ARTDIRECTION #26) ───────────── */
+// Приоритет «Главное за 30 секунд»: критическое здоровье → критические
+// рекомендации → критические аномалии → health (как fallback).
+// AI может прислать explicit hero hint в `state.aiAnalysis.heroBlockId`,
+// но rule-based selector — текущий вариант «AI ещё не подсказал».
+function _pickHeroBlockId(blocks) {
+  // 1. Если есть LLM hint — используем его.
+  try {
+    const hint = window.state?.aiAnalysis?.heroBlockId;
+    if (hint && blocks[hint]) return hint;
+  } catch (_) {}
+  // 2. Severity-based: первый блок с status='critical' среди приоритетных.
+  const PRIORITY = ['health', 'recommendations', 'anomalies'];
+  for (const id of PRIORITY) {
+    const b = blocks[id];
+    if (b && b.status === 'critical') return id;
+  }
+  // 3. risk-tier — то же.
+  for (const id of PRIORITY) {
+    const b = blocks[id];
+    if (b && b.status === 'risk') return id;
+  }
+  // 4. Default — health (всегда в наборе).
+  return 'health';
+}
+
+// AUDIT_ARTDIRECTION #26 — persistence открытого/закрытого state.
+const COLLAPSE_LS_PREFIX = 'prizma.ai.expanded.';
+function _isBlockExpanded(blockId) {
+  try {
+    const v = localStorage.getItem(COLLAPSE_LS_PREFIX + blockId);
+    return v === '1';
+  } catch (_) { return false; }
+}
+
+// Wrapper «collapsed library» — каждая карта в `<details>`.
+function _renderLibraryItem(b) {
+  if (!b) return '';
+  const expanded = _isBlockExpanded(b.id);
+  // AUDIT_ARTDIRECTION #26 — eyebrow CAPS 10px (Spine-pill §5).
+  // Title и status-badge в summary, contents — renderBlock внутри <details>.
+  return `
+  <details class="ai-library-item" data-block-id="${esc(b.id)}" ${expanded?'open':''}>
+    <summary class="ai-library-summary">
+      <span class="ai-library-eyebrow">${esc((b.title||'').toUpperCase())}</span>
+      ${statusBadge(b.status)}
+      ${b.aiEnhanced ? `<span class="ai-enhanced-badge"><span class="ai-enhanced-sparkle" aria-hidden="true">${Icons.get('sparkles', { size: 10 })}</span>AI</span>` : ''}
+    </summary>
+    <div class="ai-library-body">${renderBlock(b)}</div>
+  </details>`;
 }
 
 /* ── full page shell (static layout only, blocks injected) ─── */
 export function renderPageShell(blocks) {
-  const blockHtml = (ids) => ids.map(id => {
-    const b = blocks[id];
-    return b ? renderBlock(b) : `<div class="ai-block" id="ai-block-${id}"></div>`;
-  }).join('');
+  // AUDIT_ARTDIRECTION #26 — hero «Главное за 30 секунд» + collapsed library.
+  const heroId = _pickHeroBlockId(blocks);
+  const heroBlock = blocks[heroId];
+  // Все остальные блоки — в collapsed library. Порядок выбран по
+  // «значимости для решения» (recommendations / forecast / quality сверху,
+  // dependency / replanning внизу).
+  const LIBRARY_ORDER = [
+    'recommendations', 'forecast', 'if_nothing_changes', 'quality',
+    'bottlenecks', 'anomalies', 'risk_narrative', 'second_opinion',
+    'prioritization', 'dashboard', 'dependency', 'replanning', 'health',
+  ];
+  const libraryHtml = LIBRARY_ORDER
+    .filter(id => id !== heroId && blocks[id])
+    .map(id => _renderLibraryItem(blocks[id]))
+    .join('');
+  const heroHtml = heroBlock
+    ? `<div class="ai-block ai-block-hero" id="ai-block-${esc(heroBlock.id)}" data-status="${esc(heroBlock.status)}" data-source="${esc(heroBlock.aiEnhanced ? 'ai' : (heroBlock.source || 'rule-based'))}">${_wrapBody((RENDERERS[heroBlock.id] || renderGeneric)(heroBlock))}</div>`
+    : '';
 
+  // V21 audit 07-ai-analysis §1/§10: 🤖 emoji + h2 → SVG ai-star + h1.
   return `
   <div class="ai-page">
     <div class="ai-page-header">
       <div class="ai-page-title-row">
-        <h2 class="ai-page-title">🤖 Центр AI-аналитики</h2>
-        <button class="ai-btn ai-btn-primary" id="ai-refresh-all">↺ Обновить всё</button>
+        <h1 class="ai-page-title">
+          <span class="ai-page-title-icon" aria-hidden="true">${Icons.get('sparkles', { size: 20 })}</span>
+          Центр AI-аналитики
+        </h1>
+        <button class="ai-btn ai-btn-primary ai-btn-with-icon" id="ai-refresh-all" aria-label="Обновить весь AI-анализ"><span class="ai-btn-icon" aria-hidden="true">${Icons.get('rotate-cw', { size: 12 })}</span>Обновить всё</button>
       </div>
       <p class="ai-page-subtitle">AI-аналитика текущего плана только для чтения. Данные не изменяются автоматически.</p>
     </div>
 
-    <div class="ai-layout-hero">
-      ${blockHtml(['health'])}
+    <!-- AUDIT_ARTDIRECTION #26 — hero «Главное за 30 секунд» -->
+    <div class="ai-layout-hero ai-layout-hero-prime">
+      <div class="ai-hero-eyebrow">ГЛАВНОЕ ЗА 30 СЕКУНД</div>
+      ${heroHtml}
     </div>
 
-    <div class="ai-layout-2col">
-      ${blockHtml(['forecast', 'if_nothing_changes'])}
-    </div>
-
-    <div class="ai-layout-2col">
-      ${blockHtml(['dashboard', 'quality'])}
-    </div>
-
-    <div class="ai-layout-2col">
-      ${blockHtml(['bottlenecks', 'anomalies'])}
-    </div>
-
-    <div class="ai-layout-2col">
-      ${blockHtml(['risk_narrative', 'second_opinion'])}
-    </div>
-
-    <div class="ai-layout-2col">
-      ${blockHtml(['prioritization', 'dependency'])}
-    </div>
-
-    <div class="ai-layout-2col">
-      ${blockHtml(['replanning', 'recommendations'])}
+    <!-- AUDIT_ARTDIRECTION #26 — collapsed library: остальные 12 блоков -->
+    <div class="ai-library">
+      <div class="ai-library-eyebrow-row">БИБЛИОТЕКА AI-АНАЛИЗА · ${LIBRARY_ORDER.filter(id => id !== heroId && blocks[id]).length} БЛОКОВ</div>
+      ${libraryHtml}
     </div>
   </div>`;
 }

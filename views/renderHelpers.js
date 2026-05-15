@@ -45,11 +45,11 @@ export const RH = {
     return html`${flags.map(f => {
       const cls = f === 'BLOCKING_NEAR_RELEASE' ? 'risk-badge risk-badge-danger' : 'risk-badge';
       const title = RISK_FLAGS[f] || f;
-      return html`<span class="${unsafe(cls)}" title="${title}">⚠</span>`;
+      return html`<span class="${unsafe(cls)}" title="${title}"><span class="signal-dot signal-drift" role="img" aria-label="Внимание"></span></span>`;
     })}`;
   },
-  dirtyBadge(d) { return d ? html`<span class="chip chip-dirty">✎</span>` : html``; },
-  doneBadge(d)  { return d ? html`<span class="chip chip-done">✅</span>`  : html``; },
+  dirtyBadge(d) { return d ? html`<span class="chip chip-dirty">${unsafe('<span class="prizma-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></span>')}</span>` : html``; },
+  doneBadge(d)  { return d ? html`<span class="chip chip-done"><span class="signal-dot signal-on-course" role="img" aria-label="Сделано"></span></span>`  : html``; },
   jiraTagsHtml(raw) {
     const links = Utils.parseJiraLinks(raw);
     if (!links.length) {
@@ -58,7 +58,9 @@ export const RH = {
     return html`${links.map(l => {
       const href = safeUrl(l.url);
       if (href) {
-        return html`<a class="jira-tag" href="${href}" target="_blank" rel="noopener" title="${href}"><span class="jira-tag-icon">🔗</span>${l.key}</a>`;
+        // E6 fix (codebase-03 audit §12 no-emoji) — `🔗` убран; используется
+        // CSS-decorator (`.jira-tag::before`) или просто текстовый key.
+        return html`<a class="jira-tag" href="${href}" target="_blank" rel="noopener" title="${href}">${l.key}</a>`;
       }
       return html`<span class="jira-tag" title="${l.key}">${l.key}</span>`;
     })}`;

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Призма — основной знак (восьмилучевая звезда)
+
+  Использует currentColor для работы с темами.
+  На тёмном фоне — fill:#FFFFFF, на светлом — fill:#1A1A22.
+
+  Конструкция:
+  - Главные лучи (верх/низ): длина 50 от центра, opacity 1.0
+  - Боковые лучи (слева/справа): длина 50 от центра, opacity 0.7
+  - Диагональные лучи (4 шт): длина 32 от центра, opacity 0.45
+  - Ядро: круг r=4
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Призма">
+  <title>Призма</title>
+  <g transform="translate(60,60)" fill="currentColor">
+    <!-- Главные лучи -->
+    <polygon points="0,-50 4,-4 0,0 -4,-4"/>
+    <polygon points="0,50 4,4 0,0 -4,4"/>
+    <!-- Боковые лучи -->
+    <polygon points="-50,0 -4,-4 0,0 -4,4" opacity="0.7"/>
+    <polygon points="50,0 4,-4 0,0 4,4" opacity="0.7"/>
+    <!-- Диагональные лучи -->
+    <polygon points="-32,-32 -3,-5 0,0 -5,-3" opacity="0.45"/>
+    <polygon points="32,-32 3,-5 0,0 5,-3" opacity="0.45"/>
+    <polygon points="-32,32 -3,5 0,0 -5,3" opacity="0.45"/>
+    <polygon points="32,32 3,5 0,0 5,3" opacity="0.45"/>
+    <!-- Ядро -->
+    <circle r="4"/>
+  </g>
+</svg>

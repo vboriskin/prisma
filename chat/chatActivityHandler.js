@@ -29,6 +29,35 @@ import {
   ACTIVITY_MODES, classifyActivityMode, buildActivitySystemPrompt,
   USER_TEMPLATES,
 } from './chatActivityPrompts.js';
+import { state } from '../state.js';
+
+// F9 fix (chat-04 audit, CLAUDE.md контракт #2) — identity-deterministic
+// resolver вместо substring-match по display name. Сначала пытаемся найти
+// employee в `state.employees[]` (источник identity), потом мапим к
+// participant по email/jiraAccountId/bbLogin/login. Display-name match —
+// последний fallback.
+function _resolveParticipantByIdentity(participants, displayName) {
+  if (!displayName) return null;
+  const dn = String(displayName).trim().toLowerCase();
+  // Step 1: find the employee record by name (case-insensitive).
+  const emp = (state?.employees || []).find(e => {
+    const fio = String(e.fio || e.name || '').trim().toLowerCase();
+    return fio === dn || fio.includes(dn) || dn.includes(fio);
+  });
+  if (emp) {
+    const ids = [emp.email, emp.jiraAccountId, emp.bitbucketLogin, emp.confluenceAccountId]
+      .filter(Boolean).map(s => String(s).toLowerCase());
+    // Step 2: participant whose key/email/login matches one of identity-keys.
+    const found = participants.find(p => {
+      const candidates = [p.key, p.email, p.login, p.bbLogin, p.jiraAccountId]
+        .filter(Boolean).map(s => String(s).toLowerCase());
+      return candidates.some(c => ids.includes(c));
+    });
+    if (found) return found;
+  }
+  // Fallback: display-name match (legacy).
+  return participants.find(p => String(p.label || '').toLowerCase() === dn) || null;
+}
 
 /* ────────────────────────────────────────────────────────────
    Data block builders — собирают строку с фактами для подстановки
@@ -162,7 +191,8 @@ function buildTeamSummaryDataBlock(participants, dateLabel) {
  */
 export function handleActivityQuery(text, deps = {}) {
   const pulseModel = deps.pulseModel || null;
-  const participants = pulseModel?.participants || [];
+  // PR-CH — отбрасываем `[X]`-уволенных перед матчем имён в чате.
+  const participants = (pulseModel?.participants || []).filter(p => !p.deactivated);
 
   const { intent } = classifyActivityIntent(text);
   if (!intent) return { intent: null };   // not an activity query
@@ -183,7 +213,7 @@ export function handleActivityQuery(text, deps = {}) {
       if (!employees.length) {
         return { intent, mode, needsClarification: 'Уточните, активность какого сотрудника вас интересует?' };
       }
-      const target = participants.find(p => p.label === employees[0]);
+      const target = _resolveParticipantByIdentity(participants, employees[0]);
       const dataBlock = buildNowDataBlock(target);
       const userPrompt = USER_TEMPLATES.whatNow({
         employee: employees[0], dataBlock,
@@ -197,7 +227,7 @@ export function handleActivityQuery(text, deps = {}) {
         return { intent, mode, needsClarification: 'Какого сотрудника?' };
       }
       const dateForDay = dateRel || 'today';
-      const target = participants.find(p => p.label === employees[0]);
+      const target = _resolveParticipantByIdentity(participants, employees[0]);
       const dataBlock = buildDayDataBlock(target, dateForDay);
       const userPrompt = USER_TEMPLATES.whatOnDay({
         employee: employees[0], date: periodLbl, dataBlock,
@@ -232,7 +262,7 @@ export function handleActivityQuery(text, deps = {}) {
     case ACTIVITY_INTENTS.FEED: {
       if (!employees.length) return { intent, mode, needsClarification: 'Чью ленту событий показать?' };
       const dateForFeed = dateRel || 'today';
-      const target = participants.find(p => p.label === employees[0]);
+      const target = _resolveParticipantByIdentity(participants, employees[0]);
       const dataBlock = buildFeedDataBlock(target, dateForFeed);
       const userPrompt = USER_TEMPLATES.eventFeed({ employee: employees[0], date: periodLbl, source: '', dataBlock });
       return { intent, mode, systemPrompt, userPrompt, dataBlock, params: { employees, date: dateForFeed } };
@@ -249,7 +279,7 @@ export function handleActivityQuery(text, deps = {}) {
     case ACTIVITY_INTENTS.GENERIC:
     default: {
       if (!employees.length) return { intent, mode, needsClarification: 'Активность какого сотрудника интересует и за какой день?' };
-      const target = participants.find(p => p.label === employees[0]);
+      const target = _resolveParticipantByIdentity(participants, employees[0]);
       const dataBlock = buildDayDataBlock(target, dateRel || 'today');
       const userPrompt = USER_TEMPLATES.whatOnDay({
         employee: employees[0], date: periodLbl, dataBlock,

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Призма — Иконка модуля: Ритуалы
+  1:1, ретро, standup. Две звезды в диалоге.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Ритуалы">
+  <title>Ритуалы</title>
+  <g transform="translate(12,12)" fill="currentColor">
+    <!-- Первая звезда (наклон влево) -->
+    <g transform="rotate(-8) translate(-1.2,0)">
+      <polygon points="0,-7.5 0.6,-0.6 0,0 -0.6,-0.6"/>
+      <polygon points="0,7.5 0.6,0.6 0,0 -0.6,0.6" opacity="0.5"/>
+      <polygon points="-7.5,0 -0.6,-0.6 0,0 -0.6,0.6" opacity="0.5"/>
+      <polygon points="7.5,0 0.6,-0.6 0,0 0.6,0.6" opacity="0.5"/>
+    </g>
+    <!-- Вторая звезда (зеркальная) -->
+    <g transform="rotate(8) translate(1.2,0)" opacity="0.55">
+      <polygon points="0,-7.5 0.6,-0.6 0,0 -0.6,-0.6"/>
+      <polygon points="0,7.5 0.6,0.6 0,0 -0.6,0.6" opacity="0.5"/>
+      <polygon points="-7.5,0 -0.6,-0.6 0,0 -0.6,0.6" opacity="0.5"/>
+      <polygon points="7.5,0 0.6,-0.6 0,0 0.6,0.6" opacity="0.5"/>
+    </g>
+    <circle r="0.7"/>
+  </g>
+</svg>

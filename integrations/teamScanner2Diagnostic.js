@@ -33,6 +33,7 @@
 import { Utils } from '../utils.js';
 import { loadSettingsRaw } from './integrationsStore.js';
 import { loadHistory, diagnostics as historyDiag } from './teamScanner2History.js';
+import { EmployeeFactory } from '../rowFactory.js';
 // V20 S8 #15 — single source of truth для классификации.
 import { classifyPerson } from './teamScanner2Classifier.js';
 // V20 S3.1 — re-use существующих verify-endpoints для probe matrix.
@@ -54,6 +55,27 @@ export function gatherDiagnosticState(ctx = {}) {
   const m = ctx.model || null;
   const settings = _safeLoadSettings();
   const projectKeys = (m?.projectKeys) || [];
+
+  // 2026-05-11 — Robustness fix: каждая секция оборачивается в _safeStep чтобы
+  // partial failure (TypeError в одной ветке) не зануляло весь export.
+  // Раньше: TypeError в jenkins-attribution → throw → весь return объект
+  // не строится → renderer падает или пишет null поверх state.
+  // Теперь: каждая секция возвращает fallback с error-field; export не теряется.
+  const _safeStep = (label, fn, fallback) => {
+    try { return fn(); }
+    catch (err) {
+      try {
+        const logger = (typeof console !== 'undefined' && console.warn)
+          ? console : null;
+        logger?.warn?.('[diag.gather_partial_fail]', { step: label, err: err?.message || String(err) });
+      } catch (_) { /* ignore */ }
+      // Включаем поле _err в fallback для post-mortem диагностики экспорта.
+      if (fallback && typeof fallback === 'object' && !Array.isArray(fallback)) {
+        return { ...fallback, _err: String(err?.message || err) };
+      }
+      return fallback;
+    }
+  };
 
   // ── 1. Header / environment ─────────────────────────────
   const header = {
@@ -112,8 +134,12 @@ export function gatherDiagnosticState(ctx = {}) {
 
   // ── 4. Per-source artifact counts ──────────────────────
   // Покажем СЫРЫЕ counts перед классификацией — отвечает на главный
-  // вопрос «BB вернул 0 коммитов или 0 после identity-фильтрации?».
-  const sources = _gatherSourceCounts(m, ctx.rawDiag);
+  // вопрос «BB вернул 0 коммутов или 0 после identity-фильтрации?».
+  // 2026-05-11 — _gatherSourceCounts получает settings для fallback'а
+  // zephyrConfigured (если rawDiag null — берём из settings).
+  const sources = _safeStep('sources',
+    () => _gatherSourceCounts(m, ctx.rawDiag, settings),
+    { jira: null, bitbucket: null, confluence: null, zephyr: null });
 
   // ── 5. Identity coverage ───────────────────────────────
   // Сколько % сотрудников имеют заполнен email / jiraAccountId /
@@ -123,41 +149,47 @@ export function gatherDiagnosticState(ctx = {}) {
   // V20 S4 fix — coverage считается через lookup в state.employees,
   // НЕ из p.bitbucketLogin (которого на participants не существует).
   // Раньше coverage по bb/cf всегда был 0% — баг в S2, нашли пилотом.
-  const identity = _gatherIdentityCoverage(m, ctx.employees || []);
+  const identity = _safeStep('identity',
+    () => _gatherIdentityCoverage(m, ctx.employees || []),
+    { teamSize: 0, coverage: {} });
 
   // ── 6. Threshold + window snapshot ─────────────────────
-  const thresholds = _gatherThresholds(m);
+  const thresholds = _safeStep('thresholds',
+    () => _gatherThresholds(m),
+    { defaultDwell: { codeReview: 8, qa: 16, inProgress: 48, todo: 72, default: 24 }, perTeam: null });
 
   // ── 7. Snapshot delta vs yesterday ─────────────────────
   // V20 S7 A6 — EMA + WoW + Z-score в diagnostic state. Помогают тимлиду
   // увидеть «устойчивые тренды» вместо daily noise.
-  const histArr = (typeof loadHistory === 'function') ? loadHistory(projectKeys, 30) : [];
-  const stopSeries     = histArr.map(h => h?.counts?.stop || 0);
-  const movingSeries   = histArr.map(h => h?.counts?.moving || 0);
-  const progressSeries = histArr.map(h => h?.sprintGoal?.aggregateProgress || 0);
-  const snapshot = {
-    prev: ctx.prevSnapshot ? {
-      ts:      ctx.prevSnapshot.ts,
-      ageHours: ctx.prevSnapshot.ts ? Math.round((Date.now() - ctx.prevSnapshot.ts) / 3600000) : null,
-      counts:  ctx.prevSnapshot.counts || {},
-    } : null,
-    current: m ? {
-      counts: _countsFromModel(m),
-      teamSize: (m.participants || []).length,
-    } : null,
-    history: historyDiag(projectKeys),
-    // V20 S7 A6 — trend signals (EMA, WoW, anomalies).
-    trends: {
-      stopEma:    _emaWoW(stopSeries),
-      movingEma:  _emaWoW(movingSeries),
-      progressEma: _emaWoW(progressSeries),
-      stopAnomaly:    _zScore(stopSeries),
-      movingAnomaly:  _zScore(movingSeries),
-    },
-  };
+  const snapshot = _safeStep('snapshot', () => {
+    const histArr = (typeof loadHistory === 'function') ? loadHistory(projectKeys, 30) : [];
+    const stopSeries     = histArr.map(h => h?.counts?.stop || 0);
+    const movingSeries   = histArr.map(h => h?.counts?.moving || 0);
+    const progressSeries = histArr.map(h => h?.sprintGoal?.aggregateProgress || 0);
+    return {
+      prev: ctx.prevSnapshot ? {
+        ts:      ctx.prevSnapshot.ts,
+        ageHours: ctx.prevSnapshot.ts ? Math.round((Date.now() - ctx.prevSnapshot.ts) / 3600000) : null,
+        counts:  ctx.prevSnapshot.counts || {},
+      } : null,
+      current: m ? {
+        counts: _countsFromModel(m),
+        teamSize: (m.participants || []).length,
+      } : null,
+      history: (typeof historyDiag === 'function') ? historyDiag(projectKeys) : null,
+      // V20 S7 A6 — trend signals (EMA, WoW, anomalies).
+      trends: {
+        stopEma:    _emaWoW(stopSeries),
+        movingEma:  _emaWoW(movingSeries),
+        progressEma: _emaWoW(progressSeries),
+        stopAnomaly:    _zScore(stopSeries),
+        movingAnomaly:  _zScore(movingSeries),
+      },
+    };
+  }, { prev: null, current: null, history: null, trends: {} });
 
   // ── 8. Pulse model summary (counts only, no PII) ───────
-  const modelSummary = m ? {
+  const modelSummary = _safeStep('modelSummary', () => m ? {
     participantsCount: (m.participants || []).length,
     activeSprintsCount: (m.summary?.activeSprints || []).length,
     spaceKeys: Object.keys(m.spaces || {}),
@@ -165,6 +197,11 @@ export function gatherDiagnosticState(ctx = {}) {
       totalOrphans:     m.scannerV2?.risks?.totalOrphans     || 0,
       totalOutOfSprint: m.scannerV2?.risks?.totalOutOfSprint || 0,
       outOfSprintRatio: m.scannerV2?.risks?.outOfSprintRatio || 0,
+      // PR-CJ — две разные метрики, не сравнимы напрямую:
+      // - totalOrphans: задачи без assignee (включая бэклог).
+      // - totalOutOfSprint / Ratio: timeline-events участников, чья задача
+      //   не в активном спринте (basis = unique keys, S6.2.3).
+      _help: 'totalOrphans считает unassigned issues (включая бэклог). totalOutOfSprint — timeline events участников по задачам вне активного спринта. Не сравнивайте напрямую.',
     },
     sprintGoal: {
       aggregateTotal:    m.scannerV2?.sprintGoal?.aggregateTotal    || 0,
@@ -172,15 +209,290 @@ export function gatherDiagnosticState(ctx = {}) {
       aggregatePace:     m.scannerV2?.sprintGoal?.aggregatePace     || 'no-data',
       sprintsCount:      (m.scannerV2?.sprintGoal?.sprints || []).length,
     },
-  } : null;
+  } : null, null);
 
   // ── 9. TZ skew (V20 S3.3) ──────────────────────────────
-  const tzSkew = computeTzSkew(m);
+  const tzSkew = _safeStep('tzSkew', () => computeTzSkew(m), { available: false });
 
   // ── 10. Service accounts filtered out (V20 S4) ────────
-  const botsFilteredOut = m?.botsFilteredOut || [];
+  const botsFilteredOut = _safeStep('botsFilteredOut', () => m?.botsFilteredOut || [], []);
 
-  return { header, config, connection, sources, identity, thresholds, snapshot, modelSummary, tzSkew, botsFilteredOut };
+  // ── 11. Per-employee BB/CF attribution details ─────────
+  // Помогает диагностировать «20 коммитов в сводной, но только 1 человек
+  // с меткой»: показывает для каждого сотрудника источник матча и counts.
+  const bbCfAttribution = _safeStep('bbCfAttribution',
+    () => _gatherBbCfAttribution(m, ctx.employees || []),
+    null);
+
+  // v22 — surface rawDiag целиком на top-level state, чтобы renderer мог
+  // показать tried-summary chips (cfTriedSummary / bbTriedSummary) и блок
+  // «RAW counts» в UI диагностики.
+  // 2026-05-11 — раньше rawDiag мутировался (statusHistogram присваивался
+  // прямо на input.bbTriedSummary), что:
+  //  · ломало повторные вызовы (frozen object → throw)
+  //  · сайд-эффект на caller'е (this._lastRawDiag меняется)
+  // Теперь — shallow-clone tried-summary'ев перед добавлением histogram'а.
+  let rawDiag = ctx.rawDiag || null;
+  let bbHist = { ok: 0, redirect: 0, auth: 0, throttle: 0, network: 0, server_err: 0, client_err: 0, unknown: 0 };
+  let cfHist = { ...bbHist };
+  let devHist = { ...bbHist };
+  try {
+    const _classifyStatus = (s) => {
+      const n = Number(s);
+      if (n === 0) return 'network';
+      if (n >= 200 && n < 300) return 'ok';
+      if (n >= 300 && n < 400) return 'redirect';
+      if (n === 401 || n === 403) return 'auth';
+      if (n === 429) return 'throttle';
+      if (n >= 500) return 'server_err';
+      if (n >= 400) return 'client_err';
+      return 'unknown';
+    };
+    const _buildHistogram = (byStatus) => {
+      const out = { ok: 0, redirect: 0, auth: 0, throttle: 0, network: 0, server_err: 0, client_err: 0, unknown: 0 };
+      if (!byStatus) return out;
+      for (const [k, v] of Object.entries(byStatus)) {
+        out[_classifyStatus(k)] += Number(v) || 0;
+      }
+      return out;
+    };
+    bbHist = _buildHistogram(rawDiag?.bbTriedSummary?.byStatus);
+    cfHist = _buildHistogram(rawDiag?.cfTriedSummary?.byStatus);
+    devHist = _buildHistogram(rawDiag?.devStatusTriedSummary?.byStatus);
+    // Clone-then-mutate — НЕ мутируем input. Раньше: ctx.rawDiag заражался
+    // statusHistogram'ом, при повторном gatherDiagnosticState() с тем же
+    // ctx — frozen-object error или дубликат.
+    if (rawDiag && typeof rawDiag === 'object') {
+      rawDiag = { ...rawDiag };
+      if (rawDiag.bbTriedSummary)        rawDiag.bbTriedSummary        = { ...rawDiag.bbTriedSummary,        statusHistogram: bbHist };
+      if (rawDiag.cfTriedSummary)        rawDiag.cfTriedSummary        = { ...rawDiag.cfTriedSummary,        statusHistogram: cfHist };
+      if (rawDiag.devStatusTriedSummary) rawDiag.devStatusTriedSummary = { ...rawDiag.devStatusTriedSummary, statusHistogram: devHist };
+    }
+  } catch (err) {
+    try { console?.warn?.('[diag.gather_partial_fail]', { step: 'statusHistogram', err: err?.message }); } catch (_) {}
+  }
+
+  // V21 O4 — alerts[] derived. Top-level массив проблем с severity + suggestion.
+  // UI должен показать первые 3 как баннер, остальные раскрыть по клику.
+  // 2026-05-11 — весь блок alerts+regressions обёрнут в outer try/catch:
+  // одна криво вычисленная alert не должна занулять весь export.
+  const alerts = [];
+  const regressions = [];
+  try {
+  const bbAuthorsCount = rawDiag?.bbAuthorsCount || 0;
+  // eslint-disable-next-line no-unused-vars
+  const cfAuthorsCount = rawDiag?.cfAuthorsCount || 0;
+  const cfMentionsUnattributed = rawDiag?.cfMentionsUnattributed || 0;
+  // BB attribution полная пропажа.
+  if (bbCfAttribution && bbCfAttribution.bbMatched === 0 && bbAuthorsCount > 0) {
+    alerts.push({
+      id: 'bb_attribution_zero',
+      severity: 'crit',
+      msg: `BB-attribution = 0 при ${bbAuthorsCount} authors в raw данных`,
+      suggestedFix: 'Проверьте identity-fields (bbLogin) у employees + не сломан ли последний deploy enrichment-логики',
+    });
+  }
+  // CF attribution полная пропажа.
+  if (bbCfAttribution && bbCfAttribution.cfMatched === 0 && cfMentionsUnattributed > 50) {
+    alerts.push({
+      id: 'cf_attribution_zero',
+      severity: 'crit',
+      msg: `CF-attribution = 0 при ${cfMentionsUnattributed} mentions в raw данных`,
+      suggestedFix: 'Запустите Identity Auto-Resolve (см. inline-banner в team-glance)',
+    });
+  }
+  // CF SSO suspicion (если ранее cfTriedSummary не имел suspectedSso, добавляем тут).
+  if (rawDiag?.cfTriedSummary?.suspectedSso) {
+    alerts.push({
+      id: 'cf_sso_intercept',
+      severity: 'warn',
+      msg: `Confluence: подозрение на SSO/прокси перехват (${rawDiag.cfTriedSummary.ssoSignal || 'redirect'})`,
+      suggestedFix: 'Проверьте network access к Confluence + действителен ли token',
+    });
+  }
+  // BB throttle.
+  if (bbHist.throttle > 0 && (bbHist.throttle / Math.max(1, bbHist.ok + bbHist.throttle)) > 0.3) {
+    alerts.push({
+      id: 'bb_rate_limited',
+      severity: 'warn',
+      msg: `Bitbucket throttle: ${bbHist.throttle}/${bbHist.throttle + bbHist.ok} (${Math.round(bbHist.throttle / (bbHist.throttle + bbHist.ok) * 100)}%) запросов 429`,
+      suggestedFix: 'BB-shared-gate уже есть; если повторяется — увеличить timeout или поговорить с BB-админом',
+    });
+  }
+  // Identity coverage low.
+  if (identity?.coverage?.cfId?.pct < 50 && identity.teamSize >= 10) {
+    alerts.push({
+      id: 'cf_identity_low',
+      severity: 'warn',
+      msg: `Confluence identity coverage ${identity.coverage.cfId.pct}% — у ${identity.teamSize - identity.coverage.cfId.count} из ${identity.teamSize} нет cfAccountId`,
+      suggestedFix: 'Запустите bulk Auto-Resolve в team-glance Сканнера',
+    });
+  }
+  if (identity?.coverage?.bbLogin?.pct < 60 && identity.teamSize >= 10) {
+    alerts.push({
+      id: 'bb_identity_low',
+      severity: 'warn',
+      msg: `Bitbucket identity coverage ${identity.coverage.bbLogin.pct}%`,
+      suggestedFix: 'Запустите bulk Auto-Resolve в team-glance Сканнера',
+    });
+  }
+  // Zephyr scanned but zero matched.
+  if (rawDiag?.zephyrConfigured && (rawDiag?.zephyrTestCasesScanned || 0) > 0
+      && sources?.zephyr && (sources.zephyr.testsCreated || 0) === 0 && (sources.zephyr.testsExecuted || 0) === 0) {
+    alerts.push({
+      id: 'zephyr_attribution_zero',
+      severity: 'crit',
+      msg: `Zephyr: scanned ${rawDiag.zephyrTestCasesScanned} test cases, ${rawDiag.zephyrAuthorsCount || 0} authors, но 0 attributed`,
+      suggestedFix: 'Проверьте формат jiraAccountId в employees vs Zephyr userKey (JIRAUSER-номер vs username)',
+    });
+  }
+  // Big metrics timeouts.
+  if (rawDiag?.bigMetricsTimeouts && Object.keys(rawDiag.bigMetricsTimeouts).length > 0) {
+    alerts.push({
+      id: 'metrics_timeout',
+      severity: 'warn',
+      msg: `Метрики не сосчитаны (timeout): ${Object.keys(rawDiag.bigMetricsTimeouts).join(', ')}`,
+      suggestedFix: 'Увеличить timeout (env PULSE_PK_TIMEOUT_MS) или раздробить query',
+    });
+  }
+
+  // V21 O3 — regressions vs prev session-snapshot из localStorage.
+  // Хранится client-side, не в state → читаем здесь, сравниваем ключевые
+  // метрики, surface если drop > 30% (warn) или > 80% (crit).
+  try {
+    const prevRaw = (typeof localStorage !== 'undefined') ? localStorage.getItem('q2_last_diag_snapshot') : null;
+    if (prevRaw) {
+      const prev = JSON.parse(prevRaw);
+      const checkDrop = (metric, currVal, prevVal, threshold = 0.3) => {
+        if (typeof currVal !== 'number' || typeof prevVal !== 'number' || prevVal === 0) return;
+        const drop = (prevVal - currVal) / prevVal;
+        if (drop > threshold) {
+          regressions.push({
+            metric,
+            from: prevVal, to: currVal,
+            ratio: -Math.round(drop * 100) / 100,
+            severity: drop > 0.8 ? 'crit' : 'warn',
+          });
+        }
+      };
+      checkDrop('bbCfAttribution.bbMatched', bbCfAttribution?.bbMatched ?? 0, prev?.bbMatched ?? 0);
+      checkDrop('bbCfAttribution.cfMatched', bbCfAttribution?.cfMatched ?? 0, prev?.cfMatched ?? 0);
+      checkDrop('sources.bitbucket.totalItems', sources?.bitbucket?.totalItems ?? 0, prev?.bbTotal ?? 0);
+      checkDrop('sources.confluence.totalItems', sources?.confluence?.totalItems ?? 0, prev?.cfTotal ?? 0);
+      checkDrop('sources.zephyr.testsCreated', sources?.zephyr?.testsCreated ?? 0, prev?.zephyrCreated ?? 0);
+      checkDrop('identity.coverage.bbLogin.pct', identity?.coverage?.bbLogin?.pct ?? 0, prev?.bbLoginPct ?? 0);
+    }
+    // Save current snapshot for next time.
+    if (typeof localStorage !== 'undefined') {
+      const snap = {
+        at: Date.now(),
+        bbMatched: bbCfAttribution?.bbMatched,
+        cfMatched: bbCfAttribution?.cfMatched,
+        bbTotal: sources?.bitbucket?.totalItems,
+        cfTotal: sources?.confluence?.totalItems,
+        zephyrCreated: sources?.zephyr?.testsCreated,
+        bbLoginPct: identity?.coverage?.bbLogin?.pct,
+      };
+      try { localStorage.setItem('q2_last_diag_snapshot', JSON.stringify(snap)); } catch (_) {}
+    }
+  } catch (_) {}
+
+  // Convert regressions to alerts.
+  for (const r of regressions) {
+    alerts.push({
+      id: `regression_${r.metric.replace(/\W+/g, '_')}`,
+      severity: r.severity,
+      msg: `Регрессия ${r.metric}: ${r.from} → ${r.to} (${r.ratio > 0 ? '+' : ''}${Math.round(r.ratio * 100)}%)`,
+      suggestedFix: 'Сравните с предыдущим diagnostic — возможно недавний deploy сломал что-то',
+    });
+  }
+  } catch (err) {
+    try { console?.warn?.('[diag.gather_partial_fail]', { step: 'alerts/regressions', err: err?.message }); } catch (_) {}
+  }
+
+  const health = {
+    alerts,
+    regressions,
+    statusHistograms: { bb: bbHist, cf: cfHist, devStatus: devHist },
+  };
+
+  // Phase-1 Jenkins MVP (2026-05-10) — surface jenkins snapshot для UI-секции.
+  // Если Jenkins не настроен / unreachable → объект с error: '...' (renderer
+  // покажет «Подключено: нет»).
+  // 2026-05-11 — when m.jenkins absent in model (fetch не вызывался / runtime
+  // error в jenkins_attach), всё равно пишем поле jenkins:{error:'not-fetched'}
+  // в диагностику. Без этого пилот видит «нет ключа jenkins в JSON» и не
+  // может отличить «не настроено» от «runtime crash».
+  // Весь блок — в _safeStep, чтобы TypeError в любом optional-chain
+  // (например на нестандартной форме rawJ.perAuthor) не зануляло export.
+  let jenkinsAttributed = 0;
+  const jenkins = _safeStep('jenkins', () => {
+    const rawJ = m?.jenkins || null;
+    if (rawJ && rawJ.perAuthor && typeof rawJ.perAuthor === 'object' && Array.isArray(m?.participants)) {
+      const norm = (s) => String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+      const knownAuthors = new Set(Object.keys(rawJ.perAuthor).map(norm));
+      for (const p of m.participants) {
+        const cands = [p?.label, p?.fullName, p?.displayName, p?.email].filter(Boolean);
+        if (cands.some(c => knownAuthors.has(norm(c)))) jenkinsAttributed++;
+      }
+    }
+    return rawJ ? {
+      folder:                rawJ.folder || null,
+      fetchedAt:             rawJ.fetchedAt || null,
+      scannedJobs:           rawJ.scannedJobs || 0,
+      totalJobs:             rawJ.totalJobs || 0,
+      summary:               rawJ.summary || {},
+      errors:                Array.isArray(rawJ.errors) ? rawJ.errors.slice(0, 10) : [],
+      error:                 rawJ.error || null,
+      perAuthorCount:        rawJ.perAuthor && typeof rawJ.perAuthor === 'object' ? Object.keys(rawJ.perAuthor).length : 0,
+      perJobCount:           Array.isArray(rawJ.perJob) ? rawJ.perJob.length : 0,
+      authorAttributedCount: Array.isArray(m?.participants)
+        ? m.participants.filter(p => (p.jenkinsBuilds48h || 0) > 0).length
+        : 0,
+    } : { error: 'not-fetched' };
+  }, { error: 'export-failed' });
+
+  // 2026-05-11 — bulk-resolve report from last Auto-Resolve run.
+  // Contains: aggregate counts (client-side), per-integration breakdown
+  // (matched/notFound/ambiguous/apiError/...) from server, AND sampled
+  // failures (max 10 per integration) with hashed keys for diagnostics.
+  // Null if Auto-Resolve wasn't run in this session.
+  const resolveReport = _safeStep('resolveReport', () => {
+    const rr = ctx.resolveReport;
+    if (!rr) return null;
+    const server = rr.server || {};
+    const _mapFailures = (arr) => (Array.isArray(arr) ? arr : []).map(s => ({
+      keyHash:     _shortHash(s.key || ''),
+      reason:      s.reason || null,
+      error:       s.error || null,
+      matchedBy:   s.matchedBy || null,
+      via:         s.via || null,
+      matchedStep: s.matchedStep || null,
+    }));
+    return {
+      ts:           rr.ts || null,
+      ageMs:        rr.ts ? (Date.now() - rr.ts) : null,
+      appliedCount: rr.appliedCount || 0,
+      client:       rr.client || null,
+      totals: {
+        total:           server.total ?? null,
+        bbResolved:      server.bbResolved ?? null,
+        cfResolved:      server.cfResolved ?? null,
+        jenkinsResolved: server.jenkinsResolved ?? null,
+        noEmail:         server.noEmail ?? null,
+        cfFallbackBySearch:  server.cfFallbackBySearch ?? null,
+        cfFallbackByBbLogin: server.cfFallbackByBbLogin ?? null,
+      },
+      bbBreakdown:      server.bbBreakdown      || null,
+      cfBreakdown:      server.cfBreakdown      || null,
+      jenkinsBreakdown: server.jenkinsBreakdown || null,
+      bbFailures:      _mapFailures(server.bbFailureSamples),
+      cfFailures:      _mapFailures(server.cfFailureSamples),
+      jenkinsFailures: _mapFailures(server.jenkinsFailureSamples),
+    };
+  }, null);
+
+  return { header, config, connection, sources, identity, thresholds, snapshot, modelSummary, tzSkew, botsFilteredOut, bbCfAttribution, rawDiag, resolveReport, health, jenkins, jenkinsAttributed };
 }
 
 /**
@@ -433,19 +745,34 @@ export function computeTzSkew(model) {
   if (!Number.isFinite(serverTs)) return { available: false };
   const browserNow = Date.now();
   const ageMs = browserNow - serverTs;
-  // ageMs ожидаемо положительный (server timestamp в прошлом).
-  // Skew = разница между ожидаемым возрастом и реальным "сейчас".
-  // Если model только что получен (latencyMs < 30s) — skew должен быть
-  // меньше latency. Если skew >> latency — clock drift.
-  const skewSeconds = Math.round(ageMs / 1000);
   const browserOffsetMin = (new Date()).getTimezoneOffset();
+  // PR-CJ — старый расчёт `skewSeconds = ageMs / 1000` ошибочно равнял возраст
+  // кэша (32 мин) и реальное расхождение clock'ов. Если кэш старше 60 секунд
+  // — расхождение нечем мерить (нужен freshly-fetched server-time). В этом
+  // случае возвращаем cacheAgeMs отдельно, а skew — unmeasurable.
+  const FRESH_THRESHOLD_MS = 60_000;
+  if (ageMs > FRESH_THRESHOLD_MS) {
+    return {
+      available: true,
+      unmeasurable: true,
+      reason: 'cache старше 60 сек — нужен свежий fetch для замера clock-skew',
+      serverTs:        model.fetchedAt,
+      browserNow:      new Date(browserNow).toISOString(),
+      cacheAgeMs:      ageMs,
+      browserTzOffsetMin: browserOffsetMin,
+      browserTzLabel: _formatTzOffset(browserOffsetMin),
+    };
+  }
+  // Кэш свежий — skew ≈ ageMs (latency сети + clock drift).
+  // Если ageMs < 60 сек, превышение обычной latency (~10-20s) указывает на drift.
+  const skewSeconds = Math.round(ageMs / 1000);
   return {
     available: true,
     serverTs:        model.fetchedAt,
     browserNow:      new Date(browserNow).toISOString(),
-    ageMs,
+    cacheAgeMs:      ageMs,
     skewSeconds,
-    skewSuspicious:  Math.abs(skewSeconds) > 300,        // > 5 мин
+    skewSuspicious:  Math.abs(skewSeconds) > 60,
     browserTzOffsetMin: browserOffsetMin,
     browserTzLabel: _formatTzOffset(browserOffsetMin),
   };
@@ -547,8 +874,16 @@ function _zScore(series) {
 }
 
 function _emaWoW(series, alpha = 0.3) {
+  // V21 trends-guard — null'и для WoW когда история < 8 точек.
+  // Параллель с computeEmaWoW в teamScanner2Enrichment.js.
   if (!Array.isArray(series) || series.length < 8) {
-    return { emaToday: series?.[series.length - 1] ?? 0, emaLastWeek: 0, wowDelta: 0 };
+    return {
+      emaToday: series?.[series.length - 1] ?? 0,
+      emaLastWeek: null,
+      wowDelta: null,
+      insufficientHistory: true,
+      pointsAvailable: series?.length ?? 0,
+    };
   }
   const ema = [series[0]];
   for (let i = 1; i < series.length; i++) ema[i] = alpha * series[i] + (1 - alpha) * ema[i - 1];
@@ -576,10 +911,113 @@ function _splitCsv(s) {
   return String(s || '').split(/[,\s]+/).filter(Boolean);
 }
 
-function _gatherSourceCounts(m, rawDiag) {
+/**
+ * Per-employee BB/CF attribution summary — помогает диагностировать
+ * «много коммитов в сводной, но почти никто не attributed».
+ * Имена не включаются в safe-mode (только индекс + ключ-хеш).
+ */
+function _gatherBbCfAttribution(m, employees) {
+  if (!m) return null;
+  const ps = m.participants || [];
+  if (!ps.length) return { total: 0, bbMatched: 0, cfMatched: 0, unmatched: [], rows: [], blockedExcluded: 0, ghostExcluded: 0 };
+
+  // Заблокированные [Х]/[X] исключаются из активных employees при матчинге —
+  // их данные не должны портить attribution-метрики (см. memory feedback).
+  // R5: используем EmployeeFactory.detectBlocked — единый источник regex'а.
+  const _isBlocked = (e) => !!e?.isBlocked || EmployeeFactory.detectBlocked(e || {});
+  // V21 ghost-filter (diagnostic 2026-05-07: 6 призраков label==key, без
+  // identity-полей). Ghosts тоже исключаются из активного registry —
+  // они auto-created, не настоящие сотрудники.
+  const _isGhost = (e) => EmployeeFactory.detectGhost(e || {});
+  // 2026-05-11 — single-pass classify вместо 3× filter. Экономит ~30%
+  // CPU на 100-person team'ах (modal-open hot path).
+  const blockedEmployees = [];
+  const ghostEmployees = [];
+  const activeEmployees = [];
+  for (const e of (employees || [])) {
+    if (_isBlocked(e)) blockedEmployees.push(e);
+    else if (_isGhost(e)) ghostEmployees.push(e);
+    else activeEmployees.push(e);
+  }
+  const blockedExcluded  = blockedEmployees.length;
+  const ghostExcluded    = ghostEmployees.length;
+
+  const empByEmail  = new Map();
+  const empByJiraId = new Map();
+  for (const e of activeEmployees) {
+    if (e.email)         empByEmail .set(String(e.email).toLowerCase().trim(), e);
+    if (e.jiraAccountId) empByJiraId.set(String(e.jiraAccountId).toLowerCase().trim(), e);
+  }
+  const findEmp = (p) => {
+    const em = String(p.email || '').toLowerCase().trim();
+    if (em && empByEmail.has(em))  return empByEmail.get(em);
+    const ji = String(p.jiraAccountId || '').toLowerCase().trim();
+    if (ji && empByJiraId.has(ji)) return empByJiraId.get(ji);
+    return null;
+  };
+
+  let bbMatched = 0, cfMatched = 0;
+  const rows = [];
+  for (const p of ps) {
+    const emp = findEmp(p);
+    const bbOk  = (p.badges?.commits48h || 0) > 0 || (p.badges?.pr48h || 0) > 0;
+    const cfOk  = (p.badges?.conf48h || 0) > 0;
+    if (bbOk) bbMatched++;
+    if (cfOk) cfMatched++;
+    rows.push({
+      // Имя не включаем — только anonymised key для safe export.
+      keyHash:       _shortHash(p.key || ''),
+      inRegistry:    !!emp,
+      hasBbLogin:    !!(emp?.bitbucketLogin),
+      hasCfId:       !!(emp?.confluenceAccountId),
+      hasEmail:      !!(p.email),
+      bbSource:      p.bbSource || null,   // 'repo'|'devStatus'|'merged'|null
+      bbCommits48h:  p.badges?.commits48h || 0,
+      bbPrs48h:      p.badges?.pr48h || 0,
+      bbItemsCount:  (p.bbItems || []).length,
+      cfEdits48h:    p.badges?.conf48h || 0,
+      cfItemsCount:  (p.cfItems || []).length,
+      // «Коммиты без транзишенов» anti-pattern: badge > 0 but items empty.
+      bbBadgeItemsMismatch: (p.badges?.commits48h || 0) > 0 && (p.bbItems || []).length === 0,
+    });
+  }
+
+  const mismatches = rows.filter(r => r.bbBadgeItemsMismatch);
+  const unmatched  = rows.filter(r => !r.inRegistry);
+  return {
+    total:       ps.length,
+    bbMatched,
+    cfMatched,
+    mismatchCount: mismatches.length,
+    unmatchedRegistryCount: unmatched.length,
+    blockedExcluded,
+    ghostExcluded,
+    rows,
+  };
+}
+
+function _shortHash(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(16).slice(0, 6);
+}
+
+function _gatherSourceCounts(m, rawDiag, settings) {
   if (!m && !rawDiag) {
     return { jira: null, bitbucket: null, confluence: null, zephyr: null };
   }
+  // 2026-05-11 — fallback для zephyr.configured если rawDiag не пришёл.
+  // settings.zephyrEnabled / settings.zephyrApiUrl / settings.zephyrProjectKey
+  // указывают что toggle настроен пользователем. Раньше при rawDiag=null
+  // показывалось configured=false даже когда фича включена в settings.
+  const _zephyrSettingsConfigured = !!(
+    settings && (
+      settings.zephyrEnabled ||
+      settings.zephyrApiUrl ||
+      settings.zephyrProjectKey ||
+      settings.zephyrToken
+    )
+  );
   // Counts из enriched model'и — они уже идентичны тому что показано в UI.
   let jiraIssues = 0, jiraTimelineEvents = 0, jiraComments = 0;
   let bbItems = 0, bbCommits = 0, bbPrs = 0, bbReviews = 0;
@@ -602,6 +1040,14 @@ function _gatherSourceCounts(m, rawDiag) {
     zephyrExecuted += (p.zephyrTestsExecutedRecent || []).length;
   }
 
+  // PR-CJ — BB/CF summary mismatch с rawDiag: после `[X]`-фильтра + identity
+  // mismatch'ей model'ные counts могут быть < raw fetched. Показываем оба
+  // числа + разницу, чтобы тимлид понимал «BB не пуст, но 16 items потерялось
+  // на attribution-этапе».
+  const filteredOut = {
+    bitbucket: rawDiag?.bbItemsTotal != null ? Math.max(0, rawDiag.bbItemsTotal - bbItems) : null,
+    confluence: rawDiag?.cfItemsTotal != null ? Math.max(0, rawDiag.cfItemsTotal - cfItems) : null,
+  };
   return {
     jira: {
       issuesAssignedNow: jiraIssues,
@@ -614,13 +1060,91 @@ function _gatherSourceCounts(m, rawDiag) {
       commits:    bbCommits,
       prs:        bbPrs,
       reviews:    bbReviews,
+      rawFetched: rawDiag?.bbItemsTotal ?? null,
+      filteredOutOrUnattributed: filteredOut.bitbucket,
+      // PR-CV — диагностика reviewer'ов: пустой overload объясняется через
+      // эти поля. См. server.js:reviewerStats.
+      reviewerStats: m?.bitbucket?.reviewerStats ? {
+        formalAssignmentsCount: m.bitbucket.reviewerStats.formalAssignmentsCount ?? null,
+        activityReviewersCount: m.bitbucket.reviewerStats.activityReviewersCount ?? null,
+        overloadCount: (m.bitbucket.reviewerStats.overload || []).length,
+        idleCount:     (m.bitbucket.reviewerStats.idle || []).length,
+        note:          m.bitbucket.reviewerStats.note ?? null,
+      } : null,
     },
     confluence: {
       totalItems: cfItems,
+      rawFetched: rawDiag?.cfItemsTotal ?? null,
+      filteredOutOrUnattributed: filteredOut.confluence,
+    },
+    // 2026-05-11 — Jenkins block. Раньше `sources.jenkins` не существовал в
+    // экспорте — silent-failure диагностировался только через жалобы
+    // пользователя. Теперь поднимаем:
+    //   configured · jobsTotal · jobsScanned · authorsCount · builds7d
+    //   failures7d · ssoRedirects · elapsedMs · errors (scope-level) ·
+    //   triedSummary (per-HTTP histogram + lastErrors) · error · folder
+    jenkins: {
+      configured:   !!rawDiag?.jenkinsConfigured,
+      folder:       rawDiag?.jenkinsFolder ?? null,
+      jobsTotal:    rawDiag?.jenkinsJobsTotal ?? null,
+      jobsScanned:  rawDiag?.jenkinsJobsScanned ?? null,
+      authorsCount: rawDiag?.jenkinsAuthorsCount ?? null,
+      builds7d:     rawDiag?.jenkinsBuilds7d ?? null,
+      failures7d:   rawDiag?.jenkinsFailures7d ?? null,
+      ssoRedirects: rawDiag?.jenkinsSsoRedirects ?? null,
+      elapsedMs:    rawDiag?.jenkinsElapsedMs ?? null,
+      error:        rawDiag?.jenkinsLastError ?? null,
+      // 2026-05-11 — clone arrays/objects to avoid `[Circular]` markers
+      // in rawDiag.jenkinsErrors / rawDiag.jenkinsTriedSummary when the
+      // serializer sees the same reference twice (once here, once in rawDiag).
+      errors:       Array.isArray(rawDiag?.jenkinsErrors) ? rawDiag.jenkinsErrors.map(e => ({ ...e })) : [],
+      triedSummary: rawDiag?.jenkinsTriedSummary ? JSON.parse(JSON.stringify(rawDiag.jenkinsTriedSummary)) : null,
+      warning: (() => {
+        if (!rawDiag?.jenkinsConfigured) return 'Jenkins не настроен (нет URL/token в Настройках → Jenkins).';
+        if (rawDiag?.jenkinsLastError) return `Jenkins scan error: ${rawDiag.jenkinsLastError}`;
+        if ((rawDiag?.jenkinsSsoRedirects || 0) >= 2) return 'Подозрение на SSO redirect — токен может быть cookie, а не API token.';
+        if ((rawDiag?.jenkinsJobsTotal || 0) === 0) return 'Jenkins вернул 0 jobs — проверьте folder в Настройках (текущий: ' + (rawDiag?.jenkinsFolder || 'пусто') + ') и права токена.';
+        if ((rawDiag?.jenkinsAuthorsCount || 0) === 0 && (rawDiag?.jenkinsBuilds7d || 0) > 0) return 'Jenkins вернул builds но 0 авторов — Auto-Resolve identity не привязал jenkinsUserName к employees.';
+        return null;
+      })(),
     },
     zephyr: {
       testsCreated:  zephyrCreated,
       testsExecuted: zephyrExecuted,
+      // 2026-05-11 — surface raw scan totals at top-level. testsCreated/Executed
+      // считают только 72h-активность (атрибутируется участникам), но это вводит
+      // в заблуждение когда сканирование само по себе работает (3487 кейсов
+      // найдено), просто за 3 дня не было новых. Лифтим из rawDiag.
+      testCasesScannedTotal: rawDiag?.zephyrTestCasesScanned ?? null,
+      testRunsScannedTotal:  rawDiag?.zephyrTestRunsScanned ?? null,
+      authorsCount:          rawDiag?.zephyrAuthorsCount ?? null,
+      projectsResolved:      rawDiag?.zephyrProjectsResolved ?? null,
+      mode:                  rawDiag?.zephyrMode ?? null,
+      // 2026-05-11 — fallback на settings если rawDiag отсутствует. Раньше
+      // configured=false показывалось когда rawDiag=null даже при включенном
+      // toggle.
+      configured: !!(rawDiag?.zephyrConfigured ?? _zephyrSettingsConfigured),
+      // D2: surface `raw.zephyr.error` (`all-zql-variants-failed (statuses: 403)` и т.п.)
+      // в человеческое сообщение вместо generic warning. Если есть точная причина —
+      // показываем её, иначе fallback на старую подсказку.
+      error: rawDiag?.zephyrTriedSummary?.error || null,
+      warning: (() => {
+        const err = rawDiag?.zephyrTriedSummary?.error;
+        if (err) {
+          if (/403/.test(err)) return 'Zephyr вернул 403 на все запросы — у токена нет прав на Zephyr API. Запросите у Jira-админа: какой плагин (Squad/Scale/Tests DC) установлен и какая роль нужна (Test Browser / Tests:View).';
+          if (/404/.test(err)) return 'Zephyr endpoint вернул 404 — установленный плагин использует другой path (`/rest/atm/1.0/...` для Scale vs `/rest/tests/1.0/...` для Tests DC). Уточните у админа.';
+          if (/all-zql-variants-failed/.test(err)) return `Zephyr: ${err}. Все 3 query-варианта упали — endpoint доступен, но ZQL отвергается. Возможно нужен другой синтаксис или scope токена.`;
+          return `Zephyr error: ${err}`;
+        }
+        // 2026-05-11 — fix false-positive warning: scan может работать (3487
+        // кейсов отсканировано), просто за 72h не было новых created/executed.
+        // Warning'уем только если scan тоже пустой.
+        const scanEmpty = !rawDiag?.zephyrTestCasesScanned && !rawDiag?.zephyrTestRunsScanned;
+        if (rawDiag?.zephyrConfigured && scanEmpty && zephyrCreated === 0 && zephyrExecuted === 0) {
+          return 'Zephyr настроен но 0 тест-кейсов / запусков отсканировано — проверьте проект-ID, права токена, корректность Zephyr Squad/Scale endpoint.';
+        }
+        return null;
+      })(),
     },
     rawDiag: rawDiag || null,    // optional: per-pk fetch counts если orchestrator capture'ил
   };
@@ -632,12 +1156,18 @@ function _gatherIdentityCoverage(m, employees) {
   const total = ps.length;
   if (!total) return { teamSize: 0, coverage: {} };
 
+  // Заблокированные [Х]/[X] исключаются — иначе уволенные люди без bbLogin/cfId
+  // портят метрики «coverage» (появляются как «у 14 человек нет bbLogin»,
+  // тогда как реально 8 из них — мёртвые души).
+  // R5: используем EmployeeFactory.detectBlocked — единый источник regex'а.
+  const _isBlocked = (e) => !!e?.isBlocked || EmployeeFactory.detectBlocked(e || {});
+  const activeEmployees = (employees || []).filter(e => !_isBlocked(e));
+
   // V20 S4 fix — Lookup из state.employees. participant.bitbucketLogin /
   // confluenceAccountId никогда не устанавливаются — поля живут в реестре.
-  // Сначала строим maps; потом для каждого participant находим emp.
   const empByEmail  = new Map();
   const empByJiraId = new Map();
-  for (const e of (employees || [])) {
+  for (const e of activeEmployees) {
     if (e.email)         empByEmail .set(String(e.email).toLowerCase().trim(), e);
     if (e.jiraAccountId) empByJiraId.set(String(e.jiraAccountId).toLowerCase().trim(), e);
   }
@@ -649,23 +1179,26 @@ function _gatherIdentityCoverage(m, employees) {
     return null;
   };
 
-  let withEmail = 0, withJiraId = 0, withBbLogin = 0, withCfId = 0;
+  let withEmail = 0, withJiraId = 0, withBbLogin = 0, withCfId = 0, withJkName = 0;
   const incomplete = [];
   for (const p of ps) {
     const emp = findEmp(p);
     // email/jiraId — берём напрямую с participant (Jira authoritative source).
-    // bbLogin/cfId — только из реестра (V17.2 I1c).
+    // bbLogin/cfId/jkName — только из реестра (V17.2 I1c).
+    // Phase-2 (2026-05-10) — jenkinsUserName добавлен как 5-й identity-канал.
     const has = {
       email:   !!p.email,
       jiraId:  !!p.jiraAccountId,
       bbLogin: !!(emp?.bitbucketLogin),
       cfId:    !!(emp?.confluenceAccountId),
+      jkName:  !!(emp?.jenkinsUserName),
     };
     if (has.email)   withEmail++;
     if (has.jiraId)  withJiraId++;
     if (has.bbLogin) withBbLogin++;
     if (has.cfId)    withCfId++;
-    if (!(has.email && has.jiraId && has.bbLogin && has.cfId)) {
+    if (has.jkName)  withJkName++;
+    if (!(has.email && has.jiraId && has.bbLogin && has.cfId && has.jkName)) {
       incomplete.push({
         label: p.label || p.key || '',     // potentially PII — scrub при export
         key:   p.key || '',
@@ -674,6 +1207,7 @@ function _gatherIdentityCoverage(m, employees) {
           !has.jiraId  && 'jiraAccountId',
           !has.bbLogin && 'bitbucketLogin',
           !has.cfId    && 'confluenceAccountId',
+          !has.jkName  && 'jenkinsUserName',
         ].filter(Boolean),
         // V20 S4 — вспом info: «есть ли в реестре вообще»
         inRegistry: !!emp,
@@ -688,6 +1222,7 @@ function _gatherIdentityCoverage(m, employees) {
       jiraId:  { count: withJiraId,  pct: pct(withJiraId) },
       bbLogin: { count: withBbLogin, pct: pct(withBbLogin) },
       cfId:    { count: withCfId,    pct: pct(withCfId) },
+      jkName:  { count: withJkName,  pct: pct(withJkName) },
     },
     incomplete,
   };
@@ -700,7 +1235,7 @@ function _gatherThresholds(m) {
   const DEFAULT_DWELL = { codeReview: 8, qa: 16, inProgress: 48, todo: 72, default: 24 };
   return {
     defaultDwell:  DEFAULT_DWELL,
-    perTeam: m?.scannerV2?._teamThresholds || null,
+    perTeam: m?.scannerV2?.teamThresholds || null,
   };
 }
 
@@ -727,6 +1262,15 @@ function _scrubInPlace(obj, salt) {
   }
   for (const k of Object.keys(obj)) {
     const v = obj[k];
+    // QD9: arrays of strings под PII-ключами (bbAuthorSlugs, authorSlugs).
+    // Scrub'ит каждую строку через hashAccountId. Раньше эти массивы
+    // обходились в Array.isArray-ветке, но строковые элементы не
+    // matched потому что recursive call с typeof 'string' возвращался
+    // на line 870. Теперь явная обработка.
+    if (Array.isArray(v) && /^(bbAuthorSlugs|cfAuthorSlugs|authorSlugs|slugs)$/i.test(k)) {
+      obj[k] = v.map(s => typeof s === 'string' ? Utils.hashAccountId(s, salt) : s);
+      continue;
+    }
     if (typeof v === 'string') {
       // Field-name-driven scrub.
       // V20 S6.2.5 — расширен regex: добавлены username, userKey, key

@@ -10,13 +10,15 @@
  */
 
 const js = require('@eslint/js');
-const noUnescapedInnerhtml = require('./eslint-rules/no-unescaped-innerhtml.js');
-const cssClassPrefix       = require('./eslint-rules/css-class-prefix.js');
+const noUnescapedInnerhtml   = require('./eslint-rules/no-unescaped-innerhtml.js');
+const cssClassPrefix         = require('./eslint-rules/css-class-prefix.js');
+const noDirectWindowService  = require('./eslint-rules/no-direct-window-service.js');
 
 const localPlugin = {
   rules: {
-    'no-unescaped-innerhtml': noUnescapedInnerhtml,
-    'css-class-prefix':       cssClassPrefix,
+    'no-unescaped-innerhtml':    noUnescapedInnerhtml,
+    'css-class-prefix':          cssClassPrefix,
+    'no-direct-window-service':  noDirectWindowService,
   },
 };
 
@@ -137,6 +139,13 @@ module.exports = [
       // to error per-module after each is cleaned up. See the OWNERSHIPS
       // map above for which prefix each file is allowed to use.
       'local/css-class-prefix':       ['warn', { ownerships: CSS_OWNERSHIPS }],
+
+      // AUDIT_TECH кр.13 — forbid direct window.<RegisteredService> access.
+      // Phase 6 promoted to ERROR after 22 → 0 hits cleanup (Toast/Nav/App
+      // mixed-access in dataStore/dashboard/app переведены на Services.X
+      // — proxy fallback гарантирует identical semantics).
+      // See docs/window-globals-migration.md.
+      'local/no-direct-window-service': 'error',
     },
   },
   // Note: in earlier iterations we promoted audit-#1 files to "error", but the

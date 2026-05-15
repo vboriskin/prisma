@@ -27,6 +27,24 @@ const LS_KEY = 'q2_scanner2_team_config';
 // здесь re-export для consumers которым удобно из Config (UI / tests).
 export { METRIC_THRESHOLDS } from './teamScanner2Enrichment.js';
 
+/**
+ * AUDIT_SCANNER #22 — Hygiene thresholds для sprint-health hygiene chips.
+ *
+ * Использовалось inline в renderer (>0 — показать chip). Вынесено в config,
+ * чтобы PM/TL могли калибровать sensitivity без правки renderer-кода.
+ *
+ * Семантика: chip показывается, если соответствующий счётчик СТРОГО БОЛЬШЕ
+ * порога. Т.е. `noAssignee = 0` означает «показывать любой ненулевой случай».
+ */
+export const HYGIENE_THRESHOLDS = {
+  noAssignee: 0,            // больше N тикетов без assignee = warning
+  noPriority: 5,
+  noDescription: 3,
+  noEpic: 5,
+  inProgressNoCommitDays: 5,
+  inReviewDwellDays: 3,
+};
+
 /** Pre-defined preset thresholds — Olga's «research» mode + «hotfix». */
 export const PRESET_THRESHOLDS = {
   default: { ...DEFAULT_DWELL_THRESHOLDS },

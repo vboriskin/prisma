@@ -24,6 +24,9 @@
    ============================================================ */
 
 import { isTerminalStatus } from './portfolioPulseUtils.js';
+import { Utils } from '../utils.js';
+// V20 S11 — Per-person metrics (Z1-Z10).
+import { applyPersonMetrics } from './teamScanner2PersonMetrics.js';
 
 const DEFAULT_DWELL_HOURS = 24;
 
@@ -76,6 +79,108 @@ function _detectServiceAccountByKey(rawKey) {
   if (/^(sbt-issue-managment-user|sbt-sbbol|cab-sa-jira\d+)$/i.test(key)) return true;
   return false;
 }
+
+/**
+ * V20 S10.6 — Build a Set of issue keys that belong to currently active sprints.
+ *
+ * Источник: `model.spaces[pk].sprintIssues[]` — заполняется analysePulse'ом
+ * на основе `report.sprintKeys` (от Jira `sprint in openSprints()` JQL).
+ * Один pk = один активный спринт (по соглашению с пользователем). При
+ * carry-over (issue в 2 спринтах одновременно) Jira возвращает её в активном
+ * спринте — она попадёт в Set.
+ *
+ * @param {object} model — output of analysePulse()
+ * @returns {Set<string>}
+ */
+function _buildActiveSprintKeySet(model) {
+  const keys = new Set();
+  const spaces = model?.spaces || {};
+  for (const pk of Object.keys(spaces)) {
+    const sp = spaces[pk] || {};
+    for (const it of (sp.sprintIssues || [])) {
+      if (it?.key) keys.add(it.key);
+    }
+  }
+  return keys;
+}
+
+/**
+ * V20 S10.6 — Filter participant's activity items to only those tied to
+ * issues in `activeSprintKeys`. Mutates participant in-place.
+ *
+ * Поля где ищем `issue.key`:
+ *   · timelineToday/Yesterday/Prev — `it.issue.key`
+ *   · zephyrTestsCreatedRecent      — `it.slim.key` (TEST issue itself)
+ *   · zephyrTestsExecutedRecent     — `it.slim.key`
+ *   · issuesNow                     — `it.key`
+ *
+ * bbItems и cfItems НЕ фильтруются здесь: коммиты из repo-walk никогда не
+ * имеют issueKey (commit-msg парсинг не реализован), поэтому фильтрация
+ * давала badges.commits48h > 0 при пустом bbItems → «Коммиты без транзишенов»
+ * на карточке + пустая модалка. Sprint filter влияет только на Jira-таймлайн
+ * (classifer читает badges/timeline, не bbItems напрямую).
+ */
+function _filterParticipantBySprintKeys(p, sprintKeys) {
+  const ok = (k) => typeof k === 'string' && sprintKeys.has(k);
+  const filt = (arr, getKey) => Array.isArray(arr)
+    ? arr.filter(it => ok(getKey(it)))
+    : arr;
+  p.timelineToday      = filt(p.timelineToday,     it => it?.issue?.key);
+  p.timelineYesterday  = filt(p.timelineYesterday, it => it?.issue?.key);
+  p.timelinePrev       = filt(p.timelinePrev,      it => it?.issue?.key);
+  p.zephyrTestsCreatedRecent  = filt(p.zephyrTestsCreatedRecent,  it => it?.slim?.key);
+  p.zephyrTestsExecutedRecent = filt(p.zephyrTestsExecutedRecent, it => it?.slim?.key);
+  p.issuesNow          = filt(p.issuesNow,         it => it?.key);
+  p.stale              = filt(p.stale,             it => it?.key);
+  // V21 sprint-filter — компромисс между «strict» и «не трогать».
+  // Sber Stash-коммиты НЕ парсятся по issueKey из commit-msg → у большинства
+  // bbItems нет `issueKey`. Если выкинуть их строго (как в первой попытке
+  // 2026-05-07) — на пилоте СБОФ Платформа `rawFetched: 351 →
+  // filteredOutOrUnattributed: 351`, ВСЁ BB-attribution умирает.
+  // Решение: items с issueKey → фильтруем по спринту; items БЕЗ issueKey →
+  // оставляем (это PR/коммиты без Jira-связи, тимлид всё равно хочет видеть
+  // их в person-feed). Badges НЕ пересчитываем — они отражают raw-активность,
+  // не sprint-scoped.
+  const sprintAware = (arr, getKey) => Array.isArray(arr)
+    ? arr.filter(it => {
+        const k = getKey(it);
+        if (!k) return true;          // нет issueKey — keep
+        return sprintKeys.has(k);     // есть — должен быть в активном спринте
+      })
+    : arr;
+  // 2026-05-11 — bbItems/cfItems НЕ фильтруются по active-sprint. Причина:
+  // commits из repo-walk не имеют issueKey → фильтрация выкидывала их и
+  // создавала рассинхрон badge/items («Коммиты 48ч: 5» + пустая detail-modal).
+  // PRs с issueKey CORE-99 (не в активном спринте) — тоже legitimate work,
+  // не должны исчезать. Фильтр оставлен только на: zephyr / issuesNow /
+  // timeline (там issueKey всегда есть и спринт-scope важен).
+}
+
+function _applyActiveSprintFilter(model, sprintKeys) {
+  for (const p of (model.participants || [])) {
+    _filterParticipantBySprintKeys(p, sprintKeys);
+  }
+}
+
+// V20 S10.1 — Detect deactivated Jira/BB accounts by `[X]` suffix in display
+// name. В Sber Delta Jira deactivated users получают суффикс `[X]` к
+// displayName (договорённость администраторов корп-Jira). Bitbucket для тех
+// же email'ов — то же поведение.
+//
+// Покрываем латинский+кириллический X, full-width брэкеты `［X］`/`〔X〕`,
+// trailing whitespace. НЕ ловим `[X-MAN]`/`[XO]` (X не последний символ
+// внутри скобок) — там X часть названия.
+//
+// V20 S11.1 BUG-5 — расслабляем trailing-anchor: HR в Sber иногда добавляет
+// суффикс типа `Иванов И.И. [X] (уволен 2025-12-31)`. Раньше regex требовал
+// `[X]` строго в конце строки → false negative. Теперь матчим `[X]` где
+// угодно после которого допускаются только пробелы / parenthetical
+// аннотации `(...)` / даты до конца. Это сохраняет защиту от false positives
+// (имя типа `[X-MAN] Petr` всё ещё не матчит — там X внутри скобок не
+// одиночный).
+// PR-CH — алиасы на централизованный helper в utils.js. Backward compat.
+const DEACTIVATED_LABEL_RE = Utils.DEACTIVATED_LABEL_RE;
+const _isDeactivatedByLabel = Utils.isDeactivatedAccount;
 // V20 S8.5 #2 — METRIC_THRESHOLDS подключены. Раньше словарь был в Config,
 // но никем не использовался — оба архитектора нашли как «мёртвый словарь».
 // Импортить из Config напрямую = circular (Config импортит DEFAULT_DWELL_THRESHOLDS
@@ -145,6 +250,10 @@ export function getLocalHour(iso, tzOffsetMin) {
  *  Pilot finding (Ilia QA): «"Ready for QA" — это PR с UI-изменениями
  *  ждёт smoke-pass; default=24 даёт false-negative, надо 16ч как другой QA».
  */
+// QD14: Set для отслеживания статусов которые fall-through на default —
+// surface'ится в model.scannerV2.unknownDwellStatuses для диагностики
+// custom workflow ситуаций (когда blocker'ы могут пропускаться).
+const _UNKNOWN_DWELL_STATUSES = new Set();
 export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESHOLDS) {
   const s = String(statusName || '').toLowerCase();
   if (/code\s*review|peer\s*review|на\s+ревью|ревью\s+кода/.test(s)) return thresholds.codeReview;
@@ -152,7 +261,18 @@ export function pickDwellThreshold(statusName, thresholds = DEFAULT_DWELL_THRESH
   if (/\bqa\b|\btest(ing)?\b|тестирован|ready\s+for\s+qa|готов(а|о)?\s+к\s+qa/.test(s)) return thresholds.qa;
   if (/in\s*progress|\bworking\b|\bdoing\b|в\s+работе|разработ/.test(s)) return thresholds.inProgress;
   if (/\btodo\b|to\s*do|\bopen\b|\bnew\b|открыт|новая/.test(s))      return thresholds.todo;
+  // Fall-through на default: если статус нестандартный (`Awaiting deploy`,
+  // `Reviewed`, `Ready for Release`...), threshold может быть некорректным
+  // (default обычно ≥ 24ч, реальные blocker'ы пропускаются). Логируем для
+  // surface'а в diagnostic.
+  if (statusName) _UNKNOWN_DWELL_STATUSES.add(String(statusName));
   return thresholds.default;
+}
+/** QD14: Получить накопленные unknown-statuses + опциональный reset. */
+export function getUnknownDwellStatuses(reset = false) {
+  const out = [..._UNKNOWN_DWELL_STATUSES];
+  if (reset) _UNKNOWN_DWELL_STATUSES.clear();
+  return out;
 }
 
 /**
@@ -179,6 +299,10 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
   // p.isServiceAccount = !!undefined = false, фильтр пропускал бота.
   // Теперь вторая проверка: pattern прямо по p.key + p.jiraAccountId.
   const filteredOutBots = [];
+  // V20 S10.1 — отдельный bucket для deactivated `[X]`-юзеров. Показываем
+  // в diagnostic + при включённом toggle «показать заблокированных» возвращаем
+  // в participants[].
+  const filteredOutDeactivated = [];
   if (!opts.includeServiceAccounts) {
     model.participants = model.participants.filter(p => {
       if (!p) return true;
@@ -195,8 +319,65 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
       return true;
     });
   }
+  // V20 S10.6 — Active Sprint Only filter. Применяется ПОСЛЕ bot/deactivated
+  // фильтрации, ДО per-participant compute (heatmap/blockers/timeline72h),
+  // чтобы все производные метрики автоматически были sprint-scoped.
+  //
+  // Pilot finding: «не хочу видеть людей у которых вся активность в бэклоге
+  // или прошлых спринтах». Фильтрует timeline (events), bb-items, cf-items,
+  // zephyr items, issuesNow по `issue.key ∈ activeSprintIssueKeys`.
+  //
+  // SAFETY: если включить filter но `model.spaces[pk].sprintIssues` пуст
+  // (нет спринта у команды) — НЕ filter'им (fail-open), иначе пользователь
+  // увидит «всё пусто» без объяснения.
+  let activeSprintFilterApplied = false;
+  let activeSprintKeyCount = 0;
+  // V20 S11.1 BUG-8 — различаем 3 состояния fail-open:
+  //   'no-sprint' — у всех команд нет активного спринта (нормальная ситуация
+  //                 для команд между спринтами, не баг)
+  //   'api-error' — хотя бы у одной команды space.hasError=true → данные
+  //                 неполные, возможно sprintIssues missing из-за ошибки API
+  //   'ok'        — фильтр применён успешно
+  let failOpenReason = 'ok';
+  if (opts.activeSprintOnly) {
+    const sprintKeys = _buildActiveSprintKeySet(model);
+    activeSprintKeyCount = sprintKeys.size;
+    const anySpaceHasError = Object.values(model.spaces || {}).some(s => s?.hasError);
+    if (sprintKeys.size > 0) {
+      _applyActiveSprintFilter(model, sprintKeys);
+      activeSprintFilterApplied = true;
+    } else if (anySpaceHasError) {
+      failOpenReason = 'api-error';
+    } else {
+      failOpenReason = 'no-sprint';
+    }
+  }
+  // V20 S10.6 — снимок состояния фильтра, прокидывается через локальные
+  // переменные в финальный model.scannerV2 (см. ниже, model.scannerV2 = {...}).
+  const _activeSprintFilterMeta = {
+    requested: !!opts.activeSprintOnly,
+    applied:   activeSprintFilterApplied,
+    sprintIssueKeyCount: activeSprintKeyCount,
+    // V20 S11.1 BUG-8 — UI должен отличать «нет спринта» от «API упал».
+    failOpenReason, // 'ok' | 'no-sprint' | 'api-error'
+  };
+  // V20 S10.1 — фильтрация deactivated `[X]`-юзеров (default ON).
+  // opts.includeDeactivated === true → оставляем (toggle «показать
+  // заблокированных» в UI для аудита/handover). Источник истины — суффикс
+  // `[X]` в displayName/label, который Sber Delta Jira ставит автоматически.
+  if (!opts.includeDeactivated) {
+    model.participants = model.participants.filter(p => {
+      if (!p) return true;
+      if (_isDeactivatedByLabel(p)) {
+        filteredOutDeactivated.push({ key: p.key, label: p.label });
+        return false;
+      }
+      return true;
+    });
+  }
   // Сохраняем как property модели — UI/диагностика смогут показать.
   model.botsFilteredOut = filteredOutBots;
+  model.deactivatedFilteredOut = filteredOutDeactivated;
   const dwellHours = Number(opts.dwellHours || DEFAULT_DWELL_HOURS);
   // V18.1 P7-S2.2 — каждое статус-зависимое значение можно override'нуть
   // через opts.thresholds. Bare scalar `dwellHours` остался как
@@ -218,6 +399,14 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
   // computations. Если не передан — используется environment-local Date.
   const tz = (typeof opts.tzOffsetMin === 'number') ? opts.tzOffsetMin : null;
 
+  // UX feedback 2026-05-10 (Sc3) — sprint filter не применялся к p.blockers,
+  // поэтому при включённом «Только активный спринт» в карточках всё равно
+  // светились старые задачи. computeBlockers идёт через assigneeIndex (raw
+  // Jira), минуя _applyActiveSprintFilter. Нужен post-filter: после построения
+  // blockers выкинуть те, чей key не в sprintKeys (если фильтр applied).
+  const _sprintKeysForBlockers = (_activeSprintFilterMeta.applied)
+    ? _buildActiveSprintKeySet(model)
+    : null;
   for (const p of model.participants) {
     p.heatmap         = computeHeatmap(p, tz);
     p.contextSwitches = computeContextSwitches(p);
@@ -231,6 +420,12 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
       ? computeBlockers(p, assigneeIndex, thresholds, teamThresholds)
       : [];
     p.blockers = _mergeBlockersWithStale(blockersBase, p.stale || []);
+    // Sc3 fix — apply sprint filter to blockers (must happen post-merge).
+    // Fail-open: если sprintKeys пустой — НЕ фильтруем (поведение _applyActiveSprintFilter
+    // уже учитывает это). При sprintKeys есть — выкинуть всё что вне активного спринта.
+    if (_sprintKeysForBlockers && _sprintKeysForBlockers.size > 0) {
+      p.blockers = (p.blockers || []).filter(b => b && b.key && _sprintKeysForBlockers.has(b.key));
+    }
     // V18.1 P5 — расширенные сигналы для side-panel:
     p.heatmap72x4     = computeHeatmap72x4(p, tz);   // 4 sources × 72 hours
     p.sparkline72h    = computeSparkline72h(p);      // 72 значений events/час (deprecated в S2.5)
@@ -281,7 +476,13 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
     codeReviewVelocity,
     prThroughput,
     crossTeamDeps,
+    // V20 S10.6 — Active Sprint Only filter meta (UI badge + diagnostic).
+    activeSprintFilter: _activeSprintFilterMeta,
   };
+  // V20 S11 — Per-person metrics (Z1-Z3, Z6, Z8, Z9, Z10). Применяется
+  // ПОСЛЕ финального model.scannerV2 чтобы все pre-computed поля (badges,
+  // contextSwitches, blockers) были на месте.
+  applyPersonMetrics(model);
   return model;
 }
 
@@ -502,6 +703,23 @@ export function computeSprintGoal(model) {
       else                                                          pace = 'on-track';
     }
 
+    // V20 S12 — расширенные данные для S1/S3/S4/S6:
+    //   goal       — sprint goal narrative из Jira (S1)
+    //   hygiene    — counts noAssignee/noPriority/oldUpdate (S6)
+    //   midpoint   — (S3) на каком % спринта находимся, expected vs actual
+    //   goalCritical — issues с label 'goal-critical' (PR-G S2)
+    const goal = sInfo?.goal || sInfo?.description || '';
+    const hygiene = {
+      noAssignee:    sprintIssues.filter(it => !it.assignee).length,
+      noPriority:    sprintIssues.filter(it => !it.priority || /none/i.test(it.priority)).length,
+      noDescription: sprintIssues.filter(it => !it.description || it.description.length < 30).length,
+    };
+    const goalCriticalIssues = sprintIssues.filter(it =>
+      Array.isArray(it.labels) && it.labels.some(l => /goal[-_]?critical/i.test(l))
+    );
+    const goalCriticalDone = goalCriticalIssues.filter(it =>
+      isTerminalStatus(it.status || '', it.statusCat || '')
+    ).length;
     sprints.push({
       pk,
       name: space.activeSprintName,
@@ -514,6 +732,18 @@ export function computeSprintGoal(model) {
       progressPct,
       idealPct,
       pace,
+      // V20 S12 PR-F — новые поля
+      goal,
+      hygiene,
+      goalCritical: {
+        total: goalCriticalIssues.length,
+        done:  goalCriticalDone,
+        progressPct: goalCriticalIssues.length > 0
+          ? Math.round((goalCriticalDone / goalCriticalIssues.length) * 1000) / 10
+          : null,
+      },
+      // sprintIssueKeys — для scope churn diff (S4) с historical snapshot.
+      sprintIssueKeys: sprintIssues.map(it => it.key).filter(Boolean),
     });
   }
   const totalAll = sprints.reduce((s, sp) => s + sp.total, 0);
@@ -1110,8 +1340,20 @@ export function computeZScore(series) {
  * @param alpha EMA smoothing factor (default 0.3)
  */
 export function computeEmaWoW(series, alpha = 0.3) {
+  // V21 trends-guard fix (diagnostic 2026-05-07: history.entries=3 →
+  // emaLastWeek=0, wowDelta=48 — выглядело как «было 0 → стало 48», враньё).
+  // 2026-05-11 — emaLastWeek/wowDelta = 0 при insufficient history (раньше null).
+  // Причина: тесты и downstream-логика ожидают численные значения.
+  // Renderer проверяет флаг `insufficientHistory` для показа '—' вместо
+  // ложных дельт (см. teamScanner2Renderer.js:5582-5583).
   if (!Array.isArray(series) || series.length < 8) {
-    return { emaToday: series?.[series.length - 1] ?? 0, emaLastWeek: 0, wowDelta: 0 };
+    return {
+      emaToday: series?.[series.length - 1] ?? 0,
+      emaLastWeek: 0,
+      wowDelta: 0,
+      insufficientHistory: true,
+      pointsAvailable: series?.length ?? 0,
+    };
   }
   const ema = [];
   ema[0] = series[0];

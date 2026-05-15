@@ -5,6 +5,8 @@
    Tokens are NEVER logged, NEVER sent to LLM.
    ============================================================ */
 
+import { Services } from '../app/services.js';
+
 export const INT_SETTINGS_KEY = 'q2_integrations_v1';
 
 const DEFAULTS = {
@@ -26,6 +28,13 @@ const DEFAULTS = {
   confluenceBaseUrl:    '',
   confluenceSpaceKeys:  '',  // V17.2 I2c — comma-separated space keys (e.g. "DEV, PAY, SBOF")
   // confluenceToken: stored but never returned to UI in full
+
+  // 2026-05-11 — Jenkins добавлен в persistence layer. До этого фикса значения
+  // визуально сбрасывались на ре-рендере (server-side jira_config.json держал,
+  // localStorage — нет, т.к. Jenkins не было в ALLOWED_STRINGS / loadSettings).
+  jenkinsBaseUrl:       '',
+  jenkinsFolder:        '',
+  // jenkinsToken: stored but never returned to UI in full
 
   // V17.2 I2c — окно активности для Pulse / Confluence aggregations.
   //   72h = 3 рабочих дня, default из плана.
@@ -69,6 +78,10 @@ export function loadSettings() {
     confluenceSpaceKeys: raw.confluenceSpaceKeys || srv.confluence?.spaceKeys || '',
     hasConfluenceToken: !!(raw.confluenceToken)  || !!srv.confluence?.hasToken,
 
+    jenkinsBaseUrl:     raw.jenkinsBaseUrl    || srv.jenkins?.baseUrl    || '',
+    jenkinsFolder:      raw.jenkinsFolder     || srv.jenkins?.folder     || '',
+    hasJenkinsToken:    !!(raw.jenkinsToken)     || !!srv.jenkins?.hasToken,
+
     activityWindowHours: Number(raw.activityWindowHours) || 72,
 
     allowInsecureTls:   !!raw.allowInsecureTls,
@@ -89,6 +102,7 @@ export function loadSettingsForUI() {
     sigmaJiraToken:  raw.sigmaJiraToken || '',
     bitbucketToken:  raw.bitbucketToken || '',
     confluenceToken: raw.confluenceToken || '',
+    jenkinsToken:    raw.jenkinsToken || '',
   };
 }
 
@@ -100,6 +114,7 @@ export function saveSettings(patch) {
     'sigmaJiraBaseUrl', 'sigmaGoalEpicKeys', 'sigmaJiraToken',
     'bitbucketBaseUrl', 'bitbucketProjectKeys', 'bitbucketToken',
     'confluenceBaseUrl', 'confluenceSpaceKeys', 'confluenceToken',
+    'jenkinsBaseUrl', 'jenkinsFolder', 'jenkinsToken',
     'sinceDate',
   ];
   const next = { ...raw };
@@ -113,7 +128,26 @@ export function saveSettings(patch) {
     if (Number.isFinite(n) && n > 0) next.activityWindowHours = Math.min(168, Math.max(1, Math.round(n)));
   }
   if (patch.lastSync !== undefined) next.lastSync = patch.lastSync;
-  localStorage.setItem(INT_SETTINGS_KEY, JSON.stringify(next));
+  // QA A16.6 — guard от QuotaExceededError. На больших проектах
+  // localStorage может быть забит другими ключами (state, snapshots),
+  // и попытка save без try бросит unhandled и пользователь увидит «save
+  // не сработал» без подсказки. Серверная копия (jira_config.json) —
+  // основной источник для токенов, localStorage здесь только как cache.
+  try {
+    localStorage.setItem(INT_SETTINGS_KEY, JSON.stringify(next));
+  } catch (e) {
+    try {
+      const isQuota = e?.name === 'QuotaExceededError' || /quota/i.test(String(e?.message || ''));
+      // AUDIT_HOLISTIC Идея 14 — Toast.warn (canonical).
+      if (typeof window !== 'undefined') {
+        const msg = isQuota
+          ? 'Хранилище заполнено — настройки не сохранены локально. Они хранятся на сервере, настройка не потеряна.'
+          : 'Не удалось локально сохранить настройки интеграций. Они хранятся на сервере.';
+        if (Services.Toast?.warn) Services.Toast.warn(msg, { timeoutMs: 5000 });
+        else window.showToast?.(msg, 'warning', 5000);
+      }
+    } catch (_) {}
+  }
   return loadSettings(); // return masked version
 }
 
@@ -154,6 +188,7 @@ export async function hydrateFromServer() {
       sigmaJira:  { hasToken: !!cfg.hasSigmaJiraToken,  baseUrl: cfg.sigmaJiraBaseUrl  || '' },
       bitbucket:  { hasToken: !!cfg.hasBitbucketToken,  baseUrl: cfg.bitbucketBaseUrl  || '' },
       confluence: { hasToken: !!cfg.hasConfluenceToken, baseUrl: cfg.confluenceBaseUrl || '' },
+      jenkins:    { hasToken: !!cfg.hasJenkinsToken,    baseUrl: cfg.jenkinsBaseUrl    || '', folder: cfg.jenkinsFolder || '' },
     };
     return cfg;
   } catch(_) {
@@ -174,6 +209,7 @@ export function isConfigured(service) {
     sigmaJira:  { url: 'sigmaJiraBaseUrl',  tok: 'sigmaJiraToken' },
     bitbucket:  { url: 'bitbucketBaseUrl',  tok: 'bitbucketToken' },
     confluence: { url: 'confluenceBaseUrl', tok: 'confluenceToken' },
+    jenkins:    { url: 'jenkinsBaseUrl',    tok: 'jenkinsToken' },
   };
   const m = map[service];
   if (!m) return false;
@@ -192,6 +228,7 @@ export function getConnectionStatus() {
     sigmaJira:  { configured: isConfigured('sigmaJira'),  url: raw.sigmaJiraBaseUrl  || srv.sigmaJira?.baseUrl  || '' },
     bitbucket:  { configured: isConfigured('bitbucket'),  url: raw.bitbucketBaseUrl  || srv.bitbucket?.baseUrl  || '' },
     confluence: { configured: isConfigured('confluence'), url: raw.confluenceBaseUrl || srv.confluence?.baseUrl || '' },
+    jenkins:    { configured: isConfigured('jenkins'),    url: raw.jenkinsBaseUrl    || srv.jenkins?.baseUrl    || '' },
     lastSync:   raw.lastSync,
   };
 }

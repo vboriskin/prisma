@@ -27,8 +27,14 @@ import {
 import { TechInfo } from './techInfo.js';
 import { parseProjectKeys } from './portfolioPulseUtils.js';
 import { makePhraseFeeder } from './loaderPhrases.js';
+import { trackIntegrationFailure as _telIntFail } from './telemetry.js';
+import { Services } from '../app/services.js';
 
 export const PortfolioPulse = {
+  // F11 fix (chat-04 audit) — публичный getter, чтобы внешние модули
+  // (chat) не лезли в приватное `_model`. Refactor приватного поля
+  // не сломает потребителей, использующих .getModel().
+  getModel() { return this._model; },
   _model: null,
   _insights: [],
   _metrics: null,
@@ -83,7 +89,11 @@ export const PortfolioPulse = {
   },
 
   async refresh() {
-    // User clicked «Повторить» / «↻ Обновить» — clear sticky states and refetch.
+    // V21 J #62 — abort предыдущего fetch ДО старта нового, чтобы
+    // double-click не приводил к race condition (поздний ответ
+    // перезаписывает свежий). Pattern из teamScanner2.refresh()/V20 S6.1.
+    try { this._abort?.abort(); }
+    catch (_) { /* defensive */ }
     this._cancelled = false;
     this._errorMsg  = '';
     if (this._container) await this._fetchAndRender();
@@ -165,10 +175,14 @@ export const PortfolioPulse = {
       'Свожу участников за 48ч…',
       'Считаю инсайты и метрики…',
     ];
-    const phaseTimer = setInterval(() => {
+    // F9 fix (codebase-01 audit) — phaseTimer был локальным; при двойном
+    // refresh _abort прерывал первый fetch, его finally чистило только свой
+    // local timer. Теперь храним на this — второй вызов сначала clears
+    // предыдущий, race по _loadingMsg исключён.
+    if (this._phaseTimer) clearInterval(this._phaseTimer);
+    this._phaseTimer = setInterval(() => {
       phaseIdx = Math.min(phaseIdx + 1, phases.length - 1);
       this._loadingMsg = phases[phaseIdx];
-      // Update only if the loader DOM is still mounted in our current container.
       const t = this._container && this._container.querySelector('#pp-skel-text');
       if (t) t.textContent = phases[phaseIdx];
     }, 4000);
@@ -223,13 +237,26 @@ export const PortfolioPulse = {
         ? 'Запрос занял слишком много времени. Откройте «Диагностика загрузки» — там видно какой PK / источник сбоит.'
         : (e?.message || 'Ошибка запроса');
       console.warn('[PortfolioPulse] fetch failed:', e);
+      // V22 — telemetry: typed integration failure для unified analytics.
+      try {
+        const errType =
+          isTimeout                                             ? 'timeout' :
+          /401|403|unauth/i.test(String(e?.message||''))        ? 'auth' :
+          /network|net::|fetch failed/i.test(String(e?.message||'')) ? 'network' :
+          /5\d\d/.test(String(e?.message||''))                  ? 'http_5xx' :
+          /4\d\d/.test(String(e?.message||''))                  ? 'http_4xx' :
+                                                                  'unknown';
+        _telIntFail('pulse', errType, { pks: projectKeys, durationMs: 0 });
+      } catch (_) {}
       // Sticky error — survives reactive auto-flush re-renders.
       this._errorMsg = msg;
       this._paintError(msg);
     } finally {
       this._loading = false;
       this._loadingMsg = '';
-      clearInterval(phaseTimer);
+      // F9 fix — clear только если это всё ещё «наш» phaseTimer (перебили мы или
+      // пришёл новый fetch). Используем сохранённую ссылку.
+      if (this._phaseTimer) { clearInterval(this._phaseTimer); this._phaseTimer = null; }
       this._stopPhraseRotator();
     }
   },
@@ -343,6 +370,7 @@ export const PortfolioPulse = {
   },
 };
 
+Services.register('PortfolioPulse', PortfolioPulse);
 if (typeof window !== 'undefined') window.PortfolioPulse = PortfolioPulse;
 
 /* ============================================================

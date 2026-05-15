@@ -34,11 +34,11 @@ describe('V17 CRIT-1 — token leak in export bundle', () => {
     state.rows = [];
   });
 
-  // V17.1 F1 — `q2_integrations_v1` снова включается в bundle (по запросу
-  //   пользователя — round-trip настроек интеграций через JSON), но токены
-  //   ОБЯЗАТЕЛЬНО вычищаются `_scrubSecrets`. Тесты отражают новую политику:
-  //   ключ присутствует, но без `jiraToken` / `bitbucketToken` / etc.
-  test('CSV export bundle includes q2_integrations_v1 BUT tokens are scrubbed', () => {
+  // 2026-05-03 — политика изменена по запросу пилот-юзера: «при выгрузке
+  // JSON токены не стирались, я уже устал их прописывать заново». Для двух
+  // ключей (q2_integrations_v1 + q2_llm_settings_v1) токены сохраняются.
+  // Остальные ключи (chat-history, action-log) продолжают scrub'иться.
+  test('CSV export bundle preserves integration tokens (personal backup)', () => {
     localStorage.setItem('q2_integrations_v1', JSON.stringify({
       jiraToken: 'AAAA-SECRET',
       jiraProjectKeys: 'PROJ',
@@ -46,39 +46,38 @@ describe('V17 CRIT-1 — token leak in export bundle', () => {
     }));
     const bundle = CSV._buildSettingsBundle();
     const integrations = bundle.localStorage.q2_integrations_v1;
-    assert.ok(integrations, 'integrations key must be present after V17.1 F1');
-    assert.equal(integrations.jiraToken, undefined, 'jiraToken must be scrubbed');
-    assert.equal(integrations.jiraProjectKeys, 'PROJ',  'non-secret fields preserved');
-    const stringified = JSON.stringify(bundle);
-    assert.ok(!stringified.includes('AAAA-SECRET'),
-      'token value must not leak via the CSV bundle');
+    assert.ok(integrations, 'integrations key present');
+    assert.equal(integrations.jiraToken, 'AAAA-SECRET', 'jiraToken preserved');
+    assert.equal(integrations.jiraProjectKeys, 'PROJ',  'non-secret fields survived');
+    assert.equal(bundle._includesSecrets, true, 'marker для UI warning');
   });
 
-  test('JSON export bundle includes q2_integrations_v1 BUT tokens are scrubbed', () => {
+  test('JSON export bundle preserves integration tokens (personal backup)', () => {
     localStorage.setItem('q2_integrations_v1', JSON.stringify({
       jiraToken: 'BBBB-SECRET',
       jiraBaseUrl: 'https://example.atlassian.net',
     }));
     const snap = JSONExport.buildSnapshot();
     const integrations = snap.bundle.q2_integrations_v1;
-    assert.ok(integrations, 'integrations key must be present after V17.1 F1');
-    assert.equal(integrations.jiraToken, undefined, 'jiraToken must be scrubbed');
-    assert.ok(!JSON.stringify(snap).includes('BBBB-SECRET'));
+    assert.ok(integrations, 'integrations key present');
+    assert.equal(integrations.jiraToken, 'BBBB-SECRET', 'jiraToken preserved');
+    assert.equal(snap._includesSecrets, true, 'marker для UI warning');
   });
 
-  test('defence-in-depth: token-shaped fields scrubbed even from allowlisted keys', () => {
-    // Pretend a future regression sneaks a token field into a kept key.
+  test('defence-in-depth: token-shaped fields scrubbed in non-preserved keys', () => {
+    // Если в q2_settings_v3 (НЕ в KEYS_PRESERVE_SECRETS) случайно окажется
+    // token-поле — оно должно быть scrub'нуто.
     localStorage.setItem('q2_settings_v3', JSON.stringify({
       foo: 1,
       jiraToken: 'CCCC-ACCIDENT',
       nested: { bitbucketToken: 'DDDD-NESTED', safe: 'ok' },
     }));
     const bundle = CSV._buildSettingsBundle();
-    const flat = JSON.stringify(bundle);
-    assert.ok(!flat.includes('CCCC-ACCIDENT'), 'top-level token must be scrubbed');
-    assert.ok(!flat.includes('DDDD-NESTED'),   'nested token must be scrubbed');
-    assert.ok(flat.includes('"safe":"ok"'),    'unrelated fields survive');
-    assert.ok(flat.includes('"foo":1'),        'unrelated numeric fields survive');
+    const settings = bundle.localStorage.q2_settings_v3;
+    assert.equal(settings.jiraToken, undefined, 'token in non-preserved key scrubbed');
+    assert.equal(settings.nested?.bitbucketToken, undefined, 'nested token scrubbed');
+    assert.equal(settings.nested?.safe, 'ok', 'unrelated fields survive');
+    assert.equal(settings.foo, 1, 'unrelated numeric fields survive');
   });
 });
 

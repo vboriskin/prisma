@@ -1,0 +1,174 @@
+/**
+ * Призма — theme.css
+ * CSS custom properties для тёмной и светлой тем.
+ * Переключение через [data-theme="light"] на корневом элементе.
+ *
+ * Принцип: светлая тема НЕ инверсия тёмной.
+ * Каждый цвет имеет двойника на той же hue-оси с другой светлотой.
+ */
+
+:root,
+[data-theme="dark"] {
+  /* Core */
+  --prizma-bg: #0A0A0F;
+  --prizma-bg-elevated: #1A1A22;
+  --prizma-bg-tertiary: #2A2A30;
+
+  /* Знак и основной текст */
+  --prizma-mark: #FFFFFF;
+  --prizma-text-primary: #FFFFFF;
+  --prizma-text-secondary: #5A5A64;
+  --prizma-text-tertiary: #3A3A44;
+
+  /* Границы */
+  --prizma-border: rgba(255, 255, 255, 0.08);
+  --prizma-border-strong: rgba(255, 255, 255, 0.15);
+
+  /* Signal — яркие на тёмном */
+  --prizma-on-course: #7FE8B5;
+  --prizma-drift: #FFB347;
+  --prizma-off-course: #FF6B6B;
+  --prizma-information: #6EC1E4;
+  --prizma-insight: #B084CC;
+
+  /* Фоны для signal-pills */
+  --prizma-on-course-bg: rgba(127, 232, 181, 0.12);
+  --prizma-drift-bg: rgba(255, 179, 71, 0.12);
+  --prizma-off-course-bg: rgba(255, 107, 107, 0.12);
+  --prizma-information-bg: rgba(110, 193, 228, 0.12);
+  --prizma-insight-bg: rgba(176, 132, 204, 0.12);
+
+  /* Прозрачности лучей звезды */
+  --prizma-mark-opacity-main: 1;
+  --prizma-mark-opacity-side: 0.7;
+  --prizma-mark-opacity-diagonal: 0.45;
+}
+
+[data-theme="light"] {
+  /* Core */
+  --prizma-bg: #FAFAF8;
+  --prizma-bg-elevated: #FFFFFF;
+  --prizma-bg-tertiary: #F0EDE5;
+
+  /* Знак и основной текст */
+  --prizma-mark: #1A1A22;
+  --prizma-text-primary: #1A1A22;
+  --prizma-text-secondary: #7A7A82;
+  --prizma-text-tertiary: #B5B5BC;
+
+  /* Границы */
+  --prizma-border: rgba(26, 26, 34, 0.08);
+  --prizma-border-strong: rgba(26, 26, 34, 0.15);
+
+  /* Signal — тёмные и насыщенные на светлом */
+  --prizma-on-course: #0F8A5F;
+  --prizma-drift: #B5670A;
+  --prizma-off-course: #C13838;
+  --prizma-information: #1F6B96;
+  --prizma-insight: #6B4488;
+
+  /* Фоны для signal-pills */
+  --prizma-on-course-bg: rgba(15, 138, 95, 0.1);
+  --prizma-drift-bg: rgba(181, 103, 10, 0.1);
+  --prizma-off-course-bg: rgba(193, 56, 56, 0.1);
+  --prizma-information-bg: rgba(31, 107, 150, 0.1);
+  --prizma-insight-bg: rgba(107, 68, 136, 0.1);
+}
+
+/* Auto-тема — следует за системой */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] {
+    --prizma-bg: #FAFAF8;
+    --prizma-bg-elevated: #FFFFFF;
+    --prizma-bg-tertiary: #F0EDE5;
+    --prizma-mark: #1A1A22;
+    --prizma-text-primary: #1A1A22;
+    --prizma-text-secondary: #7A7A82;
+    --prizma-text-tertiary: #B5B5BC;
+    --prizma-border: rgba(26, 26, 34, 0.08);
+    --prizma-border-strong: rgba(26, 26, 34, 0.15);
+    --prizma-on-course: #0F8A5F;
+    --prizma-drift: #B5670A;
+    --prizma-off-course: #C13838;
+    --prizma-information: #1F6B96;
+    --prizma-insight: #6B4488;
+  }
+}
+
+/* Плавный переход между темами */
+:root {
+  transition:
+    background-color 240ms ease-out,
+    color 240ms ease-out;
+}
+
+* {
+  transition:
+    background-color 240ms ease-out,
+    border-color 240ms ease-out,
+    color 240ms ease-out,
+    fill 240ms ease-out;
+}
+
+/* Easing-функции */
+:root {
+  --prizma-ease-calm: cubic-bezier(0.16, 1, 0.3, 1);
+  --prizma-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --prizma-ease-smooth: ease-in-out;
+  --prizma-ease-decel: ease-out;
+}
+
+/* Keyframes анимаций */
+
+/* EMERGE — первое появление звезды */
+@keyframes prizma-emerge-core {
+  from { transform: scale(0); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+@keyframes prizma-emerge-ray {
+  from { transform: scale(0.2); opacity: 0; }
+  to   { transform: scale(1); opacity: var(--prizma-ray-opacity, 1); }
+}
+
+/* BREATHE — idle-состояние, всегда включено */
+@keyframes prizma-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.04); opacity: 1; }
+}
+
+/* PULSE — сигнал внимания */
+@keyframes prizma-pulse-ring {
+  0%   { transform: scale(0.4); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+/* ALIGN — смена контекста */
+@keyframes prizma-align {
+  0%   { transform: rotate(-12deg); }
+  50%  { transform: rotate(2deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* L1 — inline pulse */
+@keyframes prizma-loader-inline {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50%      { transform: scale(1); opacity: 1; }
+}
+
+/* L3 — skeleton shimmer */
+@keyframes prizma-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+/* Уважаем prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

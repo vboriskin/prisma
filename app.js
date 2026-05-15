@@ -15,17 +15,26 @@ import { RiskEngine } from './riskEngine.js';
 import { Utils, nextId } from './utils.js';
 import { RowFactory, EmployeeFactory } from './rowFactory.js';
 import { Multiselect } from './components/multiselect.js';
+import { prizmaLoaderMark } from './app/prizmaUI.js';
 import { DashboardView } from './views/dashboard.js';
 import { RegistryView } from './views/registry.js';
 import { GanttView } from './views/gantt.js';   // V14: GanttV2 removed (B2)
 import { GanttHTMLExport } from './views/ganttHtmlExport.js';   // V15: standalone HTML viewer
 import { KanbanView } from './views/kanban.js';
 import { TimelineView, PodlozhkaView } from './views/timeline.js';
-import { SummaryView, MetricsView, InsightsView, DiagnosticsView } from './views/metrics.js';
+// П4-MS Wave 1 — SummaryView удалён, Сводная свёрнута в Дашборд (audit-2026-05-04/summary-metrics-redesign).
+import { MetricsView, DiagnosticsView } from './views/metrics.js';
 import { EmployeesView } from './views/employees.js';
+// V21 AO/AP — 4 новых dashboard-сектора (читают pulse-model через TeamScanner2).
+import { EstimationCalibrationView, ComponentHealthView, BurnoutWatchtowerView, DocDebtConsoleView } from './views/teamHealthDashboards.js';
 import { AIView }        from './views/aiView.js';
 import { AICeoView }          from './views/aiCeoView.js';
+import { ExecView }           from './views/exec.js';
+import { DependencyGraphView } from './views/dependencyGraph.js';
 import { IntegrationsView, openIntegrationsSettings } from './views/integrationsView.js';
+// AUDIT_HOLISTIC F12 — Workspace settings 2.0: единый settings-экран взамен
+// разбросанных диалогов (AppSettings / integrations modal / promptsEditor / mascot).
+import { SettingsView } from './views/settingsView.js';
 import { hydrateFromServer as hydrateIntegrationsFromServer } from './integrations/integrationsStore.js';
 import { ErrorsView } from './views/errorsView.js';
 import { ErrorsLog } from './errorsLog.js';
@@ -40,15 +49,44 @@ import { HistoryManager } from './app/historyManager.js';
 import { Onboarding }     from './app/onboarding.js';
 import { ActionLayer }    from './app/actionLayer.js';
 import { LLMAssistant }   from './app/llmAssistant.js';
+import { ObsidianMascot } from './app/obsidianMascot.js';
 import { setupWelcomeSplash as _setupWelcomeSplash, welcomeHandledRestore } from './app/init.js';
 // V13 audit #18 — pulled out of app.js to shrink it below 2000 LOC.
 import { StorageSettings } from './app/storageSettings.js';
 import { PromptsEditor }   from './app/promptsEditor.js';
 import { Nav }             from './app/nav.js';
+// AUDIT_HOLISTIC F9 — hash-based deep-link router (#section?team=...&done=...).
+import { Router }          from './app/router.js';
 // V18.1 P9 — UI toggles extracted into app/uiToggles.js
 import { SimMode, SidebarUI, ThemeUI } from './app/uiToggles.js';
 // V18.1 P9 — Bulk edit panel extracted into app/bulkEditPanel.js
 import { BulkEditPanel } from './app/bulkEditPanel.js';
+import { Icons }            from './app/icons.js';
+// AUDIT_HOLISTIC AI1 — «Объясни этот экран» (hotkey `?`).
+import { ExplainScreen }    from './app/explainScreen.js';
+// V21 P — UX foundations (ConfirmDialog / FocusTrap / ToastQueue).
+import { ConfirmDialog, FocusTrap, ToastQueue } from './app/uxKit.js';
+// AUDIT_HOLISTIC паттерн 9 / Идея 14 — чистый Toast.* API (success/error/info/warn/loading
+// + persist + mascotPhase + subText + actionLabel/onAction). Side-effect:
+// window.Toast регистрируется как public API. Legacy `showToast(msg, type, ms)`
+// в этом файле остаётся backward-compat и делегирует через `Toast.*`.
+import { Toast } from './app/toast.js';
+// AUDIT_HOLISTIC F4 — Notification Center (bell-icon в topbar).
+import { NotifyCenter } from './app/notifyCenter.js';
+// V22 (AUDIT_HOLISTIC паттерн 17 / Идея 15) — cross-tab sync (BroadcastChannel + storage event fallback).
+import { CrossTabSync } from './app/crossTabSync.js';
+// V21 W — versioned migration runner (вместо ad-hoc parsed.version checks).
+import { Migrations } from './app/migrations.js';
+// AUDIT_HOLISTIC P3 + Идея 1 — единый event-bus + permissions/feature-flags
+// поверх state.meta. Сами модули — singleton'ы (window.EventBus / window.Permissions /
+// window.Flags); импорт здесь нужен ради side-effect (window.* регистрация) +
+// чтобы Reactive↔EventBus bridge заработал на boot.
+import { EventBus } from './app/eventBus.js';
+import './app/permissions.js';
+import './app/featureFlags.js';
+// AUDIT_HOLISTIC §5.1 «Утро тимлида» — единый focus-якорь + Cmd+[ / Cmd+]
+// history navigation. Side-effect: window.Focus + globalThis.Focus.
+import { Focus } from './app/focusManager.js';
 // V18.1 P9 — App settings + nav/blocks/topbar registries extracted
 import { AppSettings, NAV_SECTIONS, BLOCKS_PER_SECTION, APP_SETTINGS_KEY, TOPBAR_ITEMS } from './app/appSettings.js';
 
@@ -60,6 +98,8 @@ import { getQuickPrompts, renderQuickPromptsHTML } from './chat/chatTemplates.js
 import { buildAlerts, renderAlertBar, refreshAlerts, saveAlertBaseline } from './chat/chatAlerts.js';
 import { takeSnapshot } from './chat/chatReports.js';
 import { getAllPrompts, savePromptOverrides, resetPromptOverride, getDefaultPrompt, CATEGORIES as PROMPT_CATEGORIES } from './chat/chatPrompts.js';
+// V22 — telemetry hooks (codebase-04 audit §6).
+import { startLongTaskObserver, markInteractive, trackFilter as _telFilter, trackPlanLockBypass as _telPlanBypass } from './integrations/telemetry.js';
 
 // ── Expose globals for chat modules (avoid circular imports) ──
 window.applyBulkAction = applyBulkAction;
@@ -124,30 +164,91 @@ function parseLLMCommand(text) {
 // ============================================================
 // TOAST / MODAL
 // ============================================================
-function showToast(msg, type='success', ms=2000) {
-  // Mirror error/warning toasts into the persistent errors log so the user
-  // can review what happened later in the «Ошибки» tab. Success/info pass
-  // through silently — they're not noise we need to keep.
-  if (type === 'error' || type === 'warning') {
+/**
+ * V21 π8 Ф4 — семантические длительности тостов.
+ * Раньше использовались magic-millisec (1500/1800/2200/2400/2600/3000/3500/4200ms)
+ * без объяснения. Теперь 5 уровней с осмысленными именами.
+ */
+export const ToastDuration = Object.freeze({
+  SHORT:      1500,  // tap-feedback («Сохранено», «Скопировано»)
+  MED:        2500,  // success / info по умолчанию
+  LONG:       4500,  // warning, error
+  PERSISTENT: 0,     // dismiss only by user (передавать `0` в `showToast`)
+});
+if (typeof window !== 'undefined') window.ToastDuration = ToastDuration;
+
+// V21 P — showToast делегирует в ToastQueue (queue + Undo CTA).
+// Back-compat: legacy callers `showToast(msg, type, ms)` работают как раньше.
+// Новый объектный API: `showToast({ msg, type, ms, undo, onUndo })`
+// показывает кнопку Undo и вызывает onUndo при клике.
+//
+// @deprecated AUDIT_COPY #47 / AUDIT_HOLISTIC паттерн 9 / Идея 14 —
+// use window.Toast.error/warning/success/info from uxKit (app/uxKit.js).
+// Под капотом маппинг: success→Toast.success, error/err→Toast.error,
+// info→Toast.info, warn/warning→Toast.warn, loading→Toast.loading.
+// Эта функция остаётся ради ~75 legacy callsites — миграция постепенная,
+// новые вызовы добавлять не нужно (используйте Toast.* из uxKit).
+function showToast(msgOrOpts, type='success', ms=2400) {
+  const opts = (typeof msgOrOpts === 'string' || msgOrOpts == null)
+    ? { msg: msgOrOpts, type, ms }
+    : Object.assign({}, msgOrOpts);
+  // AUDIT_HOLISTIC паттерн 9 / Идея 14 — type-normalization. Закрывает legacy
+  // дрейф `'warn'` vs `'warning'` (audit таблица §1 строка 9, §8 строка 14):
+  //   'warn' → 'warning'   (canonical CSS-class)
+  //   'ok'   → 'success'   (alias из старого кода)
+  //   'err'  → 'error'     (alias)
+  // Делаем здесь чтобы любой legacy callsite автоматически получил правильный
+  // CSS-class и aria-live escalation.
+  const _typeAlias = { warn: 'warning', ok: 'success', err: 'error' };
+  if (opts.type && Object.prototype.hasOwnProperty.call(_typeAlias, opts.type)) {
+    opts.type = _typeAlias[opts.type];
+  }
+  // Mirror error/warning toasts в errors-log как раньше.
+  if (opts.type === 'error' || opts.type === 'warning') {
     try {
       ErrorsLog.add({
-        level:   type === 'error' ? 'error' : 'warn',
+        level:   opts.type === 'error' ? 'error' : 'warn',
         source:  'showToast',
-        message: String(msg || ''),
+        message: String(opts.msg || ''),
       });
     } catch (_) {}
   }
-  const el=document.getElementById('toast');
-  if (!el) return;
-  el.textContent=msg; el.className=`toast toast-${type}`;
-  el.classList.remove('hidden');
-  clearTimeout(showToast._t);
-  showToast._t=setTimeout(()=>{
-    el.classList.add('toast-out');
-    setTimeout(()=>el.classList.add('hidden'),160);
-  },ms);
-  // Refresh the sidebar badge so the user sees there's something new to look at.
+  const id = ToastQueue.show(opts);
   try { updateErrorsBadge(); } catch (_) {}
+  // П10.29 — focus-management для toast'ов с undo-CTA. Container делаем
+  // <aside role="region" aria-label="Уведомления">; на toast с undo —
+  // перебрасываем focus на кнопку «Отменить», но НЕ если пользователь
+  // активно набирает в input/textarea/contenteditable.
+  try {
+    const container = document.getElementById('toast-queue');
+    if (container) {
+      // V21 — aria-live escalation: error toast'ы прерывают screen-reader
+      // (assertive), success/info/warning — polite. Без этого критичные
+      // ошибки могли быть потеряны если пользователь уже слушает другой
+      // polite toast.
+      const wantLive = opts.type === 'error' ? 'assertive' : 'polite';
+      if (container.getAttribute('aria-live') !== wantLive) {
+        container.setAttribute('aria-live', wantLive);
+      }
+      if (container.tagName !== 'ASIDE' || container.getAttribute('role') !== 'region') {
+        container.setAttribute('role', 'region');
+        container.setAttribute('aria-label', 'Уведомления');
+      }
+    }
+    if (opts && typeof opts.onUndo === 'function' && opts.undo) {
+      const ae = document.activeElement;
+      const tag = ae?.tagName;
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || ae?.isContentEditable;
+      if (!isTyping && container) {
+        // Latest toast = последний child; ToastQueue ставит новый toast в конец.
+        requestAnimationFrame(() => {
+          const last = container.querySelector(`[data-toast-id="${String(id)}"]`);
+          last?.querySelector('.toast-undo')?.focus({ preventScroll: true });
+        });
+      }
+    }
+  } catch (_) {}
+  return id;
 }
 
 /** Keep #nav-errors-badge in sync with the count of un-cleared errors+warnings. */
@@ -175,30 +276,47 @@ function closeModal(el) {
 // crashed silently the first time a user tried to close it.
 if (typeof window !== 'undefined') window.closeModal = closeModal;
 
+// V22 — boot timestamp для TTI измерения (telemetry.markInteractive).
+if (typeof window !== 'undefined' && !window.__BOOT_T0) window.__BOOT_T0 = Date.now();
+// V22 — long-task observer стартуем как можно раньше, до тяжёлой работы.
+try { startLongTaskObserver(); } catch (_) {}
+
 // ============================================================
-// FUNNY LOADER — used during AI / Integrations long operations
+// P3 fix (codebase-02 audit) — lazy-loader для xlsx.full.min.js (~952KB).
+// Раньше xlsx грузился sync на boot и блокировал FCP на 300-800ms,
+// хотя нужен только при первом импорте/экспорте Excel.
+// ============================================================
+let _xlsxLoadPromise = null;
+window.ensureXLSX = function ensureXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (_xlsxLoadPromise) return _xlsxLoadPromise;
+  _xlsxLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'libs/xlsx.full.min.js';
+    s.async = true;
+    s.onload  = () => resolve(window.XLSX);
+    s.onerror = () => { _xlsxLoadPromise = null; reject(new Error('xlsx-load-failed')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxLoadPromise;
+};
+
+// ============================================================
+// LOADER PHRASES — used during AI / Integrations long operations.
+// AUDIT_COPY #50 — заменены на нейтральные фразы в тоне «компас»
+// (брендбук §1: без эмодзи, ToV — северная звезда / навигация).
 // ============================================================
 const FUNNY_PHRASES = [
-  '🤖 Беру у джуна интервью…',
-  '☕ Завариваю кофе для нейронки…',
-  '🐌 Ловлю улитку с задачами Jira…',
-  '🎯 Целюсь в спринт, не дрогни рукой…',
-  '📜 Читаю комменты, ужасаюсь…',
-  '🔎 Ищу того, кто двигал дедлайн…',
-  '🧠 Греем GPU. Зимой это бонус…',
-  '🐘 Втаскиваю слона из бэклога…',
-  '🛸 Запускаю CEO-режим, держитесь…',
-  '🪄 Умножаю риски на оптимизм…',
-  '☁️ Стучусь в Confluence, никто не дома…',
-  '🧩 Складываю пазл из эпиков…',
-  '⏳ Ещё чуть-чуть. Серьёзно.',
-  '🔧 Подкручиваю гайки на гант-стрелках…',
-  '📡 Звоню в Bitbucket, длинные гудки…',
-  '🥷 Ниндзя-менеджер обходит блокеры…',
-  '🦉 Смотрю на план мудро и долго…',
-  '🐙 Связываю всё со всем (8 рук помогает)…',
-  '🚀 Просчитываю траекторию релиза 1.21…',
-  '🎲 Бросаю кубик за того парня…',
+  'Сверяем данные с Jira…',
+  'Готовим контекст для команды…',
+  'Подсчитываем активность…',
+  'Сводим события источников…',
+  'Прокладываем маршрут по релизу…',
+  'Считаем риски и зависимости…',
+  'Сверяем курс с планом…',
+  'Собираем картину спринта…',
+  'Уточняем сроки и блокеры…',
+  'Ещё немного — дочитываем источники…',
 ];
 function _pickFunny(used = new Set()) {
   const pool = FUNNY_PHRASES.filter(p => !used.has(p));
@@ -213,9 +331,11 @@ function showFunnyLoader(initialMsg = 'Загружаю…') {
     el = document.createElement('div');
     el.id = 'funny-loader';
     el.className = 'funny-loader';
+    // V21 — legacy circular spinner removed; brand star + breathe + ring
+    // per BRAND_BOOK §11.
     el.innerHTML = `
       <div class="funny-loader-card">
-        <div class="funny-loader-spinner"></div>
+        ${prizmaLoaderMark()}
         <div class="funny-loader-title" id="funny-loader-title"></div>
         <div class="funny-loader-phrase" id="funny-loader-phrase"></div>
       </div>`;
@@ -259,9 +379,15 @@ function showFunnyLoader(initialMsg = 'Загружаю…') {
 // FORCE SAVE
 // ============================================================
 function forceSave() {
-  state.rows.forEach(r=>RowFactory.updateDerived(r));
-  RiskEngine.computeAll();
-  syncColumnSettings();
+  // F2 fix (codebase-01 audit) — mass-mutation + setItem без Reactive.silent
+  // приводила к двойному save+refresh: первый sync через setItem, второй
+  // через subscriber через 100ms. Теперь заворачиваем mutations в silent;
+  // _dataVersion bump и явный refreshAll остаются снаружи (нужен один rerender).
+  Reactive.silent(() => {
+    state.rows.forEach(r => RowFactory.updateDerived(r));
+    RiskEngine.computeAll();
+    syncColumnSettings();
+  });
   state._dataVersion++;
   clearTimeout(Storage._t);
   try {
@@ -271,21 +397,21 @@ function forceSave() {
       sidebarCollapsed:state.sidebarCollapsed,pinnedCols:state.pinnedCols,rowHeight:state.rowHeight,
       colLabels:state.colLabels,customCols:state.customCols,colTypes:state.colTypes,
       epicDeps:state.epicDeps,ganttMode:state.ganttMode,ganttEpicsWell:state.ganttEpicsWell,
-      podlozhkaMode:state.podlozhkaMode,summaryMode:state.summaryMode,presetsCollapsed:state.presetsCollapsed,
+      // V21 W (AUDIT_HOLISTIC O3) — summaryMode dropped.
+      podlozhkaMode:state.podlozhkaMode,presetsCollapsed:state.presetsCollapsed,
       theme:state.theme,
-      // V14: gantt2* keys retired with GanttV2; old persisted entries
-      // are silently dropped on next save.
+      version:1,
     }));
   } catch(e){
     if (e && e.name === 'QuotaExceededError') {
-      showToast('Сохранение не выполнено: переполнен localStorage', 'error', 4200);
+      showToast('Не удалось сохранить — переполнено локальное хранилище', 'error', ToastDuration.LONG);
       return;
     }
   }
   App.populateFilterDropdowns();
   App.refreshAll();
   App.updateTopbarBadge();
-  showToast('✓ Сохранено и пересчитано');
+  showToast('Сохранено');
 }
 
 
@@ -314,10 +440,14 @@ const FiltersUI = {
       const el=document.getElementById(id);
       if (!el) return;
       el.addEventListener('change',e=>{
-        // V17 P11 (sys-analyst §4 + QA B3) — manual filter mutation drops the
-        // active-preset highlight: preset claim no longer matches reality.
         if (state.filters.preset && key !== 'preset') state.filters.preset = null;
         state.filters[key]=bool?e.target.checked:e.target.value;
+        // AUDIT_HOLISTIC F9 — пользователь руками меняет фильтр → source='manual'.
+        // Router всё равно перепишет URL hash debounced, но badge должен сразу
+        // отразить, что мы больше не «из ссылки».
+        state.filters._source = 'manual';
+        // V22 — telemetry filter-funnel apply.
+        try { _telFilter('apply', key); } catch (_) {}
         App.refreshCurrentSection();
       });
     };
@@ -338,7 +468,14 @@ const FiltersUI = {
         App.refreshCurrentSection();
       }, 140);
     });
-    document.getElementById('btn-reset-filters').addEventListener('click',()=>FiltersUI.reset());
+    document.getElementById('btn-reset-filters').addEventListener('click',()=>{
+      try { _telFilter('clear', 'reset'); } catch (_) {}
+      FiltersUI.reset();
+    });
+    // V22 — open-event на разворот панели фильтров.
+    document.getElementById('btn-toggle-filters')?.addEventListener('click', () => {
+      try { _telFilter('open', 'panel'); } catch (_) {}
+    });
     document.querySelectorAll('.preset-btn[data-preset]').forEach(btn=>btn.addEventListener('click',()=>FiltersUI.applyPreset(btn.dataset.preset)));
     // V17 P11 (QA A2) — toggle-chip wraps a hidden checkbox; `change` flips
     // `state.filters.only*` via the bind() above, but the visual `.active`
@@ -403,16 +540,23 @@ const FiltersUI = {
     FiltersUI.syncUI(); FiltersUI.populateDropdowns(); App.refreshCurrentSection();
   },
   populateDropdowns() {
+    // sj8 fix (codebase-05 audit) — идемпотентность: пересобираем innerHTML
+    // только если набор опций реально изменился. Раньше каждый refreshAll
+    // переписывал innerHTML → открытый dropdown закрывался + height-jump.
+    const _setOptions = (sel, options, cur) => {
+      const html = '<option value="">Все</option>' + options.map(o => `<option value="${o}"${cur===o?' selected':''}>${o}</option>`).join('');
+      if (sel.dataset._cache !== html) { sel.innerHTML = html; sel.dataset._cache = html; }
+    };
     const teamSel=document.getElementById('filter-team'), cur1=teamSel.value;
-    teamSel.innerHTML='<option value="">Все</option>'+FilterEngine.getTeams().map(t=>`<option value="${t}"${cur1===t?' selected':''}>${t}</option>`).join('');
+    _setOptions(teamSel, FilterEngine.getTeams(), cur1);
     const wtSel=document.getElementById('filter-worktype'), cur2=wtSel.value;
-    wtSel.innerHTML='<option value="">Все</option>'+FilterEngine.getWorkTypes().map(t=>`<option value="${t}"${cur2===t?' selected':''}>${t}</option>`).join('');
+    _setOptions(wtSel, FilterEngine.getWorkTypes(), cur2);
     const roleSel=document.getElementById('filter-role'), cur3=Array.isArray(state.filters.role)?'':roleSel.value;
-    roleSel.innerHTML='<option value="">Все</option>'+FilterEngine.getRoles().map(r=>`<option value="${r}"${cur3===r?' selected':''}>${r}</option>`).join('');
+    _setOptions(roleSel, FilterEngine.getRoles(), cur3);
     const asSel=document.getElementById('filter-assignee');
     if (asSel) {
       const curA=Array.isArray(state.filters.assignee)?'':asSel.value;
-      asSel.innerHTML='<option value="">Все</option>'+FilterEngine.getAssignees().map(a=>`<option value="${a}"${curA===a?' selected':''}>${a}</option>`).join('');
+      _setOptions(asSel, FilterEngine.getAssignees(), curA);
     }
     const rpw=document.getElementById('preset-roles-wrap');
     if(rpw){
@@ -502,6 +646,10 @@ const App = {
       window.addEventListener('beforeunload', () => {
         try { Storage.flushNow?.(); } catch (_) {}
       });
+      // QA AX.3 — pagehide надёжнее beforeunload на mobile / Safari (BFCache).
+      window.addEventListener('pagehide', () => {
+        try { Storage.flushNow?.(); } catch (_) {}
+      });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           try { Storage.flushNow?.(); } catch (_) {}
@@ -509,6 +657,24 @@ const App = {
       });
     } catch (_) {}
     setupWelcomeSplash();
+    // V21 W — прогнать миграции ДО loadSettings: ad-hoc registrations
+    // могли сделаться в импорте уже выполненных модулей. Если нет
+    // зарегистрированных миграций — runAll() это no-op.
+    try { Migrations.runAll(); } catch (_) {}
+    // AUDIT_HOLISTIC P3 — мост NotifyCenter → EventBus.
+    // NotifyCenter уже имеет subscribe API (F4), но он шлёт «add»/«markRead»/...
+    // Здесь публикуем 'notification-added' в EventBus только на reason='add'.
+    // Не ломаем существующих подписчиков NotifyCenter.subscribe — добавляем
+    // ещё одного.
+    try {
+      NotifyCenter.subscribe((reason) => {
+        if (reason === 'add') {
+          const arr = state.notifications;
+          const last = (Array.isArray(arr) && arr.length) ? arr[arr.length - 1] : null;
+          EventBus.emit('notification-added', last);
+        }
+      });
+    } catch (_) {}
     Storage.loadSettings();
     loadHistoryLog();
     // V11: kick off SQLite initialisation in the background. The promise is
@@ -522,6 +688,49 @@ const App = {
     SidebarUI.init();
     ThemeUI.init();
     Nav.init({ App });
+    // AUDIT_HOLISTIC F9 — deep-link router (hash → state.filters / activeSection).
+    // Init после Nav, до FiltersUI: при открытии страницы по ссылке UI должен
+    // увидеть уже применённые из hash фильтры.
+    try { Router.init({ App }); } catch (e) { console.warn('[router] init failed:', e); }
+    // AUDIT_HOLISTIC §5.1 — глобальный Cmd+[ / Cmd+] history navigation
+    // + мост 'focus-changed' → TeamScanner2.applyFocus / EmployeesView re-apply.
+    try {
+      Focus.bindHotkeys();
+      EventBus.on('focus-changed', (focus) => {
+        // 1. Сканнер: preselect employee row если открыт subtab.
+        try { Services.TeamScanner2?.applyFocus?.(focus); } catch (_) {}
+        // 2. Employees view: если активен — re-render для подсветки карточки.
+        //    Если не активен — на следующем render() сам прочитает state.meta.focus.
+        try {
+          if (state.activeSection === 'employees') EmployeesView.render();
+        } catch (_) {}
+        // 3. V22 X-02 / K-03 (audit-experts-2026-05-15 Selvadurai #1, #2) —
+        //    Гант реагирует на focus.kind === 'epic': scroll-to + highlight.
+        //    Раньше Сканнер был единственным подписчиком, что блокировало
+        //    cross-tab handoff из чата/реестра/dep-graph'а в Гант.
+        try {
+          if (focus && focus.kind === 'epic' && state.activeSection === 'gantt') {
+            // Defer to next paint — даём Reactive proxy flush'у завершиться.
+            requestAnimationFrame(() => {
+              const id = String(focus.id || '');
+              if (!id) return;
+              const row = (state.rows || []).find(r =>
+                (r.epic && String(r.epic) === id) ||
+                (r.tasks && String(r.tasks) === id) ||
+                (r.id && String(r.id) === id)
+              );
+              if (!row) return;
+              const el = document.querySelector(`.gantt-row[data-row-id="${CSS.escape ? CSS.escape(row.id) : row.id}"]`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('gantt-row-focused');
+                setTimeout(() => el.classList.remove('gantt-row-focused'), 2400);
+              }
+            });
+          }
+        } catch (_) {}
+      });
+    } catch (e) { console.warn('[focus] init failed:', e); }
     FiltersUI.init();
     App.bindImports();
     App.bindExport();
@@ -534,7 +743,7 @@ const App = {
     App.bindGanttModes();
     App.bindTimelineModes();
     App.bindPodlozhkaModes();
-    App.bindSummaryModes();
+    // V21 W (AUDIT_HOLISTIC O3) — bindSummaryModes удалён вместе с summaryMode field.
     App.bindColOrderReset();
     App.bindPodlozhkaGroup();
     App.bindFullscreenRegistry();
@@ -579,7 +788,23 @@ const App = {
     document.getElementById('btn-onboarding')?.addEventListener('click', () => {
       showWelcomeScreen();
     });
+    // AUDIT_HOLISTIC AI1 / V22 fix (2026-05-10) — click toggles explain mode +
+    // visual feedback (aria-pressed sync + toast при первом включении).
+    document.getElementById('btn-explain-screen')?.addEventListener('click', () => {
+      try {
+        ExplainScreen.toggle();
+        const btn = document.getElementById('btn-explain-screen');
+        const enabled = ExplainScreen.isEnabled();
+        if (btn) btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        if (enabled) {
+          Services.Toast?.info?.('Помощь по экрану включена — кликни любой блок чтобы получить объяснение. Esc — выйти.', { ms: 4000 });
+        }
+      } catch (_) { /* non-critical */ }
+    });
     LLMAssistant.init();
+    // Mascot Обсидиан — Emerge один раз за сессию, hover/alert behaviour.
+    // См. obsidian/MASCOT_OBSIDIAN.md §13.7.
+    try { ObsidianMascot.init(); } catch (_) { /* мaскот — non-critical UI */ }
     // Initialise chat alerts & daily snapshot after state is ready
     try { takeSnapshot(); } catch(_) {}
     try { saveAlertBaseline(); } catch(_) {}
@@ -645,6 +870,12 @@ const App = {
     }
     App.populateFilterDropdowns();
     App.updateTopbarBadge();
+    // i11 fix (codebase-04 audit) — personal digest «Что изменилось со
+    // вчера»: считаем delta historyLog с прошлого визита. Toast 7s со
+    // ссылкой «Открыть историю», если delta ≥ 3.
+    try { App._showPersonalDigestIfAny(); } catch (_) {}
+    // V22 — TTI mark в конец init: всё что нужно для интерактива готово.
+    try { markInteractive('app.init'); } catch (_) {}
     // V17 P10 (designer §1 + sys-analyst §3) — brand click/Enter → dashboard.
     // Previously the brand was a dead label.
     const brand = document.getElementById('topbar-brand');
@@ -665,24 +896,27 @@ const App = {
       const f = e.target.files[0]; if (!f) return;
       const fname = f.name || 'JSON';
       const r = new FileReader();
-      r.onload = ev => {
+      r.onload = async ev => {
         try {
-          JSONImport.import(ev.target.result);
+          // UX скв.2 — JSONImport.import стал async (ConfirmDialog).
+          await JSONImport.import(ev.target.result);
           App.populateFilterDropdowns();
           showPostLoadInsights(state.rows);
           HistoryLog.data('import_json', `Импорт JSON: ${fname}`, { count: state.rows.length, target: fname, source: 'json' });
         } catch (err) {
-          // JSONImport.import() уже сам показывает alert + пишет в ErrorsLog;
+          // JSONImport.import() уже сам показывает Toast.error + пишет в ErrorsLog;
           // но catch здесь страхует от unexpected throws.
-          showToast(`Не удалось импортировать JSON: ${err?.message || err}`, 'error', 3500);
+          showToast(`Импорт JSON прерван · ${err?.message || err}`, 'error', ToastDuration.LONG);
         }
         e.target.value = '';
       };
       r.readAsText(f, 'utf-8');
     });
-    document.getElementById('input-xlsx').addEventListener('change',e=>{
+    document.getElementById('input-xlsx').addEventListener('change',async e=>{
       const f=e.target.files[0]; if(!f)return;
       const fname=f.name||'XLSX';
+      // P3 fix — lazy-загружаем xlsx до использования.
+      try { await window.ensureXLSX(); } catch (_) { showToast('Не удалось загрузить XLSX-парсер','error'); return; }
       const r=new FileReader(); r.onload=ev=>{
         XLSXImporter.import(new Uint8Array(ev.target.result));
         App.populateFilterDropdowns(); e.target.value='';
@@ -706,8 +940,9 @@ const App = {
         const f=e.target.files[0]; if(!f)return;
         const fname=f.name||'CSV update';
         const r=new FileReader();
-        r.onload=ev=>{
-          CSV.importUpdate(ev.target.result); App.populateFilterDropdowns(); e.target.value='';
+        r.onload=async ev=>{
+          // UX скв.2 — CSV.importUpdate стал async (ConfirmDialog).
+          await CSV.importUpdate(ev.target.result); App.populateFilterDropdowns(); e.target.value='';
           HistoryLog.data('import_csv_update', `CSV update: ${fname}`, { target: fname, source: 'csv-update' });
         };
         r.readAsText(f,'utf-8');
@@ -718,9 +953,10 @@ const App = {
     // separately from settings).
     const xlsxUpdate = document.getElementById('input-xlsx-update');
     if (xlsxUpdate) {
-      xlsxUpdate.addEventListener('change', e => {
+      xlsxUpdate.addEventListener('change', async e => {
         const f = e.target.files[0]; if (!f) return;
         const fname = f.name || 'XLSX update';
+        try { await window.ensureXLSX(); } catch (_) { showToast('Не удалось загрузить XLSX-парсер','error'); return; }
         const r = new FileReader();
         r.onload = ev => {
           XLSXImporter.importUpdate(new Uint8Array(ev.target.result));
@@ -744,25 +980,29 @@ const App = {
     };
     const exportCsvFn = async () => {
       flushPendingEdits();
-      if(!state.rows.length){alert('Нет данных');return;}
+      if (!state.rows.length) {
+        Services.Toast?.warning?.('Нет данных') || window.showToast?.('Нет данных', 'warning', 3000);
+        return;
+      }
       try{
         await CSV.export();
         HistoryLog.data('export_csv', `Скачать CSV (${state.rows.length} строк)`, { count: state.rows.length });
       }
-      catch(e){ console.error(e); showToast('Не удалось экспортировать CSV','error',2600); }
+      catch(e){ console.error(e); showToast('Экспорт CSV прерван','error',ToastDuration.MED); }
     };
     document.getElementById('btn-export-csv')?.addEventListener('click', exportCsvFn);
 
     // V15: JSON export — atomic round-trip format.
-    document.getElementById('btn-export-json')?.addEventListener('click', () => {
+    document.getElementById('btn-export-json')?.addEventListener('click', async () => {
       flushPendingEdits();
       try {
-        JSONExport.download();
+        // UX скв.2 — JSONExport.download стал async (ConfirmDialog для tokens).
+        await JSONExport.download();
         HistoryLog.data('export_json', `Скачать JSON (${state.rows.length} строк, ${state.employees.length} сотрудников)`,
           { rows: state.rows.length, employees: state.employees.length });
       } catch (e) {
         console.error(e);
-        showToast('Не удалось экспортировать JSON', 'error', 2600);
+        showToast('Экспорт JSON прерван', 'error', ToastDuration.MED);
       }
     });
 
@@ -773,39 +1013,55 @@ const App = {
         HistoryLog.data('export_gantt_html', `Выгрузка Ганта в HTML (${state.rows.length} строк)`, { rows: state.rows.length });
       } catch (e) {
         console.error(e);
-        showToast('Не удалось экспортировать Гант: ' + (e?.message || e), 'error', 3000);
+        showToast('Экспорт Ганта прерван · ' + (e?.message || e), 'error', ToastDuration.LONG);
       }
     });
 
     // XLSX export — round-trip-safe: same headers as XLSXImporter.import,
     // one sheet per team. No extra columns beyond the import template.
-    document.getElementById('btn-export-xlsx')?.addEventListener('click', () => {
+    document.getElementById('btn-export-xlsx')?.addEventListener('click', async () => {
       flushPendingEdits();
-      if (!state.rows.length) { alert('Нет данных'); return; }
+      if (!state.rows.length) {
+        Services.Toast?.warning?.('Нет данных') || window.showToast?.('Нет данных', 'warning', 3000);
+        return;
+      }
+      try { await window.ensureXLSX(); } catch (_) { showToast('Не удалось загрузить XLSX-парсер','error'); return; }
       try {
         XLSXImporter.export();
         HistoryLog.data('export_xlsx', `Скачать XLSX (${state.rows.length} строк)`, { count: state.rows.length });
       } catch (e) {
-        console.error(e); showToast('Не удалось экспортировать XLSX', 'error', 2600);
+        console.error(e); showToast('Экспорт XLSX прерван', 'error', ToastDuration.MED);
       }
     });
   },
   bindClear() {
-    document.getElementById('btn-clear-storage').addEventListener('click',()=>{
-      if(confirm('Очистить все данные и настройки?')){
-        HistoryManager.checkpoint('очистка данных');
-        const before=state.rows.length;
-        Storage.clear(); state.rows=[]; state.diagnostics={sources:[],sheets:[],rowsPerSheet:{},detectedColumns:{},missingColumns:{},warnings:[],registryCount:0,csvImportCount:0,localStorageCount:0};
-        state.employees=[];
-        App.populateFilterDropdowns(); App.refreshAll(); App.updateTopbarBadge();
-        HistoryLog.data('clear_all', `Очистка всех данных (было ${before} строк)`, { count: before, source: 'topbar' });
-      }
+    document.getElementById('btn-clear-storage').addEventListener('click', async () => {
+      // V21 K #90 + UX скв.3 — destructive type-confirm через ConfirmDialog
+      // (typeToConfirm: 'ОЧИСТИТЬ'). Раньше native prompt() — теперь брендированный
+      // диалог с disabled-кнопкой пока не введено точное слово.
+      const before = state.rows.length;
+      const empN   = state.employees.length;
+      if (!before && !empN) { showToast?.('Очищать нечего','info',1500); return; }
+      const ok = Services.ConfirmDialog?.show
+        ? await Services.ConfirmDialog.show({
+            title: 'Очистить все данные и настройки?',
+            message: `Будет удалено: задач ${before}, сотрудников ${empN}.\nДействие можно отменить через Ctrl+Z.`,
+            typeToConfirm: 'ОЧИСТИТЬ',
+            confirmLabel: 'Очистить',
+            danger: true,
+          })
+        : (typeof window.confirm === 'function' && window.confirm(`Очистить все данные? Будет удалено: задач ${before}, сотрудников ${empN}.`));
+      if (!ok) return;
+      HistoryManager.checkpoint('очистка данных');
+      Storage.clear(); state.rows=[]; state.diagnostics={sources:[],sheets:[],rowsPerSheet:{},detectedColumns:{},missingColumns:{},warnings:[],registryCount:0,csvImportCount:0,localStorageCount:0};
+      state.employees=[];
+      App.populateFilterDropdowns(); App.refreshAll(); App.updateTopbarBadge();
+      HistoryLog.data('clear_all', `Очистка всех данных (было ${before} строк)`, { count: before, source: 'topbar' });
     });
   },
   bindSave() {
     const doSave = (source) => {
-      // V17 P10 (QA §1.1) — guard на пустой state, иначе toast «✓ Сохранено»
-      // вводит в заблуждение когда нечего сохранять.
+      // V17 P10 — guard на пустой state, иначе toast «Сохранено» вводит в заблуждение когда нечего сохранять.
       if (!state.rows.length) {
         showToast?.('Нет данных для сохранения', 'info', 1600);
         return;
@@ -907,15 +1163,9 @@ const App = {
     detailedBtn.addEventListener('click',()=>{ state.timelineMode='detailed'; sync(); if(state.activeSection==='timeline')TimelineView.render(); });
     sync();
   },
-  bindSummaryModes() {
-    // V17.1 G1 — представление «Совсем красиво» удалено вместе с переключателем.
-    //   Любое значение state.summaryMode теперь нормализуется в 'brief'
-    //   (мигрирует старые сохранённые настройки superBeautiful → brief).
-    if (state.summaryMode !== 'brief') {
-      state.summaryMode = 'brief';
-      try { Storage.save(); } catch(_) {}
-    }
-  },
+  // V21 W (AUDIT_HOLISTIC O3) — bindSummaryModes() удалён.
+  // П4-MS Wave 1 удалила «Сводное» UI. summaryMode field вычищен из state +
+  // q2_settings_v3 миграцией 0→1 (см. app/migrations.js).
   bindPodlozhkaModes() {
     const summary=document.getElementById('podlozhka-mode-summary');
     const detailed=document.getElementById('podlozhka-mode-detailed');
@@ -976,6 +1226,8 @@ const App = {
     const setOpen = (open) => {
       document.body.classList.toggle('filters-open', !!open);
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      // V21 π8 Ф3 — sync aria-pressed для toggle-state (audit 1.3).
+      btn.setAttribute('aria-pressed', open ? 'true' : 'false');
     };
     const close = () => setOpen(false);
 
@@ -1013,14 +1265,53 @@ const App = {
   bindEmployees() {
     const addBtn=document.getElementById('btn-add-employee');
     if(addBtn) addBtn.addEventListener('click',()=>{
+      // V21 audit 04-employees §5: блокируем накопление пустых сотрудников.
+      // Раньше каждый клик пушил пустой объект → юзер случайно нажал 5 раз =
+      // 5 безымянных карточек. Теперь, если в state уже есть пустой
+      // («неоконченный») сотрудник, фокусируемся на нём вместо нового push'а.
+      const blankIdx = state.employees.findIndex(e => !String(e.fio || '').trim());
+      if (blankIdx >= 0) {
+        if (state.activeSection === 'employees') EmployeesView.render();
+        // try focus the existing FIO input
+        try {
+          setTimeout(() => {
+            const card = document.querySelector(`.employee-card[data-emp-id="${state.employees[blankIdx].id}"]`);
+            const inp = card?.querySelector('.employee-card-fio input');
+            inp?.focus();
+            inp?.select?.();
+          }, 50);
+        } catch (_) {}
+        showToast('Сначала заполните ФИО у уже добавленного сотрудника', 'info', ToastDuration.MED);
+        return;
+      }
       // V15 (audit#1, system H5): checkpoint so misclicks can be Ctrl+Z'd.
       HistoryManager.checkpoint('добавить сотрудника');
       state.employees.push(EmployeeFactory.create({sourceType:'manual'}));
       Storage.save();
       App.populateFilterDropdowns();
       if(state.activeSection==='employees') EmployeesView.render();
-      showToast('Сотрудник добавлен');
+      // Auto-focus новой карточки.
+      try {
+        setTimeout(() => {
+          const cards = document.querySelectorAll('.employee-card .employee-card-fio input');
+          const last = cards[cards.length - 1];
+          last?.focus();
+        }, 50);
+      } catch (_) {}
+      showToast('Сотрудник добавлен — введите ФИО');
     });
+    // V21 audit 04-employees §15: wire search-by-FIO с debounce 200ms.
+    const searchInp = document.getElementById('employees-search');
+    if (searchInp) {
+      let _searchT = null;
+      searchInp.addEventListener('input', () => {
+        clearTimeout(_searchT);
+        _searchT = setTimeout(() => {
+          EmployeesView._filter.query = String(searchInp.value || '').trim();
+          if (state.activeSection === 'employees') EmployeesView.render();
+        }, 200);
+      });
+    }
     const importCsv=document.getElementById('input-employees-csv');
     if(importCsv){
       importCsv.addEventListener('change',e=>{
@@ -1032,8 +1323,9 @@ const App = {
     }
     const importXlsx=document.getElementById('input-employees-xlsx');
     if(importXlsx){
-      importXlsx.addEventListener('change',e=>{
+      importXlsx.addEventListener('change', async e=>{
         const f=e.target.files[0]; if(!f)return;
+        try { await window.ensureXLSX(); } catch (_) { showToast('Не удалось загрузить XLSX-парсер','error'); return; }
         const r=new FileReader();
         r.onload=ev=>{ EmployeesView.importXLSX(new Uint8Array(ev.target.result)); e.target.value=''; };
         r.readAsArrayBuffer(f);
@@ -1041,9 +1333,9 @@ const App = {
     }
     const tmplBtn=document.getElementById('btn-employees-template');
     if(tmplBtn){
-      tmplBtn.addEventListener('click',()=>{
-        if (typeof window.XLSX==='undefined') {
-          showToast('Библиотека XLSX не загружена','error',3000); return;
+      tmplBtn.addEventListener('click', async () => {
+        try { await window.ensureXLSX(); } catch (_) {
+          showToast('Библиотека XLSX не загружена','error',ToastDuration.LONG); return;
         }
         const headers=['ФИО','Роль','Команда','Дни овертайма','Готов работать в будни','Комментарий по будням'];
         const example=['Иванов Иван','Backend','Платформа','2026-05-15, 2026-05-22','Да','Только до 19:00'];
@@ -1066,25 +1358,41 @@ const App = {
     // for undo, so the worst case is "press Ctrl+Z".
     const delAllBtn=document.getElementById('btn-employees-delete-all');
     if (delAllBtn) {
-      delAllBtn.addEventListener('click',()=>{
+      delAllBtn.addEventListener('click', async () => {
         const n=state.employees.length;
-        if (!n) { showToast('Список уже пуст','info',1800); return; }
-        const typed=prompt(
-          `Удалить всех сотрудников (${n} шт.)? Это действие можно отменить через Ctrl+Z.\n\n`+
-          `Введите УДАЛИТЬ для подтверждения:`,
-          ''
-        );
-        if (typed == null) return;                 // user cancelled
-        if (typed.trim().toUpperCase() !== 'УДАЛИТЬ') {
-          showToast('Подтверждение не совпало — действие отменено','info',2400);
-          return;
-        }
+        if (!n) { showToast('Очищать нечего','info',ToastDuration.SHORT); return; }
+        // UX скв.3 — destructive type-confirm через ConfirmDialog (typeToConfirm).
+        const ok = Services.ConfirmDialog?.show
+          ? await Services.ConfirmDialog.show({
+              title: `Удалить всех сотрудников (${n} шт.)?`,
+              message: 'Это действие можно отменить через Ctrl+Z.',
+              typeToConfirm: 'УДАЛИТЬ',
+              confirmLabel: 'Удалить',
+              danger: true,
+            })
+          : (typeof window.confirm === 'function' && window.confirm(`Удалить всех сотрудников (${n} шт.)?`));
+        if (!ok) return;
         HistoryManager.checkpoint(`удаление всех сотрудников (${n})`);
+        // V21 P / П10.22 — snapshot для toast-undo CTA (локальная state-операция,
+        // безопасно откатить через перезапись массива).
+        const removedSnapshot = state.employees.slice();
         state.employees=[];
         Storage.save();
         App.populateFilterDropdowns();
         if (state.activeSection==='employees') EmployeesView.render();
-        showToast(`Удалено ${n} сотрудников`,'success',2200);
+        showToast({
+          msg:  `Удалено ${n} сотрудников`,
+          type: 'success',
+          ms:   ToastDuration.LONG,
+          undo: 'Отменить',
+          onUndo: () => {
+            state.employees = removedSnapshot.slice();
+            Storage.save();
+            App.populateFilterDropdowns();
+            if (state.activeSection === 'employees') EmployeesView.render();
+            showToast('Удаление отменено', 'info', ToastDuration.SHORT);
+          },
+        });
         try { window.HistoryLog?.data?.('employees_delete_all', `Удалено ${n} сотрудников`, { count:n }); } catch(_) {}
       });
     }
@@ -1099,7 +1407,9 @@ const App = {
      the move is aborted. */
   bindGanttPlanLock() {
     const fmtDate = (iso) => {
-      try { return new Date(iso).toLocaleString('ru', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+      // V21 — компактный формат «04.05» в badge (без года, без времени).
+      // Полная дата+время остаётся в title-tooltip для деталей.
+      try { return new Date(iso).toLocaleString('ru', { day:'2-digit', month:'2-digit' }); }
       catch(_) { return iso || ''; }
     };
     const renderHeader = () => {
@@ -1119,12 +1429,17 @@ const App = {
 
       if (locked) {
         const ts = fmtDate(state.planLocked.at);
+        // Wave1 P-GR §E10 — emoji 🔒 / ✏ / ✓ заменены на Lucide-line SVG
+        // через Icons.get() (icons: lock / pencil / check, size 12).
+        const editIco  = Icons.get('pencil', { size: 12 });
+        const lockIco  = Icons.get('lock',   { size: 12 });
+        const checkIco = Icons.get('check',  { size: 12 });
         if (editMode) {
-          status.innerHTML = `<span class="gantt-lock-badge gantt-lock-badge-edit">✏ Режим редактирования (без фиксации переносов)</span>`;
-          editBtn.textContent = '✓ Выйти из режима редактирования';
+          status.innerHTML = `<span class="gantt-lock-badge gantt-lock-badge-edit">${editIco} Режим редактирования (без фиксации переносов)</span>`;
+          editBtn.innerHTML = `${checkIco} Выйти из режима редактирования`;
         } else {
-          status.innerHTML = `<span class="gantt-lock-badge">🔒 План зафиксирован · ${ts}</span>`;
-          editBtn.textContent = '✏ Режим редактирования';
+          status.innerHTML = `<span class="gantt-lock-badge">${lockIco} План зафиксирован · ${ts}</span>`;
+          editBtn.innerHTML = `${editIco} Редактировать`;
         }
       }
     };
@@ -1144,29 +1459,41 @@ const App = {
         state.ganttEditMode = false;
         Storage.save();
         renderHeader();
-        showToast(`План зафиксирован на ${label} — переносы теперь требуют комментарий`, 'success', 3200);
+        showToast(`План зафиксирован на ${label} — переносы теперь требуют комментарий`, 'success', ToastDuration.LONG);
         try { window.HistoryLog?.data?.('plan_lock', `План зафиксирован на ${label}`); } catch(_) {}
       });
     });
 
-    document.getElementById('btn-gantt-unlock-plan')?.addEventListener('click', () => {
-      if (!confirm('Снять фиксацию плана? Переносы снова будут без обязательного комментария.')) return;
+    document.getElementById('btn-gantt-unlock-plan')?.addEventListener('click', async () => {
+      // V21 Q — ConfirmDialog (warning, не danger — данные не теряются).
+      const ok = await ConfirmDialog.show({
+        title: 'Снять фиксацию плана?',
+        message: 'Переносы задач между релизами снова будут без обязательного комментария. Историю фиксации не теряем.',
+        confirmLabel: 'Снять',
+      });
+      if (!ok) return;
       state.planLocked = null;
       state.ganttEditMode = false;
       Storage.save();
       renderHeader();
-      showToast('Фиксация плана снята', 'info', 2200);
+      showToast('Фиксация плана снята', 'info', ToastDuration.MED);
       try { window.HistoryLog?.data?.('plan_unlock', 'Фиксация плана снята'); } catch(_) {}
     });
 
     document.getElementById('btn-gantt-edit-mode')?.addEventListener('click', () => {
+      const wasOff = !state.ganttEditMode;
       state.ganttEditMode = !state.ganttEditMode;
       Storage.save();
       renderHeader();
       const msg = state.ganttEditMode
         ? 'Режим редактирования включён — переносы пока без комментариев'
         : 'Вышли из режима редактирования — переносы снова требуют комментарий';
-      showToast(msg, 'info', 2400);
+      showToast(msg, 'info', ToastDuration.MED);
+      // V22 — telemetry plan-lock bypass: фиксируем включение edit-mode при
+      // активном plan-lock (это и есть «обход процесса»).
+      if (wasOff && state.planLocked) {
+        try { _telPlanBypass('edit-mode-on-while-locked', 'user'); } catch (_) {}
+      }
     });
   },
 
@@ -1198,6 +1525,16 @@ const App = {
     overlay.classList.remove('hidden');
     setTimeout(() => ta.focus(), 50);
 
+    // Wave3 P-GR — explicit FocusTrap.attach() поверх auto-trap (uxKit.js
+    // §«Auto focus-trap for modal-style overlays»). Auto-trap полагается
+    // на MutationObserver: race-condition между классовой mutation и
+    // observer-tick может оставить модалку без trap'а на 1-2 frames.
+    // Явный attach даёт детерминированное поведение + initialFocus на
+    // textarea (вместо первого focusable — кнопки close).
+    let detachTrap = null;
+    try { detachTrap = FocusTrap.attach(overlay, { initialFocus: ta }); }
+    catch (_) { detachTrap = null; }
+
     return new Promise(resolve => {
       const cleanup = () => {
         ta.removeEventListener('input', onInput);
@@ -1207,6 +1544,8 @@ const App = {
         document.removeEventListener('keydown', onKey);
         overlay.dataset.busy = '0';
         overlay.classList.add('hidden');
+        try { if (detachTrap) detachTrap(); } catch (_) {}
+        detachTrap = null;
       };
       const onInput  = () => { okBtn.disabled = !ta.value.trim(); };
       const onOk     = () => { if (okBtn.disabled) return; const v = ta.value.trim(); cleanup(); resolve(v || null); };
@@ -1260,11 +1599,11 @@ const App = {
         const d = String(dateEl.value || '').trim();
         const t = String(timeEl.value || '00:00').trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-          showToast('Заполните дату', 'error', 2200); return;
+          showToast('Заполните дату', 'error', ToastDuration.MED); return;
         }
         const parsed = new Date(`${d}T${t}:00`);
         if (Number.isNaN(parsed.getTime())) {
-          showToast('Неверная дата/время', 'error', 2200); return;
+          showToast('Неверная дата/время', 'error', ToastDuration.MED); return;
         }
         const [yyyy, mm, dd] = d.split('-');
         const label = `${dd}.${mm}.${yyyy} ${t}`;
@@ -1298,7 +1637,9 @@ const App = {
     if (overlay.dataset.busy === '1') return Promise.resolve(null);   // V15 audit#1 — re-entry guard
     overlay.dataset.busy = '1';
     summaryEl.textContent = summary || '';
-    const today = new Date().toISOString().slice(0, 10);
+    // QA A4.3 — локальная «сегодня», не UTC (после 21:00 локально для UTC+3
+    // юзер видел бы завтрашнюю date в default-поле modal'а).
+    const today = Utils.localDateString();
     dateEl.value = today;
     cmtEl.value  = '';
     overlay.classList.remove('hidden');
@@ -1314,10 +1655,10 @@ const App = {
       };
       const onOk     = () => {
         const date = (dateEl.value || '').trim();
-        if (!date) { showToast('Укажите дату фактического завершения','error',2200); return; }
+        if (!date) { showToast('Укажите дату фактического завершения','error',ToastDuration.MED); return; }
         // V15 (audit#1, QA M6): reject invalid dates ("2026-13-99" etc.)
         const parsed = new Date(date);
-        if (isNaN(parsed.getTime())) { showToast('Некорректная дата','error',2200); return; }
+        if (isNaN(parsed.getTime())) { showToast('Некорректная дата','error',ToastDuration.MED); return; }
         cleanup();
         resolve({ date, comment: (cmtEl.value || '').trim() });
       };
@@ -1361,10 +1702,10 @@ const App = {
         const s = (startEl.value || '').trim();
         const e = (endEl.value   || '').trim();
         // V15 (audit#1, QA M6): reject invalid date strings.
-        if (s && isNaN(new Date(s).getTime())) { showToast('Некорректная дата начала','error',2400); return; }
-        if (e && isNaN(new Date(e).getTime())) { showToast('Некорректная дата завершения','error',2400); return; }
+        if (s && isNaN(new Date(s).getTime())) { showToast('Некорректная дата начала','error',ToastDuration.MED); return; }
+        if (e && isNaN(new Date(e).getTime())) { showToast('Некорректная дата завершения','error',ToastDuration.MED); return; }
         if (s && e && new Date(s) > new Date(e)) {
-          showToast('Дата начала позже даты завершения','error',2400); return;
+          showToast('Дата начала позже даты завершения','error',ToastDuration.MED); return;
         }
         cleanup();
         resolve({ start: s, end: e });
@@ -1525,12 +1866,16 @@ const App = {
   },
 
   bindCrossTabStorageSync() {
-    if(App._storageSyncBound) return;
-    App._storageSyncBound=true;
-    window.addEventListener('storage',(e)=>{
-      if(!e||(e.key!==STORAGE_KEY&&e.key!==SETTINGS_KEY)) return;
-      showToast('Данные были изменены в другой вкладке. Обновите страницу, чтобы синхронизироваться.','error',3800);
-    });
+    // V21 J #69 — DEPRECATED. Раньше: toast «обновите страницу» при cross-tab
+    // изменении. Параллельно работал module-level listener (см. конец app.js)
+    // который **молча** reload'ит данные. Получалось: юзер видел toast +
+    // данные уже перезаписывались — confusing.
+    // Решение: отключаем этот toast-only listener; silent reload остаётся
+    // как primary UX (V12 audit-driven). Если в будущем потребуется
+    // visible-confirm — добавить modal с «Применить / Игнорировать».
+    if (App._storageSyncBound) return;
+    App._storageSyncBound = true;
+    // Intentionally no-op — see comment above.
   },
   // V14: bindGantt2Controls() removed — GanttV2 retired (B2).
   renderLegend(targetId,items) {
@@ -1546,55 +1891,33 @@ const App = {
     }).join('');
   },
   renderSectionLegends(section) {
+    // 2026-05-10 — block-legends удалены из 6 разделов (dashboard / metrics /
+    // gantt / kanban / timeline / employees) по решению тимлида. Контейнеры
+    // `<div id="*-legend" class="view-legend">` остаются в index.html, но
+    // получают пустой items[] → renderLegend() ставит display:none.
+    // Соседние секции (registry / podlozhka / summary / diagnostics) не
+    // тронуты — продолжают рендериться как раньше.
     const legendsBySection={
-      dashboard:[
-        {color:'#4f46e5',label:'Релизы: 1.20 / 1.21 / 1.22'},
-        {color:'#dc2626',label:'Красный: блокеры и овертайм'},
-        {color:'#f59e0b',label:'Жёлтый: требует подтверждения'},
-        {color:'#059669',label:'Зелёный: в scope / сделано'},
-      ],
+      dashboard:[],
       registry:[],
-      gantt:[
-        {color:'#4f46e5',label:'Линии зависимостей'},
-        {color:'#dc2626',label:'Конфликт зависимости по срокам'},
-        {label:'◎ Перетяните с задачи на задачу для связи'},
-      ],
+      gantt:[],
       // V14: gantt2 legend removed (GanttV2 retired)
-      kanban:[
-        {color:'#dc2626',label:'Красная рамка: блокер'},
-        {color:'#f59e0b',label:'Жёлтая рамка: риск'},
-        {color:'#9ca3af',label:'Полупрозрачность: сделано'},
-      ],
-      timeline:[
-        {color:'#4f46e5',label:'Стадии релизов'},
-        {color:'#059669',label:'Распределение работ'},
-        {color:'#d97706',label:'Статусы scope'},
-      ],
+      kanban:[],
+      timeline:[],
       podlozhka:[
         {color:'#dc2626',label:'Рисковые строки'},
         {color:'#059669',label:'Сделанные строки'},
         {label:'Режим «Детализированное» показывает видимые столбцы реестра'},
       ],
-      employees:[
-        {color:'#4f46e5',label:'Роли и команды как теги'},
-        {color:'#dc2626',label:'OT: задачи сотрудника в овертайме'},
-        {label:'Кнопка «Задачи» раскрывает связанный список из реестра'},
-      ],
+      employees:[],
       summary:[
         {color:'#4f46e5',label:'Ключевые KPI для CEO'},
         {color:'#059669',label:'Прогресс выполнения'},
         {color:'#dc2626',label:'Точки риска и блокировки'},
       ],
-      metrics:[
-        {color:'#4f46e5',label:'SLA сроков и зависимостное давление'},
-        {color:'#14b8a6',label:'Scope mix и портфель типов работ'},
-        {color:'#ef4444',label:'Операционные и качественные сигналы'},
-      ],
-      insights:[
-        {color:'#dc2626',label:'High: критический сигнал'},
-        {color:'#f59e0b',label:'Medium: требует внимания'},
-        {color:'#22c55e',label:'Low: наблюдение'},
-      ],
+      metrics:[],
+      // V21 tabs-consolidation (вариант A) — `insights` legend свёрнут
+      // в dashboard legend (severity-цвета). Старая запись retired.
       diagnostics:[
         {label:'Показывает источник данных и качество импорта'},
       ],
@@ -1610,7 +1933,7 @@ const App = {
       employees:'employees-legend',
       summary:'summary-legend',
       metrics:'metrics-legend',
-      insights:'insights-legend',
+      // V21 tabs-consolidation (вариант A) — insights legend retired (свёрнут в dashboard).
       diagnostics:'diagnostics-legend',
     };
     Object.entries(targetMap).forEach(([key,id])=>App.renderLegend(id,key===section?legendsBySection[key]||[]:[]) );
@@ -1636,16 +1959,29 @@ const App = {
     else if(s==='timeline') TimelineView.render();
     else if(s==='podlozhka') PodlozhkaView.render();
     else if(s==='employees') EmployeesView.render();
-    else if(s==='summary') SummaryView.render();
     else if(s==='metrics') MetricsView.render();
-    else if(s==='insights') InsightsView.render();
+    // V21 tabs-consolidation (вариант A) — `insights` retired; Nav.goTo
+    // ремаппит на 'dashboard'. Сюда не должно прилететь, но defensive fallback.
+    else if(s==='insights') DashboardView.render();
+    // V21 AO/AP — 4 новых dashboard-секция.
+    else if(s==='est-calibration')   EstimationCalibrationView.render();
+    else if(s==='component-health')  ComponentHealthView.render();
+    else if(s==='burnout')           BurnoutWatchtowerView.render();
+    else if(s==='doc-debt')          DocDebtConsoleView.render();
     else if(s==='diagnostics') DiagnosticsView.render();
     else if(s==='actions') ActionLayer.render();
     else if(s==='ai') AIView.render();
     else if(s==='ai-ceo') AICeoView.render();
+    else if(s==='exec') ExecView.render();
     else if(s==='integrations') IntegrationsView.render();
     else if(s==='history') HistoryView.render();
     else if(s==='errors') ErrorsView.render();
+    // AUDIT_HOLISTIC F12 — единый settings-экран. Хост `#section-settings`
+    // создаётся лениво (см. app/nav.js — не в MODULES, отдельный root).
+    else if(s==='settings') {
+      const host = document.getElementById('section-settings');
+      if (host) SettingsView.render(host);
+    }
     App.renderSectionLegends(s);
     if(typeof LLMAssistant!=='undefined'&&LLMAssistant.updateQuickPrompts){
       LLMAssistant.updateQuickPrompts();
@@ -1658,6 +1994,18 @@ const App = {
     if(!root) return;
     const now=Date.now();
     if(App._lastAnimAt&&(now-App._lastAnimAt)<260) return;
+    // sj2 fix (codebase-05 audit) — гейт «волна» на refreshAll: запускать
+    // анимацию только при реальной смене активной секции, не на каждый клик
+    // фильтра/save. Раньше любой reactive flush запускал ui-fade-up на 48
+    // карточках, juser воспринимал это как «дёрганье».
+    if (App._lastAnimSection === section) return;
+    // sj-metrics fix — Метрики управляют emerge сами через
+    // MetricsView._stagger (Wave 4 motion, audit-2026-05-04 §2.4 —
+    // metrics-emerge keyframe с translateY 8px и step 50ms). Универсальный
+    // ui-fade-up здесь дублирует на тех же .metrics-card → пользователь
+    // видит «дёрг → дёрг» (две translateY-амплитуды одна за другой).
+    if (section === 'metrics') { App._lastAnimSection = section; App._lastAnimAt = now; return; }
+    App._lastAnimSection = section;
     App._lastAnimAt=now;
     const targets=[...root.querySelectorAll('.kpi-card, .summary-card, .data-table-wrap, .insight-item, .kanban-card, .gantt-row, .gar-row, .timeline-section, .diag-card, .employee-card, .metrics-card, .metrics-person, .metrics-signal, .view-legend .legend-item-inline, .preset-btn, .preset-role-btn, .ai-block, .ceo-card, .ceo-feed-item')].slice(0,48);
     const bars=[...root.querySelectorAll('.mini-progress > span')].slice(0,32);
@@ -1680,18 +2028,75 @@ const App = {
     },760);
   },
   refreshAll() { App.renderSection(state.activeSection); HistoryManager.syncButtons(); },
-  refreshCurrentSection() { App.renderSection(state.activeSection); },
+  refreshCurrentSection() {
+    App.renderSection(state.activeSection);
+    // V21 BM — refresh AI context bar при смене filters.
+    try { Services.LLMAssistant?.refreshContextBar?.(); } catch (_) {}
+  },
   /** Sub-views that re-render in-place (e.g. GanttView.renderChart on a
    *  drop handler) can call this to inform the reactive auto-flush that
    *  the active section was just painted — and the upcoming reactive
    *  flush should skip a redundant `App.refreshAll()`. */
   markRenderedNow() { App._lastRenderAt = Date.now(); App._lastRenderSection = state.activeSection; },
+
+  // i11 fix (codebase-04 audit) — personal digest.
+  _LAST_SEEN_KEY: 'q2_last_seen_v1',
+  _pluralRu(n, forms) {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return forms[2];
+    if (b > 1 && b < 5) return forms[1];
+    if (b === 1) return forms[0];
+    return forms[2];
+  },
+  _showPersonalDigestIfAny() {
+    try {
+      const lastSeenRaw = localStorage.getItem(App._LAST_SEEN_KEY);
+      const now = Date.now();
+      // Обновляем «last seen» в любом случае.
+      localStorage.setItem(App._LAST_SEEN_KEY, String(now));
+      if (!lastSeenRaw) return;                    // первый визит — пропускаем
+      const lastSeen = parseInt(lastSeenRaw, 10) || 0;
+      // Игнорируем визиты <2 мин назад (быстрая F5 не должна спамить).
+      if (now - lastSeen < 120000) return;
+      const log = Array.isArray(state.actionLog) ? state.actionLog : [];
+      const delta = log.filter(e => {
+        const ts = Date.parse(e.at || '') || 0;
+        return ts > lastSeen && e.category !== 'view'; // нав-логи не считаем
+      });
+      if (delta.length < 3) return;                // показываем только если интересно
+      const since = new Date(lastSeen).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' });
+      window.showToast?.({
+        msg: `С ${since}: ${delta.length} ${App._pluralRu(delta.length, ['изменение','изменения','изменений'])}`,
+        type: 'info',
+        ms: 7000,
+        undo: true,
+        undoLabel: 'История',
+        onUndo: () => { try { Services.Nav?.goTo?.('history'); } catch (_) {} },
+      });
+    } catch (_) {}
+  },
   refreshDashboardIfActive() { if(state.activeSection==='dashboard') DashboardView.render(); },
   updateTopbarBadge() {
-    const b=document.getElementById('topbar-row-count');
-    if(state.rows.length){b.textContent=state.rows.length+' задач';b.classList.remove('hidden');}
-    else b.classList.add('hidden');
+    // Волна 1 (Northstar redesign) — `topbar-row-count` badge удалён из index.html
+    // (legacy «N задач» рядом с mark — отвлекал от знака). Оставляем null-guard
+    // чтобы старые вызовы (init, onclick) не падали; refreshFilterCountBadge продолжает
+    // обновлять «Фильтры» counter — он остался.
+    const b = document.getElementById('topbar-row-count');
+    if (b) {
+      if (state.rows.length) { b.textContent = state.rows.length + ' задач'; b.classList.remove('hidden'); }
+      else b.classList.add('hidden');
+    }
     App.refreshFilterCountBadge();
+    // 2026-05-04 — Save reactive disabled-state. Раньше клик на пустой
+    // реестр давал тост «Нет курса для сверки» без visual cue; теперь сама
+    // кнопка становится неактивной (aria-disabled + opacity), hotkey тоже
+    // ловит guard в bindSave. Hotkey-guard остаётся (см. doSave).
+    const saveBtn = document.getElementById('btn-save');
+    if (saveBtn) {
+      const empty = !state.rows.length;
+      saveBtn.classList.toggle('is-empty', empty);
+      saveBtn.setAttribute('aria-disabled', empty ? 'true' : 'false');
+    }
   },
   // V17 P10 (designer §1 + sys-analyst §2 + art-director Quick win 4) —
   // applied-filter counter on the «Фильтры» topbar button. Hidden when 0
@@ -1706,6 +2111,22 @@ const App = {
       el.classList.remove('hidden');
     } else {
       el.classList.add('hidden');
+    }
+    // AUDIT_HOLISTIC F9 + паттерн 14 — badge «Из ссылки → ...».
+    // Опционально: если в DOM есть #filter-source-badge, обновляем его
+    // на основе state.filters._source ('url' | 'manual' | 'drill-down').
+    const srcBadge = document.getElementById('filter-source-badge');
+    if (srcBadge) {
+      const src = (state.filters && state.filters._source) || '';
+      const label = src === 'url' ? 'Из ссылки'
+                  : src === 'drill-down' ? 'Из дашборда'
+                  : '';
+      if (label && n > 0) {
+        srcBadge.textContent = label;
+        srcBadge.classList.remove('hidden');
+      } else {
+        srcBadge.classList.add('hidden');
+      }
     }
   },
   bindFilesDropdown() {
@@ -1788,6 +2209,32 @@ const App = {
 // ============================================================
 // WINDOW REFS + BOOTSTRAP
 // ============================================================
+// AUDIT_TECH кр.13 / Phase 4 — single batch регистрации всех services
+// orchestrator-уровня. Services.register уже зеркалит на window, но
+// явные window.X сохранены как backward-compat signal (для будущего
+// удаления когда callsite'ы мигрируют на Services.X / ES import).
+// LLMAssistant / PromptsEditor / HistoryManager / Onboarding / NotifyCenter /
+// migrations / etc. УЖЕ зарегистрированы в своих module-owner файлах
+// (Phase 2). Здесь — только те что app.js exposes для cross-cycle access:
+// App, AppSettings, ThemeUI, RegistryView, BulkEditPanel, showToast,
+// showFunnyLoader, и idempotent re-affirmation для остальных.
+import { Services } from './app/services.js';
+Services.register('App',           App);
+Services.register('AppSettings',   AppSettings);
+Services.register('ThemeUI',       ThemeUI);
+Services.register('RegistryView',  RegistryView);
+Services.register('BulkEditPanel', BulkEditPanel);
+// Idempotent re-register для модулей которые self-register'ятся в
+// своих файлах (Phase 2). Гарантирует доступность даже если их
+// init происходит позже app.js bootstrap.
+Services.register('LLMAssistant',   LLMAssistant);
+Services.register('PromptsEditor',  PromptsEditor);
+Services.register('HistoryManager', HistoryManager);
+Services.register('Onboarding',     Onboarding);
+Services.register('ActionLayer',    ActionLayer);
+// Lowercase utility helpers — пока остаются как window.X (Phase 5
+// подумает как унифицировать lowercase API через Services).
+
 window.App            = App;
 window.LLMAssistant   = LLMAssistant;
 // `PromptsEditor` is now imported from ./app/promptsEditor.js (audit #18 decomposition)
@@ -1848,7 +2295,7 @@ window.addEventListener('storage', (e) => {
         try { RiskEngine.computeAll(state.rows); } catch(_) {}
       }
     });
-    if (window.App) {
+    if (Services.App) {
       App.populateFilterDropdowns();
       App.refreshAll();
       App.updateTopbarBadge();
@@ -1881,7 +2328,7 @@ let _reactiveBooted = false;
 let _reactiveFlushing = false;
 const _AUTO_RERENDER_GRACE_MS = 250;
 Reactive.subscribe(() => {
-  if (!_reactiveBooted || !window.App) return;       // ignore changes during initial load
+  if (!_reactiveBooted || !Services.App) return;     // ignore changes during initial load
   if (_reactiveFlushing) return;                     // re-entry → skip
   _reactiveFlushing = true;
   Reactive.silent(() => {
@@ -1906,4 +2353,60 @@ document.addEventListener('DOMContentLoaded', () => {
   // After init returns we flip the flag and let auto-flush take over.
   Reactive.silent(() => App.init());
   _reactiveBooted = true;
+  // V21 Wave-3 — replace `data-icon="..."` placeholders в index.html на inline-SVG
+  // (icons.js рендерит Lucide-derived line-glyph). Делаем после App.init —
+  // некоторые секции рендерятся внутри App.init и тоже могут добавлять
+  // data-icon-узлы. Re-hydrate ВЫЗЫВАЕТСЯ повторно из views при необходимости.
+  try { Icons.hydrate(document); } catch (e) { console.warn('Icons.hydrate failed:', e); }
+  // AUDIT_HOLISTIC F4 — bell-button hydrate ПОСЛЕ Icons.hydrate (data-icon
+  // должен сначала развернуться в SVG, иначе кнопка пуста).
+  try {
+    const bellBtn   = document.getElementById('prizma-notify-bell');
+    const bellPanel = document.getElementById('prizma-notify-panel');
+    if (bellBtn && bellPanel) NotifyCenter.hydrateBell(bellBtn, bellPanel);
+  } catch (e) { console.warn('NotifyCenter.hydrateBell failed:', e); }
+
+  // V22 (AUDIT_HOLISTIC паттерн 17 / Идея 15) — cross-tab sync.
+  // Init ПОСЛЕ App.init — Storage.load уже отработал, не надо обрабатывать
+  // ping'и от себя самого до полной hydration.
+  try {
+    CrossTabSync.init();
+    CrossTabSync.onRemoteChange((msg) => {
+      if (msg.type !== 'state-change') return;
+      // НЕ авто-merge: показываем toast с кнопкой «Перезагрузить» — пользователь
+      // решает сам (Notion / Linear pattern). См. контракт в crossTabSync.js.
+      ToastQueue.show({
+        msg: 'Данные обновлены в другой вкладке',
+        type: 'warning',
+        mascot: 'alert',
+        subText: 'Чтобы увидеть изменения, перезагрузите план.',
+        ms: 0,                  // sticky — не пропадаём по таймеру
+        undo: 'Перезагрузить',  // re-используем undo-button slot — он визуально подходит
+        onUndo: () => {
+          try {
+            Reactive.silent(() => {
+              const parsed = Storage.load();
+              if (parsed && Array.isArray(parsed.rows)) {
+                state.rows      = parsed.rows;
+                state.employees = Array.isArray(parsed.employees) ? parsed.employees : [];
+              }
+            });
+            App.refreshAll();
+          } catch (e) {
+            console.warn('[crossTabSync] reload failed:', e);
+          }
+        },
+        id: 'cross-tab-sync-conflict', // одноразовый id → дубликаты заменяют, не накапливаются
+      });
+    });
+  } catch (e) { console.warn('[crossTabSync] init failed:', e); }
+
+  // V22 → V1.0.1: footer удалён, версия в шапке модалки настроек
+  // (см. app/version.js + app/appSettings.js renderVersionHeader).
 });
+
+/**
+ * V22 → V1.0.1: footer-функция удалена. Версия теперь рендерится
+ * в шапке модалки настроек (см. app/appSettings.js → renderVersionHeader).
+ * Источник истины — app/version.js (APP_VERSION + RELEASES).
+ */

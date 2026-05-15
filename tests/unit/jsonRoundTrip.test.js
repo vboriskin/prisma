@@ -67,23 +67,59 @@ describe('JSONExport.buildSnapshot', () => {
     assert.equal(s.settings.ganttEditMode, true);
   });
 
-  test('V17.1 F1: integrations key IS exported but tokens are scrubbed', () => {
+  test('integrations + LLM tokens preserved in bundle (personal backup)', () => {
+    // По запросу пилот-юзера (2026-05-03): «при выгрузке JSON токены не
+    // стирались, я уже устал их прописывать заново». Раньше было V17.1 F1
+    // (integrations key есть, токены scrub'ятся). Теперь — для двух ключей
+    // (q2_integrations_v1 + q2_llm_settings_v1) токены сохраняются для
+    // personal backup. Остальные ключи (chat, log) продолжают scrub'иться.
     localStorage.setItem('q2_settings_v3', '{"foo":1}');
     localStorage.setItem('q2_integrations_v1', JSON.stringify({
       jiraToken: 'SECRET',
       jiraProjectKeys: 'PROJ',
     }));
     const s = JSONExport.buildSnapshot();
-    // V17.1 F1 — integrations key теперь round-trip'ится через JSON
-    //   (project keys, base URLs, feature toggles), но _scrubSecrets вырезает
-    //   token-shaped поля. Старая политика «омит ключа целиком» снята.
     assert.ok(s.bundle.q2_settings_v3, 'normal settings key still exported');
-    assert.ok(s.bundle.q2_integrations_v1, 'integrations key is now present (V17.1 F1)');
-    assert.equal(s.bundle.q2_integrations_v1.jiraToken, undefined, 'jiraToken stripped');
+    assert.ok(s.bundle.q2_integrations_v1, 'integrations key is present');
+    assert.equal(s.bundle.q2_integrations_v1.jiraToken, 'SECRET', 'jiraToken preserved (personal backup)');
     assert.equal(s.bundle.q2_integrations_v1.jiraProjectKeys, 'PROJ', 'non-secret survives');
-    // Defence-in-depth: token never appears anywhere in serialised snapshot.
-    const stringified = JSON.stringify(s);
-    assert.ok(!stringified.includes('SECRET'), 'token value must NOT appear anywhere in the export');
+    assert.equal(s._includesSecrets, true, 'snapshot marker для UI warning');
+  });
+
+  // F8: invariant — scrub защищает nested-карты, где ключ верхнего уровня
+  // безобидный (`bigMetricsTimeouts`, etc), но nested ключ выглядит как
+  // секрет (substring 'token'/'secret'). Defence-in-depth тест.
+  test('F8: nested-map scrub защищает токено-shaped имена nested-ключей', () => {
+    localStorage.setItem('q2_llm_conv_v1', JSON.stringify([
+      { role: 'system', meta: { tokenFetcher: 'value', okField: 'kept' } },
+    ]));
+    const s = JSONExport.buildSnapshot();
+    const conv = s.bundle.q2_llm_conv_v1;
+    if (conv && conv[0]?.meta) {
+      assert.equal(conv[0].meta.tokenFetcher, undefined, 'nested tokenFetcher key strip');
+      assert.equal(conv[0].meta.okField, 'kept', 'nested okField преserved');
+    }
+  });
+
+  test('chat history / action log still scrubbed (defence in depth)', () => {
+    // Если пользователь случайно вставит Bearer-токен в чат-историю или
+    // action-log — он не должен попасть в bundle. Эти ключи остаются под scrub.
+    localStorage.setItem('q2_llm_conv_v1', JSON.stringify([
+      { role: 'user', content: 'try Bearer abc', token: 'leaked' },
+    ]));
+    localStorage.setItem('q2_action_log_v1', JSON.stringify([
+      { action: 'ok', secret: 'do-not-keep' },
+    ]));
+    const s = JSONExport.buildSnapshot();
+    const conv = s.bundle.q2_llm_conv_v1;
+    const log  = s.bundle.q2_action_log_v1;
+    if (conv) {
+      // Скраб удаляет любое поле с именем содержащим "token"/"secret".
+      assert.equal(conv[0]?.token, undefined, 'token field stripped from chat-history');
+    }
+    if (log) {
+      assert.equal(log[0]?.secret, undefined, 'secret field stripped from action-log');
+    }
   });
 });
 

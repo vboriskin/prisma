@@ -9,11 +9,45 @@
 import { state }               from '../state.js';
 // V17 P8 (QA B-2 consensus) — respect global filters.
 import { FilterEngine }        from '../filters.js';
+// AUDIT_HOLISTIC O6 — TODO: мигрировать на AIPipeline.runAll('ceo', ctx),
+//   аналогично тому как это сделано в `views/aiView.js`. Сейчас идёт через
+//   thin wrapper `aiCeoFallback.js` → `UnifiedFallbackEngine.runAllCeoBlocks`.
+//   Логика fallback'а уже унифицирована, остался только bootstrap registry.
 import { runAllCeoBlocks }     from '../ai/aiCeoFallback.js';
 import {
   renderCeoPage, renderCeoEmpty, renderCeoLoading,
   renderPreviewModal, renderExplainPanel,
 } from '../ai/aiCeoRenderer.js';
+// V18 P7 (audit-2026-05-04 §7) — общий LLM-клиент / парсер / applyFilter
+// извлечён в ai/llmClient.js, чтобы не дублировать с aiView.
+import { callLLM, parseLLMJsonResponse, applyFilterPayload } from '../ai/llmClient.js';
+import { renderPageHeader, showPageLoader, inlinePulseLoader } from '../app/prizmaUI.js';
+// AUDIT_ARTDIRECTION #20 — AI-frame primitive (insight-glow + mascot state +
+// AI-only stripe). См. app/aiFramePrimitive.js.
+import { applyAiFrame, triggerInsightGlow, setMascotState, syncAiOnlyMarkers } from '../app/aiFramePrimitive.js';
+import { Services } from '../app/services.js';
+
+/* AUDIT_ARTDIRECTION #20 — runtime CSS для AI CEO (не трогаем styles.css).
+   Дополняет AI-frame primitive стилем для card data-source="ai" + hero
+   data-source-визуальной разметкой. */
+function _ensureAiCeoStyle() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('audit-art-aiCeo-style')) return;
+  const style = document.createElement('style');
+  style.id = 'audit-art-aiCeo-style';
+  style.textContent = `
+    /* AI-frame на ceo-root — отступ под hero чтобы insight-glow не обрезался. */
+    #ceo-root.prizma-ai-frame { padding-top: 4px; }
+    /* AI-only stripe для ceo-card / ceo-hero (override default border). */
+    #ceo-root [data-source="ai"] {
+      border-left: 3px solid var(--prizma-insight, #B084CC);
+    }
+    body.theme-light #ceo-root [data-source="ai"] {
+      border-left-color: var(--prizma-insight, #6B4488);
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 /* ── LLM schema for CEO structured output ─────────────────── */
 const CEO_SCHEMA = `{
@@ -86,81 +120,68 @@ function buildCeoContext(data) {
   return raw.length > 45000 ? JSON.stringify({...ctx, noReleaseTasks:[], unconfirmed:[]}) : raw;
 }
 
+/* ── validate LLM CEO response shape ─────────────────────── */
+// V21 audit 05-ai-ceo §8: schema validation — LLM иногда возвращает
+// actionFeed без severity или ifNothingChanges без firstToBreak.
+// При провале → возвращаем null → fallback остаётся.
+const VALID_SEV = new Set(['critical','warning','info','ok']);
+function validateCeoSchema(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (!p.health || typeof p.health.score !== 'number') return false;
+  if (p.health.score < 0 || p.health.score > 100) return false;
+  if (p.ifNothingChanges) {
+    const inc = p.ifNothingChanges;
+    if (inc.projectedDays !== undefined && (typeof inc.projectedDays !== 'number' || inc.projectedDays <= 0)) return false;
+    // Normalize missing arrays
+    inc.firstToBreak    = Array.isArray(inc.firstToBreak)    ? inc.firstToBreak    : [];
+    inc.affectedReleases = Array.isArray(inc.affectedReleases) ? inc.affectedReleases : [];
+    inc.consequences    = Array.isArray(inc.consequences)    ? inc.consequences    : [];
+  }
+  if (p.hardTruths) {
+    p.hardTruths.hardTruths  = Array.isArray(p.hardTruths.hardTruths)  ? p.hardTruths.hardTruths  : [];
+    p.hardTruths.suspicious  = Array.isArray(p.hardTruths.suspicious)  ? p.hardTruths.suspicious  : [];
+    p.hardTruths.weakSignals = Array.isArray(p.hardTruths.weakSignals) ? p.hardTruths.weakSignals : [];
+  }
+  if (Array.isArray(p.actionFeed)) {
+    p.actionFeed = p.actionFeed.map(item => ({
+      ...item,
+      severity:     VALID_SEV.has(item.severity)          ? item.severity     : 'info',
+      affectedCount: typeof item.affectedCount === 'number' ? item.affectedCount : 0,
+    }));
+  }
+  return true;
+}
+
 /* ── LLM call (non-streaming, expects JSON) ───────────────── */
 async function callCeoLLM(contextStr) {
-  const settings = window.LLMAssistant?.getSettings?.();
-  if (!settings) return null;
-
-  const token   = window.LLMAssistant?.getToken?.() || '';
-  const apiBase = String(settings.apiBaseUrl || '').replace(/\/+$/, '');
-  const proxy   = String(settings.proxyUrl   || '').replace(/\/+$/, '');
-  const model   = settings.model || 'GigaChat-2';
+  if (!Services.LLMAssistant?.getSettings?.()) return null;
 
   const userMsg = `Ты CEO-советник. Проанализируй данные и верни JSON строго по схеме:\n${CEO_SCHEMA}\n\nДанные проекта:\n${contextStr}`;
 
-  const body = {
-    model, temperature: 0.2, max_tokens: 1800, stream: false,
-    messages: [
-      { role: 'system', content: LLM_SYSTEM },
-      { role: 'user',   content: userMsg },
-    ],
-  };
-
-  try {
-    let res;
-    let useDirect = false;
-    if (settings.apiMode === 'direct' && apiBase) {
-      // Direct mode is only safe when the endpoint is on the same origin (no CORS).
-      // For cross-origin endpoints (e.g. gigachat.devices.sberbank.ru) — fall back to proxy.
-      try {
-        const ep = apiBase.endsWith('/chat/completions') ? apiBase : `${apiBase}/chat/completions`;
-        const epUrl = new URL(ep, window.location.origin);
-        useDirect = epUrl.origin === window.location.origin;
-        if (useDirect) {
-          res = await fetch(epUrl.toString(), {
-            method: 'POST', signal: AbortSignal.timeout(25000),
-            headers: { 'Content-Type':'application/json', ...(token?{Authorization:`Bearer ${token}`}:{}) },
-            body: JSON.stringify(body),
-          });
-        }
-      } catch(_) { useDirect = false; }
-    }
-    if (!useDirect) {
-      const ep = proxy ? `${proxy}/api/llm/chat` : '/api/llm/chat';
-      res = await fetch(ep, {
-        method: 'POST', signal: AbortSignal.timeout(25000),
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ ...body, apiBaseUrl: apiBase, token }),
-      });
-    }
-    if (!res.ok) return null;
-
-    const json = await res.json().catch(() => null);
-    if (!json) return null;
-
-    const text = json?.choices?.[0]?.message?.content
-               || json?.result?.choices?.[0]?.message?.content
-               || json?.content || '';
-    if (!text) return null;
-
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-
-    const parsed = JSON.parse(match[0]);
-    // Minimal validation
-    if (!parsed.health || typeof parsed.health.score !== 'number') return null;
-    return parsed;
-  } catch(e) {
-    console.warn('[AICeoView] LLM call failed:', e?.message || e);
-    return null;
-  }
+  const text = await callLLM({
+    system: LLM_SYSTEM,
+    user:   userMsg,
+    timeoutMs:  25000,
+    temperature: 0.2,
+    maxTokens:  1800,
+  });
+  const { ok, data } = parseLLMJsonResponse(text, p => p?.health && typeof p.health.score === 'number');
+  if (!ok) return null;
+  // V21 audit 05-ai-ceo §8: reject structurally invalid LLM output
+  if (!validateCeoSchema(data)) return null;
+  return data;
 }
 
 /* ── merge LLM into fallback data ─────────────────────────── */
 function mergeLLMData(fallback, llm) {
   if (!llm) return fallback;
 
-  const merge = (fb, lv) => lv && typeof lv === 'object' && Object.keys(lv).length ? { ...fb, ...lv, aiEnhanced: true } : fb;
+  // AUDIT_ARTDIRECTION #20 — поле `source` помечает блок как AI-driven.
+  // Renderer вешает data-source="ai" → AI-frame primitive стрипит карточку
+  // 3px insight-цветом. Если LLM не вернул блок — оставляем 'rule-based'
+  // из fallback'а (source уже задан там).
+  const merge = (fb, lv) => lv && typeof lv === 'object' && Object.keys(lv).length
+    ? { ...fb, ...lv, aiEnhanced: true, source: 'ai' } : fb;
 
   return {
     ...fallback,
@@ -169,28 +190,17 @@ function mergeLLMData(fallback, llm) {
     hardTruths:       merge(fallback.hardTruths, llm.hardTruths),
     actionFeed:       Array.isArray(llm.actionFeed) && llm.actionFeed.length
                         ? llm.actionFeed : fallback.actionFeed,
+    saveRelease:      fallback.saveRelease,  // saveRelease остаётся rule-based
     aiEnhanced: true,
   };
 }
 
 /* ── navigate + apply filter ──────────────────────────────── */
+// V18 P7 — извлечено в ai/llmClient.js#applyFilterPayload (см. import).
+// CEO-версия исторически переходила на 'registry' даже при пустом payload —
+// это поведение восстанавливается через navigateOnEmpty:true.
 function applyFilterAndGoTo(filterPayload) {
-  try {
-    if (!filterPayload) { window.App?.goTo?.('registry'); return; }
-    const f = state.filters;
-    if (filterPayload.team         !== undefined) f.team         = filterPayload.team;
-    if (filterPayload.release      !== undefined) f.release      = filterPayload.release;
-    if (filterPayload.scope        !== undefined) f.scope        = filterPayload.scope;
-    if (filterPayload.scopeStatus  !== undefined) f.scope        = filterPayload.scopeStatus;
-    if (filterPayload.search       !== undefined) f.search       = filterPayload.search;
-    if (filterPayload.onlyBlocking !== undefined) f.onlyBlocking = !!filterPayload.onlyBlocking;
-    if (filterPayload.onlyRisky    !== undefined) f.onlyRisky    = !!filterPayload.onlyRisky;
-    if (filterPayload.onlyDone     !== undefined) f.onlyDone     = !!filterPayload.onlyDone;
-    if (filterPayload.isUnassigned) { f.scope = 'Да'; }
-    window.App?.goTo?.('registry');
-    window.notify?.('chat_filter');
-    window.showToast?.('Фильтры применены');
-  } catch(e) { console.warn('[AICeoView] applyFilter error', e); }
+  return applyFilterPayload(filterPayload, { navigateOnEmpty: true });
 }
 
 /* ── open chat with a message ─────────────────────────────── */
@@ -234,11 +244,10 @@ function showExplain(section, data) {
     return;
   }
   // Fallback: show a quick modal
-  const existing = document.getElementById('ceo-explain-modal');
-  if (existing) existing.remove();
+  document.getElementById('ceo-explain-modal')?.remove();
   const html = renderExplainPanel(section, data);
   document.body.insertAdjacentHTML('beforeend', html);
-  bindModalClose('#ceo-explain-modal');
+  attachModalClose(document.getElementById('ceo-explain-modal'));
 
   const chatBtn = document.getElementById('ceo-expl-chat-btn');
   if (chatBtn && prompt) {
@@ -249,40 +258,41 @@ function showExplain(section, data) {
   }
 }
 
-/* ── preview modal helpers ────────────────────────────────── */
-function bindModalClose(selector) {
-  const modal = document.querySelector(selector);
-  if (!modal) return;
+/* ── modal close helper (V21 audit 05-ai-ceo §15: deduplicated) ─── */
+// V21 audit 05-ai-ceo §15: единая функция вместо двух копий.
+// Поддерживает Esc — раньше закрытие было только кликом.
+function attachModalClose(modal) {
+  if (!modal) return () => {};
   const close = () => modal.remove();
   modal.querySelector('#ceo-modal-close')?.addEventListener('click', close);
   modal.querySelector('#ceo-modal-cancel')?.addEventListener('click', close);
   modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  const onEsc = e => { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+  document.addEventListener('keydown', onEsc);
+  return close;
 }
 
 function showPreviewModal(scenarioLabel, changesRaw) {
   let changes = [];
   try { changes = typeof changesRaw === 'string' ? JSON.parse(changesRaw) : changesRaw; } catch(_) {}
 
-  const existing = document.getElementById('ceo-preview-modal');
-  if (existing) existing.remove();
+  document.getElementById('ceo-preview-modal')?.remove();
 
   const html = renderPreviewModal(scenarioLabel, changes);
   document.body.insertAdjacentHTML('beforeend', html);
 
   const modal = document.getElementById('ceo-preview-modal');
-  const close = () => modal?.remove();
-  modal?.querySelector('#ceo-modal-close')?.addEventListener('click', close);
-  modal?.querySelector('#ceo-modal-cancel')?.addEventListener('click', close);
-  modal?.addEventListener('click', e => { if (e.target === modal) close(); });
+  const close = attachModalClose(modal);
 
   const confirmBtn = modal?.querySelector('#ceo-modal-confirm');
   if (confirmBtn) {
+    // V21 audit 05-ai-ceo §11: кнопка переименована — честный deeplink в Action Layer
+    // (раньше называлась «Применить изменения» — вводила в заблуждение).
+    confirmBtn.textContent = 'Перейти к Action Layer';
     confirmBtn.addEventListener('click', () => {
-      // Show a warning — changes are not actually applied here
-      // To really apply: wire to applyBulkAction via a proper batch flow
-      window.showToast?.('Функция прямого применения требует ревью и подтверждения через Action Layer', 'info');
+      window.showToast?.('Предпросмотр закрыт — переходим к Action Layer для детального ревью', 'info');
       close();
-      window.App?.goTo?.('actions');
+      Services.App?.goTo?.('actions');
     });
   }
 }
@@ -298,36 +308,51 @@ export const AICeoView = {
     const root = document.getElementById('section-ai-ceo');
     if (!root) return;
     this._root = root;
+    // AUDIT_ARTDIRECTION #20 — runtime CSS (не трогаем styles.css).
+    _ensureAiCeoStyle();
 
+    const headerHtml = renderPageHeader('ai-ceo', {
+      sub: 'Управленческий нарратив: где команда сейчас и что важно знать.',
+    });
     // V17 P8 (QA B-2) — respect global filters.
     const rows = FilterEngine.getFiltered();
     if (!rows || !rows.length) {
-      root.innerHTML = `<div id="ceo-root" class="view-root">${renderCeoEmpty()}</div>`;
+      root.innerHTML = `${headerHtml}<div id="ceo-root" class="view-root">${renderCeoEmpty()}</div>`;
       return;
     }
 
     // Rule-based fallback (instant)
     this._data = runAllCeoBlocks(rows);
     if (!this._data) {
-      root.innerHTML = `<div id="ceo-root" class="view-root">${renderCeoEmpty()}</div>`;
+      root.innerHTML = `${headerHtml}<div id="ceo-root" class="view-root">${renderCeoEmpty()}</div>`;
       return;
     }
 
-    root.innerHTML = `<div id="ceo-root" class="view-root">${renderCeoPage(this._data)}</div>`;
+    root.innerHTML = `${headerHtml}<div id="ceo-root" class="view-root">${renderCeoPage(this._data)}</div>`;
     this._bindEvents(root);
+    // AUDIT_ARTDIRECTION #20 — AI-frame: маркируем page как AI-area,
+    // синхронизируем data-ai-only stripes на cards с data-source="ai".
+    const ceoRoot = root.querySelector('#ceo-root');
+    if (ceoRoot) {
+      applyAiFrame(ceoRoot, { source: this._data?.aiEnhanced ? 'ai' : 'rule-based' });
+      syncAiOnlyMarkers(ceoRoot);
+    }
   },
 
   /* ── event delegation ──────────────────────────────────── */
   _bindEvents(root) {
-    // V17 P8 (full-stack memleak) — `onclick=` overwrite-pattern,
-    // see aiView._bindEvents for rationale (root not recreated).
-    root.onclick = async e => {
+    // V17 P8 (full-stack memleak) — `onclick=` overwrite-pattern.
+    // V21 audit 05-ai-ceo §16: handler вешается на #ceo-page (внутренний
+    // рендер-root), а не на #section-ai-ceo (section-контейнер), чтобы не
+    // конфликтовать со scroll/nav обвязкой секции.
+    const page = root.querySelector('#ceo-page') || root;
+    page.onclick = async e => {
       // AI refresh button
       if (e.target.id === 'ceo-refresh-btn' || e.target.closest('#ceo-refresh-btn')) {
         const btn = e.target.closest('#ceo-refresh-btn') || e.target;
         btn.disabled = true;
-        btn.textContent = '⏳';
-        const loader = window.showFunnyLoader?.('Обновляю CEO-сводку');
+        btn.innerHTML = inlinePulseLoader('Обновляем CEO-сводку');
+        const loader = showPageLoader('Сверяем курс по CEO-сводке…');
         try {
           await this._refreshWithLLM();
           window.HistoryLog?.ai?.('refresh_ceo', 'AI CEO: обновлена сводка');
@@ -335,7 +360,10 @@ export const AICeoView = {
         finally {
           loader?.close();
           btn.disabled = false;
-          btn.textContent = '↺ AI';
+          // V21 P11.12 — восстанавливаем иконку rotate-cw + label «AI»
+          // (см. renderCeoHero — рендерится через Icons.get('rotate-cw');
+          // имя `refresh-cw` отсутствует в registry, синоним rotate-cw).
+          btn.innerHTML = `${Services.Icons?.get?.('rotate-cw', { size: 14 }) || ''}<span class="aiceo-refresh-label">AI</span>`;
         }
         return;
       }
@@ -377,22 +405,66 @@ export const AICeoView = {
     const root = document.getElementById('ceo-root');
     if (!root) return;
 
+    // V21 audit 05-ai-ceo §6: пометить карточки как «обновляются»,
+    // чтобы пользователь видел что данные скоро изменятся.
+    const cards = root.querySelectorAll('.ceo-card, .ceo-hero');
+    cards.forEach(c => { c.classList.add('aiceo-refreshing'); c.setAttribute('aria-busy', 'true'); });
+
+    // AUDIT_ARTDIRECTION #20 — переключаем маскота в thinking-state на время
+    // AI-запроса (визуальный сигнал «второй мозг думает»).
+    setMascotState(root, 'thinking');
+
     try {
       const ctxStr    = buildCeoContext(this._data);
       const llmResult = await callCeoLLM(ctxStr);
 
       if (!llmResult) {
+        // V21 audit 05-ai-ceo §7: показываем fallback-статус в hero
+        this._markAIStatus(root, false);
         window.showToast?.('AI недоступен — показан rule-based анализ', 'info');
+        // AI-frame: вернуть маскота в idle (без success — данные не обновились).
+        setMascotState(root, 'idle');
         return;
       }
 
       this._data = mergeLLMData(this._data, llmResult);
       root.innerHTML = renderCeoPage(this._data);
+      // V21 audit 05-ai-ceo §7: показываем AI-статус
+      this._markAIStatus(root, true);
       this._bindEvents(this._root);
-      window.showToast?.('✨ AI CEO обновлён', 'success');
+      // AUDIT_ARTDIRECTION #20 — после успешного AI-merge:
+      //   1) insight-glow на hero (одноразовый 800ms pulse).
+      //   2) sync data-ai-only stripes на новых cards.
+      //   3) маскот в success → idle через 1.5s.
+      const heroEl = root.querySelector('#ceo-hero');
+      if (heroEl) triggerInsightGlow(heroEl);
+      syncAiOnlyMarkers(root);
+      setMascotState(root, 'success');
+      window.showToast?.('AI CEO обновлён', 'success');
     } catch(e) {
-      console.warn('[AICeoView] LLM refresh error:', e);
-      window.showToast?.('Ошибка AI — показан rule-based анализ', 'info');
+      this._markAIStatus(root, false);
+      window.showToast?.('AI дрейфует — показан rule-based анализ', 'info');
+      setMascotState(root, 'idle');
+    } finally {
+      // Снять skeleton-состояние (если рендер не перезаписал)
+      root.querySelectorAll('.aiceo-refreshing').forEach(c => {
+        c.classList.remove('aiceo-refreshing');
+        c.removeAttribute('aria-busy');
+      });
     }
+  },
+
+  /* ── show AI/fallback status chip in hero ──────────────── */
+  // V21 audit 05-ai-ceo §7: чип показывает откуда данные — AI или rule-based.
+  _markAIStatus(root, isAI) {
+    const hero = root.querySelector('#ceo-hero');
+    if (!hero) return;
+    hero.querySelector('.ceo-ai-status-chip')?.remove();
+    const now = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const chip = document.createElement('div');
+    chip.className = `ceo-ai-status-chip ${isAI ? 'ceo-ai-chip-enhanced' : 'ceo-ai-chip-fallback'}`;
+    chip.textContent = isAI ? `AI · ${now}` : `Rule-based · AI недоступен`;
+    const heroRight = hero.querySelector('.ceo-hero-right');
+    heroRight ? heroRight.prepend(chip) : hero.append(chip);
   },
 };

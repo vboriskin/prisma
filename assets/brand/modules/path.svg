@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Призма — Иконка модуля: След пути
+  История пути команды. Звезда с затухающими точками за ней.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="След пути">
+  <title>След пути</title>
+  <g transform="translate(12,12)" fill="currentColor">
+    <!-- Звезда -->
+    <polygon points="0,-9 0.7,-0.7 0,0 -0.7,-0.7"/>
+    <polygon points="0,9 0.7,0.7 0,0 -0.7,0.7" opacity="0.5"/>
+    <polygon points="-9,0 -0.7,-0.7 0,0 -0.7,0.7" opacity="0.5"/>
+    <polygon points="9,0 0.7,-0.7 0,0 0.7,0.7" opacity="0.5"/>
+    <circle r="0.7"/>
+    <!-- Точки следа -->
+    <circle cx="-5" cy="6" r="0.5" opacity="0.4"/>
+    <circle cx="-7" cy="7.5" r="0.4" opacity="0.25"/>
+    <circle cx="-9" cy="8.5" r="0.3" opacity="0.15"/>
+  </g>
+</svg>

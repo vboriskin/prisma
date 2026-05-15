@@ -64,8 +64,16 @@ export const Utils = {
       const y=ru[3].length===2?'20'+ru[3]:ru[3];
       return `${y}-${ru[2].padStart(2,'0')}-${ru[1].padStart(2,'0')}`;
     }
+    // V21 J #64 — TZ skew fix: `new Date("2026-05-02T23:30:00")` без Z
+    // интерпретируется как local time, потом `.toISOString()` конвертит в
+    // UTC и может сдвинуть на день. Используем local-date через
+    // getFullYear/getMonth/getDate чтобы избежать TZ shift.
     const d=new Date(s);
-    return Number.isNaN(d.getTime())?'':d.toISOString().slice(0,10);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mo}-${dd}`;
   },
   parseDateRange(raw) {
     if (!raw) return {start:'',end:''};
@@ -92,6 +100,25 @@ export const Utils = {
       .replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;')
       .replace(/'/g,'&#39;');
+  },
+  // QA AS.6 / A3.1 / A3.4 / A7.2 — единый deep-clone для snapshot/undo/copy
+  // путей. Сохраняет Date/Map/Set, в отличие от JSON.parse(JSON.stringify).
+  // Fallback на JSON-копию только если в объект попадёт что-то non-cloneable
+  // (functions/DOM); для plain Row/Employee/state shape это не должно
+  // случиться, но падать молча мы не хотим.
+  deepClone(obj) {
+    if (typeof structuredClone === 'function') {
+      try { return structuredClone(obj); } catch (_) { /* fallthrough */ }
+    }
+    return JSON.parse(JSON.stringify(obj));
+  },
+  // QA A4.3 — локальная дата YYYY-MM-DD. `new Date().toISOString().slice(0,10)`
+  // возвращает UTC-дату — для UTC+3 после 21:00 локально пользователь видит
+  // «завтрашнюю» date в полях типа `doneDate`. Этот helper использует
+  // local-time getters, чтобы дата соответствовала календарю пользователя.
+  localDateString(d = new Date()) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   },
   hexToRgba(hex, alpha=0.14) {
     const h=String(hex||'').trim().replace('#','');
@@ -127,7 +154,6 @@ export const Utils = {
    * header в response body; LLM-провайдеры могут ECHO'нуть Bearer).
    *
    * Применять ВЕЗДЕ где error-text от внешнего сервиса всплывает в UI / logs:
-   *   - integrations/employeePerformance.js fetchModel error path
    *   - integrationsSync.js syncJiraRow / syncBitbucketRow / syncConfluenceRow
    *   - app/llmAssistant.js streaming error path
    *
@@ -142,6 +168,49 @@ export const Utils = {
       .replace(/Bearer\s+[A-Za-z0-9\-_=.]+/gi, 'Bearer ***')
       .replace(/(Authorization|X-API-Key)\s*[:=]\s*[^\s,;]+/gi, '$1: ***')
       .replace(/(token|secret|password|apiKey|authKey)\s*[:=]\s*[^\s,;"]+/gi, '$1: ***');
+  },
+
+  /**
+   * V21 BG (audit-04 §G #1) — PII scrubber для текста, попадающего в LLM payload.
+   * Расширяет redactSecretsInText: дополнительно маскирует
+   *   · emails       → [email]
+   *   · phones       → [phone]   (+7-форматы / 8-форматы / международные)
+   *   · СНИЛС        → [snils]   (XXX-XXX-XXX YY)
+   *   · паспорт      → [passport] (4-digit + 6-digit подряд)
+   * Используется в `buildContextPayload` chat-движка перед отправкой
+   * в GigaChat — закрывает дыру где comments / epic-text могли попасть
+   * с PII в external LLM.
+   */
+  scrubPiiInText(text, maxLen = 200) {
+    return Utils.redactSecretsInText(text, maxLen)
+      // Email — стандартный pattern.
+      .replace(/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]')
+      // СНИЛС: «123-456-789 12» (3-3-3 + 2 контрольные).
+      .replace(/\b\d{3}-\d{3}-\d{3}\s?\d{2}\b/g, '[snils]')
+      // Паспорт РФ: 4 цифры + 6 цифр (с пробелом, дефисом или без).
+      .replace(/\b\d{4}\s?\d{6}\b/g, '[passport]')
+      // Phone: +7 / 8 / +XX-formatted, минимум 10 цифр всего.
+      .replace(/(?:\+?\d{1,3}[\s\-]?)?\(?\d{3,4}\)?[\s\-]?\d{2,3}[\s\-]?\d{2}[\s\-]?\d{2}/g, '[phone]');
+  },
+
+  /**
+   * PR-CH — централизованный детектор заблокированных учёток.
+   * Sber Delta Jira ставит суффикс `[X]` к displayName уволенных. Иногда
+   * после `[X]` идут даты или parenthetical аннотации: `[X] (уволен 2025-12-31)`.
+   * Regex и helper жили локально в teamScanner2Enrichment — поднял в Utils
+   * чтобы тот же фильтр работал в Black Dashboard, registry, employees.
+   */
+  DEACTIVATED_LABEL_RE: /[\[［〔]\s*[xXхХ]\s*[\]］〕]\s*(\([^)]*\)|[\d\s.\-—–:/«»"',])*\s*$/u,
+  isDeactivatedDisplayName(s) {
+    return typeof s === 'string' && Utils.DEACTIVATED_LABEL_RE.test(s.trim());
+  },
+  isDeactivatedAccount(p) {
+    if (!p) return false;
+    const fields = [p.label, p.displayName, p.fullName, p.name];
+    for (const s of fields) {
+      if (Utils.isDeactivatedDisplayName(s)) return true;
+    }
+    return false;
   },
 
   /**
@@ -273,8 +342,117 @@ export const Utils = {
   },
   truncate(s,n) { if(!s)return''; s=String(s); return s.length>n?s.slice(0,n)+'…':s; },
   unique(arr) { return [...new Set(arr.filter(Boolean))].sort(); },
+
+  /**
+   * V21 π7 A3 — единый split-tags. Раньше в 4+ копиях (`metrics.js:350`,
+   * `employees.js:41`, `summary.renderDetailed`, `dashboard.js`).
+   * Разбивает строку по `,` или `|`, тримит, удаляет пустые токены.
+   */
+  splitTags(v) {
+    return String(v || '').split(/[|,]/).map(s => s.trim()).filter(Boolean);
+  },
+
+  /**
+   * V21 π9 Ф1 — единый форматтер числа с thousand-separator (ru-RU).
+   * Замена голого `${n}` в KPI-карточках (audit §1.1 п.1, п.4).
+   * `12000` → `12 000`. NaN/null/undefined → '—'.
+   */
+  fmtNumber(n) {
+    if (n == null || Number.isNaN(Number(n))) return '—';
+    return new Intl.NumberFormat('ru-RU').format(Number(n));
+  },
+
+  /**
+   * V21 π9 Ф2 — единый формат даты-времени короткий (DD.MM.YYYY, HH:mm).
+   * Раньше 4 ad-hoc копии (history/errorsView/aux.js/employees) с разными
+   * options. Теперь единый. ISO-string или Date.
+   */
+  fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = iso instanceof Date ? iso : new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  },
+
+  /**
+   * V21 π9 Ф2 — короткий формат «DD.MM» (без года).
+   * Используется в gantt-cell-headings.
+   */
+  fmtDateShort(iso) {
+    if (!iso) return '—';
+    const d = iso instanceof Date ? iso : new Date(iso);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit' });
+  },
+
+  /**
+   * V21 π9 Ф2 — относительное время «5 минут назад» через Intl.RelativeTimeFormat.
+   * Возвращает строку. Если timestamp в будущем — добавляет «через».
+   */
+  fmtRelTime(iso) {
+    if (!iso) return '';
+    const ts = (iso instanceof Date) ? iso.getTime() : Date.parse(iso);
+    if (!Number.isFinite(ts)) return '';
+    const diff = ts - Date.now();
+    const abs = Math.abs(diff);
+    const rtf = new Intl.RelativeTimeFormat('ru', { numeric: 'auto' });
+    if (abs < 60_000)        return diff < 0 ? 'только что' : 'через мгновение';
+    if (abs < 3600_000)      return rtf.format(Math.round(diff / 60_000),  'minute');
+    if (abs < 86_400_000)    return rtf.format(Math.round(diff / 3600_000), 'hour');
+    if (abs < 604_800_000)   return rtf.format(Math.round(diff / 86_400_000), 'day');
+    if (abs < 2_592_000_000) return rtf.format(Math.round(diff / 604_800_000), 'week');
+    return rtf.format(Math.round(diff / 2_592_000_000), 'month');
+  },
+
+  /**
+   * V21 π9 Ф3 — единый duration-форматтер (мс → строка).
+   * `_fmtH(ms) = (ms/3600000).toFixed(1)+'ч'` был только в teamHealthDashboards.
+   * Теперь общий. По умолчанию формат «1ч 30м» / «45м» / «25с».
+   */
+  formatDuration(ms) {
+    if (!ms || ms <= 0) return '—';
+    const sec  = Math.floor(ms / 1000);
+    const hour = Math.floor(sec / 3600);
+    const min  = Math.floor((sec % 3600) / 60);
+    if (hour >= 1) return `${hour}ч${min ? ' ' + min + 'м' : ''}`;
+    if (min  >= 1) return `${min}м`;
+    return `${sec}с`;
+  },
+
+  /**
+   * V21 π9 Ф2 — safe ISO-парсер. Возвращает Date | null.
+   * 3 разных способа safe-parse → один.
+   */
+  parseISO(s) {
+    if (!s) return null;
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  },
+
   yieldToBrowser(ms=0) {
     return new Promise(resolve=>setTimeout(resolve,ms));
+  },
+
+  /**
+   * V21 L (audit-2026-05-03 §I, Quick win 1) — Russian plural helper.
+   * Раньше существовал в двух копиях:
+   *   - chat/chatEngine.js: plural(n, one, few, many) → '{n} {form}'
+   *   - integrations/teamScanner2Renderer.js: plural(n, [one, few, many]) → '{form}'
+   * Здесь — каноническая версия. Принимает массив форм или 3 аргумента;
+   * возвращает только form (без `${n}`) — caller сам решает как сшивать.
+   * Правило для русского: 1, 21 → forms[0]; 2-4, 22-24 → forms[1]; 0, 5-20 → forms[2].
+   */
+  plural(n, oneOrForms, few, many) {
+    const forms = Array.isArray(oneOrForms) ? oneOrForms : [oneOrForms, few, many];
+    const a = Math.abs(Number(n) || 0) % 100;
+    const b = a % 10;
+    if (a > 10 && a < 20) return forms[2];
+    if (b > 1 && b < 5)   return forms[1];
+    if (b === 1)          return forms[0];
+    return forms[2];
   },
 
   /**

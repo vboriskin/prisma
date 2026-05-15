@@ -5,32 +5,8 @@
    ============================================================ */
 
 import { Utils } from '../utils.js';
+import { Icons } from '../app/icons.js';
 const esc = s => Utils.escapeHtml(String(s ?? ''));
-const fmtDate = s => { if (!s) return '—'; try { return new Date(s).toLocaleDateString('ru'); } catch(_) { return s; } };
-const linkBtn = (url, label) => url ? `<a class="int-link-btn" href="${esc(url)}" target="_blank" rel="noreferrer">${label}</a>` : '';
-
-/* ── PR status badge ──────────────────────────────────────── */
-function prBadge(status) {
-  if (!status) return '';
-  const map = {
-    open:     ['int-badge-pr-open',     '🟡 Open'],
-    approved: ['int-badge-pr-approved', '✅ Approved'],
-    merged:   ['int-badge-pr-merged',   '🟢 Merged'],
-    declined: ['int-badge-pr-declined', '🔴 Declined'],
-  };
-  const [cls, label] = map[String(status).toLowerCase()] || ['int-badge-pr-open', esc(status)];
-  return `<span class="int-badge ${cls}">${label}</span>`;
-}
-
-/* ── Jira status badge ────────────────────────────────────── */
-function jiraBadge(status) {
-  if (!status) return '';
-  const s = String(status).toLowerCase();
-  const cls = s.includes('done') || s.includes('closed') || s.includes('resolved') ? 'int-badge-jira-done'
-            : s.includes('progress') || s.includes('review') ? 'int-badge-jira-wip'
-            : 'int-badge-jira-todo';
-  return `<span class="int-badge int-badge-jira ${cls}">🔵 ${esc(status)}</span>`;
-}
 
 /* ══════════════════════════════════════════════════════════
    SETTINGS MODAL
@@ -42,13 +18,26 @@ export function renderSettingsModal(settings, opts = {}) {
   // When `inline=true` we skip overlay/box wrapping so the form sits directly inside the app-settings modal
   const headerHtml = inline
     ? ''
-    : `<div class="int-modal-header"><span class="int-modal-title">⚙ Настройки интеграций</span><button class="int-modal-close" id="int-modal-close">✕</button></div>`;
+    : `<div class="int-modal-header"><span class="int-modal-title">${Icons.get('settings', { cls: 'btn-icon', size: 14 })} Настройки интеграций</span><button class="int-modal-close" id="int-modal-close" aria-label="Закрыть">${Icons.get('x', { size: 14 })}</button></div>`;
   const openWrap  = inline
     ? `<div class="int-inline" id="int-settings-modal">`
     : `<div class="int-modal-overlay" id="int-settings-modal"><div class="int-modal-box">`;
   const closeWrap = inline ? `</div>` : `</div></div>`;
+  // AUDIT_ARTDIRECTION #32 — пустые настройки = первый контакт с системой.
+  // Показываем маскот в углу + caption «компаньон-feel». Detect: ни один
+  // из 5 каналов не имеет URL+token. На пустой панели юзер видит, что
+  // система ждёт связь. CSS-инжект — один раз, idempotent (см. _ensure...).
+  const isEmpty = !(
+    (s.jiraBaseUrl       && s.hasJiraToken)       ||
+    (s.sigmaJiraBaseUrl  && s.hasSigmaJiraToken)  ||
+    (s.bitbucketBaseUrl  && s.hasBitbucketToken)  ||
+    (s.confluenceBaseUrl && s.hasConfluenceToken) ||
+    (s.jenkinsBaseUrl    && s.hasJenkinsToken)
+  );
+  const mascotIllust = isEmpty ? _renderEmptyMascot() : '';
   return openWrap + headerHtml + `
-      <div class="int-modal-body">
+      <div class="int-modal-body${isEmpty ? ' int-modal-body-empty' : ''}">
+        ${mascotIllust}
         <!-- V17.1.3 — Jira (Delta + Sigma) разделено на две независимые
              вкладки. Bindings (#int-jira-* / #int-sigma-*) сохранены —
              меняется только разметка вкладок и панелей. -->
@@ -57,6 +46,7 @@ export function renderSettingsModal(settings, opts = {}) {
           <button class="int-stab" data-stab="jira-sigma">Jira Sigma</button>
           <button class="int-stab" data-stab="bitbucket">Bitbucket</button>
           <button class="int-stab" data-stab="confluence">Confluence</button>
+          <button class="int-stab" data-stab="jenkins">Jenkins</button>
         </div>
 
         <!-- Jira Delta — основная Jira, источник задач команд -->
@@ -67,9 +57,9 @@ export function renderSettingsModal(settings, opts = {}) {
             <input class="int-field-input" id="int-jira-url" type="url" placeholder="https://company.atlassian.net" value="${esc(s.jiraBaseUrl||'')}">
           </div>
           <div class="int-field-group">
-            <label class="int-field-label">API Token ${s.hasJiraToken ? '<span class="int-token-ok">✓ Сохранён</span>' : ''}</label>
-            <input class="int-field-input" id="int-jira-token" type="password" placeholder="Bearer token или email:token" value="${esc(s.jiraToken||'')}">
-            <span class="int-field-hint">Сохранён в браузере и на сервере — повторно вводить не нужно. <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">Создать токен →</a></span>
+            <label class="int-field-label">API Token ${s.hasJiraToken ? `<span class="int-token-ok">${Icons.get('check', { cls: 'btn-icon', size: 12 })} Сохранён</span>` : ''}</label>
+            <input class="int-field-input" id="int-jira-token" type="password" placeholder="${s.hasJiraToken ? '••••••••' : 'Bearer token или email:token'}">
+            <span class="int-field-hint">Если оставить поле пустым при сохранении — текущий токен НЕ перезаписывается. <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">Создать токен →</a></span>
           </div>
           <div class="int-field-group">
             <label class="int-field-label">Ключи проектных пространств</label>
@@ -77,8 +67,8 @@ export function renderSettingsModal(settings, opts = {}) {
             <span class="int-field-hint">Через запятую. Используется для запросов в Jira (JQL <code>project in (...)</code>) и в Portfolio Pulse.</span>
           </div>
           <div class="int-field-actions">
-            <button class="int-btn int-btn-ghost" id="int-jira-verify">Проверить Delta</button>
-            <button class="int-btn int-btn-primary" id="int-jira-save">Сохранить Delta</button>
+            <button class="int-btn int-btn-ghost" id="int-jira-verify" title="Delta = основная Jira с задачами команд">Проверить Delta</button>
+            <button class="int-btn int-btn-primary" id="int-jira-save" title="Delta = основная Jira с задачами команд">Сохранить Delta</button>
           </div>
           <div class="int-verify-result hidden" id="int-jira-verify-result"></div>
         </div>
@@ -91,8 +81,8 @@ export function renderSettingsModal(settings, opts = {}) {
             <input class="int-field-input" id="int-sigma-url" type="url" placeholder="https://sigma.example.com" value="${esc(s.sigmaJiraBaseUrl||'')}">
           </div>
           <div class="int-field-group">
-            <label class="int-field-label">Personal Access Token ${s.hasSigmaJiraToken ? '<span class="int-token-ok">✓ Сохранён</span>' : ''}</label>
-            <input class="int-field-input" id="int-sigma-token" type="password" placeholder="Bearer token или email:token" value="${esc(s.sigmaJiraToken||'')}">
+            <label class="int-field-label">Personal Access Token ${s.hasSigmaJiraToken ? `<span class="int-token-ok">${Icons.get('check', { cls: 'btn-icon', size: 12 })} Сохранён</span>` : ''}</label>
+            <input class="int-field-input" id="int-sigma-token" type="password" placeholder="${s.hasSigmaJiraToken ? '••••••••' : 'Bearer token или email:token'}">
             <span class="int-field-hint">Если оставить поле пустым при сохранении — текущий токен НЕ перезаписывается.</span>
           </div>
           <div class="int-field-group">
@@ -101,8 +91,8 @@ export function renderSettingsModal(settings, opts = {}) {
             <span class="int-field-hint">Через запятую. Каждый эпик содержит поле <code>Domain link</code> — массив ключей задач Delta.</span>
           </div>
           <div class="int-field-actions">
-            <button class="int-btn int-btn-ghost" id="int-sigma-verify">Проверить Sigma</button>
-            <button class="int-btn int-btn-primary" id="int-sigma-save">Сохранить Sigma</button>
+            <button class="int-btn int-btn-ghost" id="int-sigma-verify" title="Sigma = Jira с эпиками-целями квартала">Проверить Sigma</button>
+            <button class="int-btn int-btn-primary" id="int-sigma-save" title="Sigma = Jira с эпиками-целями квартала">Сохранить Sigma</button>
           </div>
           <div class="int-verify-result hidden" id="int-sigma-verify-result"></div>
         </div>
@@ -114,15 +104,16 @@ export function renderSettingsModal(settings, opts = {}) {
             <input class="int-field-input" id="int-bb-url" type="url" placeholder="https://api.bitbucket.org/2.0" value="${esc(s.bitbucketBaseUrl||'')}">
           </div>
           <div class="int-field-group">
-            <label class="int-field-label">Token ${s.hasBitbucketToken ? '<span class="int-token-ok">✓ Сохранён</span>' : ''}</label>
-            <input class="int-field-input" id="int-bb-token" type="password" placeholder="Bearer token или user:app_password" value="${esc(s.bitbucketToken||'')}">
-            <span class="int-field-hint">Сохранён в браузере и на сервере — повторно вводить не нужно.</span>
+            <label class="int-field-label">Token ${s.hasBitbucketToken ? `<span class="int-token-ok">${Icons.get('check', { cls: 'btn-icon', size: 12 })} Сохранён</span>` : ''}</label>
+            <input class="int-field-input" id="int-bb-token" type="password" placeholder="${s.hasBitbucketToken ? '••••••••' : 'Bearer token или user:app_password'}">
+            <span class="int-field-hint">Если оставить поле пустым при сохранении — текущий токен НЕ перезаписывается.</span>
           </div>
           <div class="int-field-group">
             <label class="int-field-label">Ключи репозиториев / проектов</label>
             <input class="int-field-input" id="int-bb-project-keys" type="text" placeholder="my-repo, another-repo" value="${esc(s.bitbucketProjectKeys||'')}">
             <span class="int-field-hint">Через запятую. Слаги репозиториев или ключи проектов для поиска PR.</span>
           </div>
+          ${_renderBbSuggestedProjects(opts.bbSuggestedProjects, s.bitbucketProjectKeys || '')}
           <div class="int-field-actions">
             <button class="int-btn int-btn-ghost" id="int-bb-verify">Проверить подключение</button>
             <button class="int-btn int-btn-primary" id="int-bb-save">Сохранить</button>
@@ -137,9 +128,9 @@ export function renderSettingsModal(settings, opts = {}) {
             <input class="int-field-input" id="int-cf-url" type="url" placeholder="https://company.atlassian.net/wiki" value="${esc(s.confluenceBaseUrl||'')}">
           </div>
           <div class="int-field-group">
-            <label class="int-field-label">API Token ${s.hasConfluenceToken ? '<span class="int-token-ok">✓ Сохранён</span>' : ''}</label>
-            <input class="int-field-input" id="int-cf-token" type="password" placeholder="Bearer token или email:token" value="${esc(s.confluenceToken||'')}">
-            <span class="int-field-hint">Сохранён в браузере и на сервере — повторно вводить не нужно.</span>
+            <label class="int-field-label">API Token ${s.hasConfluenceToken ? `<span class="int-token-ok">${Icons.get('check', { cls: 'btn-icon', size: 12 })} Сохранён</span>` : ''}</label>
+            <input class="int-field-input" id="int-cf-token" type="password" placeholder="${s.hasConfluenceToken ? '••••••••' : 'Bearer token или email:token'}">
+            <span class="int-field-hint">Если оставить поле пустым при сохранении — текущий токен НЕ перезаписывается.</span>
           </div>
           <!-- V17.2 I2c — Ключи пространств (CQL space-in filter) -->
           <div class="int-field-group">
@@ -186,10 +177,42 @@ export function renderSettingsModal(settings, opts = {}) {
           </div>
           <div class="int-verify-result hidden" id="int-cf-verify-result"></div>
         </div>
+
+        <!-- V21 Jenkins — CI integration для Сканнера команд. -->
+        <div class="int-stab-panel" data-panel="jenkins">
+          <div class="int-subblock-title">Jenkins CI <span class="int-subblock-hint">— builds + успешность для team-glance в Сканнере</span></div>
+          <div class="int-field-group">
+            <label class="int-field-label">Endpoint (Base URL)</label>
+            <input class="int-field-input" id="int-jenkins-url" type="url" placeholder="https://sbof.ci.jenkins.sberbank.ru" value="${esc(s.jenkinsBaseUrl||'')}">
+            <span class="int-field-hint">
+              Корень Jenkins-инстанса. Если у команды отдельный shard (например <code>sbof.ci.jenkins.sberbank.ru</code>) — используйте его, не общий <code>ci.jenkins.sberbank.ru</code>.
+              <br><strong>Внимание:</strong> Sber DREAM Jenkins (<code>*.sberbank.ru</code>) и Sber Delta (Jira/BB/CF на <code>*.delta.sbrf.ru</code>) — <strong>разные security perimeters</strong>. Token, валидный для Jira/BB/CF, может не работать на Jenkins. API token нужно создать именно в Jenkins UI (см. ниже).
+            </span>
+          </div>
+          <div class="int-field-group">
+            <label class="int-field-label">Token ${s.hasJenkinsToken ? `<span class="int-token-ok">${Icons.get('check', { cls: 'btn-icon', size: 12 })} Сохранён</span>` : ''}</label>
+            <input class="int-field-input" id="int-jenkins-token" type="password" placeholder="${s.hasJenkinsToken ? '••••••••' : 'username:apiToken (например i.ivanov:11abc...)'}">
+            <span class="int-field-hint">
+              <strong>Формат: <code>username:apiToken</code></strong> (как у Jira/BB/CF на Sber DREAM). Голый token без username даёт 403.
+              <br>API token создаётся в Jenkins: <code>People → ваш юзер → Configure → API Token → Add new Token</code>.
+              <br>Если оставить поле пустым при сохранении — текущий token НЕ перезаписывается.
+            </span>
+          </div>
+          <div class="int-field-group">
+            <label class="int-field-label">Folder команды</label>
+            <input class="int-field-input" id="int-jenkins-folder" type="text" placeholder="sbof" value="${esc(s.jenkinsFolder||'')}">
+            <span class="int-field-hint">Имя верхнего folder'а команды (segment URL после <code>/job/</code>). Для СБОФ Платформа = <code>sbof</code>. Без него probe сканирует root.</span>
+          </div>
+          <div class="int-field-actions">
+            <button class="int-btn int-btn-ghost" id="int-jenkins-verify">Проверить подключение</button>
+            <button class="int-btn int-btn-primary" id="int-jenkins-save">Сохранить</button>
+          </div>
+          <div class="int-verify-result hidden" id="int-jenkins-verify-result"></div>
+        </div>
       </div>
       <div class="int-modal-footer">
         <div class="int-footer-row">
-          <label class="int-field-label-inline" for="int-global-since-date">Загружать данные с даты</label>
+          <label class="int-field-label-inline" for="int-global-since-date">Дата начала выборки</label>
           <input type="date" id="int-global-since-date" class="int-field-input int-field-input-narrow" value="${esc(s.sinceDate || '2025-01-01')}">
           <span class="int-field-hint">Применяется к Jira (updated &gt;= …) и Confluence (lastModified &gt;= …)</span>
         </div>
@@ -202,338 +225,136 @@ export function renderSettingsModal(settings, opts = {}) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   STATUS OVERVIEW
-   ══════════════════════════════════════════════════════════ */
-export function renderStatusOverview(status, rows) {
-  const jiraRows    = rows.filter(r => r.jiraKey);
-  const prRows      = rows.filter(r => r.prUrl);
-  const docRows     = rows.filter(r => r.docUrl);
-
-  function svcCard(id, icon, name, svc, count, filterVal) {
-    const connected = svc.configured;
-    const badge = connected ? '<span class="int-status-ok">✓ Подключено</span>' : '<span class="int-status-none">— Не настроено</span>';
-    const lastSync = status.lastSync ? `<div class="int-status-sync">Синхр.: ${fmtDate(status.lastSync)}</div>` : '';
-    return `
-    <div class="int-status-card" id="int-card-${id}">
-      <div class="int-status-icon">${icon}</div>
-      <div class="int-status-info">
-        <div class="int-status-name">${name} ${badge}</div>
-        <div class="int-status-count">${count} связанных задач</div>
-        ${lastSync}
-      </div>
-      <div class="int-status-actions">
-        ${connected ? `<button class="int-btn int-btn-xs" data-int-action="filter" data-filter="${esc(filterVal)}">Показать</button>` : ''}
-        <button class="int-btn int-btn-xs int-btn-settings" data-int-action="settings" data-tab="${id}">Настройки</button>
-      </div>
-    </div>`;
-  }
-
-  return `
-  <div class="int-section">
-    <div class="int-section-header">
-      <span class="int-section-title">Статус интеграций</span>
-      <div class="int-section-actions" style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="int-btn int-btn-primary" id="int-fetch-all-btn" title="Запросить все данные из Jira / Bitbucket / Confluence и обновить реестр">⤓ Загрузить всё из систем</button>
-        <button class="int-btn int-btn-ghost" id="int-sync-all-btn" title="Обновить только существующие задачи с Jira Key">↺ Обновить существующие</button>
-      </div>
-    </div>
-    <div id="int-sync-progress" class="int-sync-progress hidden"></div>
-    <div class="int-status-grid">
-      ${svcCard('jira',      '🔵', 'Jira',       status.jira,       jiraRows.length,  'jira')}
-      ${svcCard('bitbucket', '🟡', 'Bitbucket',  status.bitbucket,  prRows.length,    'bitbucket')}
-      ${svcCard('confluence','📄', 'Confluence', status.confluence, docRows.length,   'confluence')}
-    </div>
-  </div>`;
+   AUDIT_ARTDIRECTION #32 — мини-маскот в empty-settings.
+   ══════════════════════════════════════════════════════════
+   Если ни одна из 5 интеграций не подключена — показываем тонкую
+   иллюстрацию: 8-лучевая Призма-звезда (брендбук §2 Anatomy) + caption.
+   Без zoom-flash, без эмодзи. Стилизуется через runtime-injected <style>
+   (id="int-empty-mascot-styles") — НЕ через styles.css по требованию
+   AUDIT_ARTDIRECTION (don't touch styles.css). */
+function _ensureEmptyMascotStyles() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById('int-empty-mascot-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'int-empty-mascot-styles';
+  style.textContent = `
+    .int-modal-body.int-modal-body-empty { position: relative; }
+    .int-empty-mascot {
+      position: absolute;
+      top: 14px; right: 18px;
+      display: flex; flex-direction: column; align-items: flex-end;
+      gap: 6px;
+      pointer-events: none;
+      max-width: 220px;
+      z-index: 1;
+    }
+    .int-empty-mascot-figure {
+      width: 56px; height: 56px;
+      color: var(--prizma-information, #6EC1E4);
+      opacity: .7;
+      animation: int-empty-mascot-breathe 3.6s ease-in-out infinite;
+    }
+    .int-empty-mascot-figure svg { display: block; width: 100%; height: 100%; }
+    .int-empty-mascot-caption {
+      font-size: 11px; line-height: 1.4;
+      color: var(--prizma-text-tertiary, var(--text-3, #7A7A82));
+      text-align: right;
+      letter-spacing: .2px;
+      max-width: 200px;
+    }
+    @keyframes int-empty-mascot-breathe {
+      0%, 100% { opacity: .55; transform: scale(1); }
+      50%      { opacity: .85; transform: scale(1.04); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .int-empty-mascot-figure { animation: none; opacity: .7; }
+    }
+    @media (max-width: 720px) {
+      .int-empty-mascot { position: static; max-width: 100%; align-items: center; margin: 0 0 12px 0; }
+      .int-empty-mascot-caption { text-align: center; }
+    }
+  `;
+  document.head.appendChild(style);
 }
 
-/* ══════════════════════════════════════════════════════════
-   JIRA BLOCK
-   ══════════════════════════════════════════════════════════ */
-export function renderJiraBlock(rows, jiraBaseUrl) {
-  const withJira = rows.filter(r => r.jiraKey);
-  if (!withJira.length) {
-    return `
-    <div class="int-section">
-      <div class="int-section-header"><span class="int-section-title">🔵 Jira</span></div>
-      <div class="int-empty">
-        <div class="int-empty-icon">🔵</div>
-        <div class="int-empty-title">Нет задач с Jira ID</div>
-        <div class="int-empty-sub">Добавьте Jira Key в колонку «Jira Key» в реестре, либо импортируйте данные с ключами.</div>
-      </div>
-    </div>`;
-  }
-
-  const rows_html = withJira.slice(0, 100).map(r => {
-    const jiraUrl = jiraBaseUrl ? `${jiraBaseUrl.replace(/\/+$/,'')}/browse/${esc(r.jiraKey)}` : '';
-    return `
-    <tr class="int-table-row" data-row-id="${esc(r.id)}">
-      <td class="int-td">${jiraUrl ? `<a class="int-jira-key" href="${esc(jiraUrl)}" target="_blank" rel="noreferrer">${esc(r.jiraKey)}</a>` : esc(r.jiraKey)}</td>
-      <td class="int-td">${esc(r.epic||'—')}</td>
-      <td class="int-td">${jiraBadge(r.jiraStatus) || '<span class="int-na">—</span>'}</td>
-      <td class="int-td int-td-sm">${esc(r.jiraAssignee||'—')}</td>
-      <td class="int-td int-td-sm">${fmtDate(r.jiraUpdatedAt)}</td>
-      <td class="int-td int-td-sm">${esc(r.team||'—')}</td>
-    </tr>`;
-  }).join('');
-
+function _renderEmptyMascot() {
+  _ensureEmptyMascotStyles();
+  // 8-лучевая Призма-звезда (брендбук §2 Anatomy). Используем уже-существующий
+  // Icons.get('star') — line-glyph 24x24, stroke=currentColor.
+  const star = Icons.get('star', { size: 56, label: 'Призма ждёт связь' });
   return `
-  <div class="int-section">
-    <div class="int-section-header">
-      <span class="int-section-title">🔵 Jira <span class="int-section-count">${withJira.length}</span></span>
-      <button class="int-btn int-btn-ghost" data-int-action="filter" data-filter="jira">Показать в реестре</button>
+    <div class="int-empty-mascot" aria-hidden="true">
+      <div class="int-empty-mascot-figure">${star}</div>
+      <div class="int-empty-mascot-caption">Настрой связь — и я начну видеть курс команды</div>
     </div>
-    <div class="int-table-wrap">
-      <table class="int-table">
-        <thead><tr>
-          <th class="int-th">Jira Key</th><th class="int-th">Эпик</th>
-          <th class="int-th">Статус</th><th class="int-th">Исполнитель</th>
-          <th class="int-th">Обновлён</th><th class="int-th">Команда</th>
-        </tr></thead>
-        <tbody>${rows_html}</tbody>
-      </table>
-    </div>
-  </div>`;
+  `;
 }
 
-/* ══════════════════════════════════════════════════════════
-   BITBUCKET BLOCK
-   ══════════════════════════════════════════════════════════ */
-export function renderBitbucketBlock(rows) {
-  const withPr   = rows.filter(r => r.prUrl);
-  const withKey  = rows.filter(r => r.jiraKey);
-  const noPr     = withKey.filter(r => !r.prUrl);
-  const openPrs  = withPr.filter(r => r.prStatus === 'open');
-  const merged   = withPr.filter(r => r.prStatus === 'merged');
-
-  if (!withKey.length) {
-    return `
-    <div class="int-section">
-      <div class="int-section-header"><span class="int-section-title">🟡 Bitbucket</span></div>
-      <div class="int-empty"><div class="int-empty-icon">🟡</div><div class="int-empty-title">Нет задач с Jira Key</div><div class="int-empty-sub">PR поиск работает по Jira Key. Сначала добавьте Jira Key к задачам.</div></div>
-    </div>`;
+/**
+ * V22 P-allowlist — secondary block «Дополнительные проекты» в BB-настройках.
+ *
+ * suggestions = unique-projects из bbDroppedSamples (см.
+ * teamScanner2._lastRawDiag.bbDroppedSamples). Каждый sample имеет
+ * `repo` или `project` field. Извлекаем prefix (project key) — обычно
+ * первый сегмент до «/», напр. `CI00361704/foo` → `CI00361704`.
+ *
+ * Если suggestions пустой / Сканнер ещё не запускался — рендерим
+ * подсказку «запустите Сканнер для получения предложений» вместо
+ * скрытого блока (visibility важна для UX-потока).
+ *
+ * Уже добавленные в `bitbucketProjectKeys` исключаются из списка
+ * (case-insensitive), чтобы не предлагать дубли.
+ */
+function _renderBbSuggestedProjects(rawSuggestions, currentKeysCsv) {
+  const list = Array.isArray(rawSuggestions) ? rawSuggestions : [];
+  const have = new Set(
+    String(currentKeysCsv || '')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  // Dedupe + filter уже-добавленных. Сохраняем порядок first-seen + count.
+  const counts = new Map();
+  for (const p of list) {
+    const key = String(p || '').trim();
+    if (!key) continue;
+    if (have.has(key.toLowerCase())) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
   }
+  const suggestions = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
 
-  const statsHtml = `
-  <div class="int-pr-stats">
-    <div class="int-pr-stat"><span class="int-pr-stat-val">${withPr.length}</span><span class="int-pr-stat-label">всего PR</span></div>
-    <div class="int-pr-stat int-pr-open"><span class="int-pr-stat-val">${openPrs.length}</span><span class="int-pr-stat-label">открытых</span></div>
-    <div class="int-pr-stat int-pr-merged"><span class="int-pr-stat-val">${merged.length}</span><span class="int-pr-stat-label">merged</span></div>
-    <div class="int-pr-stat int-pr-none"><span class="int-pr-stat-val">${noPr.length}</span><span class="int-pr-stat-label">без PR</span></div>
-  </div>`;
-
-  const prRows = withPr.slice(0, 50).map(r => `
-    <tr class="int-table-row">
-      <td class="int-td">${esc(r.jiraKey||'—')}</td>
-      <td class="int-td">${esc(r.epic||'—')}</td>
-      <td class="int-td">${prBadge(r.prStatus)}</td>
-      <td class="int-td">${r.prUrl ? linkBtn(r.prUrl, '🔗 Открыть PR') : '<span class="int-na">—</span>'}</td>
-      <td class="int-td int-td-sm">${fmtDate(r.prUpdatedAt)}</td>
-    </tr>`).join('');
-
-  const noPrHtml = noPr.length ? `
-    <div class="int-subsection">
-      <div class="int-subsection-title">⚠️ Задачи без PR (${noPr.length})</div>
-      <div class="int-no-pr-list">
-        ${noPr.slice(0,20).map(r => `
-        <div class="int-no-pr-row">
-          <span class="int-no-pr-key">${esc(r.jiraKey)}</span>
-          <span class="int-no-pr-epic">${Utils.truncate(r.epic||'',50)}</span>
-          <span class="int-no-pr-team">${esc(r.team||'—')}</span>
-        </div>`).join('')}
-        ${noPr.length > 20 ? `<div class="int-more">...ещё ${noPr.length - 20}</div>` : ''}
-      </div>
-    </div>` : '';
-
-  return `
-  <div class="int-section">
-    <div class="int-section-header">
-      <span class="int-section-title">🟡 Bitbucket <span class="int-section-count">${withPr.length}</span></span>
-      <button class="int-btn int-btn-ghost" data-int-action="filter" data-filter="bitbucket">Показать в реестре</button>
-    </div>
-    ${statsHtml}
-    ${withPr.length ? `
-    <div class="int-table-wrap">
-      <table class="int-table">
-        <thead><tr>
-          <th class="int-th">Jira Key</th><th class="int-th">Эпик</th>
-          <th class="int-th">PR Статус</th><th class="int-th">Ссылка</th>
-          <th class="int-th">Обновлён</th>
-        </tr></thead>
-        <tbody>${prRows}</tbody>
-      </table>
-    </div>` : ''}
-    ${noPrHtml}
-  </div>`;
-}
-
-/* ══════════════════════════════════════════════════════════
-   CONFLUENCE BLOCK
-   ══════════════════════════════════════════════════════════ */
-export function renderConfluenceBlock(rows) {
-  const withDoc  = rows.filter(r => r.docUrl);
-  const withKey  = rows.filter(r => r.jiraKey);
-  const noDoc    = withKey.filter(r => !r.docUrl);
-
-  if (!withKey.length) {
+  if (!suggestions.length) {
     return `
-    <div class="int-section">
-      <div class="int-section-header"><span class="int-section-title">📄 Confluence</span></div>
-      <div class="int-empty"><div class="int-empty-icon">📄</div><div class="int-empty-title">Нет задач с Jira Key</div><div class="int-empty-sub">Документация ищется по Jira Key задачи.</div></div>
-    </div>`;
-  }
-
-  const docRows = withDoc.slice(0, 50).map(r => `
-    <tr class="int-table-row">
-      <td class="int-td">${esc(r.jiraKey||'—')}</td>
-      <td class="int-td">${r.docTitle ? esc(r.docTitle) : '<span class="int-na">—</span>'}</td>
-      <td class="int-td">${r.docUrl ? linkBtn(r.docUrl, '📄 Открыть') : '<span class="int-na">—</span>'}</td>
-      <td class="int-td int-td-sm">${esc(r.team||'—')}</td>
-    </tr>`).join('');
-
-  const noDocHtml = noDoc.length ? `
-    <div class="int-subsection">
-      <div class="int-subsection-title">📭 Задачи без документации (${noDoc.length})</div>
-      <div class="int-no-pr-list">
-        ${noDoc.slice(0,15).map(r => `
-        <div class="int-no-pr-row">
-          <span class="int-no-pr-key">${esc(r.jiraKey)}</span>
-          <span class="int-no-pr-epic">${Utils.truncate(r.epic||'',50)}</span>
-          <span class="int-no-pr-team">${esc(r.team||'—')}</span>
-        </div>`).join('')}
-        ${noDoc.length > 15 ? `<div class="int-more">...ещё ${noDoc.length - 15}</div>` : ''}
+      <div class="int-field-group int-bb-allowlist-empty">
+        <label class="int-field-label">Дополнительные проекты</label>
+        <span class="int-field-hint">
+          После запуска Сканнера здесь появятся предложения по проектам, в которые
+          команда контрибутит, но они <code>отброшены allowlist'ом</code> в диагностике.
+        </span>
       </div>
-    </div>` : '';
-
-  return `
-  <div class="int-section">
-    <div class="int-section-header">
-      <span class="int-section-title">📄 Confluence <span class="int-section-count">${withDoc.length}</span></span>
-    </div>
-    ${withDoc.length ? `
-    <div class="int-table-wrap">
-      <table class="int-table">
-        <thead><tr>
-          <th class="int-th">Jira Key</th><th class="int-th">Название</th>
-          <th class="int-th">Ссылка</th><th class="int-th">Команда</th>
-        </tr></thead>
-        <tbody>${docRows}</tbody>
-      </table>
-    </div>` : ''}
-    ${noDocHtml}
-  </div>`;
-}
-
-/* ══════════════════════════════════════════════════════════
-   CROSS-SOURCE ANALYSIS: PLAN VS REALITY
-   ══════════════════════════════════════════════════════════ */
-export function renderCrossAnalysis(rows) {
-  const activeRows = rows.filter(r => !r.isDone);
-  const inRelease  = activeRows.filter(r => r.hasRelease120 || r.hasRelease121 || r.hasRelease122);
-  const withKey    = activeRows.filter(r => r.jiraKey);
-
-  // Tasks in release but no assignee in Jira
-  const noJiraAssignee = inRelease.filter(r => r.jiraKey && !r.jiraAssignee);
-  // Tasks in release but no PR
-  const noPr = inRelease.filter(r => r.jiraKey && !r.prUrl);
-  // Tasks stalled (jiraUpdatedAt > 7 days ago)
-  const sevenDaysAgo = Date.now() - 7 * 24 * 3600 * 1000;
-  const stalled = withKey.filter(r => {
-    if (!r.jiraUpdatedAt) return false;
-    try { return new Date(r.jiraUpdatedAt).getTime() < sevenDaysAgo; } catch(_) { return false; }
-  });
-  // Tasks in release but no documentation
-  const noDoc = inRelease.filter(r => r.jiraKey && !r.docUrl);
-
-  const findings = [
-    noJiraAssignee.length && {
-      icon:'👤', sev:'warning',
-      title:`${noJiraAssignee.length} задач в релизе без Jira Assignee`,
-      text:'Задачи никому не назначены в Jira — ответственность неопределена.',
-      filter:'no-jira-assignee',
-    },
-    noPr.length && {
-      icon:'🔀', sev:'warning',
-      title:`${noPr.length} задач в релизе без PR`,
-      text:'Разработка без pull request — нет код-ревью, нет отслеживания прогресса.',
-      filter:'no-pr',
-    },
-    stalled.length && {
-      icon:'⏸', sev:'warning',
-      title:`${stalled.length} задач зависли (>7 дней без обновления в Jira)`,
-      text:'Задачи не двигаются. Возможно, блокеры или брошенные задачи.',
-      filter:'stalled',
-    },
-    noDoc.length && {
-      icon:'📭', sev:'info',
-      title:`${noDoc.length} задач в релизе без документации`,
-      text:'Confluence документация не привязана — риск "чёрного ящика".',
-      filter:'no-doc',
-    },
-  ].filter(Boolean);
-
-  if (!findings.length && !withKey.length) {
-    return `
-    <div class="int-section">
-      <div class="int-section-header"><span class="int-section-title">🔍 План vs Реальность</span></div>
-      <div class="int-empty"><div class="int-empty-icon">✅</div><div class="int-empty-title">Нет данных для анализа</div><div class="int-empty-sub">Добавьте Jira Key к задачам и обновите данные интеграций.</div></div>
-    </div>`;
+    `;
   }
-
-  if (!findings.length) {
-    return `
-    <div class="int-section">
-      <div class="int-section-header"><span class="int-section-title">🔍 План vs Реальность</span></div>
-      <div class="int-empty"><div class="int-empty-icon">✅</div><div class="int-empty-title">Расхождений не найдено</div><div class="int-empty-sub">Данные плана и реальных систем согласованы.</div></div>
-    </div>`;
-  }
-
-  const findingsHtml = findings.map(f => `
-    <div class="int-cross-item int-cross-${f.sev}">
-      <span class="int-cross-icon">${f.icon}</span>
-      <div class="int-cross-body">
-        <div class="int-cross-title">${esc(f.title)}</div>
-        <div class="int-cross-text">${esc(f.text)}</div>
-      </div>
-      <div class="int-cross-actions">
-        <button class="int-btn int-btn-xs" data-int-action="cross-filter" data-cross="${esc(f.filter)}">Показать задачи</button>
-        <button class="int-btn int-btn-xs" data-int-action="cross-explain" data-cross="${esc(f.filter)}">Объяснить</button>
-      </div>
-    </div>`).join('');
-
+  const chips = suggestions.map(([k, n]) => `
+    <label class="int-bb-allowlist-chip">
+      <input type="checkbox" class="int-bb-allowlist-checkbox" value="${esc(k)}">
+      <span class="int-bb-allowlist-chip-key"><code>${esc(k)}</code></span>
+      <span class="int-bb-allowlist-chip-count" title="Items в активности">${n}</span>
+    </label>
+  `).join('');
   return `
-  <div class="int-section">
-    <div class="int-section-header"><span class="int-section-title">🔍 План vs Реальность</span></div>
-    <div class="int-cross-list">${findingsHtml}</div>
-  </div>`;
-}
-
-/* ══════════════════════════════════════════════════════════
-   FULL PAGE
-   ══════════════════════════════════════════════════════════ */
-export function renderIntegrationsPage(rows, status, settings) {
-  return `
-  <div class="int-page" id="int-page">
-    ${renderStatusOverview(status, rows)}
-    ${renderCrossAnalysis(rows)}
-    ${renderJiraBlock(rows, settings.jiraBaseUrl || '')}
-    ${renderBitbucketBlock(rows)}
-    ${renderConfluenceBlock(rows)}
-  </div>`;
-}
-
-/* ── Empty state ─────────────────────────────────────────── */
-export function renderIntegrationsEmpty() {
-  return `
-  <div class="int-page">
-    <div class="int-empty int-empty-full">
-      <div class="int-empty-icon">🔗</div>
-      <div class="int-empty-title">Нет данных для интеграций</div>
-      <div class="int-empty-sub">Загрузите задачи из Jira напрямую или импортируйте файл.</div>
-      <div class="int-empty-actions" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px">
-        <button class="int-btn int-btn-primary" id="int-fetch-all-btn" title="Запросить задачи из Jira и создать строки в реестре">⤓ Загрузить из Jira</button>
-        <button class="int-btn int-btn-ghost"   data-int-action="settings" data-tab="jira">⚙ Настроить интеграции</button>
+    <div class="int-field-group int-bb-allowlist">
+      <label class="int-field-label">Дополнительные проекты <span class="int-field-hint" style="margin-left:6px;">— из диагностики Сканнера</span></label>
+      <span class="int-field-hint">
+        Эти проекты появлялись в активности команды, но не были учтены allowlist'ом.
+        Отметьте те, которые относятся к команде, и нажмите «Добавить выбранные».
+      </span>
+      <div class="int-bb-allowlist-chips">${chips}</div>
+      <div class="int-bb-allowlist-actions">
+        <button class="int-btn int-btn-ghost" id="int-bb-allowlist-add" type="button">Добавить выбранные</button>
+        <span class="int-bb-allowlist-status" id="int-bb-allowlist-status" aria-live="polite"></span>
       </div>
     </div>
-    <div id="int-sync-progress" class="int-sync-progress hidden"></div>
-  </div>`;
+  `;
 }
