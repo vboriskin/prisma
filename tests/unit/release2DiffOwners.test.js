@@ -197,7 +197,7 @@ describe('renderRelease2View: owners-card', () => {
     assert.ok(petrovIdx < sidIdx);
   });
 
-  test('phase-dots показывают breakdown по фазам', async () => {
+  test('owner micro-phasebar: сегменты по фазам (V22+ Phase 5.1: dots → bar)', async () => {
     const { renderRelease2View } = await import('../../integrations/release2/release2Renderer.js');
     const releases = [
       _makeRelease('A-1', 'Иванов Иван', 'creation'),
@@ -211,9 +211,11 @@ describe('renderRelease2View: owners-card', () => {
       stats: { total: 3, byPhase: { creation: 1, uat: 1, deploy: 1 } },
     };
     const html = renderRelease2View(analysed, _stateOwners());
-    assert.match(html, /r2-phase-dot-creation/);
-    assert.match(html, /r2-phase-dot-uat/);
-    assert.match(html, /r2-phase-dot-deploy/);
+    // Phase 5.1: 5 dot-chip заменены на micro-phasebar с 6 сегментами.
+    assert.match(html, /r2-owner-phasebar/);
+    assert.match(html, /r2-phase-seg-creation/);
+    assert.match(html, /r2-phase-seg-uat/);
+    assert.match(html, /r2-phase-seg-deploy/);
   });
 
   test('initials корректные', async () => {
@@ -228,7 +230,7 @@ describe('renderRelease2View: owners-card', () => {
     assert.match(html, />ИИ</);
   });
 
-  test('groupBy="owner" → toggle button active', async () => {
+  test('groupBy="owner" → owners-card раскрыт по умолчанию (V22+ Phase 5.1: toggle button → details open)', async () => {
     const { renderRelease2View } = await import('../../integrations/release2/release2Renderer.js');
     const releases = [_makeRelease('A-1', 'Иванов Иван', 'creation')];
     const analysed = {
@@ -238,8 +240,9 @@ describe('renderRelease2View: owners-card', () => {
       stats: { total: 1, byPhase: { creation: 1 } },
     };
     const html = renderRelease2View(analysed, _stateOwners('owner'));
-    assert.match(html, /r2-owners-group-active/);
-    assert.match(html, /· По владельцу ·/);
+    // Phase 5.1: дублирующая кнопка «Группировать» убрана. Теперь карточка —
+    // <details>, открывается автоматически если groupBy === 'owner'.
+    assert.match(html, /<details class="r2-owners-card" open>/);
   });
 
   test('organizer приоритетнее assignee', async () => {

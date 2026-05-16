@@ -172,6 +172,13 @@ export const Release2View = {
     const signal = release2State.startLoading();
     try {
       const result = await fetchRelease2List({ signal });
+      // Phase 5.1 (Доп #22) — append diff to history sparkline.
+      // Считаем diff до finishLoading (там prevList → lastList).
+      const prevList = release2State.lastList?.releases;
+      if (prevList && result.releases && result.fetchedAt) {
+        const d = diffRelease2Lists(prevList, result.releases);
+        release2State.appendDiffHistory(d, result.fetchedAt);
+      }
       release2State.finishLoading(result);
       this._renderFull();
     } catch (err) {
@@ -214,14 +221,36 @@ export const Release2View = {
       prevDiff = diffRelease2Lists(prev, analysed.releases);
     }
 
+    // Phase 5.1 — preserve scroll-position + active element (search-input focus)
+    // перед innerHTML='...'. Иначе при каждом refresh скролл уходит вверх,
+    // фокус из search-input теряется (юзер не может печатать с debounce).
+    const scrollY = this._container.scrollTop;
+    const active = document.activeElement;
+    const restoreFocus = (active && this._container.contains(active))
+      ? { tag: active.tagName, data: active.dataset?.r2Search, value: active.value,
+          selStart: active.selectionStart, selEnd: active.selectionEnd }
+      : null;
+
     // jiraBaseUrl: сервер прокидывает его внутрь analysed (через release2-fetch),
     // если нет — пусто, ссылки на Jira просто не рендерятся (escapeHtml safe).
     const html = renderRelease2View(analysed, _stateForRenderer(), {
       jiraBaseUrl: analysed.jiraBaseUrl || '',
       prevList: prev,
       prevDiff,
+      diffHistory: release2State.getDiffHistory(),
     });
     this._container.innerHTML = html;
+
+    // Restore scroll + focus
+    this._container.scrollTop = scrollY;
+    if (restoreFocus?.data !== undefined) {
+      const newSearch = this._container.querySelector('[data-r2-search]');
+      if (newSearch) {
+        newSearch.focus();
+        if (restoreFocus.value !== undefined) newSearch.value = restoreFocus.value;
+        try { newSearch.setSelectionRange(restoreFocus.selStart || 0, restoreFocus.selEnd || 0); } catch (_) {}
+      }
+    }
   },
 
   _bindOnce(container) {
@@ -278,20 +307,13 @@ export const Release2View = {
       this._renderFull();
       return;
     }
-    // Smart preset
-    const preset = target.closest('[data-r2-preset]');
-    if (preset) {
-      release2State.setFilter('smartPreset', preset.dataset.r2Preset || '');
-      this._renderFull();
-      return;
-    }
-    // Stat chip with phase-filter
+    // V22+ Phase 5.1 — phase filter (из phase-bar / stat-cards).
+    // Toggle-семантика: повторный клик на ту же фазу снимает фильтр.
     const statChip = target.closest('[data-r2-filter-phase]');
     if (statChip) {
       const ph = statChip.dataset.r2FilterPhase || '';
-      release2State.setFilter('smartPreset', ph === 'uat' ? '' : '');
-      // Phase-based filtering — для упрощения переключаем на «по статусу» group.
-      release2State.setGroupBy('status');
+      const cur = release2State.filters.phase || '';
+      release2State.setFilter('phase', cur === ph ? '' : ph);
       this._renderFull();
       return;
     }

@@ -210,6 +210,21 @@
   --release-r122-color: var(--prizma-drift);
   --release-ot-color:   var(--prizma-off-course);
   --release-none-color: var(--prizma-text-tertiary);
+
+  /* V22+ Phase 5.1 — токен для approve-фазы (ППСИ).
+     Раньше hex'ы #a855f7 / rgba(168,85,247,…) были хардкожены в 6+ местах
+     `.r2-*` блока; теперь один callsite. Палитра фаз — monotonic luminance
+     creation→stabilize→uat→approve→deploy от lightest до brightest. */
+  --prizma-approve: #8b5cf6;             /* фиолет ППСИ */
+  --prizma-approve-bg: rgba(139,92,246,.10);
+
+  /* Phase-palette: monotonic luminance ordinal scale */
+  --r2-phase-creation:  var(--prizma-text-tertiary);   /* lightest grey */
+  --r2-phase-stabilize: var(--prizma-text-secondary);  /* darker grey */
+  --r2-phase-uat:       var(--prizma-drift);           /* amber */
+  --r2-phase-approve:   var(--prizma-approve);         /* purple */
+  --r2-phase-deploy:    var(--prizma-on-course);       /* green */
+  --r2-phase-cancel:    var(--prizma-off-course);      /* red — categorical, не ordinal */
 }
 
 
@@ -22004,11 +22019,18 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 
 /* ============================================================
-   V22+ Phase 5 — Release 2.0 sub-tab styles
-   Pattern: Spine-pill (3px stripe-left для статусов / риска)
-            no gradients · tabular-nums · CAPS section-headers
+   V22+ Phase 5.1 — Release 2.0 sub-tab styles (re-groomed)
+   После аудита 4 экспертов: stripe-инфляция убрана, токенизирован
+   --prizma-approve, unicode-glyphs заменены на inline-SVG, native
+   select оставлен но dark-theme починен, phase-bar заменил 6-big-numbers
+   stat-bar, owners → micro-phasebar, 6→3 expand-таба, scroll preserve.
+   Pattern: Spine-pill (3px stripe-left ТОЛЬКО для active/selected),
+            no gradients, tabular-nums везде, CAPS 10/700/.6px унифицирован.
    ============================================================ */
-.r2-view { display: flex; flex-direction: column; gap: 12px; }
+.r2-view {
+  display: flex; flex-direction: column; gap: 12px;
+  font-variant-numeric: tabular-nums;   /* P1-13: tnum для всех вложенных чисел */
+}
 
 /* ── Toolbar ──────────────────────────────────────────────── */
 .r2-toolbar {
@@ -22018,23 +22040,24 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border-bottom: 1px solid var(--border);
 }
 .r2-toolbar-left { display: flex; align-items: baseline; gap: 12px; }
-.r2-toolbar-title { font: 600 18px/1.2 inherit; margin: 0; }
+.r2-toolbar-title { font: 600 18px/1.2 inherit; margin: 0; color: var(--text-1); }
 .r2-toolbar-count {
   font: 500 13px/1 ui-monospace, monospace;
   font-feature-settings: "tnum" 1;
   color: var(--text-3);
   padding: 2px 8px;
-  background: var(--bg-2, #f1f5f9);
+  background: var(--bg-2);
   border-radius: 12px;
 }
 .r2-toolbar-fetched {
   font: 400 11px/1.2 inherit;
-  color: var(--text-4, #94a3b8);
+  color: var(--text-4);
   letter-spacing: .2px;
 }
 .r2-toolbar-right { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
 .r2-btn {
+  display: inline-flex; align-items: center; gap: 5px;
   padding: 6px 12px;
   font: 500 12px/1 inherit;
   border-radius: 5px;
@@ -22042,16 +22065,25 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border: 1px solid var(--border);
   background: var(--prizma-bg-elevated, #fff);
   color: var(--text-1);
-  transition: background-color .12s, border-color .12s;
+  transition: background-color .12s, border-color .12s, color .12s;
 }
-.r2-btn:hover { background: var(--bg-2, #f8fafc); }
-.r2-btn-primary { background: var(--prizma-information, #4f46e5); color: #fff; border-color: var(--prizma-information); }
-.r2-btn-primary:hover { filter: brightness(1.08); background: var(--prizma-information); }
+.r2-btn:hover { background: var(--bg-2); border-color: var(--border-strong, var(--border)); }
+.r2-btn-primary {
+  background: var(--prizma-information);
+  color: #fff;
+  border-color: var(--prizma-information);
+}
+/* P1-15: убрали filter: brightness — теперь чистая color-mix замена */
+.r2-btn-primary:hover {
+  background: color-mix(in srgb, var(--prizma-information) 88%, #000 12%);
+  border-color: color-mix(in srgb, var(--prizma-information) 88%, #000 12%);
+}
 .r2-btn-secondary { color: var(--prizma-information); border-color: var(--prizma-information); }
 .r2-btn-ghost { background: transparent; border-color: transparent; color: var(--text-3); }
 .r2-btn-ghost:hover { color: var(--text-1); background: var(--bg-2); }
+.r2-btn svg { flex-shrink: 0; }
 
-/* Group-by chips */
+/* Group-by chips — без box-shadow (P1-15) */
 .r2-groupby { display: inline-flex; gap: 2px; padding: 2px; background: var(--bg-2); border-radius: 6px; }
 .r2-groupby-chip {
   padding: 4px 10px;
@@ -22067,60 +22099,114 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-groupby-chip-active {
   background: var(--prizma-bg-elevated, #fff);
   color: var(--prizma-information);
-  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  /* box-shadow убран по Spine-pill «no-glow» */
 }
 
-/* ── Stat-bar ─────────────────────────────────────────────── */
-.r2-statbar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
+/* ── Phase-bar (заменил stat-bar 6×big-numbers) ─────────────
+   Tufte: ordinal scale visualized as proportional segments, не как
+   6 равноправных KPI. Click на сегменте = toggle filter.phase.
+   ──────────────────────────────────────────────────────────── */
+.r2-phase-wrap {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
 }
-.r2-stat {
-  padding: 10px 12px;
-  background: var(--prizma-bg-elevated, #fff);
-  border: 1px solid var(--border);
+.r2-phase-bar {
+  flex: 1 1 320px; min-width: 280px;
+  display: flex;
+  height: 36px;
   border-radius: 6px;
-  cursor: pointer;
-  transition: border-color .12s, background-color .12s;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
 }
-.r2-stat:hover { border-color: var(--prizma-information); }
-.r2-stat-num {
-  font: 700 22px/1 ui-monospace, monospace;
+.r2-phase-seg {
+  flex: 0 1 auto;
+  min-width: 28px;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  padding: 4px 6px;
+  border: none;
+  background: var(--bg-2);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: background-color .12s, color .12s;
+  position: relative;
+  overflow: hidden;
+}
+.r2-phase-seg:hover { background: var(--prizma-bg-tertiary, var(--bg-2)); }
+.r2-phase-seg-label {
+  font: 500 9.5px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.r2-phase-seg-num {
+  font: 700 13px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  margin-top: 2px;
+  color: var(--text-1);
+}
+/* Цветовое кодирование: левый 3px stripe-top вместо filled-bg
+   (Spine-pill — stripe для семантики, фон нейтральный) */
+.r2-phase-seg-creation  { box-shadow: inset 0 3px 0 var(--r2-phase-creation); }
+.r2-phase-seg-stabilize { box-shadow: inset 0 3px 0 var(--r2-phase-stabilize); }
+.r2-phase-seg-uat       { box-shadow: inset 0 3px 0 var(--r2-phase-uat); }
+.r2-phase-seg-approve   { box-shadow: inset 0 3px 0 var(--r2-phase-approve); }
+.r2-phase-seg-deploy    { box-shadow: inset 0 3px 0 var(--r2-phase-deploy); }
+.r2-phase-seg-cancel    { box-shadow: inset 0 3px 0 var(--r2-phase-cancel); }
+/* Active state — заливка соответствующим цветом + bold-num */
+.r2-phase-seg-active { background: color-mix(in srgb, currentColor 8%, var(--prizma-bg-elevated)); }
+.r2-phase-seg-active.r2-phase-seg-creation  { color: var(--r2-phase-creation); }
+.r2-phase-seg-active.r2-phase-seg-stabilize { color: var(--r2-phase-stabilize); }
+.r2-phase-seg-active.r2-phase-seg-uat       { color: var(--r2-phase-uat); }
+.r2-phase-seg-active.r2-phase-seg-approve   { color: var(--r2-phase-approve); }
+.r2-phase-seg-active.r2-phase-seg-deploy    { color: var(--r2-phase-deploy); }
+.r2-phase-seg-active.r2-phase-seg-cancel    { color: var(--r2-phase-cancel); }
+.r2-phase-seg-active .r2-phase-seg-num   { color: currentColor; }
+.r2-phase-seg-active .r2-phase-seg-label { color: currentColor; opacity: .85; }
+
+.r2-phase-side {
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+}
+.r2-stat-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  background: var(--prizma-bg-elevated, #fff);
+  border-radius: 16px;
+  font: 500 11px/1 inherit;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color .12s, border-color .12s;
+}
+.r2-stat-chip:hover { border-color: var(--prizma-drift); }
+.r2-stat-chip-num {
+  font: 700 13px/1 ui-monospace, monospace;
   font-feature-settings: "tnum" 1, "lnum" 1;
   color: var(--text-1);
 }
-.r2-stat-label {
-  font: 500 10.5px/1.2 inherit;
+.r2-stat-chip-label {
   text-transform: uppercase;
-  letter-spacing: .6px;
+  letter-spacing: .4px;
+  font-size: 10px;
   color: var(--text-3);
-  margin-top: 2px;
 }
-.r2-stat-alert { border-left: 3px solid var(--prizma-drift, #b07b1a); }
-.r2-stat-deploy { border-left: 3px solid var(--prizma-on-course, #10b981); }
-.r2-stat-approve { border-left: 3px solid #a855f7; }
-.r2-stat-uat { border-left: 3px solid var(--prizma-drift, #b07b1a); }
-
-/* ── Smart presets ────────────────────────────────────────── */
-.r2-presets { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.r2-presets-label { font: 500 10.5px/1 inherit; color: var(--text-3); text-transform: uppercase; letter-spacing: .6px; margin-right: 6px; }
-.r2-preset {
-  padding: 3px 9px;
-  font: 500 11px/1.2 inherit;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--text-2);
-  cursor: pointer;
-  transition: background-color .12s, border-color .12s, color .12s;
+.r2-stat-chip-alert {
+  border-left: 3px solid var(--prizma-drift);
+  padding-left: 8px;
 }
-.r2-preset:hover { color: var(--text-1); border-color: var(--text-3); }
-.r2-preset-active {
-  background: var(--prizma-information-bg, #eef2ff);
+.r2-stat-chip-active {
+  background: var(--prizma-drift-bg);
+  border-color: var(--prizma-drift);
+}
+.r2-stat-chip-clear {
   border-color: var(--prizma-information);
   color: var(--prizma-information);
 }
+.r2-stat-chip-clear:hover { background: var(--prizma-information-bg); }
+.r2-stat-chip svg { color: currentColor; }
 
 /* ── Filters bar ──────────────────────────────────────────── */
 .r2-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -22131,8 +22217,12 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--prizma-bg-elevated, #fff);
+  color: var(--text-1);
 }
-.r2-filter-search:focus { outline: 2px solid var(--prizma-information); outline-offset: 1px; }
+.r2-filter-search:focus {
+  outline: none;
+  border-color: var(--prizma-information);
+}
 .r2-filter-select {
   min-width: 130px; max-width: 200px;
   padding: 4px;
@@ -22140,6 +22230,11 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--prizma-bg-elevated, #fff);
+  color: var(--text-1);
+}
+.r2-filter-select:focus {
+  outline: none;
+  border-color: var(--prizma-information);
 }
 
 /* ── List + groups ────────────────────────────────────────── */
@@ -22153,14 +22248,25 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-group-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 8px 12px;
-  background: var(--bg-2, #f8fafc);
+  background: var(--bg-2);
   border-bottom: 1px solid var(--border);
 }
-.r2-group-name { font: 600 12px/1.2 inherit; color: var(--text-1); text-transform: uppercase; letter-spacing: .4px; }
-.r2-group-count { font: 500 11px/1 ui-monospace, monospace; font-feature-settings: "tnum" 1; color: var(--text-3); }
+.r2-group-name {
+  font: 700 10px/1.2 inherit;          /* унифицировано 10/700/.6px */
+  color: var(--text-1);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+}
+.r2-group-count {
+  font: 500 11px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-3);
+}
 .r2-group-body { display: flex; flex-direction: column; }
 
-/* ── Release row ──────────────────────────────────────────── */
+/* ── Release row ──────────────────────────────────────────────
+   Phase 5.1 row-grid: 8 колонок вместо 9 (приоритет убран).
+   КЭ из 200px text → 60px chip с count. Summary вес 600 (был 500). */
 .r2-row {
   border-bottom: 1px solid var(--border);
   border-left: 3px solid transparent;
@@ -22169,94 +22275,113 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-row:last-child { border-bottom: none; }
 .r2-row-head {
   display: grid;
-  grid-template-columns: 10px 100px 1fr 140px 70px 200px 90px auto 18px;
+  grid-template-columns: 14px 92px minmax(0,1fr) 120px 64px 84px auto 16px;
   gap: 10px;
   padding: 8px 12px;
   align-items: center;
   cursor: pointer;
   font: 400 12px/1.4 inherit;
 }
-.r2-row-head:hover { background: var(--bg-2, #f8fafc); }
-.r2-row-expanded { background: var(--bg-2, #f8fafc); border-left-color: var(--prizma-information); }
+.r2-row-head:hover { background: var(--bg-2); }
+.r2-row-expanded { background: var(--bg-2); border-left-color: var(--prizma-information); }
 
-.r2-phase-neutral   { border-left-color: var(--text-4, #94a3b8); }
-.r2-phase-stabilize { border-left-color: var(--text-3, #6b7280); }
-.r2-phase-uat       { border-left-color: var(--prizma-drift, #b07b1a); }
-.r2-phase-approve   { border-left-color: #a855f7; }
-.r2-phase-deploy    { border-left-color: var(--prizma-on-course, #10b981); }
-.r2-phase-cancel    { border-left-color: var(--prizma-off-course, #c13838); }
+.r2-phase-neutral   { border-left-color: var(--r2-phase-creation); }
+.r2-phase-stabilize { border-left-color: var(--r2-phase-stabilize); }
+.r2-phase-uat       { border-left-color: var(--r2-phase-uat); }
+.r2-phase-approve   { border-left-color: var(--r2-phase-approve); }
+.r2-phase-deploy    { border-left-color: var(--r2-phase-deploy); }
+.r2-phase-cancel    { border-left-color: var(--r2-phase-cancel); }
 
+/* Risk-dot: redundant encoding — size + hue (P2-19).
+   Гарантирует CVD-safe различимость 5 уровней даже без hue. */
 .r2-risk-dot {
-  width: 10px; height: 10px;
   border-radius: 50%;
-  background: var(--text-4, #94a3b8);
+  background: var(--text-4);
   flex-shrink: 0;
+  display: inline-block;
 }
-.r2-risk-low      { background: #6b7280; }
-.r2-risk-mid      { background: var(--prizma-drift, #b07b1a); }
-.r2-risk-high     { background: #d97706; }
-.r2-risk-high-plus{ background: #c13838; }
-.r2-risk-block    { background: #7f1d1d; }
-.r2-risk-none     { background: transparent; border: 1px dashed var(--text-4); }
+.r2-risk-low       { width: 6px;  height: 6px;  background: var(--text-3); }
+.r2-risk-mid       { width: 8px;  height: 8px;  background: var(--prizma-drift); }
+.r2-risk-high      { width: 10px; height: 10px; background: #d97706; }
+.r2-risk-high-plus { width: 12px; height: 12px; background: var(--prizma-off-course); }
+.r2-risk-block     { width: 14px; height: 14px; background: var(--prizma-off-course);
+                     box-shadow: 0 0 0 2px var(--prizma-off-course-bg); }
+.r2-risk-none      { width: 6px;  height: 6px;  background: transparent;
+                     border: 1px dashed var(--text-4); }
 
 .r2-key {
-  font: 500 11px/1 ui-monospace, monospace;
+  font: 600 11px/1 ui-monospace, monospace;
   font-feature-settings: "tnum" 1;
   color: var(--prizma-information);
   letter-spacing: .2px;
 }
 .r2-summary {
-  font: 500 13px/1.3 inherit;
+  font: 600 13px/1.3 inherit;          /* был 500 — поднят чтобы стать якорем строки */
   color: var(--text-1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Status-pill — унифицирован 10px / 700 / .6px (Spine §5).
+   Снят цветовой filled-bg — только border-color + text-color по фазе. */
 .r2-status {
   display: inline-block;
   padding: 1px 7px;
-  font: 700 9px/1.4 inherit;
+  font: 700 10px/1.4 inherit;
   text-transform: uppercase;
   letter-spacing: .6px;
   border-radius: 3px;
   border: 1px solid var(--border);
+  color: var(--text-2);
   text-align: center;
 }
-.r2-status-uat      { color: var(--prizma-drift); border-color: var(--prizma-drift); }
-.r2-status-approve  { color: #a855f7; border-color: #a855f7; }
-.r2-status-deploy   { color: var(--prizma-on-course); border-color: var(--prizma-on-course); }
-.r2-status-cancel   { color: var(--prizma-off-course); border-color: var(--prizma-off-course); }
+.r2-status-uat      { color: var(--r2-phase-uat);      border-color: var(--r2-phase-uat); }
+.r2-status-approve  { color: var(--r2-phase-approve);  border-color: var(--r2-phase-approve); }
+.r2-status-deploy   { color: var(--r2-phase-deploy);   border-color: var(--r2-phase-deploy); }
+.r2-status-cancel   { color: var(--r2-phase-cancel);   border-color: var(--r2-phase-cancel); }
 
-.r2-priority { font: 500 11px/1 inherit; color: var(--text-3); }
-.r2-priority-blocker  { color: var(--prizma-off-course); font-weight: 700; }
-.r2-priority-critical { color: #d97706; font-weight: 600; }
-.r2-priority-major    { color: var(--prizma-information); }
-
-.r2-ke {
-  font: 400 11px/1.3 inherit;
-  color: var(--text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.r2-ke-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px;
+  font: 500 10px/1.4 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--text-3);
 }
+.r2-ke-chip strong {
+  font: 700 11px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-1);
+}
+
 .r2-date {
   font: 500 11px/1 ui-monospace, monospace;
   font-feature-settings: "tnum" 1, "lnum" 1;
   color: var(--text-2);
+  white-space: nowrap;
 }
+.r2-flags { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .r2-flag {
   display: inline-block;
   padding: 1px 6px;
-  font: 700 9.5px/1.4 inherit;
+  font: 700 10px/1.4 inherit;          /* унифицировано 10/700/.6px */
   text-transform: uppercase;
-  letter-spacing: .4px;
+  letter-spacing: .6px;
   border-radius: 3px;
-  background: var(--prizma-drift-bg, #fef3c7);
+  background: var(--prizma-drift-bg);
   color: var(--prizma-drift);
 }
-.r2-flag-prod { background: rgba(193,56,56,.10); color: var(--prizma-off-course); }
-.r2-flag-fpd  { background: rgba(168,85,247,.10); color: #a855f7; }
-.r2-row-chevron { color: var(--text-3); font-size: 11px; }
+.r2-flag-prod { background: var(--prizma-off-course-bg); color: var(--prizma-off-course); }
+.r2-flag-fpd  { background: var(--prizma-approve-bg);    color: var(--prizma-approve); }
+
+.r2-row-chevron {
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* ── Expand panel + tabs ──────────────────────────────────── */
 .r2-row-body {
@@ -22280,6 +22405,7 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-tab-active { color: var(--prizma-information); border-bottom-color: var(--prizma-information); }
 .r2-tabs-spacer { flex: 1; }
 .r2-external-link {
+  display: inline-flex; align-items: center; gap: 4px;
   font: 500 11.5px/1.4 inherit;
   color: var(--prizma-information);
   text-decoration: none;
@@ -22289,7 +22415,7 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-tab-body { padding: 8px 0; }
 .r2-section {
   padding: 10px;
-  background: var(--bg-2, #f8fafc);
+  background: var(--bg-2);
   border-radius: 5px;
   margin-bottom: 8px;
 }
@@ -22300,6 +22426,9 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   color: var(--text-3);
   margin-bottom: 8px;
 }
+.r2-attrs-collapsed { margin-top: 4px; }
+.r2-attrs-collapsed > summary { cursor: pointer; padding: 6px 0; }
+
 .r2-field {
   display: grid;
   grid-template-columns: minmax(180px, 200px) 1fr;
@@ -22334,16 +22463,16 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border-top: 1px solid var(--border);
 }
 .r2-sublink:first-of-type { border-top: none; }
-.r2-sublink-key { color: var(--prizma-information); font-family: ui-monospace, monospace; font-size: 11px; }
+.r2-sublink-key { color: var(--prizma-information); font-family: ui-monospace, monospace; font-size: 11px; font-feature-settings: "tnum" 1; }
 .r2-sublink-summary { color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.r2-sublink-status { color: var(--text-3); font-size: 11px; }
+.r2-sublink-status { color: var(--text-3); font-size: 11px; font-feature-settings: "tnum" 1; }
 .r2-sublink-priority { color: var(--text-3); font-size: 11px; }
 .r2-sublink-assignee { color: var(--text-3); font-size: 11px; }
 
 .r2-attach { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-top: 1px solid var(--border); }
 .r2-attach:first-of-type { border-top: none; }
 .r2-attach a { color: var(--prizma-information); font-weight: 500; }
-.r2-attach-meta { font: 400 11px/1 inherit; color: var(--text-4); }
+.r2-attach-meta { font: 400 11px/1 inherit; color: var(--text-4); font-feature-settings: "tnum" 1; }
 
 /* ── States ───────────────────────────────────────────────── */
 .r2-loader, .r2-error, .r2-empty {
@@ -22364,42 +22493,42 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .r2-error-msg   { margin-bottom: 12px; font-size: 12px; }
 .r2-empty-tab   { color: var(--text-4); padding: 16px; text-align: center; font-size: 12px; }
 
-/* ── Footer (JQL details) ─────────────────────────────────── */
-.r2-footer {
+/* ── Footer (MD-export + JQL details) ─────────────────────── */
+.r2-footer-bar {
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.r2-footer-export { font-size: 11px; }
+.r2-footer {
   font: 400 11px/1.3 inherit;
   color: var(--text-4);
+  flex: 1;
 }
 .r2-footer summary { cursor: pointer; }
 .r2-jql {
   margin: 6px 0 0;
   padding: 8px;
-  background: var(--bg-2, #f8fafc);
+  background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 4px;
   font: 400 11px/1.4 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-2);
 }
 
-/* Dark theme overrides */
-body.theme-dark .r2-toolbar-count,
-body.theme-dark .r2-group-header,
-body.theme-dark .r2-section,
-body.theme-dark .r2-jql { background: var(--bg-1, #1e293b); }
-body.theme-dark .r2-row-head:hover,
-body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
-
 /* ============================================================
-   V22+ Phase 5 (Доп #9 + #7) — Diff-banner + Owners card
+   Diff-banner (P0-4: понижена громкость — transparent + stripe-left)
+   + 7-day sparkline (Доп #22)
    ============================================================ */
-
-/* ── Diff banner ──────────────────────────────────────────── */
 .r2-diff-banner {
-  background: var(--prizma-information-bg, #eef2ff);
-  border: 1px solid var(--prizma-information, #4f46e5);
-  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--prizma-information);
+  border-radius: 0 6px 6px 0;
   padding: 10px 14px;
   margin-bottom: 4px;
 }
@@ -22412,49 +22541,38 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
 .r2-diff-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   color: var(--text-1);
   font: 500 12.5px/1.4 inherit;
 }
-.r2-diff-icon {
-  width: 22px; height: 22px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--prizma-information, #4f46e5);
-  color: #fff;
-  border-radius: 50%;
-  font-size: 13px; font-weight: 700;
-  flex-shrink: 0;
-}
 .r2-diff-title {
-  font-weight: 700;
+  font: 700 10px/1.2 inherit;          /* унифицирован CAPS-eyebrow */
   text-transform: uppercase;
-  letter-spacing: .4px;
-  font-size: 11px;
+  letter-spacing: .6px;
   color: var(--text-3);
 }
 .r2-diff-num {
-  font-family: ui-monospace, monospace;
+  font: 700 12px/1 ui-monospace, monospace;
   font-feature-settings: "tnum" 1, "lnum" 1;
-  font-weight: 700;
   padding: 1px 6px;
   border-radius: 3px;
 }
-.r2-diff-added   { background: rgba(16,185,129,.12); color: var(--prizma-on-course, #059669); }
-.r2-diff-changed { background: rgba(79,70,229,.12);  color: var(--prizma-information, #4f46e5); }
-.r2-diff-removed { background: rgba(193,56,56,.12);  color: var(--prizma-off-course, #c13838); }
+.r2-diff-added   { background: var(--prizma-on-course-bg);  color: var(--prizma-on-course); }
+.r2-diff-changed { background: var(--prizma-information-bg); color: var(--prizma-information); }
+.r2-diff-removed { background: var(--prizma-off-course-bg); color: var(--prizma-off-course); }
 
 .r2-diff-dismiss {
   background: transparent;
   border: none;
-  font-size: 18px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
   color: var(--text-3);
   cursor: pointer;
-  padding: 2px 6px;
   border-radius: 3px;
   transition: background-color .12s, color .12s;
 }
-.r2-diff-dismiss:hover { color: var(--text-1); background: rgba(255,255,255,.5); }
+.r2-diff-dismiss:hover { color: var(--text-1); background: var(--bg-2); }
 
 .r2-diff-details {
   margin-top: 8px;
@@ -22472,7 +22590,7 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
   flex-direction: column;
   gap: 8px;
   margin-top: 6px;
-  background: rgba(255,255,255,.55);
+  background: var(--bg-2);
   padding: 8px 10px;
   border-radius: 4px;
 }
@@ -22508,13 +22626,13 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.r2-diff-item-added   { border-color: var(--prizma-on-course, #10b981); }
-.r2-diff-item-changed { border-color: var(--prizma-information, #4f46e5); }
-.r2-diff-item-removed { border-color: var(--prizma-off-course, #c13838); opacity: .85; }
+.r2-diff-item-added   { border-color: var(--prizma-on-course); }
+.r2-diff-item-changed { border-color: var(--prizma-information); }
+.r2-diff-item-removed { border-color: var(--prizma-off-course); opacity: .85; }
 .r2-diff-tag {
-  font: 700 9px/1 inherit;
+  font: 700 10px/1 inherit;
   text-transform: uppercase;
-  letter-spacing: .4px;
+  letter-spacing: .6px;
   color: var(--text-3);
   padding: 1px 5px;
   background: var(--bg-2);
@@ -22522,49 +22640,79 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
 }
 .r2-diff-fromto {
   font: 500 10.5px/1.3 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
   color: var(--text-2);
 }
 .r2-diff-more { color: var(--text-4); font-size: 11px; font-style: italic; }
 
-/* ── Owners card ──────────────────────────────────────────── */
+/* Sparkline — 7 stacked tri-color мини-баров (added/changed/removed) */
+.r2-diff-sparkline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.r2-spark-bar {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  width: 6px;
+  height: 100%;
+  background: var(--bg-2);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.r2-spark-seg { display: block; width: 100%; }
+.r2-spark-added   { background: var(--prizma-on-course); }
+.r2-spark-changed { background: var(--prizma-information); }
+.r2-spark-removed { background: var(--prizma-off-course); }
+
+/* ============================================================
+   Owners card — теперь <details>, micro-phasebar вместо 5 dots
+   ============================================================ */
 .r2-owners-card {
   background: var(--prizma-bg-elevated, #fff);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 12px 14px;
+  padding: 0;
+  overflow: hidden;
 }
 .r2-owners-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
 }
+.r2-owners-header::-webkit-details-marker { display: none; }
 .r2-owners-title {
-  font: 700 10.5px/1 inherit;
+  font: 700 10px/1 inherit;
   text-transform: uppercase;
   letter-spacing: .6px;
   color: var(--text-3);
 }
-.r2-owners-group-toggle {
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 12px;
-}
-.r2-owners-group-active {
-  background: var(--prizma-information-bg, #eef2ff);
-  color: var(--prizma-information);
+.r2-owners-count {
+  font: 500 11px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-3);
 }
 .r2-owners-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
+  padding: 0 14px 14px;
 }
 .r2-owner-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 6px 10px;
-  background: var(--bg-2, #f8fafc);
+  background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 11.5px;
@@ -22573,7 +22721,7 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
 .r2-owner-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: var(--prizma-information, #4f46e5);
+  background: var(--prizma-information);
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -22585,7 +22733,7 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
 .r2-owner-body {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
   flex: 1;
   min-width: 0;
 }
@@ -22595,39 +22743,51 @@ body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 12px;
 }
-.r2-owner-stats {
-  color: var(--text-3);
-  font-size: 10.5px;
+/* Micro phase-bar — 6 сегментов пропорциональны count по фазам.
+   Это менее ink, чем 5 цветных chip с числами (P2-20). */
+.r2-owner-phasebar {
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
 }
-.r2-owner-phases {
-  display: inline-flex;
-  gap: 3px;
+.r2-owner-phase-seg {
+  display: block;
+  height: 100%;
+  flex: 0 1 auto;
+  min-width: 2px;
+}
+.r2-owner-phase-seg.r2-phase-seg-creation  { background: var(--r2-phase-creation); }
+.r2-owner-phase-seg.r2-phase-seg-stabilize { background: var(--r2-phase-stabilize); }
+.r2-owner-phase-seg.r2-phase-seg-uat       { background: var(--r2-phase-uat); }
+.r2-owner-phase-seg.r2-phase-seg-approve   { background: var(--r2-phase-approve); }
+.r2-owner-phase-seg.r2-phase-seg-deploy    { background: var(--r2-phase-deploy); }
+.r2-owner-phase-seg.r2-phase-seg-cancel    { background: var(--r2-phase-cancel); }
+.r2-owner-total {
+  font: 700 13px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--text-1);
   flex-shrink: 0;
 }
-.r2-owner-phase-dot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 18px;
-  padding: 0 5px;
-  font: 700 10px/1 ui-monospace, monospace;
-  font-feature-settings: "tnum" 1;
-  color: #fff;
-  border-radius: 3px;
-}
-.r2-phase-dot-creation  { background: var(--text-4, #94a3b8); }
-.r2-phase-dot-stabilize { background: var(--text-3, #6b7280); }
-.r2-phase-dot-uat       { background: var(--prizma-drift, #b07b1a); }
-.r2-phase-dot-approve   { background: #a855f7; }
-.r2-phase-dot-deploy    { background: var(--prizma-on-course, #10b981); }
-.r2-phase-dot-cancel    { background: var(--prizma-off-course, #c13838); }
 
-/* Dark theme overrides */
-body.theme-dark .r2-diff-banner { background: rgba(79,70,229,.10); }
-body.theme-dark .r2-diff-body { background: rgba(0,0,0,.25); }
-body.theme-dark .r2-diff-item { background: var(--bg-1, #1e293b); }
-body.theme-dark .r2-diff-dismiss:hover { background: rgba(255,255,255,.08); }
-body.theme-dark .r2-owners-card { background: var(--bg-1, #1e293b); }
+/* ── Dark theme parity (P1-14: 6 surfaces было дыр) ───────── */
+body.theme-dark .r2-toolbar-count,
+body.theme-dark .r2-group-header,
+body.theme-dark .r2-section,
+body.theme-dark .r2-jql,
+body.theme-dark .r2-diff-body { background: var(--bg-1); }
+body.theme-dark .r2-row-head:hover,
+body.theme-dark .r2-row-expanded { background: rgba(255,255,255,.04); }
+body.theme-dark .r2-filter-search,
+body.theme-dark .r2-filter-select,
+body.theme-dark .r2-rich,
+body.theme-dark .r2-row-body,
+body.theme-dark .r2-stat-chip,
+body.theme-dark .r2-phase-bar,
+body.theme-dark .r2-diff-item { background: var(--bg-1); }
 body.theme-dark .r2-owner-chip { background: rgba(255,255,255,.04); }
+body.theme-dark .r2-owners-card { background: var(--bg-1); }
+body.theme-dark .r2-diff-dismiss:hover { background: rgba(255,255,255,.08); }

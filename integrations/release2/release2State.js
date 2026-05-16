@@ -27,13 +27,18 @@ function _emptyState() {
       types: [],
       risks: [],
       searchText: '',
-      smartPreset: '',  // '' | 'uat-soon' | 'prod-soon' | 'high-risk' | 'high-risk-plus' | 'no-rov'
+      phase: '',        // V22+ Phase 5.1 — toggle-фильтр из phase-bar / stat-bar
+                        // ('' | 'creation' | 'stabilize' | 'uat' | 'approve' | 'deploy' | 'cancel')
+      smartPreset: '',  // legacy, для backward-compat (не используется UI после Phase 5.1)
     },
     expandedKeys: [],
     expandedTab: {},  // { key: tabId }
     diffDismissed: null,  // { fetchedAt } — для какого fetch'а banner закрыт
+    diffHistory: [],      // V22+ Phase 5.1 — last 7 fetches {fetchedAt, added, changed, removed}
   };
 }
+
+const DIFF_HISTORY_MAX = 7;
 
 class Release2State {
   constructor() {
@@ -126,6 +131,33 @@ class Release2State {
     this._ensureLoaded();
     this._state.diffDismissed = { fetchedAt };
     this._save();
+  }
+
+  /* ── diff history (Доп #22 — 7-day sparkline) ──────────── */
+
+  /** Дописать одну запись в history (ringbuffer 7 элементов). */
+  appendDiffHistory(diff, fetchedAt) {
+    this._ensureLoaded();
+    if (!Array.isArray(this._state.diffHistory)) this._state.diffHistory = [];
+    const entry = {
+      fetchedAt,
+      added:   diff?.added?.length || 0,
+      changed: diff?.changed?.length || 0,
+      removed: diff?.removed?.length || 0,
+    };
+    // Дедуплицируем по fetchedAt — если уже есть запись, обновляем.
+    const idx = this._state.diffHistory.findIndex(h => h.fetchedAt === fetchedAt);
+    if (idx >= 0) this._state.diffHistory[idx] = entry;
+    else this._state.diffHistory.push(entry);
+    // Trim до DIFF_HISTORY_MAX последних.
+    if (this._state.diffHistory.length > DIFF_HISTORY_MAX) {
+      this._state.diffHistory = this._state.diffHistory.slice(-DIFF_HISTORY_MAX);
+    }
+    this._save();
+  }
+  getDiffHistory() {
+    this._ensureLoaded();
+    return Array.isArray(this._state.diffHistory) ? this._state.diffHistory.slice() : [];
   }
 
   /* ── fetch lifecycle ────────────────────────────────────── */

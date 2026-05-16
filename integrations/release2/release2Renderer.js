@@ -74,6 +74,20 @@ function _riskClass(level) {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Inline SVG icons (V22+ Phase 5.1 — заменяют unicode-glyphs ↻ ⤓ ▾ ▸ ↗)
+   Spine-pill §6: «иконки — inline SVG 12–16 px, stroke=currentColor».
+   ───────────────────────────────────────────────────────────── */
+
+const ICONS = {
+  refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  chevronDown:  '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>',
+  chevronRight: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg>',
+  external: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+  close:    '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+};
+
+/* ─────────────────────────────────────────────────────────────
    Top-level view
    ───────────────────────────────────────────────────────────── */
 
@@ -85,13 +99,12 @@ function _riskClass(level) {
 export function renderRelease2View(analysed, state, opts = {}) {
   const parts = [];
   parts.push(_renderToolbar(analysed, state));
-  // V22+ Phase 5 (Доп #9) — diff-banner подаётся в opts.prevDiff из
-  // orchestrator'а (он вычисляет через diffRelease2Lists). Если null —
-  // banner не рендерится.
-  parts.push(_renderDiffBanner(opts.prevDiff, analysed?.fetchedAt));
-  parts.push(_renderStatBar(analysed));
+  // V22+ Phase 5.1 — diff-banner понижен по громкости (transparent + stripe-left)
+  // + 7-day sparkline (Доп #22). open снят: подробности раскрываются по клику.
+  parts.push(_renderDiffBanner(opts.prevDiff, analysed?.fetchedAt, opts.diffHistory));
+  // Phase-bar (заменил 6 big-numbers stat-bar). Click = toggle filter.phase.
+  parts.push(_renderPhaseBar(analysed, state));
   parts.push(_renderOwnersCard(analysed, state));
-  parts.push(_renderSmartPresets(state));
   parts.push(_renderFilters(analysed, state));
   parts.push(_renderListBody(analysed, state, opts));
   parts.push(_renderFooter(analysed));
@@ -108,6 +121,8 @@ function _renderToolbar(analysed, state) {
     : '';
   const total = analysed?.stats?.total || 0;
 
+  // MD-export — переехал в футер (не daily-action). Toolbar держит primary
+  // (Refresh) + group-by chips. Это «один primary action на одну page».
   return `
     <div class="r2-toolbar">
       <div class="r2-toolbar-left">
@@ -122,8 +137,7 @@ function _renderToolbar(analysed, state) {
           ${_groupByChip('owner',   'По владельцу', state.groupBy)}
           ${_groupByChip('flat',    'Плоский', state.groupBy)}
         </div>
-        <button class="r2-btn r2-btn-secondary" data-r2-action="export-md" title="Экспорт текущего вида в Markdown">⤓ MD</button>
-        <button class="r2-btn r2-btn-primary" data-r2-action="refresh">↻ Обновить</button>
+        <button class="r2-btn r2-btn-primary" data-r2-action="refresh">${ICONS.refresh} Обновить</button>
       </div>
     </div>`;
 }
@@ -134,67 +148,65 @@ function _groupByChip(value, label, current) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Stat-bar (Доп предложение #1)
+   Phase-bar (V22+ Phase 5.1 — заменил 6 «big numbers» stat-bar)
+
+   Tufte-принцип: phase — ORDINAL шкала (creation→deploy), а
+   sum(byPhase) == total. Раньше 6 равноправных big-numbers нарушали
+   pre-attentive восприятие «distribution». Теперь — segmented bar
+   12px высотой, ширина сегмента ∝ count.
+
+   Side-stats: total + 2 alert-chips (скоро ПСИ / ПРОМ).
+   Click на сегменте = toggle filter.phase.
    ───────────────────────────────────────────────────────────── */
 
-function _renderStatBar(analysed) {
+function _renderPhaseBar(analysed, state) {
   const s = analysed?.stats;
   if (!s || !s.total) return '';
-  return `
-    <div class="r2-statbar">
-      <div class="r2-stat r2-stat-total"          data-r2-filter-phase="">
-        <div class="r2-stat-num">${s.total}</div>
-        <div class="r2-stat-label">всего</div>
-      </div>
-      <div class="r2-stat r2-stat-deploy"          data-r2-filter-phase="deploy">
-        <div class="r2-stat-num">${s.byPhase.deploy || 0}</div>
-        <div class="r2-stat-label">готов к ПРОМ</div>
-      </div>
-      <div class="r2-stat r2-stat-approve"         data-r2-filter-phase="approve">
-        <div class="r2-stat-num">${s.byPhase.approve || 0}</div>
-        <div class="r2-stat-label">ППСИ</div>
-      </div>
-      <div class="r2-stat r2-stat-uat"             data-r2-filter-phase="uat">
-        <div class="r2-stat-num">${s.byPhase.uat || 0}</div>
-        <div class="r2-stat-label">ПСИ</div>
-      </div>
-      <div class="r2-stat r2-stat-stabilize"       data-r2-filter-phase="stabilize">
-        <div class="r2-stat-num">${s.byPhase.stabilize || 0}</div>
-        <div class="r2-stat-label">стабилизация</div>
-      </div>
-      <div class="r2-stat r2-stat-creation"        data-r2-filter-phase="creation">
-        <div class="r2-stat-num">${s.byPhase.creation || 0}</div>
-        <div class="r2-stat-label">в работе</div>
-      </div>
-      ${s.upcomingUAT ? `<div class="r2-stat r2-stat-alert">
-        <div class="r2-stat-num">${s.upcomingUAT}</div>
-        <div class="r2-stat-label">скоро ПСИ (≤3д)</div>
-      </div>` : ''}
-      ${s.upcomingProd ? `<div class="r2-stat r2-stat-alert">
-        <div class="r2-stat-num">${s.upcomingProd}</div>
-        <div class="r2-stat-label">скоро ПРОМ (≤7д)</div>
-      </div>` : ''}
-    </div>`;
-}
+  const curPhase = state.filters.phase || '';
 
-/* ─────────────────────────────────────────────────────────────
-   Smart presets (Доп. предложение #10)
-   ───────────────────────────────────────────────────────────── */
-
-function _renderSmartPresets(state) {
-  const cur = state.filters.smartPreset || '';
-  const presets = [
-    { id: '',                label: 'Все' },
-    { id: 'uat-soon',        label: 'Скоро ПСИ (≤3д)' },
-    { id: 'prod-soon',       label: 'Скоро ПРОМ (≤7д)' },
-    { id: 'high-risk',       label: 'Высокий риск' },
-    { id: 'high-risk-plus',  label: 'Высокий+/Неприемлемый' },
-    { id: 'no-rov',          label: 'Без РоВ' },
+  // Ordinal порядок: creation → stabilize → uat → approve → deploy → cancel.
+  const PHASES = [
+    { id: 'creation',  label: 'В работе' },
+    { id: 'stabilize', label: 'Стабилизация' },
+    { id: 'uat',       label: 'ПСИ' },
+    { id: 'approve',   label: 'ППСИ' },
+    { id: 'deploy',    label: 'К ПРОМ' },
+    { id: 'cancel',    label: 'Отменено' },
   ];
+
+  const segments = PHASES.map(p => {
+    const n = s.byPhase[p.id] || 0;
+    const w = s.total > 0 ? (n / s.total * 100) : 0;
+    if (!n) return '';
+    const active = curPhase === p.id;
+    const pct = w.toFixed(1);
+    return `<button
+      class="r2-phase-seg r2-phase-seg-${p.id}${active ? ' r2-phase-seg-active' : ''}"
+      style="flex-grow: ${n}"
+      data-r2-filter-phase="${p.id}"
+      title="${escapeHtml(p.label)}: ${n} (${pct}%)"
+      aria-pressed="${active}"
+    ><span class="r2-phase-seg-label">${escapeHtml(p.label)}</span><span class="r2-phase-seg-num">${n}</span></button>`;
+  }).join('');
+
+  const alertUat  = s.upcomingUAT  ? `<button class="r2-stat-chip r2-stat-chip-alert${curPhase === 'uat' ? ' r2-stat-chip-active' : ''}" data-r2-filter-phase="uat" aria-pressed="${curPhase === 'uat'}"><span class="r2-stat-chip-num">${s.upcomingUAT}</span><span class="r2-stat-chip-label">скоро ПСИ ≤3д</span></button>` : '';
+  const alertProd = s.upcomingProd ? `<button class="r2-stat-chip r2-stat-chip-alert${curPhase === 'deploy' ? ' r2-stat-chip-active' : ''}" data-r2-filter-phase="deploy" aria-pressed="${curPhase === 'deploy'}"><span class="r2-stat-chip-num">${s.upcomingProd}</span><span class="r2-stat-chip-label">скоро ПРОМ ≤7д</span></button>` : '';
+
+  // Если phase-filter активен — показываем «снять фильтр» chip
+  const clearChip = curPhase
+    ? `<button class="r2-stat-chip r2-stat-chip-clear" data-r2-filter-phase="${curPhase}" title="Снять фильтр по фазе">${ICONS.close}<span>фаза: ${escapeHtml(_phaseLabel(curPhase))}</span></button>`
+    : '';
+
   return `
-    <div class="r2-presets">
-      <span class="r2-presets-label">Быстро:</span>
-      ${presets.map(p => `<button class="r2-preset${cur === p.id ? ' r2-preset-active' : ''}" data-r2-preset="${p.id}">${escapeHtml(p.label)}</button>`).join('')}
+    <div class="r2-phase-wrap">
+      <div class="r2-phase-bar" role="group" aria-label="Распределение по фазам">
+        ${segments}
+      </div>
+      <div class="r2-phase-side">
+        ${alertUat}
+        ${alertProd}
+        ${clearChip}
+      </div>
     </div>`;
 }
 
@@ -229,7 +241,7 @@ function _renderFilters(analysed, state) {
         ${risks.map(r => `<option value="${escapeHtml(r)}" ${(f.risks || []).includes(r) ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
       </select>
 
-      <button class="r2-btn r2-btn-ghost" data-r2-action="filters-reset" title="Сбросить фильтры">×</button>
+      <button class="r2-btn r2-btn-ghost" data-r2-action="filters-reset" title="Сбросить фильтры">${ICONS.close}</button>
     </div>`;
 }
 
@@ -238,10 +250,11 @@ function _renderFilters(analysed, state) {
    ───────────────────────────────────────────────────────────── */
 
 /**
- * @param {object|null} diff — output diffRelease2Lists (added/removed/changed)
- * @param {string} fetchedAt — для dismiss-tracking (banner закрывается per-fetch)
+ * @param {object|null} diff      — output diffRelease2Lists (added/removed/changed)
+ * @param {string} fetchedAt      — для dismiss-tracking (banner закрывается per-fetch)
+ * @param {Array}  diffHistory    — last 7 entries для sparkline
  */
-function _renderDiffBanner(diff, fetchedAt) {
+function _renderDiffBanner(diff, fetchedAt, diffHistory) {
   if (!diff) return '';
   const total = (diff.added?.length || 0) + (diff.removed?.length || 0) + (diff.changed?.length || 0);
   if (!total) return '';
@@ -251,6 +264,9 @@ function _renderDiffBanner(diff, fetchedAt) {
   if (diff.added?.length)   summaryParts.push(`<strong class="r2-diff-num r2-diff-added">+${diff.added.length}</strong> ${_pl(diff.added.length, ['новый', 'новых', 'новых'])}`);
   if (diff.changed?.length) summaryParts.push(`<strong class="r2-diff-num r2-diff-changed">~${diff.changed.length}</strong> ${_pl(diff.changed.length, ['изменён', 'изменено', 'изменено'])}`);
   if (diff.removed?.length) summaryParts.push(`<strong class="r2-diff-num r2-diff-removed">−${diff.removed.length}</strong> ${_pl(diff.removed.length, ['удалён', 'удалено', 'удалено'])}`);
+
+  // V22+ Phase 5.1 (Доп #22) — 7-day mini-sparkline
+  const sparkline = _renderDiffSparkline(diffHistory);
 
   // Detail lines
   const lines = [];
@@ -302,17 +318,43 @@ function _renderDiffBanner(diff, fetchedAt) {
     <div class="r2-diff-banner" data-r2-fetched-at="${escapeHtml(fetchedAt || '')}">
       <div class="r2-diff-header">
         <div class="r2-diff-summary">
-          <span class="r2-diff-icon" aria-hidden="true">↻</span>
           <span class="r2-diff-title">За последний refresh:</span>
           ${summaryParts.join(' · ')}
+          ${sparkline}
         </div>
-        <button class="r2-diff-dismiss" data-r2-action="diff-dismiss" title="Скрыть до следующего обновления" aria-label="Скрыть">×</button>
+        <button class="r2-diff-dismiss" data-r2-action="diff-dismiss" title="Скрыть до следующего обновления" aria-label="Скрыть">${ICONS.close}</button>
       </div>
-      <details class="r2-diff-details" open>
+      <details class="r2-diff-details">
         <summary class="r2-diff-details-summary">Подробнее</summary>
         <div class="r2-diff-body">${lines.join('')}</div>
       </details>
     </div>`;
+}
+
+/**
+ * Mini 7-day sparkline: 3 stacked color-bars (added/changed/removed) на каждый
+ * из последних 7 fetch'ей. CSS-only (без canvas) — 7 × 3 div'а.
+ * Если history < 2 точек — sparkline не показываем (тренд бессмысленен).
+ */
+function _renderDiffSparkline(history) {
+  if (!Array.isArray(history) || history.length < 2) return '';
+  // Берём последние 7. Нормализуем по max(added+changed+removed) для всей серии.
+  const recent = history.slice(-7);
+  const sums = recent.map(e => (e.added || 0) + (e.changed || 0) + (e.removed || 0));
+  const max = Math.max(1, ...sums);
+  const bars = recent.map(e => {
+    const a = (e.added   || 0) / max * 100;
+    const c = (e.changed || 0) / max * 100;
+    const r = (e.removed || 0) / max * 100;
+    const total = (e.added || 0) + (e.changed || 0) + (e.removed || 0);
+    const date = String(e.fetchedAt || '').slice(0, 10);
+    return `<div class="r2-spark-bar" title="${escapeHtml(date)}: +${e.added || 0} / ~${e.changed || 0} / −${e.removed || 0}">
+      <span class="r2-spark-seg r2-spark-removed" style="height:${r}%"></span>
+      <span class="r2-spark-seg r2-spark-changed" style="height:${c}%"></span>
+      <span class="r2-spark-seg r2-spark-added"   style="height:${a}%"></span>
+    </div>`;
+  }).join('');
+  return `<span class="r2-diff-sparkline" title="История последних 7 refresh'ей">${bars}</span>`;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -338,41 +380,40 @@ function _renderOwnersCard(analysed, state) {
 
   // Top-6 по количеству
   const sorted = Array.from(byOwner.values()).sort((a, b) => b.total - a.total).slice(0, 6);
-  const currentActive = (state.filters?.owner || '') === '__active__';   // Reserved для будущего
 
-  // Group-by=owner shortcut
-  const ownersGroupActive = state.groupBy === 'owner';
-
+  // Phase 5.1 — кнопку «Группировать» убрали (дублировала toolbar-chip).
+  // Заголовок самостоятельно подсказывает что owners-карточка ↔ group-by=owner.
   return `
-    <div class="r2-owners-card">
-      <div class="r2-owners-header">
-        <div class="r2-owners-title">Владельцы релизов</div>
-        <button class="r2-btn r2-btn-ghost r2-owners-group-toggle${ownersGroupActive ? ' r2-owners-group-active' : ''}" data-r2-groupby="owner" title="Перейти на группировку по владельцу">
-          ${ownersGroupActive ? '· По владельцу ·' : 'Группировать'}
-        </button>
-      </div>
+    <details class="r2-owners-card" ${state.groupBy === 'owner' ? 'open' : ''}>
+      <summary class="r2-owners-header">
+        <span class="r2-owners-title">Топ владельцев</span>
+        <span class="r2-owners-count">${byOwner.size} ${_pl(byOwner.size, ['владелец', 'владельца', 'владельцев'])}</span>
+      </summary>
       <div class="r2-owners-list">
-        ${sorted.map(o => _renderOwnerChip(o)).join('')}
+        ${sorted.map(o => _renderOwnerChip(o, analysed.stats?.total || 1)).join('')}
       </div>
-    </div>`;
+    </details>`;
 }
 
-function _renderOwnerChip(o) {
+function _renderOwnerChip(o, totalReleases) {
   const initials = _initials(o.name);
-  // mini phase-distribution dots (max 4 phases)
-  const phaseDots = ['creation', 'stabilize', 'uat', 'approve', 'deploy'].map(ph => {
+  // V22+ Phase 5.1 — заменили 5 цветных dot-chip на micro-phasebar.
+  // Сегменты пропорциональны count по фазам. Это меньше ink + сохраняет
+  // distribution glanceable (Tufte «small multiples»).
+  const PHASE_IDS = ['creation', 'stabilize', 'uat', 'approve', 'deploy', 'cancel'];
+  const phaseBar = PHASE_IDS.map(ph => {
     const n = o.byPhase[ph] || 0;
     if (!n) return '';
-    return `<span class="r2-owner-phase-dot r2-phase-dot-${ph}" title="${escapeHtml(_phaseLabel(ph))}: ${n}">${n}</span>`;
+    return `<span class="r2-owner-phase-seg r2-phase-seg-${ph}" style="flex-grow:${n}" title="${escapeHtml(_phaseLabel(ph))}: ${n}"></span>`;
   }).join('');
   return `
     <div class="r2-owner-chip" title="${escapeHtml(o.email || o.name)}">
       <span class="r2-owner-avatar">${escapeHtml(initials)}</span>
       <span class="r2-owner-body">
         <span class="r2-owner-name">${escapeHtml(o.name)}</span>
-        <span class="r2-owner-stats">${o.total} ${_pl(o.total, ['релиз', 'релиза', 'релизов'])}</span>
+        <span class="r2-owner-phasebar" aria-hidden="true">${phaseBar}</span>
       </span>
-      <span class="r2-owner-phases">${phaseDots}</span>
+      <span class="r2-owner-total">${o.total}</span>
     </div>`;
 }
 
@@ -423,9 +464,10 @@ function _applyFilters(list, f) {
   const statuses = new Set(f.statuses || []);
   const types = new Set(f.types || []);
   const risks = new Set(f.risks || []);
-  const preset = f.smartPreset || '';
+  const phase = f.phase || '';
 
   return list.filter(r => {
+    if (phase && r._phase !== phase) return false;
     if (projects.size && !projects.has(r.project?.name || r.project?.key)) return false;
     if (statuses.size && !statuses.has(r.status)) return false;
     if (types.size && !types.has(r.type)) return false;
@@ -440,20 +482,6 @@ function _applyFilters(list, f) {
         ...(r.service || []).map(s => s.value),
       ].filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(text)) return false;
-    }
-    if (preset === 'uat-soon') {
-      if (!(r._flags || []).some(fl => fl.kind === 'uat-soon')) return false;
-    } else if (preset === 'prod-soon') {
-      if (!(r._flags || []).some(fl => fl.kind === 'prod-soon')) return false;
-    } else if (preset === 'high-risk') {
-      if ((r._riskRank || 0) < 3) return false;
-    } else if (preset === 'high-risk-plus') {
-      if ((r._riskRank || 0) < 4) return false;
-    } else if (preset === 'no-rov') {
-      // У релиза нет РоВ-связи (Introduction Order)
-      const outward = r._links?.outward || [];
-      const hasROV = outward.some(o => /Introduction Order/i.test(o.linkType));
-      if (hasROV) return false;
     }
     return true;
   });
@@ -533,6 +561,13 @@ function _renderReleaseRow(r, state, opts) {
 
   const kg = (r.configElement || []).map(c => c.value).join(', ') || '—';
 
+  // V22+ Phase 5.1: убрали `.r2-priority` (для 95% релизов скоррелирован с
+  // risk-dot; кому надо — смотрит в expand). КЭ сжали в dot-count с hover.
+  const kgList = (r.configElement || []).map(c => c.value).filter(Boolean);
+  const kgChip = kgList.length
+    ? `<span class="r2-ke-chip" title="${escapeHtml(kgList.join(', '))}">КЭ <strong>${kgList.length}</strong></span>`
+    : '';
+
   return `
     <div class="r2-row ${phaseClass}${expanded ? ' r2-row-expanded' : ''}" data-r2-key="${escapeHtml(r.key)}">
       <div class="r2-row-head" data-r2-toggle="${escapeHtml(r.key)}">
@@ -540,11 +575,10 @@ function _renderReleaseRow(r, state, opts) {
         <span class="r2-key">${escapeHtml(r.key)}</span>
         <span class="r2-summary">${escapeHtml(r.summary)}</span>
         <span class="r2-status r2-status-${r._phase}">${escapeHtml(r.status)}</span>
-        <span class="r2-priority r2-priority-${escapeHtml((r.priority || '').toLowerCase())}">${escapeHtml(r.priority || '—')}</span>
-        <span class="r2-ke" title="${escapeHtml(kg)}">${escapeHtml(kg.length > 40 ? kg.slice(0, 40) + '…' : kg)}</span>
+        ${kgChip}
         <span class="r2-date">${escapeHtml(planProd)}</span>
-        ${flagsHtml}
-        <span class="r2-row-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+        <span class="r2-flags">${flagsHtml}</span>
+        <span class="r2-row-chevron" aria-hidden="true">${expanded ? ICONS.chevronDown : ICONS.chevronRight}</span>
       </div>
       ${expanded ? `<div class="r2-row-body" data-r2-key="${escapeHtml(r.key)}">${renderExpandPanel(r, state, opts)}</div>` : ''}
     </div>`;
@@ -554,34 +588,36 @@ function _renderReleaseRow(r, state, opts) {
    Expand panel — 6 tabs
    ───────────────────────────────────────────────────────────── */
 
+// V22+ Phase 5.1 — свернули 6 табов → 3 (по daily-task анализу:
+// Состав + Даты + РоВ — на 80% запросов). Атрибуты убраны под
+// <details>Все поля</details> внутри «Что внутри». Подзадачи, ПСИ-факт,
+// Вложения склеены в логические группы.
 const TABS = [
-  { id: 'attrs',    label: 'Атрибуты' },
-  { id: 'compose',  label: 'Состав' },
-  { id: 'ppsi',     label: 'ПСИ' },
-  { id: 'rov',      label: 'РоВ' },
-  { id: 'dates',    label: 'Даты' },
-  { id: 'attach',   label: 'Вложения' },
+  { id: 'inside',  label: 'Что внутри' },   // compose + ppsi + subtasks
+  { id: 'dates',   label: 'Сроки' },        // dates (plan/fact)
+  { id: 'links',   label: 'Связи' },        // rov + attachments
 ];
 
 export function renderExpandPanel(r, state, opts = {}) {
-  const tab = state.getExpandedTab ? state.getExpandedTab(r.key) : 'attrs';
+  const rawTab = state.getExpandedTab ? state.getExpandedTab(r.key) : 'inside';
+  // Backward-compat для старого state с 6-tab id'шками.
+  const legacyMap = { attrs: 'inside', compose: 'inside', ppsi: 'inside',
+                       rov: 'links', attach: 'links' };
+  const tab = legacyMap[rawTab] || rawTab || 'inside';
   const tabsHtml = TABS.map(t => `
     <button class="r2-tab${t.id === tab ? ' r2-tab-active' : ''}" data-r2-tab="${t.id}" data-r2-key="${escapeHtml(r.key)}">${escapeHtml(t.label)}</button>
   `).join('');
 
   let bodyHtml;
   switch (tab) {
-    case 'compose': bodyHtml = _renderTabCompose(r, state); break;
-    case 'ppsi':    bodyHtml = _renderTabPpsi(r); break;
-    case 'rov':     bodyHtml = _renderTabRov(r); break;
-    case 'dates':   bodyHtml = _renderTabDates(r); break;
-    case 'attach':  bodyHtml = _renderTabAttachments(r); break;
-    default:        bodyHtml = _renderTabAttrs(r);
+    case 'dates': bodyHtml = _renderTabDates(r); break;
+    case 'links': bodyHtml = _renderTabLinks(r); break;
+    default:      bodyHtml = _renderTabInside(r, state);
   }
 
   const jiraUrl = opts.jiraBaseUrl ? `${opts.jiraBaseUrl.replace(/\/$/, '')}/browse/${encodeURIComponent(r.key)}` : '';
   const externalLink = jiraUrl
-    ? `<a class="r2-external-link" href="${escapeHtml(jiraUrl)}" target="_blank" rel="noopener noreferrer">Открыть в Jira ↗</a>`
+    ? `<a class="r2-external-link" href="${escapeHtml(jiraUrl)}" target="_blank" rel="noopener noreferrer">${ICONS.external} Открыть в Jira</a>`
     : '';
 
   return `
@@ -593,6 +629,22 @@ export function renderExpandPanel(r, state, opts = {}) {
       </div>
       <div class="r2-tab-body">${bodyHtml}</div>
     </div>`;
+}
+
+/** Объединённый таб «Что внутри»: Состав + ПСИ + Подзадачи + collapsed-Атрибуты */
+function _renderTabInside(r, state) {
+  return `
+    ${_renderTabCompose(r, state)}
+    ${_renderTabPpsi(r)}
+    <details class="r2-attrs-collapsed">
+      <summary class="r2-section-title">Все поля релиза</summary>
+      ${_renderTabAttrs(r)}
+    </details>`;
+}
+
+/** Объединённый «Связи»: РоВ + Вложения */
+function _renderTabLinks(r) {
+  return _renderTabRov(r) + _renderTabAttachments(r);
 }
 
 function _renderTabAttrs(r) {
@@ -630,7 +682,7 @@ function _renderTabCompose(r, state) {
   const subtasks = r._subtasks || [];
 
   const lazyHint = state?.getRelated && !state.getRelated(r.key)
-    ? `<button class="r2-btn r2-btn-ghost" data-r2-action="related-load" data-r2-key="${escapeHtml(r.key)}">↻ Подгрузить детали</button>`
+    ? `<button class="r2-btn r2-btn-ghost" data-r2-action="related-load" data-r2-key="${escapeHtml(r.key)}">${ICONS.refresh} Подгрузить детали</button>`
     : '';
 
   return `
@@ -755,11 +807,16 @@ function _renderValue(v, kind) {
    ───────────────────────────────────────────────────────────── */
 
 function _renderFooter(analysed) {
-  if (!analysed?.jql) return '';
-  return `<details class="r2-footer">
-    <summary>JQL</summary>
-    <pre class="r2-jql">${escapeHtml(analysed.jql)}</pre>
-  </details>`;
+  if (!analysed) return '';
+  // V22+ Phase 5.1 — MD-export переехал сюда из toolbar (раз-в-неделю action,
+  // не daily). Plus JQL details рядом.
+  return `<div class="r2-footer-bar">
+    <button class="r2-btn r2-btn-ghost r2-footer-export" data-r2-action="export-md" title="Экспорт текущего вида в Markdown">${ICONS.download} Экспорт MD</button>
+    ${analysed?.jql ? `<details class="r2-footer">
+      <summary>JQL</summary>
+      <pre class="r2-jql">${escapeHtml(analysed.jql)}</pre>
+    </details>` : ''}
+  </div>`;
 }
 
 function _fmtBytes(n) {
