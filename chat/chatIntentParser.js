@@ -27,6 +27,24 @@ export const INTENTS = {
   // зашло». Rule-based, без LLM — мгновенно. Identity-deterministic resolve
   // через state.employees + state.actionLog (что закрыто за вчера).
   STAND_UP:          'stand_up',
+  // V22+ Week 2 (LP-01..LP-08) — Comprehensive employee deep-dive за период.
+  // Триггерится фразами «расскажи про X за квартал», «X за год», «инфо по X»,
+  // «X в Q1 2026». Period-aware: parser извлекает from/to.
+  EMPLOYEE_REPORT:   'employee_report',
+  // V22+ Week 3 (S-S1..S-S5) — per-source queries: «BB у Иванова вчера»,
+  // «PR команды PAY за неделю», «страницы Сидоровой в CF за месяц».
+  SOURCE_QUERY:      'source_query',
+  // V22+ Week 3 (B-D1..B-D12) — Чёрный дашборд queries: coverage, goals,
+  // unmapped, per-goal status, per-employee Sigma contribution.
+  BD_QUERY:          'bd_query',
+  // V22+ Week 3 (G-Q1..G-Q14) — Гант operations: переносы, овертаймы,
+  // completion, plan-lock.
+  GANTT_QUERY:       'gantt_query',
+  // V22+ Phase 4 (K-K1) — Cross-source CEO update (Гант + Чёрный + Scanner + Реестр).
+  // Триггеры: «CEO update», «executive summary», «сводка для CEO», «прогресс по 1.21».
+  CEO_UPDATE:        'ceo_update',
+  // V22+ Phase 4 (K-K6) — Explain-engine на «почему» questions.
+  WHY_QUERY:         'why_query',
   HISTORY:           'history',
   CLEAR_FILTERS:     'clear_filters',
   CONFIRM_BATCH:     'confirm_batch',
@@ -35,6 +53,93 @@ export const INTENTS = {
 };
 
 const RULES = [
+  // ── V22+ Week 3 domain queries — ставим ПЕРЕД остальными
+  // чтобы перехватить специфичные термины («переносы», «coverage sigma»,
+  // «BB у Иванова») до того как они улетят в release_overview / find_tasks. ──
+
+  // ── V22+ Phase 4 (K-K1) — CEO UPDATE.
+  // Срабатывает на «CEO update», «executive», «сводка для CEO», «прогресс
+  // по релизу X». ВАЖНО: идёт ПЕРЕД EXECUTIVE_SUMMARY (старый rule-based,
+  // более узкий) и BD_QUERY/GANTT_QUERY чтобы перехватить high-level
+  // executive prompts.
+  {
+    intent: INTENTS.CEO_UPDATE,
+    patterns: [
+      /(?:^|[^а-яёa-z])ceo[\s-]?(?:update|апдейт|обновлен[а-яё]+|сводк[а-яё]+|отчёт)/i,
+      /executive[\s-]?(?:summary|update|report|сводк[а-яё]+)/i,
+      /(?:сводк[а-яё]+|отчёт[а-яё]*|update)\s+(?:для|про|по)\s+ceo/i,
+      /(?:прогресс|статус)\s+(?:по\s+)?(?:релиз[а-яё]*\s+)?[12]\.\d{2}\s*$/i,
+      /(?:готовность|готов\w*)\s+(?:к\s+)?релиз/i,
+      /(?:подготов[а-яё]+|сделай|нарисуй)\s+(?:сводк[а-яё]+|update|отчёт)\s+(?:для|по)\s+(?:руководств|executive|ceo)/i,
+    ],
+    extract: (text) => {
+      const t = text.toLowerCase();
+      const params = {};
+      const rel = t.match(/[12]\.(\d{2})/);
+      if (rel) params.releaseId = `1.${rel[1]}`;
+      return params;
+    },
+  },
+
+  // ── V22+ Phase 4 (K-K6) — WHY (explain) query.
+  // Триггеры: «почему X», «откуда X», «причина X», «отчего X».
+  {
+    intent: INTENTS.WHY_QUERY,
+    patterns: [
+      /^почему\s+/i,
+      /^отчего\s+/i,
+      /^откуда\s+(?:так\s+)?(?:много|мало|столько)/i,
+      /(?:в чём|в чем|какая)\s+причин[а-яё]+/i,
+      /объясни\s+почему/i,
+    ],
+    extract: (text) => ({ asks: text }),
+  },
+
+  // GANTT_QUERY (G-Q1..G-Q14)
+  {
+    intent: INTENTS.GANTT_QUERY,
+    patterns: [
+      // Без \b — Cyrillic-aware: explicit char-class
+      /(?:сколько\s+)?переносов?(?:[^а-яёa-z]|$)/i,
+      /(?:^|[^а-яёa-z])переноси?ло?[а-яё]*/i,
+      /(?:в|за)\s+овертайм/i,
+      /кто\s+овертайм/i,
+      /(?:сколько|кто)\s+(?:заверш|готов|закры|сделал)/i,
+      /план\s+зафикс/i,
+      /(?:план|plan).*lock/i,
+    ],
+    extract: () => ({}),
+  },
+
+  // BD_QUERY (B-D1..B-D12)
+  {
+    intent: INTENTS.BD_QUERY,
+    patterns: [
+      /(?:^|[^а-яёa-z])(?:sigma|сигм[а-яё]*)/i,
+      /(?:чёрн|черн|black)[а-яё\s]*дашборд/i,
+      /(?:не\s+привязали|без\s+цел|без\s+goal|не\s+покрыт)/i,
+      /(?:цел[еийь][а-яё]*\s+без)/i,
+      /coverage/i,
+      /(?:^|[^A-Z0-9])(?:GOAL|KPI|SIGMA)-\d+/i,
+      /(?:привязка|привязал[а-яё]*)\s+(?:к|задач)/i,
+      /прогресс\s+(?:по\s+)?goal/i,
+    ],
+    extract: () => ({}),
+  },
+
+  // SOURCE_QUERY (S-S1..S-S5)
+  {
+    intent: INTENTS.SOURCE_QUERY,
+    patterns: [
+      /(?:в\s+|по\s+)(?:bitbucket|битбакет|bb)(?:[^а-яёa-z]|$)/i,
+      /(?:в\s+|по\s+)(?:confluence|конфлюенс|cf)(?:[^а-яёa-z]|$)/i,
+      /(?:сколько\s+)?(?:pr(?:[^а-яёa-z]|$)|пул[а-яё]*-?\s*реквест|коммит[а-яё]+)/i,
+      /(?:страниц[а-яё]+)\s+(?:в\s+)?(?:cf|confluence|конфл)/i,
+      /(?:тест[\s-]*кейс[а-яё]*|zephyr|зефир)/i,
+    ],
+    extract: () => ({}),
+  },
+
   // Executive summary / CEO update
   {
     intent: INTENTS.EXECUTIVE_SUMMARY,
@@ -378,6 +483,51 @@ const RULES = [
     extract: () => ({}),
   },
 
+  // ── EMPLOYEE_REPORT (V22+ Week 2 LP-01..LP-08) ──
+  // Comprehensive cross-source deep-dive за указанный период.
+  // Триггерится: «расскажи про X», «X за месяц/квартал/год», «инфо по X»,
+  // «X в марте 2026», «X в Q1», «сводка по X», «AI обзор Иванова».
+  // ВАЖНО: должен идти ПЕРЕД EXPLAIN и FIND_TASKS (иначе они перехватят).
+  {
+    intent: INTENTS.EMPLOYEE_REPORT,
+    patterns: [
+      // Прямой запрос инфо
+      /(?:расскажи|расскаж\w+|дай|покажи|выведи|сводк[аую]|инфо|информац\w+)\s+(?:про|по|о)\s+/i,
+      // Period после имени
+      /[а-яё]+\s+(?:за|в)\s+(?:квартал|год|месяц|полугодие|Q[1-4]|\d{4})/i,
+      // Review preset
+      /(?:review|ревью|обзор)\s+(?:по|про|для)/i,
+      /performance\s+review/i,
+      /подготов\w+\s+ревью/i,
+      // V22+ Week 4 (LP-09) — AI narrative triggers.
+      /(?:ai[\s-]?обзор|ai[\s-]?narrative|narrative|ai[\s-]?summary)\s+(?:для|про|по)?\s*[а-яёa-z]/i,
+      /^ai\s+обзор\s+/i,
+      // ФИО + period — типичный pattern для year/quarter queries.
+      // Match если в строке есть ФИО pattern (≥3 cyrillic char word с заглавной) + указание периода.
+      /^[А-ЯЁ][а-яё]{2,}\s+(?:за|в)\s+/,
+    ],
+    extract: (text) => {
+      // Preset detection
+      const t = text.toLowerCase();
+      const params = {};
+      // AI narrative — opt-in flag (явный trigger).
+      if (/(?:ai[\s-]?обзор|ai[\s-]?narrative|^narrative|с\s+ai|с\s+narrative|ai[\s-]?summary)/.test(t)) {
+        params.aiNarrative = true;
+      }
+      // Preset detection
+      if (/(?:review|ревью|performance)/.test(t)) params.preset = 'review';
+      else if (params.aiNarrative) params.preset = 'narrative';
+      else if (/обзор/.test(t)) params.preset = 'review';
+      else if (/недельн[а-яё]*|weekly/.test(t)) params.preset = 'weekly';
+      else params.preset = 'full';
+      // Comparison toggle
+      if (/(?:vs[^а-яёa-z]|против|сравн[а-яё]+|по\s+сравн)/.test(t)) {
+        params.includeComparison = true;
+      }
+      return params;
+    },
+  },
+
   // ── STAND-UP (V22 K-04 audit Zhuravlev killer #10) ──
   // Тимлид утром нажимает «Stand-up» и получает: «Вчера закрыто N (A,B,C).
   // Сегодня в работе M. Блокеры: X (wait integration), Y (needs review).
@@ -506,6 +656,12 @@ export function isRuleBased(intent) {
     INTENTS.EXPLAIN,
     INTENTS.DAILY_REPORT,
     INTENTS.STAND_UP,        // V22 K-04 — rule-based, мгновенный
+    INTENTS.EMPLOYEE_REPORT, // V22+ Week 2 — rule-based, async (fetcher)
+    INTENTS.SOURCE_QUERY,    // V22+ Week 3 — Scanner per-source
+    INTENTS.BD_QUERY,        // V22+ Week 3 — Чёрный
+    INTENTS.GANTT_QUERY,     // V22+ Week 3 — Гант
+    INTENTS.CEO_UPDATE,      // V22+ Phase 4 (K-K1)
+    INTENTS.WHY_QUERY,       // V22+ Phase 4 (K-K6)
     INTENTS.HISTORY,
     INTENTS.CLEAR_FILTERS,
     INTENTS.CONFIRM_BATCH,
@@ -546,6 +702,12 @@ const INTENT_TO_CATEGORY = {
   [INTENTS.RELEASE_NOTES]:     'report',
   [INTENTS.DAILY_REPORT]:      'report',
   [INTENTS.STAND_UP]:          'report',   // V22 K-04
+  [INTENTS.EMPLOYEE_REPORT]:   'report',   // V22+ Week 2
+  [INTENTS.SOURCE_QUERY]:      'analysis', // V22+ Week 3
+  [INTENTS.BD_QUERY]:          'analysis', // V22+ Week 3
+  [INTENTS.GANTT_QUERY]:       'analysis', // V22+ Week 3
+  [INTENTS.CEO_UPDATE]:        'report',   // V22+ Phase 4 (K-K1)
+  [INTENTS.WHY_QUERY]:         'explain',  // V22+ Phase 4 (K-K6)
   [INTENTS.GENERIC]:           null,   // fall through to free-text rules
 };
 

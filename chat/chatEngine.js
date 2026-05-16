@@ -30,6 +30,18 @@ import { handleActivityQuery } from './chatActivityHandler.js';
 import { classifyActivityIntent } from './chatActivityIntents.js';
 import { Services } from '../app/services.js';
 
+// V22+ Week 2 (LP-01) — Long-period employee deep-dive builder.
+import { buildEmployeeReport } from './employeeReport.js';
+// V22+ Week 1 (I-01) — Universal resolver: один target для всех builder'ов.
+import { resolveTarget, rememberTarget } from './resolveTarget.js';
+// V22+ Week 3 — domain-specific query builders.
+import { buildSourceQueryResponse } from './sourceQueries.js';
+import { buildBlackDashQueryResponse } from './blackDashQueries.js';
+import { buildGanttQueryResponse } from './ganttQueries.js';
+// V22+ Phase 4 (K-K1, K-K6) — cross-source CEO update + explain engine.
+import { buildCEOUpdate } from './ceoUpdate.js';
+import { buildExplainResponse as buildWhyExplainResponse } from './explainEngine.js';
+
 /* ── Helpers ─────────────────────────────────────────────── */
 
 function pct(n, d) { return d ? Math.round(n / d * 100) : 0; }
@@ -834,11 +846,91 @@ export function process(userText, opts = {}) {
       case INTENTS.EXPLAIN:           structured = buildExplainResponse(params); break;
       case INTENTS.DAILY_REPORT:      structured = buildDailyReportResponse(); break;
       case INTENTS.STAND_UP:          structured = buildStandUpResponse(params); break;  // V22 K-04
+      // V22+ Week 2 (LP-01) — Employee deep-dive: async fetcher, путь
+      // отдельный (см. ниже после switch'а).
+      case INTENTS.EMPLOYEE_REPORT:   structured = null; break;
+      // V22+ Week 3 — domain queries (sync, через resolveTarget).
+      case INTENTS.SOURCE_QUERY: {
+        const t = resolveTarget(userText);
+        structured = buildSourceQueryResponse(t);
+        try { rememberTarget(t); } catch (_) {}
+        break;
+      }
+      case INTENTS.BD_QUERY: {
+        const t = resolveTarget(userText);
+        structured = buildBlackDashQueryResponse(t);
+        try { rememberTarget(t); } catch (_) {}
+        break;
+      }
+      case INTENTS.GANTT_QUERY: {
+        const t = resolveTarget(userText);
+        structured = buildGanttQueryResponse(t);
+        try { rememberTarget(t); } catch (_) {}
+        break;
+      }
+      // V22+ Phase 4 (K-K1) — Cross-source CEO update.
+      case INTENTS.CEO_UPDATE: {
+        const t = resolveTarget(userText);
+        structured = buildCEOUpdate(t, { releaseId: params.releaseId });
+        try { rememberTarget(t); } catch (_) {}
+        break;
+      }
+      // V22+ Phase 4 (K-K6) — Why/explain engine.
+      case INTENTS.WHY_QUERY: {
+        const t = resolveTarget(userText);
+        structured = buildWhyExplainResponse(t, params);
+        try { rememberTarget(t); } catch (_) {}
+        break;
+      }
       case INTENTS.HISTORY:           structured = buildHistoryResponse(params); break;
       case INTENTS.CLEAR_FILTERS:     structured = buildClearFiltersResponse(); break;
       case INTENTS.CONFIRM_BATCH:     structured = buildConfirmBatchResponse(); break;
       case INTENTS.CANCEL_BATCH:      structured = buildCancelBatchResponse(); break;
       default:                        structured = { text: '…', cards: [], actions: [], drilldown: [] };
+    }
+    // V22+ Week 2 (LP-01) — Employee deep-dive: async путь.
+    // buildEmployeeReport нуждается в fetcher'е (Jira/BB/CF API calls).
+    // Используем resolveTarget для извлечения employee+period+sources,
+    // потом async build → onRuleBased.
+    if (intent === INTENTS.EMPLOYEE_REPORT) {
+      const target = resolveTarget(userText);
+      // Если employee не извлёкся — возвращаем err sync (без fetch).
+      if (!target.employee) {
+        const errStructured = {
+          text: 'Не удалось найти сотрудника в запросе. Попробуйте: «Иванов за квартал», «Сидорова за год», «Петров в марте 2026».',
+          cards: [], actions: [], drilldown: [],
+          responseSource: 'rule',
+        };
+        opts.onRuleBased?.({ structured: errStructured, intent, ctx });
+        return;
+      }
+      // Async fetch + build. Не блокируем sync return.
+      (async () => {
+        try {
+          const built = await buildEmployeeReport(target, target.period, {
+            preset: params.preset || 'full',
+            includeComparison: !!params.includeComparison,
+            // V22+ Week 4 (LP-09) — undefined (не false) если не явно set,
+            // чтобы preset='review' мог auto-enable narrative.
+            aiNarrative: params.aiNarrative,
+            signal: opts.signal,
+          });
+          try { rememberTarget(target); } catch (_) {}
+          opts.onRuleBased?.({ structured: built, intent, ctx });
+        } catch (e) {
+          console.warn('[chatEngine] employee_report failed:', e);
+          opts.onRuleBased?.({
+            structured: {
+              text: `Не удалось собрать отчёт: ${String(e?.message || e).slice(0, 120)}`,
+              cards: [], actions: [], drilldown: [],
+              isError: true,
+              responseSource: 'rule',
+            },
+            intent, ctx,
+          });
+        }
+      })();
+      return;
     }
     opts.onRuleBased?.({ structured, intent, ctx });
     return;

@@ -7911,6 +7911,127 @@ body.theme-dark .gdt-ctx-section-danger {
   transform: translateY(-1px);
 }
 
+/* V22+ Week 2 (UX-02) — Custom date-range picker popover. */
+.chat-date-picker-popover {
+  position: fixed;
+  bottom: 100px;
+  right: 20px;
+  z-index: 10000;
+  background: var(--prizma-bg-elevated, #fff);
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .15);
+  min-width: 260px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.chat-date-picker-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--prizma-text-secondary, var(--text-2));
+  margin-bottom: 10px;
+}
+.chat-date-picker-row {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.chat-date-picker-row input[type="date"] {
+  padding: 4px 6px;
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--prizma-bg-elevated, #fff);
+  color: var(--prizma-text-primary, var(--text-1));
+}
+.chat-date-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.chat-date-picker-actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 4px;
+  background: var(--prizma-bg-elevated, #fff);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.chat-date-picker-actions .chat-date-picker-apply {
+  background: var(--prizma-information, #4f46e5);
+  color: #fff;
+  border-color: var(--prizma-information, #4f46e5);
+}
+.chat-date-picker-actions button:hover {
+  filter: brightness(.95);
+}
+
+/* V22+ Week 2 (S-S7) — Source mini-chips для glance-read. */
+.chat-source-mini-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0 2px;
+  font: 700 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  background: var(--prizma-bg-tertiary, var(--prizma-bg-elevated));
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 3px;
+  color: var(--prizma-text-secondary, var(--text-2));
+  cursor: help;
+}
+
+/* V22+ Week 1 (EX-06) — Export chip group в подвале ответа.
+   Малозаметные secondary-кнопки [Копировать] [Markdown]. Не конкурируют
+   с primary actions (Sigma blue) — нейтральный grey, появляются после
+   завершения streaming'а. */
+.chat-export-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--prizma-border, var(--border));
+  opacity: .65;
+  transition: opacity .15s;
+}
+.chat-export-chips:hover { opacity: 1; }
+.chat-export-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  height: 22px;
+  font: 500 11px/1 inherit;
+  color: var(--prizma-text-secondary, var(--text-2));
+  background: transparent;
+  border: 1px solid var(--prizma-border, var(--border));
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color .12s, color .12s, border-color .12s;
+}
+.chat-export-chip:hover {
+  background: var(--prizma-bg-tertiary, var(--prizma-bg-elevated, #f8fafc));
+  color: var(--prizma-text-primary, var(--text-1));
+  border-color: var(--prizma-information, #4f46e5);
+}
+.chat-export-chip:focus-visible {
+  outline: 2px solid var(--prizma-information, #4f46e5);
+  outline-offset: 1px;
+}
+.chat-export-chip svg {
+  flex-shrink: 0;
+  opacity: .8;
+}
+
 /* ── Review mode badge ───────────────────────────────────── */
 .chat-review-badge {
   font-size: 11.5px;

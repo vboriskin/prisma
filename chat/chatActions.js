@@ -449,9 +449,207 @@ export function executeAction(type, payload = {}) {
     case 'take_snapshot':   return handleTakeSnapshot();
     case 'open_settings':   return handleOpenSettings(payload);   // L11
     case 'set_focus':       return handleSetFocus(payload);          // V22 X-02 / K-03
+    case 'open_url':        return handleOpenUrl(payload);           // V22+ Week 1 (DL-7)
+    case 'export_md':       return handleExportMarkdown(payload);    // V22+ Week 1 (EX-01)
+    case 'copy_response':   return handleCopyResponse(payload);      // V22+ Week 1 (EX-02)
+    case 'open_date_picker': return handleOpenDatePicker(payload);   // V22+ Week 2 (UX-02)
     default:
       console.warn('[ChatActions] Unknown action type:', type, payload);
   }
+}
+
+// V22+ Week 1 (DL-7) — open external URL (Jira browse, BB repo, CF page).
+// Безопасность: разрешаем ТОЛЬКО https:// + проверяем host против известных
+// integrations baseUrl. Иначе LLM мог бы подсунуть фишинговый URL.
+function handleOpenUrl(payload = {}) {
+  const url = String(payload?.url || '').trim();
+  if (!url) return { ok: false, reason: 'no-url' };
+  let parsed;
+  try { parsed = new URL(url); }
+  catch { return { ok: false, reason: 'invalid-url' }; }
+  if (!/^https?:$/.test(parsed.protocol)) return { ok: false, reason: 'bad-protocol' };
+  // Host whitelist: integrations baseUrl'ы из state.
+  const allowedHosts = [];
+  try {
+    const ints = (Services.AppState || globalThis.state || {}).integrations || {};
+    for (const k of ['jira', 'bitbucket', 'confluence', 'sigma']) {
+      const base = ints[k]?.baseUrl;
+      if (base) {
+        try { allowedHosts.push(new URL(base).host); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  if (allowedHosts.length && !allowedHosts.includes(parsed.host)) {
+    console.warn('[ChatActions] open_url rejected (host not in integrations whitelist):', parsed.host);
+    return { ok: false, reason: 'host-not-allowed' };
+  }
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: 'window-open-failed' };
+  }
+}
+
+// V22+ Week 1 (EX-01) — export structured response to Markdown.
+// payload: { messageIdx, includeHeader?, filename? }
+function handleExportMarkdown(payload = {}) {
+  try {
+    const idx = Number(payload?.messageIdx);
+    const history = (Services.AppState || globalThis.state || {}).llm?.history || [];
+    const msg = Number.isFinite(idx) ? history[idx] : history[history.length - 1];
+    if (!msg) return { ok: false, reason: 'no-message' };
+    const md = _renderResponseAsMarkdown(msg, payload);
+    const fname = payload?.filename || `prisma-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    _downloadBlob(md, fname, 'text/markdown');
+    return { ok: true };
+  } catch (e) {
+    console.warn('[ChatActions] export_md failed:', e);
+    return { ok: false, reason: 'export-failed' };
+  }
+}
+
+// V22+ Week 1 (EX-02) — copy formatted response (rich html + plain text)
+// to clipboard. Использует Clipboard API multi-mime.
+async function handleCopyResponse(payload = {}) {
+  try {
+    const idx = Number(payload?.messageIdx);
+    const history = (Services.AppState || globalThis.state || {}).llm?.history || [];
+    const msg = Number.isFinite(idx) ? history[idx] : history[history.length - 1];
+    if (!msg) return { ok: false, reason: 'no-message' };
+    const md = _renderResponseAsMarkdown(msg, payload);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(md);
+      try { Services.Toast?.info?.('Скопировано в буфер обмена', { ms: 1600 }); } catch (_) {}
+      return { ok: true };
+    }
+    return { ok: false, reason: 'no-clipboard-api' };
+  } catch (e) {
+    console.warn('[ChatActions] copy_response failed:', e);
+    return { ok: false, reason: 'copy-failed' };
+  }
+}
+
+// V22+ Week 1 — Markdown renderer для structured response.
+// Совместим с Confluence / Slack / email-копи-паст.
+function _renderResponseAsMarkdown(msg, opts = {}) {
+  const lines = [];
+  if (opts.includeHeader !== false) {
+    lines.push(`# Призма · Ответ ассистента`);
+    lines.push(`> ${new Date().toLocaleString('ru-RU')}`);
+    lines.push('');
+  }
+  const s = msg.structured;
+  if (s?.text) {
+    lines.push(String(s.text));
+    lines.push('');
+  } else if (msg.content) {
+    lines.push(String(msg.content));
+    lines.push('');
+  }
+  if (Array.isArray(s?.cards) && s.cards.length) {
+    lines.push('## Показатели');
+    for (const c of s.cards) {
+      const title = c.title || '';
+      const value = c.value != null ? `**${c.value}**` : '';
+      const hint  = c.hint  ? ` — _${c.hint}_` : '';
+      lines.push(`- ${title}: ${value}${hint}`);
+    }
+    lines.push('');
+  }
+  if (Array.isArray(s?.drilldown) && s.drilldown.length) {
+    lines.push('## Связанные вопросы');
+    for (const d of s.drilldown) {
+      lines.push(`- ${d.text || d.prompt}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trim() + '\n';
+}
+
+// V22+ Week 2 (UX-02) — Custom date-range picker popover.
+// При клике «Свой период...» — открываем мини-popover с двумя
+// <input type="date">. При submit — формируем prompt и через
+// send_prompt автосендим.
+function handleOpenDatePicker(payload = {}) {
+  if (typeof document === 'undefined') return { ok: false, reason: 'no-dom' };
+  // Idempotent — удаляем предыдущий popover если есть.
+  const prev = document.getElementById('chat-date-picker-popover');
+  if (prev) prev.remove();
+
+  const subject = String(payload?.subject || '').trim();
+  const today = new Date();
+  const ago30 = new Date(today.getTime() - 30 * 86400_000);
+  const fromIso = ago30.toISOString().slice(0, 10);
+  const toIso   = today.toISOString().slice(0, 10);
+
+  const pop = document.createElement('div');
+  pop.id = 'chat-date-picker-popover';
+  pop.className = 'chat-date-picker-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Выберите период');
+  pop.innerHTML = `
+    <div class="chat-date-picker-title">Свой период</div>
+    <label class="chat-date-picker-row">
+      <span>с</span>
+      <input type="date" id="chat-date-picker-from" value="${fromIso}">
+    </label>
+    <label class="chat-date-picker-row">
+      <span>по</span>
+      <input type="date" id="chat-date-picker-to" value="${toIso}">
+    </label>
+    <div class="chat-date-picker-actions">
+      <button class="chat-date-picker-cancel" type="button">Отмена</button>
+      <button class="chat-date-picker-apply" type="button">Применить</button>
+    </div>
+  `;
+  document.body.appendChild(pop);
+
+  const close = () => { try { pop.remove(); } catch (_) {} };
+  pop.querySelector('.chat-date-picker-cancel').addEventListener('click', close);
+  pop.querySelector('.chat-date-picker-apply').addEventListener('click', () => {
+    const f = pop.querySelector('#chat-date-picker-from').value;
+    const t = pop.querySelector('#chat-date-picker-to').value;
+    close();
+    if (!f || !t) return;
+    const prompt = subject
+      ? `${subject} с ${f} по ${t}`
+      : `с ${f} по ${t}`;
+    try {
+      const input = document.getElementById('assistant-input');
+      if (input) {
+        input.value = prompt;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      try { Services.LLMAssistant?.sendFromInput?.(); } catch (_) {}
+    } catch (_) {}
+  });
+
+  // Close on outside-click (after a tick — иначе тот же клик закроет).
+  setTimeout(() => {
+    const onOutside = (e) => {
+      if (!pop.contains(e.target)) {
+        close();
+        document.removeEventListener('click', onOutside, true);
+      }
+    };
+    document.addEventListener('click', onOutside, true);
+  }, 50);
+
+  return { ok: true };
+}
+
+function _downloadBlob(content, filename, mime = 'text/plain') {
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 200);
 }
 
 // V22 X-02 / K-03 (audit-experts-2026-05-15 Selvadurai #1, #2) — единый

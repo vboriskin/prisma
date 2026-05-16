@@ -92,6 +92,24 @@ function renderPlan(plan) {
   return `<div class="chat-plan">${items.join('')}</div>`;
 }
 
+/* ── V22+ Week 1 (EX-06) — Export chip group ──────────────── */
+// Малозаметная группа кнопок «Копировать / Скачать MD» в подвале каждого
+// non-streaming ответа. Кнопки делегируются в chatActions:
+//   · copy_response  → handleCopyResponse — clipboard write
+//   · export_md      → handleExportMarkdown — download .md blob
+// Стилизация через .chat-export-chips (см. styles.css дополнения).
+function renderExportChips(idx) {
+  const data = esc(JSON.stringify({ messageIdx: idx }));
+  return `<div class="chat-export-chips" aria-label="Действия с ответом">
+    <button class="chat-export-chip" data-action-type="copy_response" data-action-payload='${data}' title="Скопировать ответ в буфер">
+      ${Icons.get('copy', { size: 12 })} <span>Копировать</span>
+    </button>
+    <button class="chat-export-chip" data-action-type="export_md" data-action-payload='${data}' title="Сохранить как Markdown">
+      ${Icons.get('download', { size: 12 }) || Icons.get('file-text', { size: 12 }) || '⬇'} <span>Markdown</span>
+    </button>
+  </div>`;
+}
+
 /* ── Drilldown prompts ───────────────────────────────────── */
 
 function renderDrilldown(items) {
@@ -177,6 +195,14 @@ export function renderStructuredResponse(resp, idx, isStreaming, lastIdx) {
 
   // Drilldown
   if (resp.drilldown?.length) parts.push(renderDrilldown(resp.drilldown));
+
+  // V22+ Week 1 (EX-06) — export chip group. Не показывается во время
+  // стрима (isStreaming) и для пустых/error-bubble'ов. Caller может
+  // явно отключить через resp.exportable=false.
+  // ВАЖНО: не показывается для thinking-сообщений (там нет text вообще).
+  if (!isStreaming && resp.exportable !== false && (resp.text || resp.cards?.length)) {
+    parts.push(renderExportChips(idx));
+  }
 
   const streamingCls = isStreaming ? ' assistant-msg-streaming' : '';
   // V21 audit 08-chatbot §1: ⧉ → Icons.copy SVG.
@@ -339,6 +365,13 @@ const _VALID_ACTION_TYPES = new Set([
   // сотруднике, Гант на эпике, фильтр на команде/релизе. Подписчики
   // focus-changed (Сканнер, Гант, Реестр, Employees) сами реагируют.
   'set_focus',
+  // V22+ Week 1 (I-03 / DL-7) — open_url для external links (Jira browse,
+  // BB repo, CF page). Открывается через handleOpenUrl в chatActions.
+  'open_url',
+  // V22+ Week 1 (EX-01..EX-06) — export action types.
+  'export_md', 'copy_response',
+  // V22+ Week 2 (UX-02) — custom date-range picker.
+  'open_date_picker',
   'show',
 ]);
 function _isPlainObject(x) { return x != null && typeof x === 'object' && !Array.isArray(x); }

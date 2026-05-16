@@ -22,9 +22,11 @@ describe('parseIntent — basic shape', () => {
     assert.deepEqual(parseIntent(123),       { intent: INTENTS.GENERIC, confidence: 0, params: {} });
   });
 
-  test('every matched rule returns confidence 0.85', () => {
+  test('every matched rule returns confidence ≥ 0.6', () => {
+    // V22+ Phase 4 — «CEO апдейт» теперь матчит CEO_UPDATE (cross-source).
+    // Старый порог 0.85 был жёстко привязан к одному rule; теперь правил больше.
     const r = parseIntent('CEO апдейт');
-    assert.equal(r.confidence, 0.85);
+    assert.ok(r.confidence >= 0.6, `expected confidence ≥ 0.6, got ${r.confidence}`);
   });
 
   test('shape always { intent, confidence, params }', () => {
@@ -36,16 +38,18 @@ describe('parseIntent — basic shape', () => {
 });
 
 describe('parseIntent — executive summary triggers', () => {
-  for (const text of [
-    'CEO апдейт',
-    'CEO update пожалуйста',
-    'краткий статус',
-    'краткая сводка',
-    'общий статус',
-    'итог релиза',
-    'что происходит',
-    'executive summary',
-  ]) {
+  // V22+ Phase 4 (K-K1) — CEO-specific prompts теперь идут в CEO_UPDATE
+  // (cross-source). Legacy EXECUTIVE_SUMMARY остаётся для общих summary-
+  // prompt'ов («краткий статус» / «итог релиза»).
+  const ceoUpdateTriggers = ['CEO апдейт', 'CEO update пожалуйста', 'executive summary'];
+  const executiveSummaryTriggers = ['краткий статус', 'краткая сводка', 'общий статус', 'итог релиза', 'что происходит'];
+
+  for (const text of ceoUpdateTriggers) {
+    test(`recognises "${text}" as CEO_UPDATE (V22+ Phase 4)`, () => {
+      assert.equal(parseIntent(text).intent, INTENTS.CEO_UPDATE);
+    });
+  }
+  for (const text of executiveSummaryTriggers) {
     test(`recognises "${text}" as EXECUTIVE_SUMMARY`, () => {
       assert.equal(parseIntent(text).intent, INTENTS.EXECUTIVE_SUMMARY);
     });
