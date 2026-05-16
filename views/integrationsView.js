@@ -768,11 +768,15 @@ export const IntegrationsView = {
       <div class="int-subtabs">
         <button class="int-subtab ${this._activeSubtab==='scanner2'?'int-subtab-active':''}" data-subtab="scanner2">Сканнер команд</button>
         <button class="int-subtab ${this._activeSubtab==='black'?'int-subtab-active':''}"    data-subtab="black"><span class="signal-dot signal-off-course" aria-hidden="true"></span> Чёрный дашборд</button>
+        <button class="int-subtab ${this._activeSubtab==='release2'?'int-subtab-active':''}" data-subtab="release2">Release 2.0</button>
       </div>`;
 
     let bodyHtml;
     if (this._activeSubtab === 'black') {
       bodyHtml = `<div id="bd-root" class="bd-root"></div>`;
+    } else if (this._activeSubtab === 'release2') {
+      // V22+ Phase 5 (Release 2.0 sub-tab) — list view с group-by + filters + lazy expand.
+      bodyHtml = `<div id="r2-root" class="r2-mount"></div>`;
     } else {
       this._activeSubtab = 'scanner2';
       bodyHtml = `<div id="ts2-root" class="ts2-mount"></div>`;
@@ -813,6 +817,18 @@ export const IntegrationsView = {
     if (this._activeSubtab === 'black') {
       const bdRoot = document.getElementById('bd-root');
       if (bdRoot) BlackDashboard.render(bdRoot);
+    } else if (this._activeSubtab === 'release2') {
+      // V22+ Phase 5 — Release 2.0 sub-tab. Lazy-import чтобы не загружать
+      // модуль если юзер никогда не откроет вкладку.
+      const r2Root = document.getElementById('r2-root');
+      if (r2Root) {
+        import('../integrations/release2/release2.js')
+          .then(m => m.Release2View.render(r2Root))
+          .catch(e => {
+            console.error('[Release2] failed to load:', e);
+            r2Root.innerHTML = `<div class="r2-error">Не удалось загрузить модуль Release 2.0: ${(e?.message || e)}</div>`;
+          });
+      }
     } else {
       const ts2Root = document.getElementById('ts2-root');
       if (ts2Root) {

@@ -369,6 +369,123 @@ async function handleIntegrationsApi(req, res, pathname) {
       return;
     }
 
+    // ── /api/integrations/release2-fetch ─────────────────────
+    // V22+ Phase 5 (Release 2.0 sub-tab).
+    // Bulk-fetch объектов issuetype="Release 2.0" по projectKeys из jira_config.
+    // Поддерживает фильтры:
+    //   · body.statuses[]    — массив статусов для исключения (default: 3 терминальных)
+    //   · body.sinceDate     — created-cutoff YYYY-MM-DD (default из cfg.sinceDate)
+    //   · body.includeAllStatuses — bool, отключает status-exclude
+    //   · body.projectKeys[] — override jiraProjectKeys из cfg
+    //   · body.maxResults    — cap результата (default 500)
+    // Возвращает RAW issues — клиент сам нормализует через release2Model.
+    if (pathname === '/api/integrations/release2-fetch') {
+      if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
+        _writeJson(res, 400, { error: 'Jira не настроена' });
+        return;
+      }
+      // Project keys: из body или из config.
+      let projectKeys = Array.isArray(body.projectKeys) ? body.projectKeys.filter(Boolean) : [];
+      if (!projectKeys.length) {
+        projectKeys = String(cfg.jiraProjectKeys || '').split(',').map(s => s.trim()).filter(Boolean);
+      }
+      if (!projectKeys.length) {
+        _writeJson(res, 400, { error: 'Не настроены jiraProjectKeys в jira_config' });
+        return;
+      }
+
+      // Default-исключаемые статусы (терминальные)
+      const DEFAULT_EXCLUDED_STATUSES = ['Установлен на ПРОМ', 'Установка на ПРОМ', 'Отменено'];
+      const includeAll = body.includeAllStatuses === true;
+      const statusesToExclude = includeAll
+        ? []
+        : (Array.isArray(body.statuses) && body.statuses.length
+            ? body.statuses
+            : DEFAULT_EXCLUDED_STATUSES);
+
+      // Date cutoff
+      const requestedSince = String(body.sinceDate || '').trim();
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(requestedSince)
+        ? requestedSince
+        : (cfg.sinceDate || '2025-01-01');
+
+      // JQL builder
+      const projectClause = `project in (${projectKeys.map(k => `"${k}"`).join(',')})`;
+      const statusClause = statusesToExclude.length
+        ? ' AND ' + statusesToExclude.map(s => `status != "${s}"`).join(' AND ')
+        : '';
+      const dateClause = ` AND created > "${since}"`;
+      const jql = `issuetype = "Release 2.0" AND ${projectClause}${statusClause}${dateClause} ORDER BY priority DESC, created DESC`;
+
+      // Fields: стандартные + список custom-полей (~56 штук).
+      // Custom-field IDs захардкожены в integrations/release2/release2Fields.js
+      // на клиенте, но сервер просто запрашивает всё что попросили + standard.
+      const requestedFields = Array.isArray(body.fields) && body.fields.length
+        ? body.fields
+        : null;
+      const fields = requestedFields || [
+        'summary', 'status', 'priority', 'issuetype', 'project',
+        'reporter', 'assignee', 'created', 'updated', 'duedate',
+        'labels', 'components', 'fixVersions',
+        'issuelinks', 'subtasks', 'attachment',
+        // Custom — клиент должен передавать список нужных field-id в body.fields.
+        // Если не передаёт — fallback на «все custom» через '*all'.
+        '*all',
+      ];
+
+      // Expand: nameы полей + рендеренные значения (для description).
+      const expand = ['names', 'schema'];
+
+      // Cap результата (default 500 — Release 2.0 редко > 100 активных).
+      const maxResults = Math.min(Math.max(50, Number(body.maxResults) || 500), 2000);
+
+      try {
+        const issues = await _jiraSearchAll(cfg, jql, fields, expand, maxResults);
+        // Клиент сам нормализует через release2Model.js. Возвращаем raw.
+        _writeJson(res, 200, {
+          issues,
+          jql,
+          count: issues.length,
+          projectKeys,
+          statusesExcluded: statusesToExclude,
+          since,
+          fetchedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        logger.error('[release2-fetch] failed', { err: e?.message || String(e), jql });
+        _writeJson(res, 500, { error: e?.message || String(e), jql });
+      }
+      return;
+    }
+
+    // ── /api/integrations/release2-related ───────────────────
+    // V22+ Phase 5 (Release 2.0) — lazy fetch связанных Story/Bug по
+    // ключам через jira-issue (без bulk). Используется при первом
+    // expand'е релиза, для подкачки описаний и текущих статусов.
+    // body: { keys: ['BIK-1', 'BIK-2', ...] }
+    if (pathname === '/api/integrations/release2-related') {
+      if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
+        _writeJson(res, 400, { error: 'Jira не настроена' });
+        return;
+      }
+      const keys = Array.isArray(body.keys) ? body.keys.filter(k => /^[A-Z][A-Z0-9]+-\d+$/.test(String(k))) : [];
+      if (!keys.length) {
+        _writeJson(res, 400, { error: 'Need keys[] array of valid Jira-keys' });
+        return;
+      }
+      // Через JQL-batch (issuekey in (K1, K2, ...)) — один запрос.
+      const jql = `issuekey in (${keys.map(k => `"${k}"`).join(',')})`;
+      const fields = ['summary', 'status', 'priority', 'issuetype', 'assignee', 'reporter', 'updated', 'duedate', 'labels'];
+      try {
+        const issues = await _jiraSearchAll(cfg, jql, fields, [], 200);
+        _writeJson(res, 200, { issues, count: issues.length });
+      } catch (e) {
+        logger.error('[release2-related] failed', { err: e?.message || String(e) });
+        _writeJson(res, 500, { error: e?.message || String(e) });
+      }
+      return;
+    }
+
     // ── /api/integrations/bitbucket-prs ──────────────────────
     if (pathname === '/api/integrations/bitbucket-prs') {
       const jiraKey = String(body.jiraKey || '').trim();
