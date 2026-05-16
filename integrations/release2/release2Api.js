@@ -93,6 +93,7 @@ export async function fetchRelease2List(opts = {}) {
       projectKeys: data.projectKeys || [],
       statusesExcluded: data.statusesExcluded || [],
       since: data.since || '',
+      jiraBaseUrl: data.jiraBaseUrl || '',
     };
   } finally {
     clearTimeout(tw._timer);

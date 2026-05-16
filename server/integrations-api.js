@@ -454,6 +454,7 @@ async function handleIntegrationsApi(req, res, pathname) {
           projectKeys,
           statusesExcluded: statusesToExclude,
           since,
+          jiraBaseUrl: cfg.jiraBaseUrl,   // для deep-links на /browse/KEY
           fetchedAt: new Date().toISOString(),
         });
       } catch (e) {

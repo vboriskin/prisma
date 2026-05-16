@@ -204,7 +204,6 @@ export const Release2View = {
     if (!this._container) return;
     const analysed = release2State.lastList;
     if (!analysed) return;
-    const cfg = _getJiraConfig();
 
     // V22+ Phase 5 (Доп #9) — diff banner.
     // Считаем diff если есть prevList И юзер не закрыл banner для этого fetched-at.
@@ -215,8 +214,10 @@ export const Release2View = {
       prevDiff = diffRelease2Lists(prev, analysed.releases);
     }
 
+    // jiraBaseUrl: сервер прокидывает его внутрь analysed (через release2-fetch),
+    // если нет — пусто, ссылки на Jira просто не рендерятся (escapeHtml safe).
     const html = renderRelease2View(analysed, _stateForRenderer(), {
-      jiraBaseUrl: cfg?.baseUrl || '',
+      jiraBaseUrl: analysed.jiraBaseUrl || '',
       prevList: prev,
       prevDiff,
     });
