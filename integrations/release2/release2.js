@@ -22,7 +22,6 @@ import { renderRelease2View, escapeHtml } from './release2Renderer.js';
 import { release2State } from './release2State.js';
 import { diffRelease2Lists } from './release2Model.js';
 import { Services } from '../../app/services.js';
-import { state } from '../../state.js';
 
 /* ─────────────────────────────────────────────────────────────
    Loader / error / empty UI
@@ -153,23 +152,17 @@ export const Release2View = {
     if (!container) return;
     this._container = container;
 
-    // Проверка конфига
-    const cfg = _getJiraConfig();
-    if (!cfg || !cfg.hasProjectKeys) {
-      _renderNotConfigured(container);
-      this._bindOnce(container);
-      return;
-    }
-
     // Если уже есть кэшированный результат — рендерим сразу.
+    // (Проверка конфига идёт на сервере — он единственный источник правды;
+    // фронт раньше читал state.integrations.jira которого нет — всегда давало
+    // ложно-позитивное «не настроено».)
     if (release2State.lastList) {
       this._renderFull();
       this._bindOnce(container);
-      // Optionally: показать «обновлено N мин назад» badge.
       return;
     }
 
-    // Иначе — стартуем fetch.
+    // Иначе — стартуем fetch. Сервер сам вернёт 400 если конфиг неполный.
     await this.refresh();
   },
 
@@ -186,7 +179,14 @@ export const Release2View = {
         return;   // отменили — не показываем error
       }
       release2State.failLoading(err);
-      _renderError(this._container, err);
+      // Если сервер прямо сказал что конфиг неполный — показываем targeted
+      // подсказку; иначе обычный error UI.
+      const msg = String(err?.message || '');
+      if (/Jira не настроена|jiraProjectKeys|jiraProjectKeys в jira_config|Не настроено ни одного пространства/i.test(msg)) {
+        _renderNotConfigured(this._container);
+      } else {
+        _renderError(this._container, err);
+      }
     }
     this._bindOnce(this._container);
   },
@@ -371,17 +371,9 @@ export const Release2View = {
    Helpers
    ───────────────────────────────────────────────────────────── */
 
-function _getJiraConfig() {
-  try {
-    // Try state.integrations.jira (server-truth pattern)
-    const cfg = (state?.integrations?.jira) || {};
-    const baseUrl = cfg.baseUrl || '';
-    const hasProjectKeys = !!(cfg.projectKeys || cfg.jiraProjectKeys);
-    return { baseUrl, hasProjectKeys };
-  } catch (_) {
-    return { baseUrl: '', hasProjectKeys: true };  // fallback — try anyway
-  }
-}
+// _getJiraConfig() retired — клиент не имеет доступа к jira_config.json,
+// проверка конфига теперь делается на сервере (release2-fetch возвращает
+// 400 с targeted-сообщением, фронт reactively показывает _renderNotConfigured).
 
 function _stateForRenderer() {
   // Передаём в renderer тот же state-объект, но даём ему доступ к

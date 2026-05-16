@@ -384,10 +384,15 @@ async function handleIntegrationsApi(req, res, pathname) {
         _writeJson(res, 400, { error: 'Jira не настроена' });
         return;
       }
-      // Project keys: из body или из config.
+      // Project keys: из body, иначе из config — поддерживаем оба формата
+      // (unified `jiraProjectKeys` + legacy `areas[]`), так же как
+      // /api/integrations/jira-fetch-all (lines 332–335).
       let projectKeys = Array.isArray(body.projectKeys) ? body.projectKeys.filter(Boolean) : [];
       if (!projectKeys.length) {
         projectKeys = String(cfg.jiraProjectKeys || '').split(',').map(s => s.trim()).filter(Boolean);
+      }
+      if (!projectKeys.length && Array.isArray(cfg.areas)) {
+        projectKeys = cfg.areas.map(a => String(a?.projectKey || '').trim()).filter(Boolean);
       }
       if (!projectKeys.length) {
         _writeJson(res, 400, { error: 'Не настроены jiraProjectKeys в jira_config' });
