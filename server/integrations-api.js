@@ -371,13 +371,13 @@ async function handleIntegrationsApi(req, res, pathname) {
 
     // ── /api/integrations/release2-fetch ─────────────────────
     // V22+ Phase 5 (Release 2.0 sub-tab).
-    // Bulk-fetch объектов issuetype="Release 2.0" по projectKeys из jira_config.
-    // Поддерживает фильтры:
-    //   · body.statuses[]    — массив статусов для исключения (default: 3 терминальных)
-    //   · body.sinceDate     — created-cutoff YYYY-MM-DD (default из cfg.sinceDate)
-    //   · body.includeAllStatuses — bool, отключает status-exclude
-    //   · body.projectKeys[] — override jiraProjectKeys из cfg
-    //   · body.maxResults    — cap результата (default 500)
+    // Bulk-fetch объектов issuetype="Release 2.0".
+    // Поддерживает фильтры (всё опциональное, БЕЗ хардкоженных дефолтов):
+    //   · body.projectKeys[]      — override (иначе cfg.jiraProjectKeys, иначе legacy cfg.areas[])
+    //   · body.statuses[]         — статусы для exclude (по умолчанию НЕ исключаем ничего)
+    //   · body.includeAllStatuses — bool, принудительно отключает status-exclude
+    //   · body.sinceDate          — created-cutoff YYYY-MM-DD (иначе cfg.sinceDate, иначе без date-фильтра)
+    //   · body.maxResults         — cap результата (default 500, max 2000)
     // Возвращает RAW issues — клиент сам нормализует через release2Model.
     if (pathname === '/api/integrations/release2-fetch') {
       if (!cfg.jiraBaseUrl || !cfg.jiraToken) {
@@ -399,27 +399,28 @@ async function handleIntegrationsApi(req, res, pathname) {
         return;
       }
 
-      // Default-исключаемые статусы (терминальные)
-      const DEFAULT_EXCLUDED_STATUSES = ['Установлен на ПРОМ', 'Установка на ПРОМ', 'Отменено'];
+      // Status-exclude: ТОЛЬКО если клиент явно передал список.
+      // Никаких хардкоженных дефолтов на сервере — пусть клиент решает.
+      // body.includeAllStatuses === true → принудительно показать всё.
       const includeAll = body.includeAllStatuses === true;
       const statusesToExclude = includeAll
         ? []
-        : (Array.isArray(body.statuses) && body.statuses.length
-            ? body.statuses
-            : DEFAULT_EXCLUDED_STATUSES);
+        : (Array.isArray(body.statuses) ? body.statuses.filter(Boolean) : []);
 
-      // Date cutoff
+      // Date cutoff: ТОЛЬКО если есть body.sinceDate (или cfg.sinceDate непустой).
+      // Никаких хардкоженных 2025-01-01.
       const requestedSince = String(body.sinceDate || '').trim();
+      const cfgSince = String(cfg.sinceDate || '').trim();
       const since = /^\d{4}-\d{2}-\d{2}$/.test(requestedSince)
         ? requestedSince
-        : (cfg.sinceDate || '2025-01-01');
+        : (/^\d{4}-\d{2}-\d{2}$/.test(cfgSince) ? cfgSince : '');
 
       // JQL builder
       const projectClause = `project in (${projectKeys.map(k => `"${k}"`).join(',')})`;
       const statusClause = statusesToExclude.length
         ? ' AND ' + statusesToExclude.map(s => `status != "${s}"`).join(' AND ')
         : '';
-      const dateClause = ` AND created > "${since}"`;
+      const dateClause = since ? ` AND created > "${since}"` : '';
       const jql = `issuetype = "Release 2.0" AND ${projectClause}${statusClause}${dateClause} ORDER BY priority DESC, created DESC`;
 
       // Fields: стандартные + список custom-полей (~56 штук).

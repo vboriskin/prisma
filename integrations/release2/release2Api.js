@@ -57,10 +57,10 @@ async function _postJson(url, body, signal) {
 
 /**
  * @param {object} opts
- *   · projectKeys?: string[]       — override (иначе из cfg.jiraProjectKeys)
- *   · statusesToExclude?: string[] — статусы для exclude (default: 3 терминальных)
- *   · sinceDate?: string           — YYYY-MM-DD, default из cfg.sinceDate
- *   · includeAllStatuses?: bool    — игнорировать exclude-фильтр
+ *   · projectKeys?: string[]       — override (иначе из cfg.jiraProjectKeys / cfg.areas[])
+ *   · statusesToExclude?: string[] — статусы для exclude (по умолчанию НЕ исключаем ничего)
+ *   · sinceDate?: string           — YYYY-MM-DD, fallback cfg.sinceDate, иначе без date-фильтра
+ *   · includeAllStatuses?: bool    — игнорировать exclude-фильтр (== пустой statuses[])
  *   · signal?: AbortSignal
  *   · timeoutMs?: number
  * @returns {Promise<object>} analysed list
