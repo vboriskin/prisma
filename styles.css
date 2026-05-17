@@ -13929,7 +13929,7 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 .ts2-tab-bar-btn.is-active {
   color: var(--prizma-text-primary, var(--text-1));
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--prizma-information);
+  box-shadow: inset 0 -3px 0 var(--prizma-information);  /* Sprint A: 3px Spine-pill §3 */
 }
 /* Phase 3 C2 — collapsible L4/L5 секции внутри «Сегодня». */
 .ts2-section-ops, .ts2-section-trends {
@@ -14339,8 +14339,9 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   font-family: var(--font-mono);
   font-feature-settings: "tnum" 1;
 }
-.ts2-row-diff-up   { color: var(--success, #10b981); border: 1px solid var(--success, #10b981); }
-.ts2-row-diff-down { color: var(--danger,  #dc2626); border: 1px solid var(--danger,  #dc2626); }
+/* Sprint A — filled border → stripe-left (anti-pattern «filled chip») */
+.ts2-row-diff-up   { color: var(--prizma-on-course);  border-left: 3px solid var(--prizma-on-course);  padding-left: 6px; }
+.ts2-row-diff-down { color: var(--prizma-off-course); border-left: 3px solid var(--prizma-off-course); padding-left: 6px; }
 
 /* V20 S13 N1-N5 — Per-employee narrative в side-panel */
 .ts2-narrative-section {
@@ -14688,7 +14689,7 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
 }
 .ts2-hero-lab {
   font-size: 10px; font-weight: 700;
-  letter-spacing: .8px; text-transform: uppercase;
+  letter-spacing: .6px; text-transform: uppercase;  /* Sprint A: unified .6px */
   color: var(--text-3);
 }
 .ts2-hero-cross {
@@ -15780,7 +15781,7 @@ button.ts2-glance-anomaly:hover { filter: brightness(0.95); }
 .ts2-glance-domain {
   font-size: 10px; font-weight: 700;
   color: var(--text-3);
-  letter-spacing: .4px;
+  letter-spacing: .6px;   /* Sprint A: unified .6px (было .4) */
   margin-right: 2px;
 }
 /* V20 S10.6 — Active Sprint Only filter badge. Spine-pill: stripe-left
@@ -16532,8 +16533,9 @@ body.theme-dark .ts2-pm-chip-popover {
   border: 1px solid var(--border); background: var(--card);
   color: var(--text-2);
 }
-.ts2-badge-switch { border-left: 2px solid var(--warning, #f59e0b); }
-.ts2-badge-dwell  { border-left: 2px solid var(--danger,  #dc2626); color: var(--danger, #dc2626); }
+/* Sprint A — 3px stripe-left для согласованности с Spine-pill §3 */
+.ts2-badge-switch { border-left: 3px solid var(--prizma-drift); }
+.ts2-badge-dwell  { border-left: 3px solid var(--prizma-off-course); color: var(--prizma-off-course); }
 .ts2-row:hover { background: var(--bg-2, #f8fafc); }
 .ts2-row-expanded { background: var(--bg-2, #f8fafc); }
 .ts2-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--prizma-information); }
@@ -16572,13 +16574,12 @@ body.theme-dark .ts2-pm-chip-popover {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
-.ts2-row-src-b { border-left-color: #16a34a; }
-.ts2-row-src-c { border-left-color: #d97706; }
-.ts2-row-src-z { border-left-color: #9333ea; }
-/* Phase-2 Jenkins (2026-05-10) — Jenkins src-chip.
-   Цвет: --prizma-information accent (slate-blue) — отличается от
-   BB-green / CF-amber / Zephyr-purple. Брендбук §3 «Information». */
-.ts2-row-src-j { border-left-color: #2563eb; }
+/* V22+ Sprint A — tokenized (was hardcoded HEX × 9). Токены сами знают тему,
+   dark-override блок удалён. Brand-guardian #3. */
+.ts2-row-src-b { border-left-color: var(--prizma-on-course); }
+.ts2-row-src-c { border-left-color: var(--prizma-drift); }
+.ts2-row-src-z { border-left-color: var(--prizma-approve); }   /* Zephyr — purple, тот же что approve в Release 2.0 */
+.ts2-row-src-j { border-left-color: var(--prizma-information); }
 .ts2-row-src-chip-key {
   font-weight: 700;
   color: var(--text-2);
@@ -16588,26 +16589,17 @@ body.theme-dark .ts2-pm-chip-popover {
   font-weight: 700;
   color: var(--text-1);
 }
-/* 2026-05-11 — Jenkins error/warn variant. Жёлтая подсветка, чтобы тимлид
-   сразу увидел «Jenkins недоступен» вместо misleading 0 builds. */
-.ts2-row-src-warn { border-left-color: #f59e0b !important; background: rgba(245, 158, 11, 0.08); }
-.ts2-pm-chip-warn { border-color: #f59e0b !important; background: rgba(245, 158, 11, 0.08); }
-.ts2-pm-chip-warn .ts2-pm-chip-num { color: #b45309; }
-body.theme-dark .ts2-row-src-warn { border-left-color: #fbbf24 !important; background: rgba(251, 191, 36, 0.12); }
-body.theme-dark .ts2-pm-chip-warn { border-color: #fbbf24 !important; background: rgba(251, 191, 36, 0.12); }
-body.theme-dark .ts2-pm-chip-warn .ts2-pm-chip-num { color: #fcd34d; }
-/* Dark theme: lighter src colors */
-body.theme-dark .ts2-row-src-b { border-left-color: #34d399; }
-body.theme-dark .ts2-row-src-c { border-left-color: #fbbf24; }
-body.theme-dark .ts2-row-src-z { border-left-color: #c084fc; }
-body.theme-dark .ts2-row-src-j { border-left-color: #60a5fa; }
+/* Jenkins error/warn — теперь через токен --prizma-drift, согласовано с brandbook */
+.ts2-row-src-warn { border-left-color: var(--prizma-drift) !important; background: var(--prizma-drift-bg); }
+.ts2-pm-chip-warn { border-color: var(--prizma-drift) !important; background: var(--prizma-drift-bg); }
+.ts2-pm-chip-warn .ts2-pm-chip-num { color: var(--prizma-drift); }
 
 .ts2-strip-wrap { display: flex; align-items: center; gap: 6px; }
 /* V21 — подпись «Сегодня» / «Вчера» перед dot-strip'ом, чтобы пользователь
    сразу понимал, что две точечные линии в строке = два разных дня. */
 .ts2-strip-label {
-  font-size: 9px; font-weight: 700;
-  letter-spacing: .5px; text-transform: uppercase;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: .6px; text-transform: uppercase;  /* Sprint A: 10/.6px unified */
   color: var(--text-3); opacity: .8;
   min-width: 48px; text-align: right;
   flex: 0 0 auto;
@@ -16649,7 +16641,8 @@ body.theme-dark .ts2-row-src-j { border-left-color: #60a5fa; }
   line-height: 1.1;
 }
 .ts2-counter-lab {
-  font-size: 9px; letter-spacing: .5px; text-transform: uppercase;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: .6px; text-transform: uppercase;  /* Sprint A: 10/700/.6px unified */
   color: var(--text-4, #94a3b8); margin-top: 1px;
 }
 /* V18.1 P7-S4.3 — WIP overcommit indicator (≥3 amber, ≥4 warn). */
@@ -23389,4 +23382,249 @@ body.theme-dark .r2-filters-sticky { background: var(--prizma-bg); }
 .r2-toolbar-fetched {
   font-variant-numeric: tabular-nums;
   cursor: help;
+}
+
+/* ============================================================
+   V22+ Sprint A — Сканнер команд: Spine-pill compliance fixes
+   (по 3-экспертному аудиту: brand-guardian + Tufte + Birman)
+   ============================================================ */
+
+/* Mascot/FAB hide на dense Scanner-rows и dense Integrations-views,
+   чтобы 144×144 кнопка не перекрывала counters-колонку */
+body[data-route="integrations"] .assistant-fab,
+body.is-ts2-modal-open .assistant-fab {
+  display: none !important;
+}
+
+/* [В]/[X]/[Х]/[B] visual marker (по MEMORY-политике) */
+.ts2-row[data-blocked="1"] {
+  opacity: .65;
+}
+.ts2-row[data-blocked="1"] .ts2-row-name {
+  text-decoration: line-through dotted var(--text-4);
+  font-style: italic;
+}
+.ts2-row-blocked-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 5px;
+  font: 700 9px/1.2 inherit;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  border: 1px solid var(--text-4);
+  border-radius: 3px;
+  color: var(--text-4);
+}
+
+/* Action-chip «1:1 разговор» — stripe-left affordance (это button, не link) */
+.ts2-action-chip,
+.ts2-row-action-1on1 {
+  border-left: 3px solid var(--prizma-information);
+  padding-left: 8px;
+  cursor: pointer;
+  transition: background-color .12s, border-color .12s;
+}
+.ts2-action-chip:hover,
+.ts2-row-action-1on1:hover {
+  background: var(--prizma-information-bg);
+}
+
+/* Inline-CSS migration: правила из _ensureSsoBannerStyles + _ensureScannerRoomStyles
+   (раньше injectились через JS document.head.appendChild). Токенизировано. */
+.ts2-sso-banner {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--prizma-information);
+  background: transparent;
+  padding: 10px 14px;
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+.ts2-sso-banner-title {
+  font: 700 10px/1.2 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-3);
+}
+.ts2-sso-banner-body {
+  font: 400 12px/1.4 inherit;
+  color: var(--text-1);
+}
+.ts2-room {
+  background: var(--prizma-bg-elevated, #fff);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.ts2-room-title {
+  font: 700 10px/1.2 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+.ts2-story-line {
+  font: 400 12px/1.5 inherit;
+  color: var(--text-2);
+}
+
+/* Sprint A: Status-strip-on активного фильтра sprint (был filled bg) */
+.ts2-sprint-filter-on {
+  background: transparent !important;
+  border-left: 3px solid var(--prizma-information) !important;
+  padding-left: 8px;
+}
+
+/* ============================================================
+   V22+ Sprint C — density encoding (segmented activity-bar,
+   per-team bullet-graphs, sticky filters, heatmap row-tail)
+   ============================================================ */
+
+/* Sprint C: 4 stat-tiles → segmented activity-bar */
+.ts2-activity-bar {
+  display: flex;
+  height: 28px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  margin: 8px 0;
+}
+.ts2-activity-seg {
+  flex: 0 1 auto;
+  min-width: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--text-1);
+  background: var(--bg-2);
+  position: relative;
+  cursor: help;
+}
+.ts2-activity-seg + .ts2-activity-seg {
+  border-left: 1px solid var(--border);
+}
+.ts2-activity-seg-lab {
+  font: 700 9px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-3);
+  margin-right: 6px;
+}
+.ts2-activity-seg-num {
+  font: 700 14px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--text-1);
+}
+.ts2-activity-seg.ts2-seg-commits  { box-shadow: inset 0 -3px 0 var(--prizma-on-course); }
+.ts2-activity-seg.ts2-seg-prs      { box-shadow: inset 0 -3px 0 var(--prizma-information); }
+.ts2-activity-seg.ts2-seg-tasks    { box-shadow: inset 0 -3px 0 var(--prizma-drift); }
+.ts2-activity-seg.ts2-seg-hours    { box-shadow: inset 0 -3px 0 var(--prizma-approve); }
+
+/* Bullet-graph для per-team breakdown */
+.ts2-bullet {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+.ts2-bullet-name {
+  font: 600 11px/1.2 inherit;
+  color: var(--text-1);
+}
+.ts2-bullet-track {
+  position: relative;
+  height: 8px;
+  background: var(--bg-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ts2-bullet-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: var(--prizma-information);
+}
+.ts2-bullet-target {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 2px;
+  background: var(--text-3);
+}
+.ts2-bullet-pct {
+  font: 700 11px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-2);
+}
+
+/* Sticky filter-strip + breadcrumb chips (reused pattern from Release 2.0) */
+.ts2-filters-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--prizma-bg);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ts2-fchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+}
+.ts2-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  font: 500 11px/1.4 inherit;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ts2-fchip:hover { border-color: var(--prizma-information); }
+.ts2-fchip svg { width: 10px; height: 10px; opacity: .7; }
+
+/* Heatmap row-tail inline-sparkline (Tufte) */
+.ts2-heatmap-row-tail {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 14px;
+  margin-left: 6px;
+}
+.ts2-heatmap-row-tail-bar {
+  width: 3px;
+  background: var(--text-4);
+  border-radius: 1px;
+}
+
+/* Sprint C: Person history 7-day sparkline (вместо "сегодня/вчера/позавчера" text) */
+.ts2-person-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 16px;
+  vertical-align: middle;
+  margin: 0 6px;
+}
+.ts2-person-spark-bar {
+  width: 3px;
+  background: var(--prizma-information);
+  border-radius: 1px;
+  opacity: .7;
+}
+.ts2-person-spark-bar:last-child {
+  background: var(--prizma-on-course);
+  opacity: 1;
 }

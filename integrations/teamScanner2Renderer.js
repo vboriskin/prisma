@@ -1229,18 +1229,22 @@ function renderPersonNarrative(p) {
  */
 function renderPersonMetricsPanel(p, model) {
   const m = p?.personMetrics;
+  // V22+ Sprint B — engineering-only chips (PROD/SWITCH/LOC) скрыты за флагом.
+  // По Birman: для PM productivity-score не интерпретируется без обучения.
+  // Включить: localStorage.q2_scanner_show_productivity = '1'
+  let _showProductivityChips = false;
+  try { _showProductivityChips = (typeof localStorage !== 'undefined' && localStorage.getItem('q2_scanner_show_productivity') === '1'); } catch (_) {}
+
   // V22 (2026-05-09 UX) — раньше при !m возвращали '' и теряли CF/Z chips.
-  // Теперь рендерим хотя бы CF/Z (всегда доступны через cfItems / timeline72h).
-  // Z1-Z10 chips остаются скрыты пока applyPersonMetrics не отработал.
   // Z1 — productivity score
   const prod = m?.productivity;
   const prodTooltip = prod ? `Сегодня (48ч): ${prod.breakdown.commits}c · ${prod.breakdown.prs}PR · ${prod.breakdown.conf}CF · ${prod.breakdown.reviewsDone}reviews · ${prod.breakdown.testsCreated}+${prod.breakdown.testsExecuted}Z · ${prod.breakdown.closedToday} закрыто. Формула: c×1 + PR×3 + CF×1.5 + reviews×2 + tests_c×2 + tests_e×1 + closed×5.` : '';
-  const prodChip = prod ? `<span class="ts2-pm-chip ts2-pm-chip-prod" data-pm-formula="${esc(prodTooltip)}" title="Клик — полная формула">
+  const prodChip = (prod && _showProductivityChips) ? `<span class="ts2-pm-chip ts2-pm-chip-prod" data-pm-formula="${esc(prodTooltip)}" title="Клик — полная формула">
     <span class="ts2-pm-chip-key">PROD</span>
     <span class="ts2-pm-chip-num">${prod.score}</span>
   </span>` : '';
 
-  // Z2 — first/last activity
+  // Z2 — first/last activity. Sprint B: empty-АКТИВ chip не рендерим (выглядит как ошибка)
   const fl = m?.firstLast;
   const flChip = !fl ? '' : (fl.first && fl.last)
     ? (() => {
@@ -1252,11 +1256,11 @@ function renderPersonMetricsPanel(p, model) {
           <span class="ts2-pm-chip-lab">${fl.span}ч</span>
         </span>`;
       })()
-    : `<span class="ts2-pm-chip ts2-pm-chip-empty" title="Нет событий за последние 24ч"><span class="ts2-pm-chip-key">АКТИВ</span><span class="ts2-pm-chip-num">—</span></span>`;
+    : '';  // empty-state НЕ рендерим — прочерк выглядит как ошибка данных
 
-  // Z3 — context switch rate
+  // Z3 — context switch rate. Sprint B: за productivity-флагом
   const cs = m?.contextSwitches;
-  const csChip = !cs ? '' : cs.total > 0
+  const csChip = (!cs || !_showProductivityChips) ? '' : cs.total > 0
     ? `<span class="ts2-pm-chip" title="Переключений между задачами за 72ч: ${cs.total} (${cs.distinctIssueKeys} уникальных). Норма ≤ 0.5/час.">
         <span class="ts2-pm-chip-key">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 12 })} SWITCH</span>
         <span class="ts2-pm-chip-num">${cs.perHour}</span>
@@ -1264,9 +1268,9 @@ function renderPersonMetricsPanel(p, model) {
       </span>`
     : '';
 
-  // Z6 — LOC delta
+  // Z6 — LOC delta. Sprint B: за productivity-флагом
   const loc = m?.loc;
-  const locChip = !loc ? '' : loc.estimated
+  const locChip = (!loc || !_showProductivityChips) ? '' : loc.estimated
     ? `<span class="ts2-pm-chip ts2-pm-chip-estimated" title="Приближённо ≈ commits × ${50} (нет diff-stats от BB API). Реальные числа доступны при hydration линий из commits diff.">
         <span class="ts2-pm-chip-key">~LOC</span>
         <span class="ts2-pm-chip-num">${loc.added}</span>

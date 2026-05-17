@@ -273,7 +273,7 @@ describe('renderTeamGlance risk shelf', () => {
     });
     const html = renderTeamGlance(model);
     assert.match(html, /ts2-glance-risk-row/);
-    assert.match(html, /3.*без assignee/);
+    assert.match(html, /3.*без исполнителя/);   // V22+ Sprint B: «без assignee» → «без исполнителя» (Birman)
     assert.match(html, /5.*out-of-sprint/);
     assert.match(html, /20%/);
   });

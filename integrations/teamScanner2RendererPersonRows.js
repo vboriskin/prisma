@@ -217,8 +217,10 @@ function renderRow(p, isExpanded, metricsMaps = {}, yesterdayGroups, currentGrou
   // p.jenkinsError, который teamScanner2.js jenkins_attach copies из
   // jenkinsData.error в каждый participant (renderRow не получает model).
   const jErr = p?.jenkinsError ? String(p.jenkinsError) : '';
+  // Sprint B (Birman) — улучшенный tooltip с расшифровкой однобуквенных src
+  const SRC_FULL = { b: 'Bitbucket: коммиты / PR / комментарии', c: 'Confluence: правки страниц', z: 'Zephyr: тесты / прогоны', j: 'Jenkins: сборки' };
   const srcChip = (label, n, cls, titleOverride) => n > 0
-    ? `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${titleOverride || `${label} активность за 72ч: ${n} событий`}"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`
+    ? `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${titleOverride || `${SRC_FULL[cls] || label} за 72ч: ${n} событий`}"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`
     : '';
   const jChipRow = jErr
     ? `<span class="ts2-row-src-chip ts2-row-src-j ts2-row-src-warn" title="Jenkins недоступен: ${esc(jErr)}"><span class="ts2-row-src-chip-key">J</span><span class="ts2-row-src-chip-num" aria-label="недоступен">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 10 })}</span></span>`
@@ -271,18 +273,18 @@ function renderRow(p, isExpanded, metricsMaps = {}, yesterdayGroups, currentGrou
     const order = { stop: 0, watch: 1, moving: 2, idle: -1 };
     const prevRank = order[prevGroup];
     const currRank = order[currentGroup];
-    let arrow = '→';
+    // Sprint A: unicode arrows → SVG icons
+    let arrowIcon = Icons.get('arrow-right', { cls: 'btn-icon', size: 10 });
     let cls = 'ts2-row-diff';
     if (Number.isFinite(prevRank) && Number.isFinite(currRank)) {
-      // moving > watch > stop (улучшение = up). idle = neutral.
-      if (currRank > prevRank) { arrow = '↗'; cls += ' ts2-row-diff-up'; }
-      if (currRank < prevRank) { arrow = '↘'; cls += ' ts2-row-diff-down'; groupDropped = true; }
+      if (currRank > prevRank) { arrowIcon = Icons.get('arrow-up-right',   { cls: 'btn-icon', size: 10 }); cls += ' ts2-row-diff-up'; }
+      if (currRank < prevRank) { arrowIcon = Icons.get('arrow-down-right', { cls: 'btn-icon', size: 10 }); cls += ' ts2-row-diff-down'; groupDropped = true; }
     }
     const groupRu = { stop: 'стоп', watch: 'наблюдение', moving: 'движется', idle: 'тихо' };
     // Phase 3 E3 — `is-pulse-attention` на дрейфующих чипах: 3 пульса × 1600ms
     // = ~5 секунд внимания. Брендбук §9 #3.
     if (groupDropped) cls += ' is-pulse-attention';
-    diffBadge = `<span class="${cls}" title="Вчера: ${groupRu[prevGroup] || prevGroup} → Сегодня: ${groupRu[currentGroup] || currentGroup}">${arrow} ${esc(groupRu[prevGroup] || prevGroup)}</span>`;
+    diffBadge = `<span class="${cls}" title="Вчера: ${groupRu[prevGroup] || prevGroup} → Сегодня: ${groupRu[currentGroup] || currentGroup}">${arrowIcon} ${esc(groupRu[prevGroup] || prevGroup)}</span>`;
   }
   const badges = (diffBadge || srcChips || switchBadge || dwellBadge || crvChip || prChip)
     ? `<span class="ts2-row-badges">${diffBadge}${srcChips}${dwellBadge}${switchBadge}${crvChip}${prChip}</span>`
@@ -305,7 +307,7 @@ function renderRow(p, isExpanded, metricsMaps = {}, yesterdayGroups, currentGrou
         <span class="ts2-counter" title="Задач затронуто за 72ч"><span class="ts2-counter-num">${tasksTouchN}</span><span class="ts2-counter-lab">задач</span></span>
         <span class="ts2-counter" title="Залогировано сегодня (часов). Медиана команды: ${tm.hours}ч${hoursToday > tm.hours * 1.5 && tm.hours > 0 ? ` (×${(hoursToday / tm.hours).toFixed(1)})` : ''}."><span class="ts2-counter-num">${hoursToday}</span><span class="ts2-counter-lab">ч</span></span>
       </span>
-      <span class="ts2-chev">${isExpanded ? '▾' : '›'}</span>
+      <span class="ts2-chev">${Icons.get(isExpanded ? 'chevron-down' : 'chevron-right', { cls: 'btn-icon', size: 12 })}</span>
     </div>
   `;
 }

@@ -443,7 +443,7 @@ function renderSprintGauge(sg, prevSg, slope) {
   return `
     <div class="ts2-sprint-gauge ts2-sprint-gauge-multi-inline ts2-sprint-pace-${pace}" title="${esc(narrative ? narrative + '\n— — —\n' + 'Aggregate: ' + sg.aggregateDone + '/' + sg.aggregateTotal + ' · ' + paceLabel : 'Aggregate Sprint Goal: ' + sg.aggregateDone + '/' + sg.aggregateTotal + ' done · pace: ' + paceLabel + daysSuffix)}">
       <span class="ts2-sprint-label" title="спринты Jira (отличаются от релизов 1.20–1.22)">Спринты</span>
-      <span class="ts2-sprint-name">${sg.sprints.length}×</span>
+      <span class="ts2-sprint-name" title="${sg.sprints.length} параллельных спринтов в выбранных проектах">${sg.sprints.length}×</span>
       <span class="ts2-sprint-bar">
         <span class="ts2-sprint-bar-fill" style="width:${Math.min(100, pct)}%"></span>
       </span>
@@ -704,7 +704,11 @@ export function renderTeamGlance(model, ctx = {}) {
   const dOos     = prev ? renderDelta(oos,     prev.risks?.totalOutOfSprint, { positiveIsBad: true }) : '';
   const riskBlocks = [];
   if (orphans > 0) {
-    riskBlocks.push(`<span class="ts2-glance-risk"><span class="ts2-glance-num-stop">${orphans}</span>${dOrphans} ${plural(orphans, ['без assignee', 'без assignee', 'без assignee'])}</span>`);
+    // Sprint B (Birman): «без assignee» → «без исполнителя» + denominator из participants
+    const totalIssues = (risks?.totalOrphans || 0) + (model?.scannerV2?.assignedIssuesCount || 0);
+    const denom = totalIssues > orphans ? `/${totalIssues}` : '';
+    const pct = totalIssues > 0 ? ` (${Math.round(orphans / totalIssues * 100)}%)` : '';
+    riskBlocks.push(`<span class="ts2-glance-risk" title="Задачи в scope без исполнителя. Чем больше — тем больше работы без owner'а"><span class="ts2-glance-num-stop">${orphans}</span><span class="ts2-glance-num-denom">${denom}</span>${dOrphans} без исполнителя${pct}</span>`);
   }
   if (oos > 0) {
     const pct = Math.round(oosRatio * 100);
@@ -733,7 +737,7 @@ export function renderTeamGlance(model, ctx = {}) {
   // Pилот feedback: «три элемента конкурируют за внимание». Объединяем.
   // CR-badge кликабельный (S8 #2) → drill-down в slow-reviewers.
   const crvBadge = crvMedian != null
-    ? `<button type="button" class="ts2-glance-crv ts2-glance-crv-${crvMedian > 24 ? 'slow' : crvMedian > 8 ? 'warn' : 'ok'}" id="ts2-glance-crv-drilldown" title="Медиана времени до первого ревью. Клик — список самых долгих ревью.">CR ${crvMedian}ч</button>`
+    ? `<button type="button" class="ts2-glance-crv ts2-glance-crv-${crvMedian > 24 ? 'slow' : crvMedian > 8 ? 'warn' : 'ok'}" id="ts2-glance-crv-drilldown" title="Медиана времени до первого ревью (Code Review). Клик — список самых долгих ревью.">До первого ревью: ~${crvMedian}ч</button>`
     : '';
   // V20 S7 A1 — PR throughput aggregate. Подсчитываем sum opened/merged за 7 дней.
   const prT = model?.scannerV2?.prThroughput || {};
@@ -751,8 +755,9 @@ export function renderTeamGlance(model, ctx = {}) {
   const prRateClass = prRate < 40 ? 'ts2-glance-pr-throughput-bad'
                     : prRate < 70 ? 'ts2-glance-pr-throughput-warn'
                     : 'ts2-glance-pr-throughput-good';
+  // Sprint B: human-readable «PR за неделю: 18 из 32 (56%)», unicode-emoji убраны из tooltip
   const prBadge = prOpened > 0
-    ? `<span class="ts2-glance-pr-throughput ${prRateClass}" title="${prMerged} merged из ${prOpened} opened за 7 дней (${prRate}%). Норма ≥70%. ${prRate < 70 ? '⚠ Ниже нормы — возможна задержка в потоке' : '✓ В норме'}. ${prOverloadCount > 0 ? prOverloadCount + ' человек(а) перегружены (>5 PR, mergeRate <0.4)' : ''}">${prMerged}/${prOpened} PR · ${prRate}%${prOverloadCount ? ` · ${Icons.get('alert-triangle', { cls: 'btn-icon', size: 12 })} ${prOverloadCount}` : ''}</span>`
+    ? `<span class="ts2-glance-pr-throughput ${prRateClass}" title="${prMerged} merged из ${prOpened} opened за 7 дней (${prRate}%). Норма ≥70%. ${prRate < 70 ? 'Ниже нормы — возможна задержка в потоке' : 'В норме'}.${prOverloadCount > 0 ? ' ' + prOverloadCount + ' человек(а) перегружены (>5 PR, mergeRate <0.4)' : ''}">PR за неделю: <strong>${prMerged}</strong> из ${prOpened} (${prRate}%)${prOverloadCount ? ` · ${Icons.get('alert-triangle', { cls: 'btn-icon', size: 12 })} ${prOverloadCount}` : ''}</span>`
     : '';
   // V20 S13 I5 — PR cycle time p50/p90 (open → merged).
   const prCycle = computePrCycleTime(model);
@@ -764,24 +769,27 @@ export function renderTeamGlance(model, ctx = {}) {
   // 2026-05-11 — CR Load Gini добавлен для visibility распределения нагрузки.
   // Gini > 0.5 → unfair distribution (один-два ревьюера на всё).
   const crGini = computeCrLoadGini(model);
+  // Sprint B (Birman): убрали Gini-индикатор как «инженерная гордость» —
+  // оставили только human-фразу про top-reviewer load.
   const crGiniBadge = crGini.totalReviewers >= 3 && crGini.gini > 0.5
-    ? `<span class="ts2-glance-cr-gini ts2-glance-cr-gini-warn" title="CR Load Gini ${crGini.gini} (0=равно, 1=один человек). Top ревьюер делает ${crGini.topReviewerPct}% всей нагрузки ревью. Рекомендуется перераспределить.">CR-load: Gini ${crGini.gini}</span>`
+    ? `<span class="ts2-glance-cr-gini ts2-glance-cr-gini-warn" title="Top ревьюер делает ${crGini.topReviewerPct}% всей нагрузки. Рекомендуется перераспределить.">Top ревьюер: ${crGini.topReviewerPct}% нагрузки</span>`
     : '';
+  // Sprint B: «CR-queue: Рзаев (10) +4» → «Очередь к ревьюерам: у Рзаева 10 PR, +4 коллег»
   const crQueueBadge = crQueue.length > 0
-    ? `<span class="ts2-glance-cr-queue" title="Топ ревьюеров с большой очередью PR на ревью: ${crQueue.map(r => `${r.label} (${r.openPrCount})`).join(', ')}.">CR-queue: ${crQueue[0].label} (${crQueue[0].openPrCount})${crQueue.length > 1 ? ` +${crQueue.length - 1}` : ''}${crGiniBadge}</span>`
+    ? `<span class="ts2-glance-cr-queue" title="Топ ревьюеров с большой очередью PR на ревью: ${crQueue.map(r => `${r.label} (${r.openPrCount})`).join(', ')}.">Очередь к ревьюерам: у ${crQueue[0].label} ${crQueue[0].openPrCount} PR${crQueue.length > 1 ? `, +${crQueue.length - 1} коллег` : ''}${crGiniBadge}</span>`
     : crGiniBadge;
-  // V20 S14 I13 — Blocker MTTR (mean time to resolution).
+  // V20 S14 I13 — Blocker MTTR. Sprint B: «MTTR» → «Блокеры висят» (PM-friendly)
   const mttr = computeBlockerMTTR(model);
   const mttrBadge = mttr.mttrHours != null && mttr.count >= 3
-    ? `<span class="ts2-glance-mttr" title="Mean time to resolution для open блокеров (${mttr.count} штук). Текущая аппроксимация — mean(dwellHours) на open. Для closed нужен server changelog.">MTTR: ${fmtDuration(mttr.mttrHours)}</span>`
+    ? `<span class="ts2-glance-mttr" title="Среднее время жизни блокера (mean time to resolution): ${mttr.count} штук. Текущая аппроксимация — mean(dwellHours) на open.">Блокеры висят: ~${fmtDuration(mttr.mttrHours)}</span>`
     : '';
   // V20 S8 #4 — slope из ctx (передаётся orchestrator'ом из history).
   const slope = ctx.sprintGoalSlope;
   const slopeMini = (slope && slope.trend !== 'no-data')
     ? `<span class="ts2-glance-slope ts2-glance-slope-${slope.trend}" title="Sprint goal тренд за ${slope.days} дней · R²=${slope.r2}. Клик «Как считается» → секция «Тренды».">${
-        slope.trend === 'up'   ? `↗ +${slope.slope}%/день` :
-        slope.trend === 'down' ? `↘ ${slope.slope}%/день` :
-                                 '→ ровно'
+        slope.trend === 'up'   ? `${Icons.get('arrow-up-right',   { cls: 'btn-icon', size: 10 })} +${slope.slope}%/день` :
+        slope.trend === 'down' ? `${Icons.get('arrow-down-right', { cls: 'btn-icon', size: 10 })} ${slope.slope}%/день` :
+                                 `${Icons.get('arrow-right',       { cls: 'btn-icon', size: 10 })} ровно`
       }</span>`
     : '';
 
@@ -808,7 +816,7 @@ export function renderTeamGlance(model, ctx = {}) {
   const blockerSec = blockerTotal > 0
     ? `<span class="ts2-glance-sep">··</span>
        <span class="ts2-glance-domain">блок:</span>
-       <span class="ts2-glance-num ${blockRateCls}" title="${blockerTotal} блокеров на команду ${teamSize}. ${blockRate > 0.20 ? '⚠ высокая концентрация' : blockRate > 0.10 ? 'умеренно' : 'в норме'} (rate ${Math.round(blockRate * 100)}%)">${blockerTotal}</span>
+       <span class="ts2-glance-num ${blockRateCls}" title="${blockerTotal} блокеров на команду ${teamSize}. ${blockRate > 0.20 ? 'высокая концентрация' : blockRate > 0.10 ? 'умеренно' : 'в норме'} (rate ${Math.round(blockRate * 100)}%)">${blockerTotal}</span>
        <span class="ts2-glance-lab">${plural(blockerTotal, ['блокер', 'блокера', 'блокеров'])}</span>
        ${dwellMaxTeam >= 24 ? `<span class="ts2-glance-sep">·</span><span class="ts2-glance-lab" title="Худший dwell-time блокера в команде">макс ${fmtDuration(dwellMaxTeam)}</span>` : ''}`
     : '';
