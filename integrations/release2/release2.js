@@ -204,6 +204,7 @@ export const Release2View = {
     if (this._container) {
       this._container.innerHTML = '';
       this._bound = false;
+      this._boundContainer = null;
     }
     this._container = null;
     // V22+ Phase 5.2 — restore mascot for other tabs.
@@ -300,9 +301,14 @@ export const Release2View = {
   },
 
   _bindOnce(container) {
-    if (this._bound) return;
     if (!container) return;
+    // Fix: integrationsView пересоздаёт #r2-root через `root.innerHTML = ...`
+    // при каждом render() — старый element уничтожается вместе с listener'ами.
+    // Если container — другой DOM-узел чем тот, на который мы биндились,
+    // нужен re-bind. Сравниваем по ссылке через WeakRef-эмуляцию (флаг сам по себе).
+    if (this._bound && this._boundContainer === container) return;
     this._bound = true;
+    this._boundContainer = container;
 
     container.addEventListener('click', (e) => this._onClick(e));
     container.addEventListener('change', (e) => this._onChange(e));
