@@ -60,26 +60,21 @@ import { getRenderContext } from './teamScanner2RendererCommon.js';
    renderer-модуля (один Сканнер на странице). Сбрасывается на 'today' при
    смене команды (см. resetScannerTab).
    Click-handler делегирован в `_bindEvents` (через global click listener). */
-let _scannerTab = 'today'; // 'today' | 'deeper' | 'metrics' | 'hygiene'
+let _scannerTab = 'today'; // 'today' | 'deeper' | 'metrics'   (hygiene вынесен в подвкладку Интеграции → Гигиена, V22+ 2026-05-17)
 export function getScannerTab()        { return _scannerTab; }
 export function setScannerTab(tab) {
-  if (tab === 'deeper' || tab === 'metrics' || tab === 'hygiene') _scannerTab = tab;
+  // V22+ (2026-05-17) — 'hygiene' tab вынесен в подвкладку Интеграции→Гигиена.
+  // Старые ссылки tab=hygiene fallback'нуть на 'today'.
+  if (tab === 'deeper' || tab === 'metrics') _scannerTab = tab;
   else _scannerTab = 'today';
 }
 export function resetScannerTab() { _scannerTab = 'today'; }
 
-// AUDIT_SCANNER #01 — sub-tab registry DSL. Регистрировать новые tab'ы через
-// единый API, не trogать switch/case в render. Пока — shim, постепенная миграция.
-// Visible-label «Графики» (F-DUP-1) применяется ТОЛЬКО в registry; legacy
-// _renderScannerTabBar по-прежнему рендерит «Тренды» (см. строку выше).
+// Sub-tab registry — теперь 3 таба, hygiene удалён (см. V22+ 2026-05-17).
 const SUB_TAB_REGISTRY = [
   { id: 'today',   label: 'Сегодня',  render: null /* legacy: inline в renderTeamGlance */ },
   { id: 'deeper',  label: 'Глубже',   render: null },
   { id: 'metrics', label: 'Графики',  render: null },  // F-DUP-1 — переименовано из «Метрики»
-  // 2026-05-11 — V23 Jira Hygiene Engine. 12 правил качества данных:
-  // без assignee / без эстимейта / без эпика / >5 дней In-Progress / zombie review / etc.
-  // Render через registered helper в renderHygieneTab (см. renderer ниже).
-  { id: 'hygiene', label: 'Гигиена',  render: null },
 ];
 export function registerScannerSubTab(entry) {
   if (!entry || !entry.id) return;
@@ -170,10 +165,6 @@ export function _renderScannerTabBar() {
               role="tab" aria-selected="${t==='metrics'}"
               aria-label="Тренды команд (графики во времени)"
               data-scanner-tab="metrics">Тренды</button>
-      <button class="ts2-tab-bar-btn ${t==='hygiene'?'is-active':''}" type="button"
-              role="tab" aria-selected="${t==='hygiene'}"
-              aria-label="Гигиена данных Jira (без assignee, без эстимейта, и т.п.)"
-              data-scanner-tab="hygiene">Гигиена</button>
     </div>
   `;
 }

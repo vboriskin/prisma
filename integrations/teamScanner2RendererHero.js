@@ -963,20 +963,9 @@ export function renderTeamGlance(model, ctx = {}) {
     `;
   }
 
-  // 2026-05-11 — V23 Jira Hygiene tab. Engine: integrations/jiraHygiene.js.
-  // 12 правил (D-01..D-12) с весами и severity. Score 0-100. Renders как
-  // список violations по rule'ам, expandable.
-  if (getScannerTab() === 'hygiene') {
-    return `
-      <div class="ts2-glance ts2-glance--deeper ts2-glance--hygiene" data-scanner-tab="hygiene">
-        ${heroBlock}
-        ${_renderScannerTabBar()}
-        <div class="ts2-hygiene-pane" id="ts2-hygiene-mount">
-          ${renderHygieneView(model)}
-        </div>
-      </div>
-    `;
-  }
+  // V22+ (2026-05-17) — hygiene-tab переехал в подвкладку Интеграции → Гигиена.
+  // Engine `integrations/jiraHygiene.js` остаётся, теперь используется
+  // `integrations/hygiene/hygiene.js` orchestrator'ом отдельной подвкладки.
 
   // Phase 3 C2 — «Сегодня» (default) tab: L2 «Сегодня» + collapsible L4 «Операции» + L5 «Тренды».
   // L4 объединяет sprint health, scope churn, stale PRs, estimate accuracy, onboarding ramp,

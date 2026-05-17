@@ -769,6 +769,7 @@ export const IntegrationsView = {
         <button class="int-subtab ${this._activeSubtab==='scanner2'?'int-subtab-active':''}" data-subtab="scanner2">Сканнер команд</button>
         <button class="int-subtab ${this._activeSubtab==='black'?'int-subtab-active':''}"    data-subtab="black"><span class="signal-dot signal-off-course" aria-hidden="true"></span> Чёрный дашборд</button>
         <button class="int-subtab ${this._activeSubtab==='release2'?'int-subtab-active':''}" data-subtab="release2">Release 2.0</button>
+        <button class="int-subtab ${this._activeSubtab==='hygiene'?'int-subtab-active':''}"  data-subtab="hygiene">Гигиена</button>
       </div>`;
 
     let bodyHtml;
@@ -777,6 +778,9 @@ export const IntegrationsView = {
     } else if (this._activeSubtab === 'release2') {
       // V22+ Phase 5 (Release 2.0 sub-tab) — list view с group-by + filters + lazy expand.
       bodyHtml = `<div id="r2-root" class="r2-mount"></div>`;
+    } else if (this._activeSubtab === 'hygiene') {
+      // V22+ Гигиена sub-tab (2026-05-17) — перенос из Scanner. 20 правил + team-switcher.
+      bodyHtml = `<div id="hyg-root" class="hyg-mount"></div>`;
     } else {
       this._activeSubtab = 'scanner2';
       bodyHtml = `<div id="ts2-root" class="ts2-mount"></div>`;
@@ -800,6 +804,13 @@ export const IntegrationsView = {
         // scanner2-контейнере (race + DOM operations on detached node).
         if (this._activeSubtab === 'scanner2' && next !== 'scanner2') {
           try { TeamScanner2.unmount?.(); } catch (_) {}
+        }
+        // V22+ Hygiene sub-tab unmount: остановить scanner-poller и cleanup listener'ы.
+        if (this._activeSubtab === 'hygiene' && next !== 'hygiene') {
+          try {
+            const HygieneView = window.HygieneView;
+            HygieneView?.unmount?.();
+          } catch (_) {}
         }
         // Phase 3 G1 — сохраняем scroll/search/expanded state перед switch'ем,
         // чтобы возврат на ту же вкладку восстанавливал «где я был».
@@ -827,6 +838,17 @@ export const IntegrationsView = {
           .catch(e => {
             console.error('[Release2] failed to load:', e);
             r2Root.innerHTML = `<div class="r2-error">Не удалось загрузить модуль Release 2.0: ${(e?.message || e)}</div>`;
+          });
+      }
+    } else if (this._activeSubtab === 'hygiene') {
+      // V22+ (2026-05-17) — Гигиена sub-tab, перенос из Scanner.
+      const hygRoot = document.getElementById('hyg-root');
+      if (hygRoot) {
+        import('../integrations/hygiene/hygiene.js')
+          .then(m => m.HygieneView.render(hygRoot))
+          .catch(e => {
+            console.error('[Hygiene] failed to load:', e);
+            hygRoot.innerHTML = `<div class="hyg-state hyg-state-empty">Не удалось загрузить модуль «Гигиена»: ${(e?.message || e)}</div>`;
           });
       }
     } else {
