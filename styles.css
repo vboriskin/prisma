@@ -3062,6 +3062,18 @@ body.theme-dark .gdt-pill-legend-demo-row2 { color: var(--prizma-text-secondary)
    `document.body.classList.toggle('is-modal-open', anyOverlayVisible)`,
    then this whole block becomes `body.is-modal-open { overflow: hidden; }`.
    Cheaper (no :has engine cost) and easier to debug. */
+/* 2026-05-17 — AUDIT_LAYOUT #50 РЕАЛИЗОВАНО: 13 html:has() селекторов
+   заменены на body.is-ts2-modal-open class. Причина: каждый html:has()
+   запускает root-level recompute при появлении модалки. Когда модалка
+   вставлялась в DOM, CSS-rule срабатывал ПОСЛЕ insertion → `.app-section`
+   терял transform/will-change → containing block менялся → fixed-position
+   modal перерасполагался относительно viewport → визуальный «jerk #2».
+   Теперь: JS выставляет `body.is-ts2-modal-open` ДО вставки модалки,
+   .app-section готов к fixed-position модалке заранее, без репозиции.
+   Class toggling в JS: integrations/teamScanner2.js (_renderPanelOnly,
+   _closePanel, _renderFull-sync, unmount, плюс _openDiagModal/HowModal/
+   AnomalyModal/ResolveModal/CrvModal). */
+body.is-ts2-modal-open,
 html:has(body > .modal-overlay:not(.hidden)),
 html:has(body > .int-modal-overlay:not(.hidden)),
 html:has(body > .ceo-modal-overlay:not(.hidden)),
@@ -3069,45 +3081,15 @@ html:has(body > .gdt-jump-overlay:not(.hidden)),
 html:has(body > .funny-loader:not(.hidden)),
 html:has(body > #onboarding-overlay:not(.hidden)),
 html:has(body > .ob-welcome-overlay:not(.hidden)),
-html:has(body > .ob-loading-overlay:not(.hidden)),
-/* Phase 3 E4 — расширили scroll-lock на 6 ts2-overlay'ев Сканнера команд.
-   Раньше эти overlay'и не блокировали body scroll → пользователь открывает
-   модалку и колесо мышки случайно крутит фон под ней.
-   ВАЖНО: эти overlay'и рендерятся deep inside #ts2-root (не direct child of
-   body) — поэтому без `body > ` селектора, просто `:has(...)`. */
-html:has(.ts2-panel-backdrop:not(.hidden)),
-html:has(.ts2-diag-modal-overlay:not(.hidden)),
-html:has(.ts2-resolve-modal-overlay:not(.hidden)),
-html:has(.ts2-crv-modal-overlay:not(.hidden)),
-html:has(.ts2-anomaly-modal-overlay:not(.hidden)),
-html:has(.ts2-how-modal-overlay:not(.hidden)) { overflow: hidden; }
-/* contain:layout на .app-section ломает position:fixed модалок сканнера —
-   fixed позиционируется относительно секции, а не viewport. Снимаем layout
-   когда открыта любая ts2-модалка.
-   v22 mascot-pass fix: sj6 fix (codebase-05 audit) добавил `transform:
-   translateZ(0)` на .app-section для smoothing section-enter. Но `transform`
-   на ancestor создаёт новый containing block для position:fixed детей —
-   модалка #ts2-panel-main «уплывала» вверх. Снимаем translateZ когда любой
-   ts2-overlay открыт. */
-/* AUDIT_LAYOUT #50 — TODO: replace html:has() with body.is-modal-open class.
-   7 html:has() selectors below trigger root-recompute on each ts2-modal
-   open. Migration: when any ts2-overlay opens, JS toggles
-   `body.classList.toggle('is-ts2-modal-open', ...)`, then collapse this
-   block to `body.is-ts2-modal-open .app-section { ... }`. */
-html:has(#ts2-panel-main) .app-section,
-html:has(.ts2-panel-backdrop:not(.hidden)) .app-section,
-html:has(.ts2-diag-modal-overlay:not(.hidden)) .app-section,
-html:has(.ts2-resolve-modal-overlay:not(.hidden)) .app-section,
-html:has(.ts2-crv-modal-overlay:not(.hidden)) .app-section,
-html:has(.ts2-anomaly-modal-overlay:not(.hidden)) .app-section,
-html:has(.ts2-how-modal-overlay:not(.hidden)) .app-section {
+html:has(body > .ob-loading-overlay:not(.hidden)) { overflow: hidden; }
+/* contain:layout + transform: translateZ(0) на .app-section ломают
+   position:fixed модалок сканнера — fixed позиционируется относительно
+   секции, а не viewport. Снимаем оба свойства когда модалка открыта.
+   sj7 fix — will-change: transform тоже создаёт containing block
+   (CSS Transforms 2 spec), убираем его тоже. */
+body.is-ts2-modal-open .app-section {
   contain: style !important;
   transform: none !important;
-  /* sj7 fix — will-change: transform ТОЖЕ создаёт containing block для
-     position:fixed детей (CSS Transforms 2 spec). Без `will-change: auto`
-     модалка #ts2-panel-main позиционируется относительно .app-section,
-     не viewport — фон не покрывает sidebar/topbar, выглядит «сломанной».
-     Прежний фикс снимал только transform — этого мало. */
   will-change: auto !important;
   perspective: none !important;
   filter: none !important;

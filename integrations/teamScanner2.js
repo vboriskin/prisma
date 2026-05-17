@@ -1869,17 +1869,12 @@ export const TeamScanner2 = {
     this._container.innerHTML = html;
     this._bindEvents();
     this._promoteTitlesToTooltips();
-    // 2026-05-17 — synchronize body class с _expandedKey. _renderFull
-    // вызывается из refresh / team-switch / active-sprint-toggle и т.д.
-    // Если эти пути меняют _expandedKey (например, пустая модель → reset),
-    // нам нужно подтянуть body-class. Click-обработчик панели и
-    // _closePanel() тоже трогают этот класс — но здесь страховка для
-    // всех остальных путей.
-    if (this._expandedKey) {
-      document.body.classList.add('is-ts2-modal-open');
-    } else {
-      document.body.classList.remove('is-ts2-modal-open');
-    }
+    // 2026-05-17 — synchronize body class с актуальным состоянием DOM.
+    // _renderFull вызывается из refresh / team-switch / active-sprint-toggle
+    // и т.д. — после rewrite container'а нужно подтянуть body-class на
+    // случай если есть открытые модалки (panel/diag/how/etc.). Helper
+    // проверяет DOM а не флаг — drift-safe.
+    this._syncModalClass();
     // V21 — если активна вкладка «Метрики», инжектируем scaffold + монтируем
     // ECharts. Renderer оставил пустой `#ts2-metrics-mount` — заполняем его
     // здесь (а не внутри renderer'а), потому что mount требует реального DOM.
@@ -2038,6 +2033,32 @@ export const TeamScanner2 = {
       el.setAttribute('data-tip', t);
       el.removeAttribute('title');
     });
+  },
+
+  /**
+   * 2026-05-17 — single source of truth для body.is-ts2-modal-open class.
+   * Раньше каждая модалка (panel/diag/how/anomaly/resolve/crv/config/velocity)
+   * имела свой open/close handler без синхронизации body-класса. CSS-rule'ы
+   * жили через `html:has(...)` — root-level recompute на каждый модал.
+   *
+   * Теперь: вызываем `_syncModalClass()` после каждого open/close. Метод
+   * проверяет наличие ЛЮБОЙ ts2-модалки в DOM и toggle'ит class. Идемпотентно,
+   * не зависит от counter'ов (drift-safe).
+   *
+   * Используется CSS-rule'ом `body.is-ts2-modal-open .app-section { transform:
+   * none; ... }` для отмены containing block у .app-section (иначе fixed-modal
+   * позиционируется относительно секции, а не viewport).
+   */
+  _syncModalClass() {
+    if (typeof document === 'undefined') return;
+    const hasModal = !!document.querySelector(
+      '.ts2-panel, .ts2-panel-backdrop, ' +
+      '.ts2-diag-modal-overlay, .ts2-how-modal-overlay, ' +
+      '.ts2-anomaly-modal-overlay, .ts2-resolve-modal-overlay, ' +
+      '.ts2-crv-modal-overlay, .ts2-velocity-compare-modal-overlay, ' +
+      '#ts2-config-modal'
+    );
+    document.body.classList.toggle('is-ts2-modal-open', hasModal);
   },
 
   /** V18.1 P7-S3.1 — text announcement для SR'а через aria-live polite. */
@@ -2500,12 +2521,16 @@ export const TeamScanner2 = {
         if (opening) {
           el.classList.add('ts2-row-expanded');
           el.setAttribute('aria-expanded', 'true');
-          // Если предыдущая модалка была открыта — _renderPanelOnly
-          // переиспользует слот; иначе вставит свежий panel + backdrop.
-          this._renderPanelOnly();
-          // body.is-ts2-modal-open: единый сигнал «модалка открыта»,
-          // используется CSS-rule'ом для скрытия FAB.
+          // ПОРЯДОК ВАЖЕН: сначала добавляем body-class (CSS прогружает
+          // .app-section'у transform:none → containing block снимается ДО
+          // вставки модалки), потом вставляем модалку (она сразу
+          // позиционируется относительно viewport, без репозиции = без
+          // jerk'а). Раньше класс добавлялся ПОСЛЕ — модалка успевала
+          // быть отрисована относительно .app-section, потом перепрыгивала
+          // к viewport'у.
           document.body.classList.add('is-ts2-modal-open');
+          this._renderPanelOnly();
+          this._syncModalClass();
         } else if (wasExpanded) {
           this._closePanel();
         }
@@ -2780,6 +2805,7 @@ export const TeamScanner2 = {
     if (!this._model) return;
     const currentConfig = loadTeamConfig();
     const html = renderTeamConfigModal(this._model, currentConfig, PRESET_THRESHOLDS);
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-config-modal')?.remove();
     document.body.insertAdjacentHTML('beforeend', html);
     const overlay = document.getElementById('ts2-config-modal');
@@ -2791,6 +2817,7 @@ export const TeamScanner2 = {
     const close = () => {
       overlay?.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
     overlay?.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
@@ -2917,13 +2944,16 @@ export const TeamScanner2 = {
     // Fallback: используем stop как самый частый сценарий аномалии.
     const series = history.map(h => h?.counts?.[metric] || 0);
     const z = computeZScore(series);
+    // 2026-05-17 — body.is-ts2-modal-open ДО insertAdjacentHTML, чтобы
+    // .app-section успел сбросить containing block до отрисовки overlay'я.
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-anomaly-modal')?.remove();
     const html = renderAnomalyMiniChart(series, z, metric);
     document.body.insertAdjacentHTML('beforeend', html);
     const overlay = document.getElementById('ts2-anomaly-modal');
     if (!overlay) return;
     const onEsc = (ev) => { if (ev.key === 'Escape') close(); };
-    const close = () => { overlay.remove(); document.removeEventListener('keydown', onEsc); };
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onEsc); this._syncModalClass(); };
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
     });
@@ -2936,6 +2966,7 @@ export const TeamScanner2 = {
    */
   _openCrvDrilldown() {
     if (!this._model) return;
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-crv-drilldown')?.remove();
     const html = renderCrvDrilldownModal(
       this._model.scannerV2?.codeReviewVelocity || {},
@@ -2948,6 +2979,7 @@ export const TeamScanner2 = {
     const close = () => {
       overlay.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
@@ -2962,6 +2994,7 @@ export const TeamScanner2 = {
    * Pure-static html (no model dep) — открывается даже без cache.
    */
   _openHowModal() {
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-how-modal')?.remove();
     const html = renderHowCalculatedModal();
     document.body.insertAdjacentHTML('beforeend', html);
@@ -2972,6 +3005,7 @@ export const TeamScanner2 = {
     const close = () => {
       overlay.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
@@ -3044,8 +3078,15 @@ export const TeamScanner2 = {
     const close = () => {
       document.getElementById('ts2-velocity-modal')?.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
-    if (!renderInto(viewMode)) return;
+    // 2026-05-17 — body-class ДО renderInto (вставляет overlay в body).
+    document.body.classList.add('is-ts2-modal-open');
+    if (!renderInto(viewMode)) {
+      // renderInto fail → откатываем класс если других модалок нет.
+      this._syncModalClass();
+      return;
+    }
     document.addEventListener('keydown', onEsc);
   },
 
@@ -3075,6 +3116,7 @@ export const TeamScanner2 = {
       // 2026-05-11 — last bulk-resolve report (если был запущен в этой сессии).
       resolveReport:   this._lastResolveReport || null,
     });
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-diag-modal')?.remove();
     const auditEntries = readAuditLog();
     const html = renderDiagnosticModal(diagState, { auditEntries });
@@ -3092,6 +3134,7 @@ export const TeamScanner2 = {
     const close = () => {
       overlay.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
@@ -3417,6 +3460,7 @@ export const TeamScanner2 = {
    * Reactive.silent (mass-mutation contract — без silent infinite loop).
    */
   _openIdentityResolvePreview(diff, summary) {
+    document.body.classList.add('is-ts2-modal-open');
     document.getElementById('ts2-resolve-modal')?.remove();
     document.body.insertAdjacentHTML('beforeend', renderIdentityResolvePreview(diff, summary));
     const overlay = document.getElementById('ts2-resolve-modal');
@@ -3426,6 +3470,7 @@ export const TeamScanner2 = {
     const close = () => {
       overlay.remove();
       document.removeEventListener('keydown', onEsc);
+      this._syncModalClass();
     };
     overlay.addEventListener('click', (ev) => {
       if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
@@ -3792,7 +3837,8 @@ export const TeamScanner2 = {
       });
     }
     // Снимаем body-class «модалка открыта» — FAB снова видим.
-    document.body.classList.remove('is-ts2-modal-open');
+    // (Через _syncModalClass на случай если параллельно открыт diag-modal.)
+    this._syncModalClass();
     // Restore focus на row из которого открыли panel.
     if (focusKey && this._container) {
       const row = this._container.querySelector(`.ts2-row[data-key="${focusKey}"]`);
