@@ -23320,12 +23320,8 @@ body.theme-dark .r2-tab-badge { color: #fff; }
 .r2-tab { color: var(--text-2); font-weight: 600; }
 .r2-tab-active { color: var(--prizma-information); font-weight: 700; }
 
-/* ── Mascot hide on Release 2.0 tab (#29) ─────────────────── */
-body.r2-active .sbof-mascot,
-body.r2-active .pz-mascot,
-body.r2-active [class*="mascot"] {
-  display: none !important;
-}
+/* Mascot hide на Release 2.0 ОТКАЧЕНО — assistant-fab это единственный
+   способ открыть чат. Лучше принять overlap чем потерять access к чату. */
 
 /* ── Zebra-fix in Сроки (Vrba #28): убрали через .r2-field rewrite ─ */
 /* Old .r2-field используется в attrs/inside — оставляем. Lifecycle-blocks
@@ -23389,10 +23385,10 @@ body.theme-dark .r2-filters-sticky { background: var(--prizma-bg); }
    (по 3-экспертному аудиту: brand-guardian + Tufte + Birman)
    ============================================================ */
 
-/* Mascot/FAB hide на dense Scanner-rows и dense Integrations-views,
-   чтобы 144×144 кнопка не перекрывала counters-колонку */
-body.ts2-active .assistant-fab,
-body.r2-active .assistant-fab,
+/* Mascot/FAB hide на Scanner/Release2 ОТКАЧЕНО — assistant-fab единственный
+   способ открыть чат-ассистент. Overlap counters-колонки решаем иначе
+   (если надо — переехать FAB левее или уменьшить размер на dense views).
+   Modal-open оставлен — там FAB реально мешает modal'ке. */
 body.is-ts2-modal-open .assistant-fab {
   display: none !important;
 }
