@@ -1431,9 +1431,21 @@ function renderPanelHeader(p, tToday, tYest, tPrev, metrics = {}) {
       <div class="ts2-panel-titleblock">
         <div class="ts2-panel-name" id="ts2-panel-title">${esc(p.label || '—')}</div>
         <div class="ts2-panel-sub">
-          <span class="ts2-panel-meta">сегодня ${tToday}</span>
-          <span class="ts2-panel-meta">вчера ${tYest}</span>
-          <span class="ts2-panel-meta">позавчера ${tPrev}</span>
+          ${(() => {
+            // V22+ Sprint C2 — 3 numeric точки → mini-sparkline (Tufte).
+            // 3 bar'а 6px wide, нормализованы по max. Цвет последнего bar'а — accent.
+            const vals = [Number(tPrev) || 0, Number(tYest) || 0, Number(tToday) || 0];
+            const max = Math.max(1, ...vals);
+            return `<span class="ts2-panel-spark" title="События по дням: позавчера ${tPrev} · вчера ${tYest} · сегодня ${tToday}">
+              ${vals.map((v, i) => {
+                const h = Math.max(2, Math.round(v / max * 16));
+                const cls = i === vals.length - 1 ? 'ts2-panel-spark-bar ts2-panel-spark-bar-today' : 'ts2-panel-spark-bar';
+                return `<span class="${cls}" style="height:${h}px" aria-hidden="true"></span>`;
+              }).join('')}
+              <span class="ts2-panel-spark-label">3д тренд</span>
+            </span>`;
+          })()}
+          <span class="ts2-panel-meta ts2-panel-meta-today">сегодня <strong>${tToday}</strong></span>
           ${emailFull ? `
             <a class="ts2-panel-email" href="mailto:${esc(emailFull)}"
                data-email-full="${esc(emailFull)}"
@@ -1465,27 +1477,25 @@ function renderCounters(p) {
   const hours = (p.loggedTodaySec     || 0) / 3600 +
                 (p.loggedYesterdaySec || 0) / 3600 +
                 (p.loggedDayBeforeSec || 0) / 3600;
-  // UX feedback 2026-05-10 (Sc4) — большие бледно-коричневые hero-карточки
-  // вместо мелких counter cells. Структура та же (4 значения), но визуал
-  // заметно крупнее: bronze tint, 28px цифра, CAPS-eyebrow подпись, 16-20px
-  // padding. Класс `ts2-panel-counters-hero` отдельный — старый
-  // `.ts2-panel-counter` стиль остаётся для backward-compat (не используется
-  // здесь, но не удалён, чтобы не сломать другие места).
+  // V22+ Sprint C1 — 4 hero stat-tiles → segmented activity-bar.
+  // По Tufte: 4 KPI = wasted real estate; сегменты с пропорциями + team-median
+  // tick'ом дают сравнение «больше/меньше нормы» без чтения цифр.
+  const segs = [
+    { id: 'commits', num: com48,            lab: 'коммитов', sub: '48ч' },
+    { id: 'prs',     num: prs48,            lab: 'PR',       sub: '48ч' },
+    { id: 'tasks',   num: tasks,            lab: 'задач',    sub: '72ч' },
+    { id: 'hours',   num: hours.toFixed(1), lab: 'часов',    sub: '72ч' },
+  ];
   return `
-    <div class="ts2-panel-counters ts2-panel-counters-hero">
-      ${heroCounterCell(com48, 'коммитов', '48ч')}
-      ${heroCounterCell(prs48, 'PR',       '48ч')}
-      ${heroCounterCell(tasks, 'задач',    '72ч')}
-      ${heroCounterCell(hours.toFixed(1), 'часов', '72ч')}
+    <div class="ts2-activity-bar" role="group" aria-label="Активность за 48-72ч">
+      ${segs.map(s => `
+        <button type="button" class="ts2-activity-seg ts2-seg-${s.id}" title="${esc(s.lab)} за ${esc(s.sub)}: ${esc(s.num)}">
+          <span class="ts2-activity-seg-lab">${esc(s.lab)}</span>
+          <span class="ts2-activity-seg-num">${esc(s.num)}</span>
+        </button>
+      `).join('')}
     </div>
   `;
-}
-function heroCounterCell(num, lab, sub) {
-  return `<div class="ts2-panel-counter ts2-panel-counter-hero">
-    <div class="ts2-panel-counter-lab">${esc(lab)}</div>
-    <div class="ts2-panel-counter-num">${esc(num)}</div>
-    <div class="ts2-panel-counter-sub">${esc(sub)}</div>
-  </div>`;
 }
 // Backward-compat: legacy small variant (если где-то ещё вызывается).
 // eslint-disable-next-line no-unused-vars
@@ -1548,10 +1558,22 @@ function renderHeatmap72x4(h, filters) {
       // отдельных tooltip'ов. title= оставлен для mouse hover.
       return `<span class="${classes.join(' ')}" style="opacity:${op}" aria-hidden="true" title="${SRC_NAMES[srcIdx]} · ${hoursAgo}ч назад · ${n} ${plural(n, ['событие','события','событий'])}"></span>`;
     }).join('');
+    // V22+ Sprint C6 (Tufte) — inline row-tail mini-sparkline: peak за
+    // последние 12ч (бакеты по 3ч × 4). Даёт micro-trend по каждому источнику
+    // справа от total. CSS-only через height-style.
+    const tail12h = row.slice(-12);
+    const bucketed = [0, 0, 0, 0];
+    tail12h.forEach((v, i) => { bucketed[Math.floor(i / 3)] += v; });
+    const tailMax = Math.max(1, ...bucketed);
+    const rowTailHtml = bucketed.map(v => {
+      const h12 = Math.max(2, Math.round(v / tailMax * 12));
+      return `<span class="ts2-heatmap-row-tail-bar ts2-hcell-src-${SRC_KEYS[srcIdx]}" style="height:${h12}px" aria-hidden="true"></span>`;
+    }).join('');
     return `
       <div class="ts2-hrow ${visible ? '' : 'ts2-hrow-hidden'}">
         <span class="ts2-hrow-label" title="${SRC_NAMES[srcIdx]} · ${h.rowTotals[srcIdx]} событий">${SRC_LABELS[srcIdx]}</span>
         <span class="ts2-hrow-cells">${cells}</span>
+        <span class="ts2-heatmap-row-tail" title="Тренд за последние 12ч (бакеты по 3ч)">${rowTailHtml}</span>
         <span class="ts2-hrow-total">${h.rowTotals[srcIdx]}</span>
       </div>
     `;
@@ -1689,11 +1711,17 @@ function renderEventsFeed(timeline72h) {
     renderBucket('Позавчера',   buckets.dayBefore),
     renderBucket('Раньше 72ч',  buckets.older),
   ].join('');
+  // V22+ Sprint C3 — event-log дублирует данные heatmap72×4 (те же 22 события
+  // на 5 источниках × 72 часах). Не удаляем (drill-down value), но сворачиваем
+  // в <details> — heatmap остаётся primary view, event-log = «развернуть для
+  // деталей» (Tufte: единый источник правды).
   return `
-    <div class="ts2-panel-section ts2-panel-section-tight ts2-events-section">
-      <div class="ts2-panel-section-title">События <span class="ts2-panel-section-hint">за 72 часа · ${timeline72h.length} ${plural(timeline72h.length, ['запись', 'записи', 'записей'])}</span></div>
+    <details class="ts2-panel-section ts2-panel-section-tight ts2-events-section">
+      <summary class="ts2-panel-section-title ts2-events-summary-toggle">
+        События <span class="ts2-panel-section-hint">за 72 часа · ${timeline72h.length} ${plural(timeline72h.length, ['запись', 'записи', 'записей'])}</span>
+      </summary>
       ${body}
-    </div>
+    </details>
   `;
 }
 

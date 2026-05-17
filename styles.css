@@ -23676,3 +23676,62 @@ body.is-ts2-modal-open .assistant-fab {
   border-bottom: 1px solid var(--border);
 }
 body.theme-dark .ts2-team-switcher { background: var(--prizma-bg); }
+
+/* ── Sprint C2: panel-sparkline (3-day trend) ─────────────── */
+.ts2-panel-spark {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+  padding: 0 6px;
+  margin-right: 8px;
+  border-right: 1px solid var(--border);
+  vertical-align: middle;
+}
+.ts2-panel-spark-bar {
+  display: inline-block;
+  width: 4px;
+  background: var(--text-3);
+  border-radius: 1px;
+  opacity: .55;
+}
+.ts2-panel-spark-bar-today {
+  background: var(--prizma-information);
+  opacity: 1;
+}
+.ts2-panel-spark-label {
+  font: 700 9px/1.4 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-4);
+  align-self: center;
+  margin-left: 4px;
+}
+.ts2-panel-meta-today strong { color: var(--text-1); font-weight: 600; }
+
+/* ── Sprint C6: heatmap row-tail (per-src colored mini sparkline) ── */
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-j  { background: var(--prizma-information); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-b  { background: var(--prizma-on-course); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-c  { background: var(--prizma-drift); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-zc { background: var(--prizma-approve); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-ze { background: var(--prizma-off-course); }
+
+/* ── Sprint C3: event-log collapsed by default ────────────── */
+.ts2-events-summary-toggle {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  list-style: none;
+}
+.ts2-events-summary-toggle::-webkit-details-marker { display: none; }
+.ts2-events-summary-toggle::before {
+  content: '▸';
+  font-size: 10px;
+  color: var(--text-3);
+  margin-right: 4px;
+  transition: transform .12s;
+}
+.ts2-events-section[open] .ts2-events-summary-toggle::before {
+  transform: rotate(90deg);
+}
