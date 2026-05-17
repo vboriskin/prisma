@@ -21,6 +21,7 @@
 import { state } from '../state.js';
 import { Services } from '../app/services.js';
 import { linkTo } from './linkTo.js';
+import { loadSettings as _loadIntegrationsSettings } from '../integrations/integrationsStore.js';
 
 /* ─────────────────────────────────────────────────────────────
    Main router
@@ -344,18 +345,32 @@ function _getModel() {
   catch (_) { return null; }
 }
 
+// V22+ Phase 5.2 fix — dual-read: state.integrations.sigma (test-mocks)
+// OR integrationsStore (production source-of-truth).
 function _isSigmaConfigured() {
   try {
-    const cfg = state.integrations?.sigma || {};
-    return !!(cfg.baseUrl || cfg.sigmaJiraBaseUrl || cfg.hasToken);
+    const testCfg = state?.integrations?.sigma;
+    if (testCfg) {
+      return !!(testCfg.baseUrl || testCfg.sigmaJiraBaseUrl || testCfg.hasToken);
+    }
+    const cfg = _loadIntegrationsSettings() || {};
+    return !!(cfg.sigmaJiraBaseUrl && cfg.hasSigmaJiraToken);
   } catch (_) { return false; }
 }
 
 function _sigmaUrlFor(goalKey) {
   try {
-    const cfg = state.integrations?.sigma || {};
-    const base = cfg.baseUrl || cfg.sigmaJiraBaseUrl || '';
-    if (!base || !goalKey) return null;
+    if (!goalKey) return null;
+    const testCfg = state?.integrations?.sigma;
+    let base = '';
+    if (testCfg) {
+      base = testCfg.baseUrl || testCfg.sigmaJiraBaseUrl || '';
+    }
+    if (!base) {
+      const cfg = _loadIntegrationsSettings() || {};
+      base = cfg.sigmaJiraBaseUrl || '';
+    }
+    if (!base) return null;
     return `${String(base).replace(/\/$/, '')}/browse/${encodeURIComponent(goalKey)}`;
   } catch (_) { return null; }
 }

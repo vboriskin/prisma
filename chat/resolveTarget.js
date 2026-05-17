@@ -31,6 +31,7 @@
 
 import { state } from '../state.js';
 import { parsePeriod } from './periodParser.js';
+import { loadSettings as _loadIntegrationsSettings } from '../integrations/integrationsStore.js';
 
 // ── Source detection patterns ─────────────────────────────────
 const SOURCE_PATTERNS = Object.freeze({
@@ -221,22 +222,61 @@ function _extractAction(text) {
  * Проверить настроены ли запрашиваемые источники.
  * Возвращает массив unavailable-источников; пустой если всё OK.
  *
+ * V22+ Phase 5.2 fix — раньше читало state.integrations[*].hasXxxToken,
+ * но в state.js поля integrations НЕТ. Поэтому метод всегда возвращал
+ * все источники как missing → chat-bot говорил «не настроены» при
+ * рабочих интеграциях. Та же бага была в Release 2.0 — fixed earlier.
+ *
+ * Теперь идём в integrationsStore.loadSettings() — единый source-of-truth,
+ * который сам мерджит localStorage + server-state (hasXxxToken флаги).
+ *
  * Caller использует:
  *   const missing = checkSourcesAvailable(target.sources);
  *   if (missing.length) return renderSourceUnavailable(missing);
  */
 export function checkSourcesAvailable(sources) {
   if (!Array.isArray(sources) || !sources.length) return [];
-  const integrationsState = (state && state.integrations) || {};
+  // Dual-read стратегия:
+  //  · state.integrations[{src}] — для unit-тестов (mock-friendly)
+  //  · integrationsStore.loadSettings() — production source-of-truth
+  // Тесты ставят state.integrations.jira.hasToken, мы это уважаем;
+  // в production state.integrations отсутствует, читаем store.
+  const testState = (state && state.integrations) || null;
+  let storeCfg = null;
+  try { storeCfg = _loadIntegrationsSettings(); } catch (_) {}
+
+  const flagMap = {
+    jira:    'hasJiraToken',
+    bb:      'hasBitbucketToken',
+    cf:      'hasConfluenceToken',
+    sigma:   'hasSigmaJiraToken',
+    zephyr:  'hasJiraToken',    // Zephyr использует тот же Jira-инстанс
+    jenkins: 'hasJenkinsToken',
+  };
+  const stateKeyMap = { jira: 'jira', bb: 'bitbucket', cf: 'confluence',
+                        sigma: 'sigma', zephyr: 'zephyr', jenkins: 'jenkins' };
+
   const missing = [];
   for (const src of sources) {
-    const cfgKey = { bb: 'bitbucket', cf: 'confluence', jira: 'jira', zephyr: 'zephyr', sigma: 'sigma' }[src] || src;
-    const cfg = integrationsState[cfgKey];
-    if (!cfg) { missing.push(src); continue; }
-    // hasXxxToken — server-truth pattern (см. integrationsStore.js).
-    const has = cfg.hasToken || cfg.hasJiraToken || cfg.hasBitbucketToken
-             || cfg.hasConfluenceToken || cfg.hasZephyrToken || cfg.token;
-    if (!has) missing.push(src);
+    // 1. Test-state mock
+    if (testState) {
+      const cfg = testState[stateKeyMap[src]];
+      if (cfg && (cfg.hasToken || cfg.hasJiraToken || cfg.hasBitbucketToken ||
+                  cfg.hasConfluenceToken || cfg.hasZephyrToken || cfg.token)) {
+        continue;
+      }
+      if (cfg && (cfg.hasToken === false || cfg.token === false)) {
+        missing.push(src);
+        continue;
+      }
+      // testState exists но конкретного src нет → пробуем store
+    }
+    // 2. Production store
+    if (storeCfg) {
+      const flag = flagMap[src];
+      if (flag && storeCfg[flag]) continue;
+    }
+    missing.push(src);
   }
   return missing;
 }

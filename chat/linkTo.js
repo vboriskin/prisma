@@ -32,6 +32,7 @@
    ============================================================ */
 
 import { state } from '../state.js';
+import { loadSettings as _loadIntegrationsSettings } from '../integrations/integrationsStore.js';
 
 // ── Иконки для разных kinds (через текстовые префиксы из spine-pill — без emoji) ──
 const KIND_PREFIX = Object.freeze({
@@ -219,8 +220,16 @@ export function buildDefaultLinks(resolved, opts = {}) {
  */
 export function externalJiraLink(jiraKey) {
   if (!jiraKey) return null;
-  const cfg = (state && state.integrations && state.integrations.jira) || {};
-  const base = cfg.baseUrl || '';
+  // V22+ Phase 5.2 fix — dual-read: state.integrations.jira (test-mocks)
+  // OR integrationsStore (production).
+  let base = '';
+  const testCfg = state?.integrations?.jira;
+  if (testCfg) {
+    base = testCfg.baseUrl || testCfg.jiraBaseUrl || '';
+  }
+  if (!base) {
+    try { base = _loadIntegrationsSettings()?.jiraBaseUrl || ''; } catch (_) {}
+  }
   if (!base) return null;
   const url = `${base.replace(/\/$/, '')}/browse/${encodeURIComponent(jiraKey)}`;
   return _externalLink({ url, label: jiraKey }, { label: `${KIND_PREFIX.external} ${jiraKey} в Jira` });
