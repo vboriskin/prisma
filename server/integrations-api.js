@@ -483,8 +483,20 @@ async function handleIntegrationsApi(req, res, pathname) {
       // Через JQL-batch (issuekey in (K1, K2, ...)) — один запрос.
       const jql = `issuekey in (${keys.map(k => `"${k}"`).join(',')})`;
       const fields = ['summary', 'status', 'priority', 'issuetype', 'assignee', 'reporter', 'updated', 'duedate', 'labels'];
+      // 2026-05-17 (Release notes feature) — опциональный description
+      // для генерации release notes. Включаем `description` + renderedFields
+      // (rendered HTML вместо ADF JSON). Без флага не запрашиваем —
+      // description тяжёлое поле (5-50KB на issue), увеличивает payload.
+      if (body.withDescription === true) {
+        fields.push('description');
+      }
       try {
-        const issues = await _jiraSearchAll(cfg, jql, fields, [], 200);
+        const issues = await _jiraSearchAll(
+          cfg, jql, fields, [], 200,
+          // expand: renderedFields даёт description как готовый HTML,
+          // а не ADF JSON — проще strip'ать на клиенте.
+          body.withDescription === true ? ['renderedFields'] : []
+        );
         _writeJson(res, 200, { issues, count: issues.length });
       } catch (e) {
         logger.error('[release2-related] failed', { err: e?.message || String(e) });

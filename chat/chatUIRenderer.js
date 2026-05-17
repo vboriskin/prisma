@@ -524,7 +524,12 @@ function _validateCitationsInHtml(html) {
   );
 }
 
-function renderMarkdownLite(raw) {
+// 2026-05-17 — exported для release2NotesModal.js (release notes preview)
+// и любых других модулей, которым нужен лайт-markdown renderer.
+export function renderMarkdownLite(raw) {
+  return _renderMarkdownLiteImpl(raw);
+}
+function _renderMarkdownLiteImpl(raw) {
   const text = String(raw || '').trim();
   if (!text) return '';
   function applyInline(s) {

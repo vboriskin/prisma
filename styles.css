@@ -22410,6 +22410,302 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   text-decoration: none;
 }
 .r2-external-link:hover { text-decoration: underline; }
+/* 2026-05-17 (Release notes feature) — кнопка слева от «Открыть в Jira».
+   Тонкая граница-разделитель между ними. Same height/font как r2-external-link. */
+.r2-release-notes-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  font: 500 11.5px/1.4 inherit;
+  color: var(--text-2);
+  background: transparent;
+  border: none;
+  padding: 0 8px 0 0;
+  margin-right: 8px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+.r2-release-notes-link:hover { color: var(--prizma-information); }
+.r2-release-notes-link:focus-visible {
+  outline: 2px solid var(--prizma-information);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ── Release notes modal (2026-05-17) ────────────────────────
+   Структура: head (sticky) + toolbar (sticky) + body (scroll) + footer (sticky).
+   Z-index 9999 — поверх release2 list. Backdrop dim + click-to-close. */
+.r2-notes-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, .42);
+  z-index: 9999;
+  display: flex; align-items: stretch; justify-content: center;
+  padding: 4vh 4vw;
+  animation: r2-notes-overlay-in .18s ease-out;
+}
+@keyframes r2-notes-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+.r2-notes-modal {
+  background: var(--card, #fff);
+  border: 1px solid var(--border-strong, rgba(0,0,0,.18));
+  border-radius: 12px;
+  box-shadow: 0 32px 80px rgba(17,24,39,.28), 0 8px 24px rgba(17,24,39,.14);
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 920px;
+  max-height: 92vh;
+  overflow: hidden;
+  animation: r2-notes-modal-in .22s cubic-bezier(.4,0,.2,1);
+}
+@keyframes r2-notes-modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);   }
+}
+[data-theme="dark"] .r2-notes-modal,
+body.theme-dark .r2-notes-modal { background: #1A1A22; border-color: rgba(255,255,255,.10); }
+
+/* Head */
+.r2-notes-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2, #f8fafc);
+  flex-shrink: 0;
+}
+.r2-notes-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex: 1; }
+.r2-notes-title-eyebrow {
+  font: 700 10px/1 inherit;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.r2-notes-title-key {
+  font: 600 14px/1.3 inherit;
+  color: var(--text-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.r2-notes-source-badge {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  font: 700 10px/1.4 inherit;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  border-radius: 4px;
+}
+.r2-notes-source-rule {
+  background: color-mix(in srgb, var(--text-3, #64748b) 14%, transparent);
+  color: var(--text-2);
+}
+.r2-notes-source-llm {
+  background: color-mix(in srgb, var(--prizma-information, #2563eb) 18%, transparent);
+  color: var(--prizma-information);
+}
+.r2-notes-close {
+  flex: 0 0 auto;
+  width: 32px; height: 32px;
+  border: none; background: transparent;
+  color: var(--text-3); cursor: pointer;
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.r2-notes-close:hover { background: var(--bg-2, #f1f5f9); color: var(--text-1); }
+
+/* Toolbar */
+.r2-notes-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card, #fff);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+[data-theme="dark"] .r2-notes-toolbar,
+body.theme-dark .r2-notes-toolbar { background: #1A1A22; }
+.r2-notes-toolbar-left, .r2-notes-toolbar-right {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.r2-notes-toolbar-mid {
+  display: inline-flex; align-items: center; gap: 6px;
+  flex: 1; justify-content: center;
+}
+.r2-notes-mode-label { font: 500 11px/1.4 inherit; color: var(--text-3); }
+.r2-notes-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.r2-notes-mode-btn {
+  padding: 4px 10px;
+  font: 500 11px/1.4 inherit;
+  background: transparent;
+  color: var(--text-2);
+  border: none;
+  cursor: pointer;
+  border-right: 1px solid var(--border);
+}
+.r2-notes-mode-btn:last-child { border-right: none; }
+.r2-notes-mode-btn.r2-notes-mode-active {
+  background: var(--prizma-information, #2563eb);
+  color: #fff;
+}
+/* Buttons (download / llm / copy) */
+.r2-notes-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 12px;
+  font: 500 12px/1.4 inherit;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--card, #fff);
+  color: var(--text-1);
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.r2-notes-btn:hover { background: var(--bg-2, #f1f5f9); }
+.r2-notes-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.r2-notes-btn-primary {
+  background: var(--prizma-information, #2563eb);
+  color: #fff;
+  border-color: var(--prizma-information, #2563eb);
+}
+.r2-notes-btn-primary:hover { background: color-mix(in srgb, var(--prizma-information, #2563eb) 88%, #000 12%); }
+.r2-notes-btn-llm {
+  border-color: var(--prizma-information, #2563eb);
+  color: var(--prizma-information, #2563eb);
+}
+.r2-notes-btn-llm:hover { background: color-mix(in srgb, var(--prizma-information, #2563eb) 8%, transparent); }
+.r2-notes-btn-loading { opacity: .85; }
+.r2-notes-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+.r2-notes-btn-ghost:hover { background: var(--bg-2, #f1f5f9); color: var(--text-1); }
+.r2-notes-btn-success {
+  background: color-mix(in srgb, var(--success, #10b981) 18%, transparent) !important;
+  border-color: var(--success, #10b981) !important;
+  color: var(--success, #10b981) !important;
+}
+
+/* Body — scroll area с rendered markdown */
+.r2-notes-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 24px 32px;
+  background: var(--card, #fff);
+}
+[data-theme="dark"] .r2-notes-body,
+body.theme-dark .r2-notes-body { background: #1A1A22; }
+.r2-notes-article {
+  max-width: 760px;
+  margin: 0 auto;
+  font: 13px/1.55 inherit;
+  color: var(--text-1);
+}
+.r2-notes-article h1,
+.r2-notes-article h2,
+.r2-notes-article h3,
+.r2-notes-article h4 { color: var(--text-1); margin: 16px 0 8px; }
+.r2-notes-article h1 { font: 700 22px/1.3 inherit; margin-top: 0; }
+.r2-notes-article h2 {
+  font: 700 16px/1.3 inherit;
+  margin-top: 24px;
+  padding-left: 8px;
+  border-left: 3px solid var(--prizma-information, #2563eb);
+}
+.r2-notes-article h3 {
+  font: 600 13px/1.3 inherit;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-2);
+  margin-top: 16px;
+}
+.r2-notes-article h4 { font: 600 13px/1.3 inherit; }
+.r2-notes-article ul { padding-left: 20px; margin: 8px 0; }
+.r2-notes-article li { margin: 3px 0; }
+.r2-notes-article p { margin: 8px 0; }
+.r2-notes-article strong { font-weight: 700; color: var(--text-1); }
+.r2-notes-article em { color: var(--text-2); }
+.r2-notes-article code {
+  font: 12px/1 var(--font-mono, ui-monospace);
+  background: var(--bg-2, #f1f5f9);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.r2-notes-article table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font: 12px/1.4 inherit;
+}
+.r2-notes-article th,
+.r2-notes-article td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.r2-notes-article th { background: var(--bg-2, #f8fafc); font-weight: 700; }
+.r2-notes-article hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 20px 0;
+}
+.r2-notes-article a {
+  color: var(--prizma-information, #2563eb);
+  text-decoration: none;
+}
+.r2-notes-article a:hover { text-decoration: underline; }
+
+/* Footer */
+.r2-notes-foot {
+  flex-shrink: 0;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-2, #f8fafc);
+  font: 11px/1.4 inherit;
+  color: var(--text-3);
+  font-feature-settings: "tnum";
+}
+[data-theme="dark"] .r2-notes-foot,
+body.theme-dark .r2-notes-foot { background: #0F0F18; }
+
+/* Inline LLM notice */
+.r2-notes-llm-notice {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  font: 12px/1.4 inherit;
+  background: var(--bg-2, #f8fafc);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--prizma-information, #2563eb);
+}
+.r2-notes-llm-notice-error {
+  border-left-color: var(--prizma-off-course, #C84B4B);
+  background: color-mix(in srgb, var(--prizma-off-course, #C84B4B) 6%, var(--bg-2, #f8fafc));
+}
+.r2-notes-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--text-3);
+  border-top-color: var(--prizma-information, #2563eb);
+  border-radius: 50%;
+  animation: r2-notes-spin .8s linear infinite;
+}
+@keyframes r2-notes-spin { to { transform: rotate(360deg); } }
+.r2-notes-warn-icon {
+  display: inline-flex;
+  color: var(--prizma-off-course, #C84B4B);
+}
+
+/* Responsive — на узких экранах toolbar wraps. */
+@media (max-width: 720px) {
+  .r2-notes-modal-overlay { padding: 2vh 2vw; }
+  .r2-notes-toolbar-mid { width: 100%; order: 3; justify-content: flex-start; }
+  .r2-notes-body { padding: 16px 18px; }
+  .r2-notes-article h1 { font-size: 18px; }
+  .r2-notes-article h2 { font-size: 15px; }
+}
 
 .r2-tab-body { padding: 8px 0; }
 .r2-section {

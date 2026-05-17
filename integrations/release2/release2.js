@@ -352,6 +352,15 @@ export const Release2View = {
       this._loadRelated(key);
       return;
     }
+    // 2026-05-17 (Release notes feature) — открыть модалку release notes.
+    const notesBtn = target.closest('[data-r2-action="open-notes"]');
+    if (notesBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = notesBtn.dataset.r2Key;
+      this._openReleaseNotes(key);
+      return;
+    }
     // Group-by chip
     const gb = target.closest('[data-r2-groupby]');
     if (gb) {
@@ -449,6 +458,26 @@ export const Release2View = {
       this._renderFull();
     } catch (e) {
       console.warn('[Release2] related-load failed:', e);
+    }
+  },
+
+  /**
+   * 2026-05-17 (Release notes feature) — открыть модалку release notes
+   * для конкретного релиза. Модалка сама делает bulk-fetch descriptions
+   * при клике «Сформировать с LLM».
+   */
+  async _openReleaseNotes(key) {
+    if (!key) return;
+    const releases = release2State.lastList?.releases || [];
+    const r = releases.find(x => x.key === key);
+    if (!r) return;
+    // Lazy-import: модалка нужна редко, не блокируем initial bundle.
+    try {
+      const mod = await import('./release2NotesModal.js');
+      const jiraBaseUrl = release2State.lastList?.jiraBaseUrl || '';
+      mod.openReleaseNotesModal(r, { jiraBaseUrl });
+    } catch (e) {
+      console.warn('[Release2] notes-modal load failed:', e);
     }
   },
 };

@@ -102,15 +102,42 @@ export async function fetchRelease2List(opts = {}) {
 
 /**
  * Lazy-fetch связанных issue (Story/Bug) для конкретного релиза.
+ *
+ * 2026-05-17 (Release notes feature) — добавлена опция `withDescription`.
+ * Когда true → server возвращает `fields.description` + `renderedFields.description`
+ * (HTML вместо ADF JSON). Без флага description не запрашивается (тяжёлое поле).
+ * Большие release'ы (>100 stories) автоматически режутся на chunks по 100,
+ * параллельные запросы через `Promise.all`. Cap 500 keys — сверх лимита
+ * берём первые 500 (release > 500 — нонсенс, скорее всего ошибка JQL).
+ *
  * @param {string[]} keys
- * @param {object} opts — { signal?, timeoutMs? }
+ * @param {object} opts — { signal?, timeoutMs?, withDescription? }
  * @returns {Promise<Array>} raw issues
  */
 export async function fetchRelease2Related(keys, opts = {}) {
   if (!Array.isArray(keys) || !keys.length) return [];
+  // Hard cap чтобы не сделать DDoS на Jira из релиза с broken JQL.
+  const safeKeys = keys.slice(0, 500);
+  // Chunking: 100 keys per chunk, параллельные fetch'ы. Без chunking
+  // JQL `key in (...)` на 200 ключах может упереться в URL-limit + heavy fetch.
+  const CHUNK = 100;
+  if (safeKeys.length <= CHUNK) {
+    return _fetchRelatedChunk(safeKeys, opts);
+  }
+  const chunks = [];
+  for (let i = 0; i < safeKeys.length; i += CHUNK) {
+    chunks.push(safeKeys.slice(i, i + CHUNK));
+  }
+  const results = await Promise.all(chunks.map(c => _fetchRelatedChunk(c, opts)));
+  return results.flat();
+}
+
+async function _fetchRelatedChunk(keys, opts = {}) {
   const tw = _withTimeout(opts.signal, opts.timeoutMs || RELATED_TIMEOUT_MS);
   try {
-    const data = await _postJson('/api/integrations/release2-related', { keys }, tw.signal);
+    const body = { keys };
+    if (opts.withDescription === true) body.withDescription = true;
+    const data = await _postJson('/api/integrations/release2-related', body, tw.signal);
     return Array.isArray(data?.issues) ? data.issues : [];
   } finally {
     clearTimeout(tw._timer);
