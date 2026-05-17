@@ -13,7 +13,9 @@ module.exports = defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
-  reporter: [['list']],
+  reporter: process.env.CI
+    ? [['list'], ['json', { outputFile: path.resolve(__dirname, '..', '..', 'playwright-report.json') }]]
+    : [['list']],
   outputDir: path.join(__dirname, '_out'),
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
