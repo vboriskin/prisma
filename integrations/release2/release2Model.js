@@ -57,13 +57,25 @@ function _normOptionArr(v) {
   return v.map(_normOption).filter(Boolean);
 }
 
+/**
+ * V22+ Phase 5.2 — [В]/[B]/[Х]/[X] suffix detection.
+ * См. ~/.claude/.../memory/feedback_blocked_users.md: эти суффиксы означают
+ * уволенных сотрудников. UI-политика: muted-render в индивид-полях +
+ * silent-filter в aggregates (owners-card etc).
+ */
+const _BLOCKED_RE = /\s*\[\s*[ХXВB]\s*\]\s*$/i;
+
 function _normUser(v) {
   if (!v) return null;
+  const rawDisplay = v.displayName || v.name || '';
+  const isBlocked = _BLOCKED_RE.test(rawDisplay);
+  const displayName = rawDisplay.replace(_BLOCKED_RE, '').trim();
   return {
-    name: v.name || v.key || '',
-    displayName: v.displayName || v.name || '',
+    name: (v.name || v.key || '').replace(_BLOCKED_RE, '').trim(),
+    displayName: displayName || rawDisplay,
     email: v.emailAddress || '',
     accountId: v.accountId || '',
+    isBlocked,
   };
 }
 

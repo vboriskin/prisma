@@ -22,6 +22,7 @@ import { renderRelease2View, escapeHtml } from './release2Renderer.js';
 import { release2State } from './release2State.js';
 import { diffRelease2Lists } from './release2Model.js';
 import { Services } from '../../app/services.js';
+import { Multiselect } from '../../components/multiselect.js';
 
 /* ─────────────────────────────────────────────────────────────
    Loader / error / empty UI
@@ -205,6 +206,10 @@ export const Release2View = {
       this._bound = false;
     }
     this._container = null;
+    // V22+ Phase 5.2 — restore mascot for other tabs.
+    if (typeof document !== 'undefined') {
+      document.body.classList.remove('r2-active');
+    }
   },
 
   _renderFull() {
@@ -241,6 +246,14 @@ export const Release2View = {
     });
     this._container.innerHTML = html;
 
+    // V22+ Phase 5.2 — Mount Multiselect components в placeholder-slots.
+    this._mountMultiselects();
+
+    // V22+ Phase 5.2 — Hide global mascot on Release 2.0 tab (Brand #29).
+    if (typeof document !== 'undefined') {
+      document.body.classList.add('r2-active');
+    }
+
     // Restore scroll + focus
     this._container.scrollTop = scrollY;
     if (restoreFocus?.data !== undefined) {
@@ -251,6 +264,39 @@ export const Release2View = {
         try { newSearch.setSelectionRange(restoreFocus.selStart || 0, restoreFocus.selEnd || 0); } catch (_) {}
       }
     }
+  },
+
+  /**
+   * V22+ Phase 5.2 — Mount V21 Multiselect компоненты в placeholder-slot'ы
+   * `<div data-r2-multiselect="…" data-r2-ms-options="…" data-r2-ms-selected="…">`.
+   * Multiselect.create() возвращает DOM-узел; вставляем его внутрь slot'а.
+   */
+  _mountMultiselects() {
+    if (!this._container) return;
+    const slots = this._container.querySelectorAll('[data-r2-multiselect]');
+    slots.forEach(slot => {
+      const filterKey = slot.dataset.r2Multiselect;
+      let options = [];
+      let selected = [];
+      try { options = JSON.parse(slot.dataset.r2MsOptions || '[]'); } catch (_) {}
+      try { selected = JSON.parse(slot.dataset.r2MsSelected || '[]'); } catch (_) {}
+      const label = slot.dataset.r2MsLabel || '';
+
+      // Multiselect mutates `selected` массив — для каждого slot создаём
+      // свежий массив (state.filters не должен mutate-ся напрямую).
+      const localSelected = selected.slice();
+      const node = Multiselect.create(localSelected, (newValues) => {
+        release2State.setFilter(filterKey, newValues);
+        this._renderFull();
+      }, options);
+
+      // Маркируем для CSS-стилизации
+      node.classList.add('r2-ms-mount');
+      node.setAttribute('data-r2-ms-key', filterKey);
+      node.setAttribute('data-r2-ms-label', label);
+
+      slot.replaceWith(node);
+    });
   },
 
   _bindOnce(container) {
@@ -317,6 +363,24 @@ export const Release2View = {
       this._renderFull();
       return;
     }
+    // V22+ Phase 5.2 (Vrba U2) — clear-filter chip из breadcrumb
+    const clearChip = target.closest('[data-r2-clear-filter]');
+    if (clearChip) {
+      const key = clearChip.dataset.r2ClearFilter;
+      const value = clearChip.dataset.r2Value;
+      const cur = release2State.filters[key];
+      if (Array.isArray(cur) && value !== undefined) {
+        release2State.setFilter(key, cur.filter(v => v !== value));
+      } else if (key === 'searchText') {
+        release2State.setFilter('searchText', '');
+      } else if (key === 'phase') {
+        release2State.setFilter('phase', '');
+      } else {
+        release2State.setFilter(key, Array.isArray(cur) ? [] : '');
+      }
+      this._renderFull();
+      return;
+    }
     // Row toggle
     const toggle = target.closest('[data-r2-toggle]');
     if (toggle) {
@@ -344,17 +408,10 @@ export const Release2View = {
     }
   },
 
-  _onChange(e) {
-    const sel = e.target.closest('[data-r2-filter]');
-    if (sel) {
-      const key = sel.dataset.r2Filter;
-      const values = Array.from(sel.selectedOptions || []).map(o => o.value);
-      if (key === 'projects') release2State.setFilter('projectKeys', values);
-      else if (key === 'statuses') release2State.setFilter('statuses', values);
-      else if (key === 'types') release2State.setFilter('types', values);
-      else if (key === 'risks') release2State.setFilter('risks', values);
-      this._renderFull();
-    }
+  _onChange(_e) {
+    // V22+ Phase 5.2 — native <select> removed; filters теперь идут через
+    // Multiselect.onChange callback (см. _mountMultiselects). Handler оставлен
+    // как no-op для backward-compat если где-то ещё кликают по <select>.
   },
 
   _onInput(e) {

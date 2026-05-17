@@ -22791,3 +22791,563 @@ body.theme-dark .r2-diff-item { background: var(--bg-1); }
 body.theme-dark .r2-owner-chip { background: rgba(255,255,255,.04); }
 body.theme-dark .r2-owners-card { background: var(--bg-1); }
 body.theme-dark .r2-diff-dismiss:hover { background: rgba(255,255,255,.08); }
+
+/* ============================================================
+   V22+ Phase 5.2 — Visual grooming v2 (по 4-эксперт-аудиту)
+   Добавки/перекрытия после первичного `.r2-*` block.
+   Не дублируем правила, только добавки и переопределения.
+   ============================================================ */
+
+/* ── Hero-block: phase-bar + owners в один horizontal card ── */
+.r2-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--prizma-bg-elevated, #fff);
+  overflow: hidden;
+}
+.r2-hero > .r2-phase-wrap {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.r2-hero > .r2-owners-card {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* ── Phase-bar v2 (sqrt-grow + filled-tint + dominant hero) ── */
+.r2-phase-wrap {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: stretch;
+}
+.r2-phase-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-3);
+  border-radius: 6px;
+  background: var(--bg-2);
+  cursor: pointer;
+  transition: background-color .12s, border-color .12s;
+}
+.r2-phase-hero:hover { border-color: var(--prizma-information); }
+.r2-phase-hero-active {
+  background: color-mix(in srgb, currentColor 12%, var(--prizma-bg-elevated));
+}
+.r2-phase-hero-num {
+  font: 700 24px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--text-1);
+}
+.r2-phase-hero-meta { display: flex; flex-direction: column; gap: 2px; }
+.r2-phase-hero-label {
+  font: 700 10px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-3);
+}
+.r2-phase-hero-pct {
+  font: 500 11px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-2);
+}
+/* Hero stripe colors */
+.r2-phase-hero.r2-phase-bg-creation  { border-left-color: var(--r2-phase-creation); }
+.r2-phase-hero.r2-phase-bg-stabilize { border-left-color: var(--r2-phase-stabilize); }
+.r2-phase-hero.r2-phase-bg-uat       { border-left-color: var(--r2-phase-uat); }
+.r2-phase-hero.r2-phase-bg-approve   { border-left-color: var(--r2-phase-approve); }
+.r2-phase-hero.r2-phase-bg-deploy    { border-left-color: var(--r2-phase-deploy); }
+.r2-phase-hero.r2-phase-bg-cancel    { border-left-color: var(--r2-phase-cancel); }
+.r2-phase-hero.r2-phase-bg-creation  { color: var(--r2-phase-creation); }
+.r2-phase-hero.r2-phase-bg-stabilize { color: var(--r2-phase-stabilize); }
+.r2-phase-hero.r2-phase-bg-uat       { color: var(--r2-phase-uat); }
+.r2-phase-hero.r2-phase-bg-approve   { color: var(--r2-phase-approve); }
+.r2-phase-hero.r2-phase-bg-deploy    { color: var(--r2-phase-deploy); }
+.r2-phase-hero.r2-phase-bg-cancel    { color: var(--r2-phase-cancel); }
+
+/* Phase-bar segments — filled-tint background instead of top-stripe */
+.r2-phase-bar { height: 40px; }
+.r2-phase-bar-rest .r2-phase-seg { min-width: 64px; }
+.r2-phase-seg.r2-phase-bg-creation  { background: color-mix(in srgb, var(--r2-phase-creation) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-creation); }
+.r2-phase-seg.r2-phase-bg-stabilize { background: color-mix(in srgb, var(--r2-phase-stabilize) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-stabilize); }
+.r2-phase-seg.r2-phase-bg-uat       { background: color-mix(in srgb, var(--r2-phase-uat) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-uat); }
+.r2-phase-seg.r2-phase-bg-approve   { background: color-mix(in srgb, var(--r2-phase-approve) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-approve); }
+.r2-phase-seg.r2-phase-bg-deploy    { background: color-mix(in srgb, var(--r2-phase-deploy) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-deploy); }
+.r2-phase-seg.r2-phase-bg-cancel    { background: color-mix(in srgb, var(--r2-phase-cancel) 18%, var(--prizma-bg-elevated)); box-shadow: inset 0 -2px 0 var(--r2-phase-cancel); }
+
+/* Alert-chip — fix open-paren artifact (#4): убрали border-left на pill-radius */
+.r2-stat-chip { border-radius: 6px; }
+.r2-stat-chip-alert { border-left: none; padding-left: 10px; position: relative; }
+.r2-stat-chip-alert::before {
+  content: '';
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--prizma-drift);
+  margin-right: 4px;
+  vertical-align: 1px;
+}
+.r2-stat-chip-num { display: inline-flex; align-items: baseline; }
+.r2-stat-chip-denom {
+  font: 500 10px/1 ui-monospace, monospace;
+  color: var(--text-3);
+  margin-left: 2px;
+}
+
+/* ── Filters sticky strip ─────────────────────────────────── */
+.r2-filters-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--prizma-bg);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Multiselect mounted slot — приводим к Spine-pill стилю */
+.r2-ms-mount { display: inline-block; }
+.r2-filters .ms-display {
+  min-width: 130px;
+  max-width: 220px;
+  padding: 4px 8px;
+  font: 400 11px/1.2 inherit;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--prizma-bg-elevated, #fff);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.r2-filters .ms-display.open { border-color: var(--prizma-information); }
+
+/* ── Active filters breadcrumb chips ──────────────────────── */
+.r2-fchips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: -4px;
+  padding: 4px 0 8px;
+}
+.r2-fchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  font: 500 11px/1.4 inherit;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.r2-fchip:hover { border-color: var(--prizma-information); color: var(--text-1); }
+.r2-fchip svg { width: 10px; height: 10px; flex-shrink: 0; opacity: .7; }
+.r2-fchip-reset {
+  background: transparent;
+  border-style: dashed;
+  color: var(--prizma-off-course);
+}
+
+/* ── Status-spine (Maeda U1) ──────────────────────────────── */
+.r2-spine {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--bg-2);
+  border-radius: 6px;
+}
+.r2-spine-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 8px;
+  position: relative;
+  text-align: left;
+}
+.r2-spine-stage:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  right: -6px; top: 14px;
+  color: var(--text-4);
+  font-size: 12px;
+  pointer-events: none;
+}
+.r2-spine-bar {
+  height: 3px;
+  border-radius: 1.5px;
+  margin-bottom: 6px;
+  background: var(--border);
+}
+.r2-spine-stage-past .r2-spine-bar    { background: var(--r2-phase-deploy); }
+.r2-spine-stage-active .r2-spine-bar  { background: var(--prizma-information); height: 4px; }
+.r2-spine-stage-cancel .r2-spine-bar  { background: var(--r2-phase-cancel); }
+.r2-spine-stage-future .r2-spine-bar  { background: var(--border); }
+.r2-spine-stage-label {
+  font: 700 10px/1.2 inherit;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-3);
+}
+.r2-spine-stage-active .r2-spine-stage-label { color: var(--prizma-information); }
+.r2-spine-stage-cancel .r2-spine-stage-label { color: var(--r2-phase-cancel); }
+.r2-spine-stage-date {
+  font: 500 11px/1.3 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-2);
+  display: flex; align-items: baseline; gap: 4px;
+  margin-top: 2px;
+}
+.r2-spine-fact { color: var(--text-1); font-weight: 600; }
+.r2-spine-plan { color: var(--text-3); }
+.r2-spine-empty { color: var(--text-4); }
+.r2-spine-delta {
+  font: 500 9.5px/1 ui-monospace, monospace;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.r2-spine-delta-late   { background: var(--prizma-off-course-bg); color: var(--prizma-off-course); }
+.r2-spine-delta-early  { background: var(--prizma-on-course-bg);  color: var(--prizma-on-course); }
+.r2-spine-delta-ontime { background: var(--bg-2);                  color: var(--text-3); }
+
+/* ── Status-pill: nowrap + grid-fix (#20) ─────────────────── */
+.r2-row-head {
+  /* Override colon width: 5th column становится auto + nowrap */
+  grid-template-columns: 14px 92px minmax(0, 1fr) minmax(72px, max-content) auto 84px auto 16px;
+}
+.r2-status { white-space: nowrap; }
+
+/* ── Date eyebrow + plan-vs-fact sparkline (Tufte) ────────── */
+.r2-date {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.r2-date-tag {
+  font: 700 9px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-4);
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--bg-2);
+}
+.r2-pvf {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  background: var(--bg-2);
+  border-radius: 3px;
+}
+.r2-pvf-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.r2-pvf-plan { background: var(--text-3); }
+.r2-pvf-fact { background: var(--text-1); }
+.r2-pvf-line { height: 1px; min-width: 8px; background: var(--text-4); }
+.r2-pvf-late  { background: var(--prizma-off-course); }
+.r2-pvf-early { background: var(--prizma-on-course); }
+.r2-pvf-delta {
+  font: 700 9px/1 ui-monospace, monospace;
+  color: var(--text-3);
+  margin-left: 3px;
+}
+
+/* ── Health chip (4-й таб + row-indicator) ────────────────── */
+.r2-health-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font: 700 10px/1.4 inherit;
+  border-radius: 3px;
+  background: var(--prizma-drift-bg);
+  color: var(--prizma-drift);
+}
+.r2-health-alert { background: var(--prizma-off-course-bg); color: var(--prizma-off-course); }
+.r2-tab-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  font: 700 10px/1.4 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  background: var(--prizma-drift);
+  color: #fff;
+  border-radius: 8px;
+}
+.r2-health-issue {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 0;
+  font: 400 12px/1.4 inherit;
+  color: var(--text-1);
+}
+.r2-health-marker { color: var(--prizma-drift); }
+.r2-health-green {
+  padding: 4px 0;
+  font: 400 12px/1.4 inherit;
+  color: var(--prizma-on-course);
+}
+.r2-health-ok {
+  padding: 12px;
+  text-align: center;
+  font: 500 13px/1.3 inherit;
+  color: var(--prizma-on-course);
+}
+
+/* ── Mini-Gantt timeline ──────────────────────────────────── */
+.r2-mini-gantt {
+  position: relative;
+  padding: 8px 0;
+}
+.r2-mini-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.r2-mini-rowlabel {
+  font: 700 10px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-3);
+  text-align: right;
+}
+.r2-mini-track {
+  position: relative;
+  height: 14px;
+  background: var(--bg-2);
+  border-radius: 3px;
+}
+.r2-mini-plan {
+  position: absolute;
+  top: 3px; bottom: 3px;
+  border-radius: 2px;
+  background: var(--text-4);
+  opacity: .65;
+}
+.r2-mini-fact {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 3px;
+  background: var(--prizma-information);
+  border-radius: 1.5px;
+  transform: translateX(-50%);
+}
+.r2-mini-fact-uat   { background: var(--r2-phase-uat); }
+.r2-mini-fact-deploy { background: var(--r2-phase-deploy); }
+.r2-mini-today {
+  position: absolute;
+  top: 4px; bottom: 4px;
+  width: 2px;
+  background: var(--prizma-off-course);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ── Lifecycle blocks (план/факт пары) ────────────────────── */
+.r2-lc-blocks { display: flex; flex-direction: column; gap: 10px; }
+.r2-lc-block {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.r2-lc-empty > summary {
+  padding: 6px 10px;
+  font: 500 11px/1.2 inherit;
+  color: var(--text-4);
+  cursor: pointer;
+  background: var(--bg-2);
+}
+.r2-lc-header {
+  padding: 6px 10px;
+  font: 700 10px/1.2 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-1);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+.r2-lc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+.r2-lc-col {
+  padding: 8px 10px;
+  background: var(--prizma-bg-elevated, #fff);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.r2-lc-coltitle {
+  font: 700 9px/1 inherit;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+.r2-lc-cell {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font: 400 12px/1.4 inherit;
+}
+.r2-lc-pending { color: var(--text-4); }
+.r2-lc-key { color: var(--text-3); font-size: 11px; }
+.r2-lc-val {
+  color: var(--text-1);
+  font-family: ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.r2-lc-delta {
+  font: 700 9.5px/1 ui-monospace, monospace;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.r2-lc-delta-late   { background: var(--prizma-off-course-bg); color: var(--prizma-off-course); }
+.r2-lc-delta-early  { background: var(--prizma-on-course-bg);  color: var(--prizma-on-course); }
+.r2-lc-delta-ontime { background: var(--bg-2);                  color: var(--text-3); }
+
+/* ── Sublink prefix (LCP grouping) + separators ───────────── */
+.r2-sublink-prefix {
+  font: 500 11px/1.3 inherit;
+  color: var(--text-3);
+  padding: 4px 0 8px;
+  border-bottom: 1px dashed var(--border);
+  margin-bottom: 4px;
+}
+.r2-sublink-priority::before {
+  content: '·';
+  color: var(--text-4);
+  margin: 0 4px;
+}
+.r2-field-sub::before {
+  content: '·';
+  color: var(--text-4);
+  margin: 0 4px;
+}
+
+/* ── URL chips ────────────────────────────────────────────── */
+.r2-url-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  margin: 2px 0;
+  font: 400 11px/1.3 inherit;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--prizma-information);
+  text-decoration: none;
+  max-width: 100%;
+  overflow: hidden;
+}
+.r2-url-chip:hover { border-color: var(--prizma-information); }
+.r2-url-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+/* ── Rich-text list (SPO heuristic-split) ────────────────── */
+.r2-rich-list {
+  margin: 0;
+  padding: 0 0 0 16px;
+  list-style: disc;
+  color: var(--text-1);
+  font: 400 13px/1.5 inherit;
+}
+.r2-rich-list li { padding: 1px 0; }
+/* Override existing .r2-rich to NOT use mono (Brand #5) */
+.r2-rich {
+  font: 400 13px/1.5 inherit !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--prizma-bg-elevated, #fff);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* ── User: blocked muted-render (Brand #21) ───────────────── */
+.r2-user-blocked {
+  opacity: .55;
+  text-decoration: line-through dotted var(--text-4);
+  font-style: italic;
+}
+
+/* ── Diff-sparkline polish (Tufte #22) ────────────────────── */
+.r2-diff-sparkline {
+  height: 26px;
+  padding: 2px 6px;
+  border-left: none;
+  border-right: none;
+  background: var(--bg-2);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  margin-left: 6px;
+}
+.r2-spark-bar { width: 7px; }
+.r2-diff-sparkline-label {
+  font: 700 10px/1 ui-monospace, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--text-3);
+  margin-left: 6px;
+  align-self: center;
+}
+
+/* ── Owners: solo group (Vrba #15) ────────────────────────── */
+.r2-group-solo { border: none; background: transparent; }
+.r2-group-solo .r2-group-body { padding: 0; }
+
+/* ── КЭ-chip gap (#16) — single chip not enough; multi-chip support ── */
+/* No-op: row уже использует single chip с count для multi-КЭ */
+
+/* ── Tab badge color in dark theme ────────────────────────── */
+body.theme-dark .r2-tab-badge { color: #fff; }
+
+/* ── Inactive tab contrast (Brand #30) ────────────────────── */
+.r2-tab { color: var(--text-2); font-weight: 600; }
+.r2-tab-active { color: var(--prizma-information); font-weight: 700; }
+
+/* ── Mascot hide on Release 2.0 tab (#29) ─────────────────── */
+body.r2-active .sbof-mascot,
+body.r2-active .pz-mascot,
+body.r2-active [class*="mascot"] {
+  display: none !important;
+}
+
+/* ── Zebra-fix in Сроки (Vrba #28): убрали через .r2-field rewrite ─ */
+/* Old .r2-field используется в attrs/inside — оставляем. Lifecycle-blocks
+   используют .r2-lc-cell, у которой нет border-top. */
+
+/* ── Dark theme parity for new components ─────────────────── */
+body.theme-dark .r2-hero,
+body.theme-dark .r2-stat-chip,
+body.theme-dark .r2-fchip,
+body.theme-dark .r2-spine,
+body.theme-dark .r2-lc-col,
+body.theme-dark .r2-url-chip,
+body.theme-dark .r2-mini-track { background: var(--bg-1); }
+body.theme-dark .r2-phase-hero { background: rgba(255,255,255,.04); }
+body.theme-dark .r2-lc-header,
+body.theme-dark .r2-lc-empty > summary { background: rgba(255,255,255,.04); }
+body.theme-dark .r2-diff-sparkline { background: rgba(255,255,255,.04); }
+body.theme-dark .r2-filters-sticky { background: var(--prizma-bg); }
