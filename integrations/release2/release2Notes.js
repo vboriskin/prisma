@@ -461,12 +461,49 @@ export function buildLLMPrompt(release, related = [], opts = {}) {
 const LLM_TIMEOUT_MS = 45_000;
 
 /**
+ * Берём LLM-настройки из глобального LLMAssistant (settings + token).
+ * Если модуля нет (тесты / shim) — возвращаем дефолты + пустой token.
+ * Сервер `/api/llm/chat` ожидает `body.token` (или clientId+clientSecret).
+ * Без этого 400 «Нет токена». Чатбот шлёт точно такой же payload —
+ * см. app/llmAssistant.js callGigaChatStream.
+ */
+function _getLLMConfig() {
+  try {
+    if (typeof window !== 'undefined' && window.LLMAssistant) {
+      const settings = window.LLMAssistant.getSettings?.() || {};
+      const token = window.LLMAssistant.getToken?.() || '';
+      return {
+        apiBaseUrl:  String(settings.apiBaseUrl || '').replace(/\/+$/, ''),
+        model:       settings.model || 'GigaChat-2',
+        temperature: Number.isFinite(Number(settings.temperature)) ? Number(settings.temperature) : 0.3,
+        clientId:     settings.clientId     || '',
+        clientSecret: settings.clientSecret || '',
+        token,
+      };
+    }
+  } catch (_) { /* fallthrough */ }
+  return { apiBaseUrl: '', model: 'GigaChat-2', temperature: 0.3, token: '', clientId: '', clientSecret: '' };
+}
+
+/**
  * @param {{system,user}} prompt
  * @param {object} opts — { signal?, model?, maxTokens?, temperature?, timeoutMs? }
- * @returns {Promise<string|null>}
+ * @returns {Promise<{ok:boolean, text?:string, error?:string}>}
  */
 export async function callLLMForNotes(prompt, opts = {}) {
-  if (!prompt?.system || !prompt?.user) return null;
+  if (!prompt?.system || !prompt?.user) {
+    return { ok: false, error: 'Внутренняя ошибка: пустой prompt.' };
+  }
+  const cfg = _getLLMConfig();
+  // Sanity: без token (и без clientId+clientSecret) сервер вернёт 400.
+  // Лучше явно сообщить пользователю «настройте LLM», чем показывать
+  // generic «не удалось».
+  if (!cfg.token && !(cfg.clientId && cfg.clientSecret)) {
+    return {
+      ok: false,
+      error: 'LLM не настроен. Откройте Настройки → LLM → введите token или clientId+clientSecret.',
+    };
+  }
   const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   const timer = ctrl ? setTimeout(() => {
     try { ctrl.abort(new DOMException('Timeout', 'TimeoutError')); }
@@ -478,14 +515,20 @@ export async function callLLMForNotes(prompt, opts = {}) {
   }
   try {
     const body = {
+      // Точно такой же shape как в LLMAssistant.callGigaChatStream / chatActions.
+      apiBaseUrl: cfg.apiBaseUrl,
+      model:      opts.model       || cfg.model || 'GigaChat-2',
+      temperature: typeof opts.temperature === 'number' ? opts.temperature : cfg.temperature,
+      max_tokens: Math.min(opts.maxTokens || 2500, 4000),
+      stream:     false,
       messages: [
         { role: 'system', content: prompt.system },
         { role: 'user',   content: prompt.user },
       ],
-      model: opts.model || 'GigaChat',
-      max_tokens: Math.min(opts.maxTokens || 2500, 4000),
-      temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.3,
-      stream: false,
+      // Token / clientId / clientSecret — обязательны для /api/llm/chat.
+      token:        cfg.token,
+      clientId:     cfg.clientId,
+      clientSecret: cfg.clientSecret,
     };
     const res = await fetch('/api/llm/chat', {
       method: 'POST',
@@ -493,17 +536,27 @@ export async function callLLMForNotes(prompt, opts = {}) {
       body: JSON.stringify(body),
       signal: ctrl?.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Пытаемся вытащить server message — он часто говорит конкретику
+      // (бюджет / нет токена / cross-origin / payload too large).
+      const errBody = await res.json().catch(() => null);
+      const errMsg = errBody?.error
+        ? `${errBody.error}`
+        : `HTTP ${res.status} ${res.statusText || ''}`.trim();
+      return { ok: false, error: errMsg };
+    }
     const data = await res.json().catch(() => null);
-    if (!data) return null;
+    if (!data) return { ok: false, error: 'Сервер вернул не-JSON ответ.' };
     const text = data?.choices?.[0]?.message?.content
               || data?.text
               || data?.content
               || null;
-    if (!text || typeof text !== 'string') return null;
-    return text.trim();
-  } catch (_) {
-    return null;
+    if (!text || typeof text !== 'string') {
+      return { ok: false, error: 'LLM вернул пустой ответ.' };
+    }
+    return { ok: true, text: text.trim() };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
   } finally {
     if (timer) clearTimeout(timer);
   }

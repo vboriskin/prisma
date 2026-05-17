@@ -296,19 +296,24 @@ async function _runLLM(release, modalState, overlay, opts) {
   // 2) Build prompt и вызываем LLM.
   _renderInlineLLMNotice(overlay, 'generating');
   const prompt = buildLLMPrompt(release, related, { mode: modalState.mode });
-  let llmText = null;
+  // 2026-05-17 — callLLMForNotes возвращает `{ok, text, error}` (раньше
+  // был просто string|null). Это позволяет показать конкретную причину:
+  // «нет токена», «бюджет исчерпан», «timeout» и т.п. — вместо generic
+  // «LLM недоступен».
+  let llmResult = { ok: false, error: 'Unknown error' };
   try {
-    llmText = await callLLMForNotes(prompt, {
+    llmResult = await callLLMForNotes(prompt, {
       signal: modalState.abortCtrl.signal,
       maxTokens: 2500,
       temperature: 0.3,
     });
   } catch (e) {
-    modalState.llmError = e?.message || 'LLM error';
+    llmResult = { ok: false, error: e?.message || 'LLM error' };
   }
   modalState.llmLoading = false;
-  if (!llmText) {
-    _renderInlineLLMNotice(overlay, 'llm-failed', 'LLM не вернул ответ — возможно токен не настроен или превышен timeout.');
+  if (!llmResult.ok) {
+    modalState.llmError = llmResult.error || 'LLM error';
+    _renderInlineLLMNotice(overlay, 'llm-failed', modalState.llmError);
     // Откатываем body к rule-based + сохраняем descriptions для следующей попытки.
     modalState.currentMarkdown = buildRuleBasedMarkdown(release, related, { mode: modalState.mode });
     _updateBody(overlay, modalState);
@@ -318,7 +323,7 @@ async function _runLLM(release, modalState, overlay, opts) {
   // 3) Success — обновляем body новым LLM-output'ом.
   _clearInlineLLMNotice(overlay);
   modalState.source = 'llm';
-  modalState.currentMarkdown = llmText;
+  modalState.currentMarkdown = llmResult.text;
   _updateBody(overlay, modalState);
   _updateSourceBadge(overlay, 'llm');
   _updateFooter(overlay, release, 'llm');
