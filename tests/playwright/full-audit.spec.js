@@ -67,35 +67,97 @@ async function setupErrorCapture(page, section) {
 }
 
 async function bypassWelcome(page) {
-  const cta = page.locator('#welcomeCtaBtn');
-  if (await cta.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await cta.click();
-    await page.waitForTimeout(1000);
+  // V22+ Phase 5 — welcome flow многоступенчатый:
+  //   Шаг 1: #welcomeOverlay (Призма / Сверить курс / Restore?)
+  //   Шаг 2: после dismiss → onboardingUI показывает empty-state c
+  //          кнопками #ob-empty-demo «Посмотреть демо» / file-import
+  // Чтобы получить богатый dataset, кликаем «Посмотреть демо» (через id'шник).
+  // 1. Дождаться welcome overlay
+  const overlay = page.locator('#welcomeOverlay');
+  if (await overlay.isVisible({ timeout: 1500 }).catch(() => false)) {
+    // Если есть restore-button — выбираем «Начать заново»
+    const restoreNo = page.locator('#welcomeRestoreNo');
+    if (await restoreNo.isVisible({ timeout: 300 }).catch(() => false)) {
+      await restoreNo.click();
+    } else {
+      const cta = page.locator('#welcomeCtaBtn');
+      if (await cta.isVisible({ timeout: 300 }).catch(() => false)) {
+        await cta.click();
+      }
+    }
+    await page.waitForTimeout(800);
   }
+  // 2. После dismiss — есть либо empty-state, либо main UI с overlay'ем «Посмотреть демо».
+  //    Жмём на demo-кнопку через ID (надёжнее text-locator).
+  for (const sel of ['#ob-empty-demo', '#ob-btn-demo', 'text=Посмотреть демо', 'text=Шаблон демо']) {
+    const btn = page.locator(sel).first();
+    if (await btn.isVisible({ timeout: 600 }).catch(() => false)) {
+      await btn.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(1800);   // дать demo-data загрузиться (loadDemoData)
+      break;
+    }
+  }
+  // 3. После загрузки demo стартует onboarding-tour («Это Обсидиан / Маленький наблюдатель»).
+  //    Жмём «Пропустить» чтобы освободить main UI для Nav.go().
+  for (let i = 0; i < 5; i++) {
+    const skip = page.locator('text=Пропустить').first();
+    if (await skip.isVisible({ timeout: 500 }).catch(() => false)) {
+      await skip.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(400);
+    } else {
+      break;
+    }
+  }
+  // 4. Закрыть любые toast'ы / banner'ы (например «Демо-данные загружены — N задач»)
+  const toastClose = page.locator('[aria-label="Закрыть"], .toast button[type="button"]').first();
+  if (await toastClose.isVisible({ timeout: 300 }).catch(() => false)) {
+    await toastClose.click({ force: true }).catch(() => {});
+  }
+  await page.waitForTimeout(400);
 }
 
 async function gotoSection(page, sectionKey) {
-  await page.evaluate((sec) => {
-    if (typeof window.Nav?.go === 'function') window.Nav.go(sec);
-    else { location.hash = '#' + sec; }
+  // V22+ — Nav.goTo (не Nav.go). Тройной fallback:
+  //   1. window.Nav.goTo()
+  //   2. click по .nav-item[data-section=<key>]
+  //   3. location.hash = #<key>
+  const ok = await page.evaluate((sec) => {
+    if (typeof window.Nav?.goTo === 'function') {
+      window.Nav.goTo(sec);
+      return 'nav-goto';
+    }
+    const btn = document.querySelector(`.nav-item[data-section="${sec}"]`);
+    if (btn) { btn.click(); return 'nav-click'; }
+    location.hash = '#' + sec;
+    return 'hash';
   }, sectionKey);
+  // eslint-disable-next-line no-console
+  if (ok !== 'nav-goto') console.log('[nav] fallback =', ok, 'for', sectionKey);
   await page.waitForTimeout(1500);
 }
 
+// V22+ — реальные section-keys из index.html (по data-section)
 const VIEWS = [
-  { key: 'registry',    label: 'Реестр',          hash: '#registry' },
-  { key: 'gantt',       label: 'Гант',            hash: '#gantt' },
-  { key: 'dashboard',   label: 'Дашборд',         hash: '#dashboard' },
-  { key: 'metrics',     label: 'Метрики',         hash: '#metrics' },
-  { key: 'summary',     label: 'Сводная',         hash: '#summary' },
-  { key: 'insights',    label: 'Инсайты',         hash: '#insights' },
-  { key: 'employees',   label: 'Сотрудники',      hash: '#employees' },
-  { key: 'aiAnalysis',  label: 'AI Анализ',       hash: '#aiAnalysis' },
-  { key: 'aiCeo',       label: 'AI CEO',          hash: '#aiCeo' },
-  { key: 'integrations', label: 'Интеграции',     hash: '#integrations' },
-  { key: 'history',     label: 'История',         hash: '#history' },
-  { key: 'errors',      label: 'Ошибки',          hash: '#errors' },
-  { key: 'settings',    label: 'Настройки',       hash: '#settings' },
+  { key: 'dashboard',         label: 'Дашборд' },
+  { key: 'metrics',           label: 'Метрики' },
+  { key: 'registry',          label: 'Реестр' },
+  { key: 'gantt',             label: 'Гант' },
+  { key: 'kanban',            label: 'Канбан' },
+  { key: 'timeline',          label: 'Таймлайн' },
+  { key: 'podlozhka',         label: 'Подложка' },
+  { key: 'history',           label: 'История' },
+  { key: 'employees',         label: 'Сотрудники' },
+  { key: 'burnout',           label: 'Перегрузка' },
+  { key: 'component-health',  label: 'Здоровье компонентов' },
+  { key: 'ai-ceo',            label: 'AI CEO' },
+  { key: 'exec',              label: 'CEO-режим' },
+  { key: 'actions',           label: 'Действия' },
+  { key: 'ai',                label: 'AI Анализ' },
+  { key: 'est-calibration',   label: 'Точность оценок' },
+  { key: 'doc-debt',          label: 'Документация: долги' },
+  { key: 'integrations',      label: 'Интеграции' },
+  { key: 'diagnostics',       label: 'Диагностика' },
+  { key: 'errors',            label: 'Ошибки' },
 ];
 
 test.describe.serial('Full audit — пробегаем по всем view', () => {
