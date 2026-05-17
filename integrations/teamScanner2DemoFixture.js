@@ -470,6 +470,9 @@ const PARTICIPANTS = [
       { key: 'CF-2', title: 'A/B Тест: 14-дневные результаты', updatedAt: ago(4), kind: 'edit' },
       { key: 'CF-3', title: 'Очистка данных KYC — план', updatedAt: ago(32), kind: 'create' },
       { key: 'CF-4', title: 'Дашборд KYC: change-log', updatedAt: ago(26), kind: 'edit' },
+      // 2026-05-17 — demo comment с body (для проверки фикса раскрывашки
+      // в Scanner panel'и: «коммент» → видно текст коммента).
+      { key: 'CF-5', title: 'KYC Метрики Q2 — обзор', updatedAt: ago(6), kind: 'comment', body: 'Согласовали с продактом: убираем зависимость от поля «исп. кстати»; вместо этого матчим по jiraAccountId. Если возражений нет — выкатим завтра.' },
     ],
     heatmap72x4: makeHeatmap(301, 1.1),
     contextSwitches: { distinctIssueKeys: 3, switchEvents: [

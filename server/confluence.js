@@ -296,7 +296,13 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
   const mentionCql = `lastmodified > "${isoCutoff}"`;
   const [editR, commentR, mentionR] = await Promise.all([
     runCQL(editCql, 'contributor', 'version,space,history.lastUpdated,history.createdBy'),
-    runCQL(commentCql, 'creator', 'version,space,container'),
+    // 2026-05-17 — добавили body.view для comments чтобы в Scanner panel'и
+    // в раскрывашке Confluence-комментариев показывать сам текст коммента,
+    // а не только container.title. Раньше «коммент» в event-листе после
+    // клика показывал только «space» и «diff link» — пользователю было
+    // непонятно ЧТО за коммент. Confluence DC + Cloud оба поддерживают
+    // body.view → возвращает HTML-ready text.
+    runCQL(commentCql, 'creator', 'version,space,container,body.view'),
     runCQL(mentionCql, 'mention', 'version,space'),
   ]);
 
@@ -367,6 +373,25 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
     const a = ensureAuthor(dn, em, k, cfUn);
     a.comments++;
     const cont = c.container || {};
+    // 2026-05-17 — извлекаем body коммента (HTML → plain text, slice 280).
+    // body.view.value приходит как HTML-fragment («<p>текст</p>»), мы:
+    //   1) strip tags регуляркой <[^>]+> → ' '
+    //   2) collapse whitespace
+    //   3) trim + slice до 280 chars (4-5 строк в UI)
+    // На случай отсутствия body.view (старая Confluence DC) — fallback на ''.
+    let bodyRaw = c?.body?.view?.value || '';
+    if (typeof bodyRaw !== 'string') bodyRaw = '';
+    const bodyText = bodyRaw
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 280);
     pushItem(a, {
       kind:  'comment',
       title: cont.title || c.title || '(без заголовка)',
@@ -375,6 +400,7 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
       spaceKey:  c.space?.key  || cont.space?.key  || '',
       spaceName: c.space?.name || cont.space?.name || '',
       targetId:  `${cont.id || c.id || ''}#comment-${c.id || ''}`,
+      body:      bodyText,
     });
   }
   // Pass 3 — mentions

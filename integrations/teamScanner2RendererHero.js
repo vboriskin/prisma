@@ -398,7 +398,7 @@ function renderSprintGauge(sg, prevSg, slope) {
         slope.trend === 'up'   ? `↗ +${slope.slope}%/день` :
         slope.trend === 'down' ? `↘ ${slope.slope}%/день — падение` :
                                   '→ ровно'
-      }${lowConfidence ? ' <small class="ts2-slope-r2-hint" aria-label="низкая статистическая уверенность">?</small>' : ''}</span>`
+      }${lowConfidence ? ` <small class="ts2-slope-r2-hint" title="Низкая статистическая уверенность: R²=${slope.r2} < 0.5 (${r2Interp}). Тренд может быть шумом, а не настоящим направлением. Нужно больше дней наблюдения." aria-label="низкая статистическая уверенность">?</small>` : ''}</span>`
     : '';
   // V20 S7 A4 — sprint-mean (sprint-weighted) рядом с aggregate (issue-weighted).
   // Раскрывает асимметрию: spring-200/10% vs sprint-20/90% → mean=50% vs aggregate=18%.

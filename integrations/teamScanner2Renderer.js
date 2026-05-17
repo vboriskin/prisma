@@ -1534,12 +1534,12 @@ function renderHeatmap72x4(h, filters) {
         if (n >= _saturatedThreshold) isHigh = true;
       }
       const isPeak = h.peakCell && h.peakCell.srcIdx === srcIdx && h.peakCell.hourIndex === hourIdx;
-      // 2026-05-11 — 5-color palette: per-source цвет вместо единого синего.
-      // Раньше все источники J/B/C/Z = одинаковый цвет, на 72×5 grid нельзя
-      // быстро увидеть «вторник 0 коммитов, но есть CF» — паттерны замешаны.
-      // Теперь каждая строка визуально отличается:
-      //   J=Jira (blue), B=Bitbucket (green), C=Confluence (amber),
-      //   Zc=Zephyr-tests (purple), Ze=Zephyr-runs (rose).
+      // 2026-05-17 — palette: brand-blue + tonal vary через color-mix
+      // (вместо rainbow 5 ярких HEX'ов). Раньше каждая строка светилась
+      // своим hue (blue/green/amber/purple/rose) — для 72×5 grid'а это
+      // выглядело как «дискотека» и съедало внимание. Теперь рядки
+      // различимы через label слева, а grid читается как единое поле
+      // активности. Per-source цвет: см. .ts2-hcell-src-* в styles.css.
       const classes = ['ts2-hcell', `ts2-hcell-src-${SRC_KEYS[srcIdx]}`];
       if (isPeak) classes.push('ts2-hcell-peak');
       if (isHigh) classes.push('ts2-hcell-saturated');
@@ -1775,7 +1775,7 @@ function renderEventLine(e, idx) {
       : linkifyIssueKeys(esc(titleText));
     body = `<span class="ts2-recent-kind">${esc(kindLabel('bb', kind))}</span> ${status} ${repo} <span class="ts2-recent-text">${titleHtml}</span>`;
   } else if (src === 'cf') {
-    // cfItem: { kind: 'edit'|'create'|'comment', title, spaceName, spaceKey, url }
+    // cfItem: { kind: 'edit'|'create'|'comment', title, spaceName, spaceKey, url, body? }
     const kind = e.kind || 'edit';
     const space = e.spaceName || e.spaceKey ? `<span class="ts2-recent-meta">${esc(e.spaceName || e.spaceKey)}</span>` : '';
     const status = e.status
@@ -1786,11 +1786,22 @@ function renderEventLine(e, idx) {
       ? `<a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">${linkifyIssueKeys(esc(titleText))}</a>`
       : linkifyIssueKeys(esc(titleText));
     body = `<span class="ts2-recent-kind">${esc(kindLabel('cf', kind))}</span> ${status} ${space} <span class="ts2-recent-text">${titleHtml}</span>`;
-    // Click-to-expand: для CF-edit показываем diff URL + space name.
+    // Click-to-expand: для CF-edit показываем diff URL + space name; для
+    // CF-comment добавляем сам текст коммента (e.body приходит из сервера
+    // после 2026-05-17 — server/confluence.js извлекает body.view.value и
+    // strip'ает HTML). Без этого блока в раскрывашке было только space +
+    // (опционально) diff-link → пользователь не понимал «что за коммент».
     const cfDetails = [];
+    if (kind === 'comment' && e.body) {
+      cfDetails.push(`<div><span class="ts2-recent-diff-tag">текст</span> ${linkifyIssueKeys(esc(e.body))}</div>`);
+    }
     if (e.spaceName || e.spaceKey) cfDetails.push(`<div><span class="ts2-recent-diff-tag">space</span> ${esc(e.spaceName || e.spaceKey)}</div>`);
     if (e.diffUrl) cfDetails.push(`<div><span class="ts2-recent-diff-tag">diff</span> <a class="ts2-issue-link" href="${esc(e.diffUrl)}" target="_blank" rel="noopener noreferrer">открыть в Confluence</a></div>`);
+    if (kind === 'comment' && e.url) cfDetails.push(`<div><span class="ts2-recent-diff-tag">ссылка</span> <a class="ts2-issue-link" href="${esc(e.url)}" target="_blank" rel="noopener noreferrer">открыть коммент</a></div>`);
     if (e.title && e.title.length > 80) cfDetails.push(`<div><span class="ts2-recent-diff-tag">title</span> ${esc(e.title)}</div>`);
+    if (kind === 'comment' && !e.body) {
+      cfDetails.push(`<div class="ts2-recent-diff-hint"><i>текст коммента недоступен — сервер не вернул body.view (старая Confluence DC?). Откройте по ссылке в Confluence.</i></div>`);
+    }
     if (cfDetails.length) expandable = `<div class="ts2-recent-diff">${cfDetails.join('')}</div>`;
   } else if (src === 'zephyr') {
     // V18.3 A2 — kind ∈ {test, testSet} → Zc badge; иначе Ze.

@@ -15171,6 +15171,20 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   border-top-color: transparent;
   border-bottom-color: var(--text-1, #0f172a);
 }
+/* 2026-05-17 — fix double-tooltip: на nested chips (gauge > pill,
+   slope > hint) браузер показывал ОБА тултипа сразу — родителя и
+   ребёнка. `:has([data-tip]:hover)` ловит парента, ВНУТРИ которого
+   уже наведён data-tip ребёнок, и гасит его pseudo-element'ы. Через
+   `@supports selector(:has(...))` старые браузеры (Safari <15.4,
+   FF <121) сохраняют текущее поведение — лучше «двойной тултип»,
+   чем «никакого» если бы `:has()` обнулял всё правило. */
+@supports selector(:has(*)) {
+  .ts2-root [data-tip]:has([data-tip]:hover):hover::after,
+  .ts2-root [data-tip]:has([data-tip]:hover):hover::before {
+    content: none;
+    display: none;
+  }
+}
 @keyframes ts2-tip-in { to { opacity: 1; } }
 
 /* V18.1 P7-S2.1 — Sprint Goal Progress gauge в topbar */
@@ -16978,38 +16992,45 @@ body.theme-dark .ts2-panel-counter-hero {
   color: var(--text-4, #94a3b8);
 }
 
-/* Heatmap 72×4 — 72 cells per row, 4 rows. */
+/* Heatmap 72×5 — 72 cells per row, 5 rows (J/B/C/Zc/Ze). */
 .ts2-heatmap { display: flex; flex-direction: column; gap: 3px; }
 .ts2-hrow {
   display: grid;
-  grid-template-columns: 18px 1fr 32px;
+  /* 2026-05-17 — 4-column grid: label / cells / row-tail / total.
+     Раньше было 3 колонки (18px 1fr 32px), а Sprint C6 добавил row-tail
+     четвёртым ребёнком — он смещал total на новую строку или перекрывал
+     её. Теперь tail имеет свою auto-колонку и gap. */
+  grid-template-columns: 22px 1fr auto 36px;
   align-items: center; gap: 8px;
 }
-.ts2-hrow-hidden { opacity: .25; }
+.ts2-hrow-hidden { opacity: .35; }
 .ts2-hrow-label {
   font-family: var(--font-mono);
   font-size: 10px; font-weight: 700; color: var(--text-2);
   text-align: center;
+  letter-spacing: .3px;
 }
 .ts2-hrow-cells {
   display: inline-grid; grid-template-columns: repeat(72, 1fr);
   gap: 1px; height: 14px; min-width: 0;
 }
 .ts2-hcell {
-  background: var(--prizma-information, #4f46e5);
+  background: var(--text-3, #64748b);
   border-radius: 1px;
   display: block;
   min-width: 2px;
 }
-/* 2026-05-11 — 5-color heatmap palette per source. Colors выбраны
-   colorblind-friendly (Wong palette adapted): blue/green/amber/purple/rose.
-   Защита от deuteranopia: blue vs amber легко различимы, green vs rose
-   через насыщенность отличаются. */
-.ts2-hcell-src-j  { background: #3b82f6; } /* Jira — blue */
-.ts2-hcell-src-b  { background: #10b981; } /* Bitbucket — emerald-green */
-.ts2-hcell-src-c  { background: #f59e0b; } /* Confluence — amber */
-.ts2-hcell-src-zc { background: #8b5cf6; } /* Zephyr-tests — purple */
-.ts2-hcell-src-ze { background: #ec4899; } /* Zephyr-runs — rose */
+/* 2026-05-17 — palette перевели с rainbow (5 ярких HEX'ов) на единый
+   prizma-information с tonal variation через `color-mix`. Раньше каждая
+   строка светилась своим цветом (blue/green/amber/purple/rose) — на 72×5
+   grid'е это выглядело как «дискотека» и съедало внимание. Теперь все
+   ряды используют brand-color + tint, различимы по строке (label слева),
+   а не по hue. */
+.ts2-hcell-src-j  { background: var(--prizma-information, #2563eb); }
+.ts2-hcell-src-b  { background: color-mix(in srgb, var(--prizma-information, #2563eb) 78%, var(--prizma-on-course, #10b981) 22%); }
+.ts2-hcell-src-c  { background: color-mix(in srgb, var(--prizma-information, #2563eb) 65%, var(--text-3, #64748b) 35%); }
+.ts2-hcell-src-zc { background: color-mix(in srgb, var(--prizma-information, #2563eb) 55%, var(--prizma-approve, #8b5cf6) 45%); }
+.ts2-hcell-src-ze { background: color-mix(in srgb, var(--prizma-information, #2563eb) 60%, var(--text-2, #334155) 40%); }
 .ts2-hcell-peak {
   outline: 1px solid var(--prizma-information);
   outline-offset: 1px;
@@ -17028,7 +17049,10 @@ body.theme-dark .ts2-panel-counter-hero {
 }
 .ts2-haxis {
   display: flex; justify-content: space-between;
-  margin: 6px 40px 0 26px;
+  /* 2026-05-17 — left/right margins подобраны под grid-template-columns
+     `22px 1fr auto 36px` + 3×8px gap. Левая часть: 22 + 8 = 30px.
+     Правая часть: 36 + 8 + tail(~21) + 8 = ~73px. */
+  margin: 6px 73px 0 30px;
   font-family: var(--font-mono);
   font-size: 9px; color: var(--text-4, #94a3b8);
 }
@@ -23592,13 +23616,14 @@ body.is-ts2-modal-open .assistant-fab {
 .ts2-fchip:hover { border-color: var(--prizma-information); }
 .ts2-fchip svg { width: 10px; height: 10px; opacity: .7; }
 
-/* Heatmap row-tail inline-sparkline (Tufte) */
+/* Heatmap row-tail inline-sparkline (Tufte).
+   2026-05-17 — margin-left убран: теперь `.ts2-hrow` grid имеет 4
+   колонки с gap:8px, ручной отступ создавал двойной зазор. */
 .ts2-heatmap-row-tail {
   display: inline-flex;
   align-items: flex-end;
   gap: 1px;
   height: 14px;
-  margin-left: 6px;
 }
 .ts2-heatmap-row-tail-bar {
   width: 3px;
@@ -23705,12 +23730,15 @@ body.theme-dark .ts2-team-switcher { background: var(--prizma-bg); }
 }
 .ts2-panel-meta-today strong { color: var(--text-1); font-weight: 600; }
 
-/* ── Sprint C6: heatmap row-tail (per-src colored mini sparkline) ── */
+/* ── Sprint C6: heatmap row-tail (per-src colored mini sparkline) ──
+   2026-05-17 — синхронизированы с новой palette ячеек heatmap'а: единый
+   prizma-information с tonal vary через color-mix вместо «радуги»
+   information/on-course/drift/approve/off-course. */
 .ts2-heatmap-row-tail-bar.ts2-hcell-src-j  { background: var(--prizma-information); }
-.ts2-heatmap-row-tail-bar.ts2-hcell-src-b  { background: var(--prizma-on-course); }
-.ts2-heatmap-row-tail-bar.ts2-hcell-src-c  { background: var(--prizma-drift); }
-.ts2-heatmap-row-tail-bar.ts2-hcell-src-zc { background: var(--prizma-approve); }
-.ts2-heatmap-row-tail-bar.ts2-hcell-src-ze { background: var(--prizma-off-course); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-b  { background: color-mix(in srgb, var(--prizma-information, #2563eb) 78%, var(--prizma-on-course, #10b981) 22%); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-c  { background: color-mix(in srgb, var(--prizma-information, #2563eb) 65%, var(--text-3, #64748b) 35%); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-zc { background: color-mix(in srgb, var(--prizma-information, #2563eb) 55%, var(--prizma-approve, #8b5cf6) 45%); }
+.ts2-heatmap-row-tail-bar.ts2-hcell-src-ze { background: color-mix(in srgb, var(--prizma-information, #2563eb) 60%, var(--text-2, #334155) 40%); }
 
 /* ── Sprint C3: event-log collapsed by default ────────────── */
 .ts2-events-summary-toggle {
