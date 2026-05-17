@@ -23351,3 +23351,42 @@ body.theme-dark .r2-lc-header,
 body.theme-dark .r2-lc-empty > summary { background: rgba(255,255,255,.04); }
 body.theme-dark .r2-diff-sparkline { background: rgba(255,255,255,.04); }
 body.theme-dark .r2-filters-sticky { background: var(--prizma-bg); }
+
+/* ── Phase 5.2 final polish (5 closing fixes) ─────────────── */
+
+/* #12 word-break для длинных значений в expand-полях */
+.r2-field-value,
+.r2-lc-val,
+.r2-kg-item {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* #13 Owner phasebar 4px → 6px (Tufte: 4px на 6 сегментов = pixel-mush).
+   Также прижимаем min-width сегмента к 3px чтобы approve/cancel не сливались. */
+.r2-owner-phasebar { height: 6px; border-radius: 3px; }
+.r2-owner-phase-seg { min-width: 3px; }
+
+/* #14 «Подгрузить детали» — link-style ghost. */
+.r2-related-load {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 2px;
+  padding: 0;
+  font: 500 11px/1.3 inherit;
+  color: var(--text-3);
+  text-decoration: none;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: .2px;
+}
+.r2-related-load:hover { color: var(--prizma-information); }
+.r2-related-load svg { width: 11px; height: 11px; opacity: .7; }
+
+/* Birman A relative time — visually subtle (light, mono для consistency) */
+.r2-toolbar-fetched {
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}

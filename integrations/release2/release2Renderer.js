@@ -290,9 +290,26 @@ function _renderActiveFiltersBreadcrumb(state) {
    Toolbar (refresh button + last-fetched + group-by)
    ───────────────────────────────────────────────────────────── */
 
+/**
+ * V22+ Phase 5.2 (Birman A) — relative time для последнего обновления.
+ * До 60 секунд — «только что», до 60 минут — «N мин назад», до 24ч — «Nч назад»,
+ * дальше — обычная дата без времени.
+ */
+function _fmtRelative(iso) {
+  const ts = Date.parse(iso || '');
+  if (!Number.isFinite(ts)) return '';
+  const diff = Date.now() - ts;
+  if (diff < 0)         return _fmtDate(iso, { withTime: 'auto', withYear: 'auto' });
+  if (diff < 60_000)    return 'только что';
+  if (diff < 3600_000)  return `${Math.floor(diff / 60_000)} мин назад`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} ч назад`;
+  return _fmtDate(iso, { withYear: 'auto' });
+}
+
 function _renderToolbar(analysed, state) {
+  // Phase 5.2 Birman A — относительное время + точное в title
   const fetched = analysed?.fetchedAt
-    ? `<span class="r2-toolbar-fetched">обновлено: ${_fmtDate(analysed.fetchedAt, { withTime: true })}</span>`
+    ? `<span class="r2-toolbar-fetched" title="${escapeHtml(_fmtDate(analysed.fetchedAt, { withTime: true }))}">обновлено: ${escapeHtml(_fmtRelative(analysed.fetchedAt))}</span>`
     : '';
   const total = analysed?.stats?.total || 0;
 
@@ -1005,8 +1022,11 @@ function _renderTabCompose(r, state) {
   const cloners = r._links?.cloners || [];
   const subtasks = r._subtasks || [];
 
+  // Phase 5.2 (#14) — «Подгрузить детали» из button → link-style (icon-only
+  // в правом верху первой секции). Раз-в-сессию-action, не должен соревноваться
+  // визуально с табами / Открыть-в-Jira.
   const lazyHint = state?.getRelated && !state.getRelated(r.key)
-    ? `<button class="r2-btn r2-btn-ghost" data-r2-action="related-load" data-r2-key="${escapeHtml(r.key)}">${ICONS.refresh} Подгрузить детали</button>`
+    ? `<a class="r2-related-load" href="#" data-r2-action="related-load" data-r2-key="${escapeHtml(r.key)}" title="Подгрузить связанные Story / Bugs">${ICONS.refresh} подгрузить детали</a>`
     : '';
 
   return `
