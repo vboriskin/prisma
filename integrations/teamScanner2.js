@@ -2104,15 +2104,27 @@ export const TeamScanner2 = {
     // V21 identity-banner CTA — открывает Diagnostic-modal и сразу триггерит
     // _runIdentityResolve (existing flow в S4). Inline-кнопка делает Auto-
     // Resolve видимым в основном UI Сканнера, не только в Diagnostic.
+    // 2026-05-17 (D2/D3 fix) — переключили на _runBulkIdentityResolve
+    // (без preview-modal) — пользователь хочет «починить identity» одним
+    // кликом, preview-flow требовал лишних 3 кликов в Diagnostic.
     root.querySelector('#ts2-glance-resolve-btn')?.addEventListener('click', () => {
       this._openDiagModal();
-      // Дать modal'у отрендериться — потом найти resolve-btn внутри и кликнуть.
+      // Дать modal'у отрендериться — потом найти bulk-resolve-btn внутри и кликнуть.
       setTimeout(() => {
         const overlay = document.getElementById('ts2-diag-modal');
         if (!overlay) return;
-        const btn = overlay.querySelector('#ts2-diag-resolve-btn');
+        const btn = overlay.querySelector('#ts2-diag-bulk-resolve-btn')
+                 || overlay.querySelector('#ts2-diag-resolve-btn');
         if (btn) btn.click();
-      }, 50);
+      }, 80);
+    });
+    // 2026-05-17 (D2/D3 fix) — dismiss identity-coverage banner на 7 дней.
+    root.querySelector('#ts2-id-banner-dismiss')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try { localStorage.setItem('q2_id_banner_dismissed_at', String(Date.now())); }
+      catch (_) { /* ignore quota */ }
+      const banner = e.currentTarget.closest('.ts2-id-banner');
+      if (banner) banner.remove();
     });
     // V21 π5 — exit-demo handler. Только присутствует если model.isDemo.
     root.querySelector('#ts2-demo-exit')?.addEventListener('click', () => this.exitDemo());

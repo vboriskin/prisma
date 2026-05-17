@@ -114,7 +114,22 @@ function renderExportChips(idx) {
 
 function renderDrilldown(items) {
   if (!Array.isArray(items) || !items.length) return '';
-  const btns = items.map(item => {
+  // 2026-05-17 (C7 fix) — дедуп по prompt-тексту. Раньше builder'ы
+  // (sourceQueries / employeeReport / blackDashQueries) могли независимо
+  // добавлять одни и те же drilldown-кнопки (e.g. «Блокеры», «Риски»,
+  // «Спринт») — пользователь видел 6 кнопок вместо 3. Теперь дедуп по
+  // нормализованному prompt'у.
+  const seen = new Set();
+  const deduped = [];
+  for (const item of items) {
+    if (!item) continue;
+    const key = String(item.prompt || item.text || '').trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  if (!deduped.length) return '';
+  const btns = deduped.map(item => {
     const prompt = esc(item.prompt || item.text || '');
     return `<button class="chat-drilldown-btn" data-prompt="${prompt}">${esc(item.text || item.prompt)}</button>`;
   });
@@ -169,8 +184,12 @@ export function renderStructuredResponse(resp, idx, isStreaming, lastIdx) {
   // badge. Маркируем что ответ собран шаблоном по локальному state, а не
   // LLM-reasoning'ом. Источник: assistantMsg.responseSource === 'rule'
   // (выставляется в llmAssistant.js при onRuleBased callback'е).
+  // 2026-05-17 (C6 fix) — переименовали «по правилу» → «локальные данные»,
+  // бизнес-пользователь не понимал техническое «правило». «Локальные
+  // данные» сразу даёт понять: ответ собран по тому что уже в браузере,
+  // без обращения к LLM.
   if (resp.responseSource === 'rule') {
-    parts.push(`<span class="chat-source-badge chat-source-rule" role="status" aria-label="Ответ построен по правилу из локальных данных">по правилу</span>`);
+    parts.push(`<span class="chat-source-badge chat-source-rule" role="status" aria-label="Ответ построен по локальным данным (без LLM)" title="Из локальных данных Сканнера / Реестра — без обращения к LLM">локальные данные</span>`);
   }
 
   // Intent category badge (e.g. "Поиск", "Объяснение", "План"…)
@@ -595,5 +614,17 @@ function renderMarkdownLite(raw) {
   result = result.replace(/(<br>){3,}/g, '<br><br>').replace(/^<br>+/,'').replace(/<br>+$/,'');
   // V21 BN — pass-through cite-pill validation.
   result = _validateCitationsInHtml(result);
+  // 2026-05-17 (C1 fix) — конвертируем source-chip sentinel-токены
+  // `[[SC|key|count|title]]` в HTML chip'ы. Sentinel применяется ПОСЛЕ
+  // escapeHtml, поэтому в нём нет символов `<>&"'`. Используется
+  // `buildSourceChips` из chat/chipBars.js. Если sentinel случайно попал
+  // в plain-text user'а — он будет проигнорирован (паттерн жёсткий).
+  result = result.replace(/\[\[SC\|([A-Za-z0-9]{1,4})\|(\d+)\|([^|\]]{1,30})\]\]/g,
+    (_, key, count, title) => {
+      const t = esc(title);
+      const k = esc(key);
+      const c = esc(count);
+      return `<span class="chat-source-mini-chip" title="${t}: ${c}">${k}:${c}</span>`;
+    });
   return result;
 }

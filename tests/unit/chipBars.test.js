@@ -58,17 +58,24 @@ describe('chipBars', () => {
     assert.equal(chip.payload.subject, 'Иванов Иван');
   });
 
-  test('buildSourceChips: правильная HTML-разметка', async () => {
+  test('buildSourceChips: sentinel-токены для post-escape конверсии', async () => {
+    // 2026-05-17 (C1 fix) — buildSourceChips раньше возвращал raw HTML
+    // (`<span class="chat-source-mini-chip">J:5</span>`), который проходил
+    // через renderMarkdownLite → escapeHtml → `&lt;span...&gt;` в bubble'е.
+    // Теперь возвращает sentinel-формат `[[SC|key|count|title]]`,
+    // который не содержит `<>&"'` (escapeHtml не трогает) и
+    // конвертируется в HTML chip ПОСЛЕ escape в renderMarkdownLite.
     const { buildSourceChips } = await import('../../chat/chipBars.js');
-    const html = buildSourceChips({
+    const txt = buildSourceChips({
       jira: { total: 5 },
       bb:   { total: 3 },
       cf:   { total: 1 },
     });
-    assert.match(html, /J:5/);
-    assert.match(html, /B:3/);
-    assert.match(html, /C:1/);
-    assert.match(html, /chat-source-mini-chip/);
+    assert.match(txt, /\[\[SC\|J\|5\|Jira\]\]/);
+    assert.match(txt, /\[\[SC\|B\|3\|Bitbucket\]\]/);
+    assert.match(txt, /\[\[SC\|C\|1\|Confluence\]\]/);
+    // Никаких HTML-тегов — sentinel формат markdown-safe.
+    assert.doesNotMatch(txt, /<span/);
   });
 
   test('buildSourceChips: пустой summary → пустая строка', async () => {

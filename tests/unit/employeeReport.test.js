@@ -29,7 +29,11 @@ describe('buildEmployeeReport', () => {
     assert.equal(r._meta.kind, 'employee_report_error');
   });
 
-  test('пустой period → error response', async () => {
+  test('пустой period → default «за 7 дней»', async () => {
+    // 2026-05-17 (C3 fix) — раньше отсутствие period вызывало error
+    // «Не указан период», что раздражало пользователя на запросах вида
+    // «расскажи про Bitbucket Рзаев». Теперь default = 7 дней с явным
+    // маркером в header'е.
     const { mockState } = await _setup();
     await mockState({
       employees: [{ email: 'iv@sber.ru', fio: 'Иванов Иван' }],
@@ -39,7 +43,9 @@ describe('buildEmployeeReport', () => {
     const { buildEmployeeReport } = await import('../../chat/employeeReport.js');
     const target = { employee: { id: 'iv@sber.ru', label: 'Иванов Иван' } };
     const r = await buildEmployeeReport(target, null);
-    assert.match(r.text, /Не указан период/);
+    // Не error, а полноценный report с default-периодом.
+    assert.match(r.text, /за 7 дней \(default\)/);
+    assert.notEqual(r._meta?.kind, 'employee_report_error');
   });
 
   test('нет настроенных источников → error', async () => {

@@ -64,9 +64,22 @@ export async function buildEmployeeReport(target, period, opts = {}) {
   if (!emp) {
     return _errResponse('Не указан сотрудник. Например: «Иванов за квартал», «расскажи про Сидорову за год».');
   }
-  const _period = period || target?.period;
+  // 2026-05-17 (C3 fix) — раньше при отсутствии period возвращали ошибку
+  // «Не указан период». Пользователь раздражался — для «расскажи про
+  // Bitbucket Рзаев» очевидный default = «за 7 дней». Теперь default'имся
+  // на неделю с явным указанием в ответе (chat-renderer показывает period
+  // в header'е) — пользователь видит «за неделю» и может уточнить.
+  let _period = period || target?.period;
   if (!_period?.from || !_period?.to) {
-    return _errResponse('Не указан период. Попробуйте: «Иванов за месяц», «в марте 2026», «с 1 марта по 15 апреля».');
+    const now = new Date();
+    const from = new Date(now);
+    from.setDate(from.getDate() - 7);
+    _period = {
+      from,
+      to: now,
+      label: 'за 7 дней (default)',
+      kind: 'default',
+    };
   }
 
   // Source-availability guard (I-04)
@@ -132,7 +145,9 @@ export async function buildEmployeeReport(target, period, opts = {}) {
   }
 
   // Summary block (LP-05)
-  const summary = _buildSummaryBlock(emp, sJira, sBB, sCF, _period);
+  // 2026-05-17 (C4 fix) — передаём fetchErrors чтобы отличить «реально 0
+  // активности» от «не смогли получить данные».
+  const summary = _buildSummaryBlock(emp, sJira, sBB, sCF, _period, fetchResult.errors || []);
 
   // Per-source sections (LP-02..LP-04)
   const sections = [];
@@ -258,7 +273,7 @@ export async function buildEmployeeReport(target, period, opts = {}) {
    LP-05 — Summary block (top-3 highlights)
    ───────────────────────────────────────────────────────────── */
 
-function _buildSummaryBlock(emp, sJira, sBB, sCF, period) {
+function _buildSummaryBlock(emp, sJira, sBB, sCF, period, fetchErrors = []) {
   const highlights = [];
 
   // Highlight 1: основная работа из Jira (closed-tickets).
@@ -289,6 +304,24 @@ function _buildSummaryBlock(emp, sJira, sBB, sCF, period) {
   }
 
   if (!highlights.length) {
+    // 2026-05-17 (C4 fix) — раньше всегда писали «Активность не зафиксирована»
+    // даже если все источники упали с ошибкой. Confuse: «он реально не
+    // работал?» vs «бот не смог запросить данные?». Теперь различаем:
+    //   · все источники упали → «Не удалось получить данные из X, Y»
+    //   · часть упала          → «По доступным источникам активности нет;
+    //                            X, Y вернули ошибку — реальная картина
+    //                            может быть другой»
+    //   · все ОК + 0 событий   → «Активность не зафиксирована»
+    const errSources = Array.isArray(fetchErrors)
+      ? fetchErrors.map(e => e?.source).filter(Boolean)
+      : [];
+    if (errSources.length) {
+      const requested = [sJira, sBB, sCF].filter(s => s !== null).length;
+      if (errSources.length >= requested) {
+        return `### Кратко\n\n> ⚠ **Не удалось получить данные** из источников: ${errSources.join(', ')}. Возможно проблема с токеном / сетью — откройте Диагностику в Сканнере.`;
+      }
+      return `### Кратко\n\n_По доступным источникам активность не зафиксирована._ ⚠ ${errSources.join(', ')} вернули ошибку — реальная картина может быть полнее.`;
+    }
     return '### Кратко\n\n_Активность за период не зафиксирована._';
   }
   return '### Кратко\n\n- ' + highlights.slice(0, 3).join('\n- ');

@@ -78,8 +78,16 @@ export function buildCustomDateChip(subject) {
  * Mini-chips для inline source-breakdown.
  * Принимает агрегированную сводку с counts per source.
  *
+ * 2026-05-17 (C1 fix) — раньше возвращали raw HTML (`<span class="chat-
+ * source-mini-chip">`), который проходил через renderMarkdownLite →
+ * `escapeHtml` экранировал `<>` → пользователь видел буквально
+ * `&lt;span...&gt;`. Теперь возвращаем sentinel-токен `[[SC|key|count|title]]`,
+ * который НЕ содержит `<>&"'` (escapeHtml его не трогает), а
+ * renderMarkdownLite после `escapeHtml` распознаёт паттерн и
+ * подставляет нужный HTML.
+ *
  * @param {object} summary — { jira?: {total}, bb?: {total}, cf?: {total}, zephyr?: {total} }
- * @returns {string} — HTML inline (НЕ action-chip, а текстовая аннотация)
+ * @returns {string} — sentinel-токены, разделённые пробелом
  */
 export function buildSourceChips(summary) {
   if (!summary) return '';
@@ -89,9 +97,8 @@ export function buildSourceChips(summary) {
   if (summary.cf)     items.push({ key: 'C',  count: summary.cf.total || 0,     title: 'Confluence' });
   if (summary.zephyr) items.push({ key: 'Z',  count: summary.zephyr.total || 0, title: 'Zephyr' });
   if (!items.length) return '';
-  return items.map(it =>
-    `<span class="chat-source-mini-chip" title="${it.title}: ${it.count}">${it.key}:${it.count}</span>`
-  ).join(' ');
+  // pipes используются как delimiter — внутри title pipes нет.
+  return items.map(it => `[[SC|${it.key}|${it.count}|${it.title}]]`).join(' ');
 }
 
 /**

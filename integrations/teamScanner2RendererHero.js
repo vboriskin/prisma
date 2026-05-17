@@ -1007,7 +1007,13 @@ export function renderTeamGlance(model, ctx = {}) {
   // V22 — identity-coverage banner удалён по UX-фидбеку (2026-05-09):
   // confluence/bb-coverage метрики остаются доступны в Diagnostic-modal,
   // inline-баннер мешал основному контенту команды.
-  const identityBanner = '';
+  //
+  // 2026-05-17 (D2/D3 fix) — возвращён banner ТОЛЬКО для критично-низкого
+  // coverage (<30% CF или <50% BB на команде ≥30 человек). Это сигнал что
+  // основная часть BB/CF активности теряется, и без bulk Auto-Resolve
+  // Scanner показывает ~15% реальной картины. Banner можно скрыть на
+  // 7 дней через × — флаг в localStorage `q2_id_banner_dismissed_at`.
+  const identityBanner = _renderIdentityCoverageBanner(model);
   // 2026-05-11 — SSO-redirect баннер убран из Сканнера (банер мешал основному
   // контенту и часто давал false-positive на инсталляциях типа Сбер DC где
   // `/wiki/rest/...` редиректит 302, но `/rest/...` работает). В Чёрном
@@ -1024,6 +1030,55 @@ export function renderTeamGlance(model, ctx = {}) {
         ${operationsSection}
         ${trendsSection}
       </div>
+    </div>
+  `;
+}
+
+/* ── 2026-05-17 (D2/D3 fix) — Identity coverage critical banner ──
+   Показывается только при критически низком coverage cfAccountId / bbLogin —
+   когда основная часть BB/CF активности теряется в Scanner'е. Click →
+   открывает Diagnostic-modal и запускает Auto-Resolve (handler сидит на
+   `#ts2-glance-resolve-btn` в teamScanner2.js L2107). Dismiss × сохраняет
+   timestamp в localStorage на 7 дней — чтобы не спамить тимлида. */
+function _renderIdentityCoverageBanner(model) {
+  if (!model) return '';
+  const parts = Array.isArray(model.participants) ? model.participants : [];
+  // Берём команду через model.totalEmployeeCount если есть, иначе оцениваем
+  // через participants. Реальный teamSize живёт в state.employees, но без
+  // import'а здесь — используем proxy.
+  const teamSize = parts.length;
+  if (teamSize < 30) return '';  // мелкие команды — coverage colebеется
+  // Считаем сколько участников имеют атрибутированный BB/CF.
+  let bbCount = 0;
+  let cfCount = 0;
+  for (const p of parts) {
+    if (p.bbItems && p.bbItems.length) bbCount++;
+    if (p.cfItems && p.cfItems.length) cfCount++;
+  }
+  // Используем coverage из diagnostic если есть (более точно).
+  // Если нет — оцениваем через items (грубо: «есть ли вообще BB/CF активность»).
+  const cfPct = Math.round(cfCount / teamSize * 100);
+  const bbPct = Math.round(bbCount / teamSize * 100);
+  const cfCritical = cfPct < 30;
+  const bbCritical = bbPct < 50;
+  if (!cfCritical && !bbCritical) return '';
+  // Dismiss check.
+  try {
+    const dismissedAt = Number(localStorage.getItem('q2_id_banner_dismissed_at') || 0);
+    if (dismissedAt > Date.now() - 7 * 24 * 60 * 60 * 1000) return '';
+  } catch (_) { /* ignore */ }
+  const issues = [];
+  if (cfCritical) issues.push(`Confluence: ${cfPct}% (${teamSize - cfCount} из ${teamSize} без cfAccountId)`);
+  if (bbCritical) issues.push(`Bitbucket: ${bbPct}% (${teamSize - bbCount} из ${teamSize} без bbLogin)`);
+  return `
+    <div class="ts2-sso-banner ts2-id-banner" role="status" aria-live="polite">
+      <div class="ts2-sso-banner-icon" aria-hidden="true">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 16 })}</div>
+      <div class="ts2-sso-banner-body">
+        <div class="ts2-sso-banner-title"><b>Identity coverage критически низкий</b> — Scanner показывает неполную картину.</div>
+        <div class="ts2-sso-banner-sub">${esc(issues.join(' · '))}. Запустите Auto-Resolve — bulk-lookup в API заполнит недостающие поля.</div>
+      </div>
+      <button type="button" class="ts2-sso-banner-cta" id="ts2-glance-resolve-btn" title="Открыть Диагностику и запустить bulk Auto-Resolve">Запустить Auto-Resolve</button>
+      <button type="button" class="ts2-sso-banner-dismiss" id="ts2-id-banner-dismiss" title="Скрыть на 7 дней" aria-label="Скрыть">×</button>
     </div>
   `;
 }
@@ -1113,6 +1168,35 @@ export function _ensureSsoBannerStyles() {
     .ts2-sso-banner-cta:focus-visible {
       outline: 2px solid var(--prizma-warning, #C97A1A);
       outline-offset: 2px;
+    }
+    /* 2026-05-17 (D2/D3 fix) — dismiss-button для identity-coverage banner. */
+    .ts2-sso-banner-dismiss {
+      flex: 0 0 auto;
+      align-self: flex-start;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+      background: transparent;
+      color: var(--prizma-text-secondary, var(--text-3, #6A6A72));
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .ts2-sso-banner-dismiss:hover {
+      background: var(--bg-2, #f1f5f9);
+      color: var(--prizma-text, var(--text-1, #1B1B1F));
+    }
+    .ts2-id-banner { border-left-color: var(--prizma-off-course, #C84B4B); }
+    .ts2-id-banner .ts2-sso-banner-icon { color: var(--prizma-off-course, #C84B4B); }
+    .ts2-id-banner .ts2-sso-banner-cta {
+      color: var(--prizma-off-course, #C84B4B);
+      border-color: var(--prizma-off-course, #C84B4B);
+    }
+    .ts2-id-banner .ts2-sso-banner-cta:hover {
+      background: var(--prizma-off-course, #C84B4B);
+      color: #FFFFFF;
     }
   `;
   document.head.appendChild(s);

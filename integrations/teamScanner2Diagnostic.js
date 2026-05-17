@@ -1060,7 +1060,16 @@ function _gatherSourceCounts(m, rawDiag, settings) {
       commits:    bbCommits,
       prs:        bbPrs,
       reviews:    bbReviews,
-      rawFetched: rawDiag?.bbItemsTotal ?? null,
+      // 2026-05-17 (D5 fix) — раньше `rawFetched=null` когда rawDiag=null
+      // (типичный case без свежего diag-snapshot'а). Пользователь не мог
+      // оценить сколько items отфильтровалось до атрибуции. Теперь
+      // fallback на `bbItems + filteredOut.bitbucket` — это reasonable
+      // approximation того что было запрошено с сервера. Если rawDiag
+      // есть — используем precise count.
+      rawFetched: rawDiag?.bbItemsTotal
+        ?? ((bbItems != null && filteredOut?.bitbucket != null)
+              ? bbItems + filteredOut.bitbucket
+              : null),
       filteredOutOrUnattributed: filteredOut.bitbucket,
       // PR-CV — диагностика reviewer'ов: пустой overload объясняется через
       // эти поля. См. server.js:reviewerStats.
@@ -1074,7 +1083,12 @@ function _gatherSourceCounts(m, rawDiag, settings) {
     },
     confluence: {
       totalItems: cfItems,
-      rawFetched: rawDiag?.cfItemsTotal ?? null,
+      // 2026-05-17 (D5 fix) — fallback на totalItems + filteredOut
+      // когда rawDiag отсутствует. См. bitbucket.rawFetched.
+      rawFetched: rawDiag?.cfItemsTotal
+        ?? ((cfItems != null && filteredOut?.confluence != null)
+              ? cfItems + filteredOut.confluence
+              : null),
       filteredOutOrUnattributed: filteredOut.confluence,
     },
     // 2026-05-11 — Jenkins block. Раньше `sources.jenkins` не существовал в
@@ -1083,31 +1097,49 @@ function _gatherSourceCounts(m, rawDiag, settings) {
     //   configured · jobsTotal · jobsScanned · authorsCount · builds7d
     //   failures7d · ssoRedirects · elapsedMs · errors (scope-level) ·
     //   triedSummary (per-HTTP histogram + lastErrors) · error · folder
-    jenkins: {
-      configured:   !!rawDiag?.jenkinsConfigured,
-      folder:       rawDiag?.jenkinsFolder ?? null,
-      jobsTotal:    rawDiag?.jenkinsJobsTotal ?? null,
-      jobsScanned:  rawDiag?.jenkinsJobsScanned ?? null,
-      authorsCount: rawDiag?.jenkinsAuthorsCount ?? null,
-      builds7d:     rawDiag?.jenkinsBuilds7d ?? null,
-      failures7d:   rawDiag?.jenkinsFailures7d ?? null,
-      ssoRedirects: rawDiag?.jenkinsSsoRedirects ?? null,
-      elapsedMs:    rawDiag?.jenkinsElapsedMs ?? null,
-      error:        rawDiag?.jenkinsLastError ?? null,
-      // 2026-05-11 — clone arrays/objects to avoid `[Circular]` markers
-      // in rawDiag.jenkinsErrors / rawDiag.jenkinsTriedSummary when the
-      // serializer sees the same reference twice (once here, once in rawDiag).
-      errors:       Array.isArray(rawDiag?.jenkinsErrors) ? rawDiag.jenkinsErrors.map(e => ({ ...e })) : [],
-      triedSummary: rawDiag?.jenkinsTriedSummary ? JSON.parse(JSON.stringify(rawDiag.jenkinsTriedSummary)) : null,
-      warning: (() => {
-        if (!rawDiag?.jenkinsConfigured) return 'Jenkins не настроен (нет URL/token в Настройках → Jenkins).';
-        if (rawDiag?.jenkinsLastError) return `Jenkins scan error: ${rawDiag.jenkinsLastError}`;
-        if ((rawDiag?.jenkinsSsoRedirects || 0) >= 2) return 'Подозрение на SSO redirect — токен может быть cookie, а не API token.';
-        if ((rawDiag?.jenkinsJobsTotal || 0) === 0) return 'Jenkins вернул 0 jobs — проверьте folder в Настройках (текущий: ' + (rawDiag?.jenkinsFolder || 'пусто') + ') и права токена.';
-        if ((rawDiag?.jenkinsAuthorsCount || 0) === 0 && (rawDiag?.jenkinsBuilds7d || 0) > 0) return 'Jenkins вернул builds но 0 авторов — Auto-Resolve identity не привязал jenkinsUserName к employees.';
-        return null;
-      })(),
-    },
+    jenkins: (() => {
+      // 2026-05-17 (D1 fix) — раньше `configured` опирался ТОЛЬКО на
+      // `rawDiag?.jenkinsConfigured`. Когда rawDiag=null (типичный case:
+      // export сделан после refresh без diag-snapshot'а), `configured`
+      // становился `false`, при этом root-level `jenkins` блок с реальными
+      // данными (folder/scannedJobs/summary) всё равно экспортировался.
+      // Пользователь видел `sources.jenkins.configured=false` + warning
+      // «не настроен», но в `jenkins.summary.totalBuilds7d=74`. Inconsistency.
+      // Теперь: fallback на m.jenkins — если есть model-данные, значит
+      // настроен.
+      const mJenkins = m?.jenkins || null;
+      const hasModelData = !!(mJenkins && (mJenkins.scannedJobs > 0 || mJenkins.summary?.totalBuilds7d > 0 || mJenkins.folder));
+      const isConfigured = !!rawDiag?.jenkinsConfigured || hasModelData;
+      const folderResolved = rawDiag?.jenkinsFolder ?? mJenkins?.folder ?? null;
+      const jobsTotal = rawDiag?.jenkinsJobsTotal ?? mJenkins?.totalJobs ?? null;
+      const jobsScanned = rawDiag?.jenkinsJobsScanned ?? mJenkins?.scannedJobs ?? null;
+      const authorsCount = rawDiag?.jenkinsAuthorsCount ?? (mJenkins?.perAuthor ? Object.keys(mJenkins.perAuthor).length : null);
+      const builds7d = rawDiag?.jenkinsBuilds7d ?? mJenkins?.summary?.totalBuilds7d ?? null;
+      const failures7d = rawDiag?.jenkinsFailures7d ?? mJenkins?.summary?.failures7d ?? null;
+      const lastError = rawDiag?.jenkinsLastError ?? mJenkins?.error ?? null;
+      return {
+        configured:   isConfigured,
+        folder:       folderResolved,
+        jobsTotal,
+        jobsScanned,
+        authorsCount,
+        builds7d,
+        failures7d,
+        ssoRedirects: rawDiag?.jenkinsSsoRedirects ?? null,
+        elapsedMs:    rawDiag?.jenkinsElapsedMs ?? null,
+        error:        lastError,
+        errors:       Array.isArray(rawDiag?.jenkinsErrors) ? rawDiag.jenkinsErrors.map(e => ({ ...e })) : [],
+        triedSummary: rawDiag?.jenkinsTriedSummary ? JSON.parse(JSON.stringify(rawDiag.jenkinsTriedSummary)) : null,
+        warning: (() => {
+          if (!isConfigured) return 'Jenkins не настроен (нет URL/token в Настройках → Jenkins).';
+          if (lastError) return `Jenkins scan error: ${lastError}`;
+          if ((rawDiag?.jenkinsSsoRedirects || 0) >= 2) return 'Подозрение на SSO redirect — токен может быть cookie, а не API token.';
+          if ((jobsTotal || 0) === 0) return 'Jenkins вернул 0 jobs — проверьте folder в Настройках (текущий: ' + (folderResolved || 'пусто') + ') и права токена.';
+          if ((authorsCount || 0) === 0 && (builds7d || 0) > 0) return 'Jenkins вернул builds но 0 авторов — Auto-Resolve identity не привязал jenkinsUserName к employees.';
+          return null;
+        })(),
+      };
+    })(),
     zephyr: {
       testsCreated:  zephyrCreated,
       testsExecuted: zephyrExecuted,

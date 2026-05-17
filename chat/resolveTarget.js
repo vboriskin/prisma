@@ -341,6 +341,22 @@ export function resolveTarget(text, opts = {}) {
     };
   }
 
+  // 2026-05-17 (C2 fix) — scope-hint resolution. Если в тексте есть
+  // ключевое слово, явно указывающее на «сотрудник» или «команда» —
+  // приоритезируем соответствующий target. Без этого бот не различал
+  // «у Рзаева» (как сотрудника) vs «команда Rzn» (как команда), когда
+  // surname и team-name похожи. Слова берём из текста, не из target —
+  // resolveEmployees уже извлёк employee если был.
+  const employeeHints = /\b(?:сотрудник|сотрудника|сотруднике|сотруднику|сотрудником|у сотрудника|по сотруднику|про сотрудника|у разработчик|разработчика|разработчику|у тестировщик|у аналитик|у дизайнер)\b/i;
+  const teamHints     = /\b(?:команд[аыеуойи]?|у команды|по команде|про команду|с командой|команд[ыау]\s+\w+)\b/i;
+  if (out.employee && out.team && employeeHints.test(lc) && !teamHints.test(lc)) {
+    out.team = null;  // явный employee-scope → выкидываем team
+  } else if (out.team && !out.employee && teamHints.test(lc)) {
+    // team только остаётся, employee и так пуст
+  } else if (out.team && out.employee && teamHints.test(lc) && !employeeHints.test(lc)) {
+    out.employee = null;  // явный team-scope → выкидываем employee
+  }
+
   return out;
 }
 
