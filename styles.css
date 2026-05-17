@@ -16501,7 +16501,10 @@ body.theme-dark .ts2-pm-chip-popover {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  transition: background .15s;
+  /* 2026-05-17 — transition: background убран. При клике на row активная
+     подсветка (ts2-row-expanded) меняла background ПЛАВНО 150ms — вместе
+     со вставкой panel это выглядело как двойное «движение». Теперь
+     instant: row сразу подсвечена, panel сразу появилась — один frame. */
 }
 /* V21 — strip-wrap фикс высоты + truncate text-fallback в одну строку,
    чтобы длинный fallback не раздвигал row vertically. */
@@ -16769,16 +16772,15 @@ body.theme-dark .ts2-pm-chip-popover {
 /* ═════════════════════════════════════════════════════════
    V18.1 P5 — SIDE-PANEL (480px slide-in справа)
    ═════════════════════════════════════════════════════════ */
+/* 2026-05-17 — все animation сняты у `.ts2-panel-backdrop`, `.ts2-panel`,
+   `.ts2-panel.ts2-panel-modal`. Anim сами выглядели как «второй jerk»
+   при открытии модалки сотрудника (1-й — вставка panel в DOM, 2-й —
+   slide/translateY-анимация). Backdrop появляется мгновенно (опасно
+   ничего — он отключает события под собой); panel тоже instant. */
 .ts2-panel-backdrop {
   position: fixed; inset: 0;
   background: rgba(15, 23, 42, .45);
   z-index: 9998;
-  animation: ts2-fade-in .18s ease-out;
-}
-@keyframes ts2-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes ts2-slide-in {
-  from { transform: translateX(100%); opacity: .6; }
-  to   { transform: translateX(0);    opacity: 1;  }
 }
 .ts2-panel {
   position: fixed; top: 0; right: 0; bottom: 0;
@@ -16789,7 +16791,6 @@ body.theme-dark .ts2-pm-chip-popover {
   z-index: 9999;
   display: flex; flex-direction: column;
   overflow-y: auto;
-  animation: ts2-slide-in .22s cubic-bezier(.4,0,.2,1);
 }
 /* PR-CN — детализация по сотруднику теперь полноэкранная модалка
    (как «Как считается»), а не slide-in справа. Reuse той же DOM
@@ -16806,7 +16807,7 @@ body.theme-dark .ts2-pm-chip-popover {
   border: 1px solid var(--border-strong, rgba(0,0,0,.18)) !important;
   border-radius: 12px !important;
   box-shadow: 0 32px 80px rgba(17,24,39,.32), 0 8px 24px rgba(17,24,39,.16) !important;
-  animation: ts2-modal-in .18s cubic-bezier(.4,0,.2,1);
+  /* animation: ts2-modal-in убран 2026-05-17 — фактический «второй jerk» */
 }
 /* ts2-modal-fix v2 — ID-specificity override. Class-level !important почему-то
    не пробивает (видимо есть другое правило с большей specificity или равной +

@@ -2005,7 +2005,15 @@ export const TeamScanner2 = {
     this._activePkFilter = String(pk || '');
     this._persistSelectedTeam(this._activePkFilter);
     telemetryEmit('scanner2.team_switch', { pk: this._activePkFilter });
-    this._closePanel(); // closePanel вызывает _renderFull
+    // 2026-05-17 — раньше тут был `_closePanel()` с комментарием "closePanel
+    // вызывает _renderFull". После рефакторинга _closePanel стал partial
+    // (без _renderFull) — команды перестали переключаться визуально (state
+    // менялся, но dashboard оставался прежним → пользователь видел только
+    // "мерцание" удаляемой панели). Теперь явно: сброс expandedKey + body
+    // class + полный re-render.
+    this._expandedKey = '';
+    document.body.classList.remove('is-ts2-modal-open');
+    this._renderFull();
   },
 
   _setMultiView() {
@@ -2013,7 +2021,9 @@ export const TeamScanner2 = {
     this._activePkFilter = '';
     this._persistSelectedTeam('__all__');
     telemetryEmit('scanner2.team_switch', { pk: '__all__' });
-    this._closePanel();
+    this._expandedKey = '';
+    document.body.classList.remove('is-ts2-modal-open');
+    this._renderFull();
   },
 
   /**
