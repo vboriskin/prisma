@@ -1346,7 +1346,10 @@ function _renderCrossTeamBenchmarks(model, history = []) {
   const cellHtml = (val, isBest, label, isBurnout) => {
     if (val == null) return `<td class="ts2-bm-cell"><span class="ts2-bm-na">—</span></td>`;
     const cls = isBest ? 'ts2-bm-cell ts2-bm-cell-best' : 'ts2-bm-cell';
-    return `<td class="${cls}" title="${esc(label)}">${val}${isBest ? ` <span class="ts2-bm-badge" title="Лидер по ${esc(label)}">★</span>` : ''}</td>`;
+    // 2026-05-17 — у ★-badge убран собственный title (дублировал parent
+    // cell'а — оба содержали `label`). ★ визуально уже сигналит «лидер»,
+    // hover показывает parent-tooltip с названием метрики.
+    return `<td class="${cls}" title="${esc(label)}">${val}${isBest ? ` <span class="ts2-bm-badge" aria-label="Лидер по ${esc(label)}">★</span>` : ''}</td>`;
   };
 
   return `

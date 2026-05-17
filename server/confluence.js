@@ -376,12 +376,14 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
     // 2026-05-17 — извлекаем body коммента (HTML → plain text, slice 280).
     // body.view.value приходит как HTML-fragment («<p>текст</p>»), мы:
     //   1) strip tags регуляркой <[^>]+> → ' '
-    //   2) collapse whitespace
-    //   3) trim + slice до 280 chars (4-5 строк в UI)
+    //   2) decode named entities (5 шт) + numeric (&#NNN;) для Cyrillic из DC
+    //   3) collapse whitespace
+    //   4) trim + slice до 280 chars (4-5 строк в UI) + ellipsis-маркер
+    //      если truncated — пользователь видит «…» и понимает что обрезано.
     // На случай отсутствия body.view (старая Confluence DC) — fallback на ''.
     let bodyRaw = c?.body?.view?.value || '';
     if (typeof bodyRaw !== 'string') bodyRaw = '';
-    const bodyText = bodyRaw
+    const bodyPlain = bodyRaw
       .replace(/<[^>]+>/g, ' ')
       .replace(/&nbsp;/g, ' ')
       .replace(/&amp;/g, '&')
@@ -389,9 +391,15 @@ async function ppFetchConfluenceActivity(cfg, tls, cutoffTs, opts = {}) {
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => {
+        const cp = parseInt(n, 10);
+        return Number.isFinite(cp) && cp > 0 && cp < 0x10FFFF ? String.fromCodePoint(cp) : '';
+      })
       .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 280);
+      .trim();
+    const bodyText = bodyPlain.length > 280
+      ? bodyPlain.slice(0, 277) + '…'
+      : bodyPlain;
     pushItem(a, {
       kind:  'comment',
       title: cont.title || c.title || '(без заголовка)',

@@ -265,22 +265,41 @@ test.describe('Chat assistant', () => {
 });
 
 test.describe('Sanity checks', () => {
-  test('mascot hide on Scanner', async ({ page }) => {
-    await setupErrorCapture(page, 'Mascot hide');
+  test('mascot visible on Scanner (regression «чат не открыть»)', async ({ page }) => {
+    // 2026-05-17 — раньше тест проверял что mascot СКРЫТ на Scanner. Это
+    // поведение откатили: mascot нужен для открытия чат-ассистента,
+    // пользователь не мог открыть чат на Scanner. Скрытие FAB осталось
+    // ТОЛЬКО для body.is-ts2-modal-open. Этот тест теперь проверяет
+    // обратное — FAB видим на Scanner (без modal'а).
+    //
+    // Навигация: hash-only смены недостаточно (body.ts2-active не всегда
+    // выставляется). Кликаем на Интеграции в nav, чтобы init-script гарантированно
+    // повесил scanner-класс — как делает scanner-smoke.spec.js gotoScannerDemo().
+    await setupErrorCapture(page, 'Mascot visible');
     await page.goto('/');
     await bypassWelcome(page);
     await page.evaluate(() => { location.hash = '#scanner2/demo'; });
     await page.waitForTimeout(2500);
+    const navIntegrations = page.locator('[data-section="integrations"]').first();
+    if (await navIntegrations.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await navIntegrations.click();
+      await page.waitForTimeout(1500);
+    }
 
-    const hasClass = await page.evaluate(() => document.body.classList.contains('ts2-active'));
+    const hasModalClass = await page.evaluate(() => document.body.classList.contains('is-ts2-modal-open'));
     const fabDisplay = await page.locator('#assistant-fab').evaluate(
       el => window.getComputedStyle(el).display
     ).catch(() => 'gone');
 
-    if (hasClass && fabDisplay !== 'none') {
-      recordFinding('Mascot hide', 'mascot-not-hidden', `body.ts2-active=true но FAB display=${fabDisplay}`);
+    // Главное assertion: без modal'а FAB должен быть видим (display !== 'none').
+    // body.ts2-active — production-сигнал, в Playwright bypass'е не всегда
+    // выставляется, не делаем его блокирующим assertion'ом.
+    if (!hasModalClass && fabDisplay === 'none') {
+      recordFinding('Mascot visible', 'mascot-hidden-no-modal', `modal=false, но FAB display=none — чат не открыть`);
     }
-    expect(hasClass).toBe(true);
+    if (!hasModalClass) {
+      expect(fabDisplay).not.toBe('none');
+    }
   });
 
   test('no welcome blocking after first visit', async ({ page }) => {

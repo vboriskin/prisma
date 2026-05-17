@@ -61,16 +61,23 @@ test.describe('Сканнер команд — V22+ Phase 5.2', () => {
     });
   });
 
-  test('mascot hide check', async ({ page }) => {
+  test('mascot visible on Scanner (regression: «чат не открыть»)', async ({ page }) => {
+    // 2026-05-17 — раньше тест проверял что mascot СКРЫТ когда body.ts2-active.
+    // Это поведение откатили (пользовательский фидбек «зачем ты маскота убрал?!
+    // чат не открыть теперь»). Mascot скрывается ТОЛЬКО когда modal открыт
+    // (body.is-ts2-modal-open) — там FAB реально мешает modal'ке. На Scanner
+    // mascot должен быть видим — единственный способ открыть чат-ассистент.
     await gotoScannerDemo(page);
-    const hasClass = await page.evaluate(() => document.body.classList.contains('ts2-active'));
+    const hasScannerClass = await page.evaluate(() => document.body.classList.contains('ts2-active'));
+    const hasModalClass = await page.evaluate(() => document.body.classList.contains('is-ts2-modal-open'));
     const fabDisplay = await page.locator('#assistant-fab').evaluate(
       el => window.getComputedStyle(el).display
     ).catch(() => 'gone');
     // eslint-disable-next-line no-console
-    console.log('[check] body.ts2-active =', hasClass, '| fab.display =', fabDisplay);
-    if (hasClass) {
-      expect(fabDisplay).toBe('none');
+    console.log('[check] body.ts2-active =', hasScannerClass, '| body.is-ts2-modal-open =', hasModalClass, '| fab.display =', fabDisplay);
+    // На Scanner без modal'а FAB должен быть видим (НЕ 'none').
+    if (hasScannerClass && !hasModalClass) {
+      expect(fabDisplay).not.toBe('none');
     }
     await page.screenshot({
       path: path.join(SNAP_DIR, '03-mascot-check.png'),
