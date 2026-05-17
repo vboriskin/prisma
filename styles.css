@@ -23391,7 +23391,8 @@ body.theme-dark .r2-filters-sticky { background: var(--prizma-bg); }
 
 /* Mascot/FAB hide на dense Scanner-rows и dense Integrations-views,
    чтобы 144×144 кнопка не перекрывала counters-колонку */
-body[data-route="integrations"] .assistant-fab,
+body.ts2-active .assistant-fab,
+body.r2-active .assistant-fab,
 body.is-ts2-modal-open .assistant-fab {
   display: none !important;
 }
@@ -23628,3 +23629,50 @@ body.is-ts2-modal-open .assistant-fab {
   background: var(--prizma-on-course);
   opacity: 1;
 }
+
+/* ── Sprint C4: pk-pills → bullet-graphs ──────────────────── */
+.ts2-sprint-pk-bullet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+}
+.ts2-pk-bullet-track {
+  position: relative;
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  background: var(--bg-2);
+  border-radius: 3px;
+  overflow: visible;
+}
+.ts2-pk-bullet-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  background: var(--prizma-information);
+  border-radius: 3px;
+  max-width: 100%;
+}
+.ts2-pk-bullet-target {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--text-2);
+  border-radius: 1px;
+}
+.ts2-sprint-pace-on-track .ts2-pk-bullet-fill { background: var(--prizma-on-course); }
+.ts2-sprint-pace-drift .ts2-pk-bullet-fill    { background: var(--prizma-drift); }
+.ts2-sprint-pace-off-track .ts2-pk-bullet-fill { background: var(--prizma-off-course); }
+
+/* ── Sprint C7: Team-switcher sticky (Vrba U2) ────────────── */
+.ts2-team-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--prizma-bg);
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+body.theme-dark .ts2-team-switcher { background: var(--prizma-bg); }

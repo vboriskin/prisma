@@ -13,6 +13,7 @@
     "test:contract": "node --test --test-reporter=spec 'tests/contract/**/*.test.js'",
     "test:coverage": "node --test --experimental-test-coverage --test-reporter=spec 'tests/unit/**/*.test.js'",
     "test:e2e": "node e2eTest.js",
+    "test:visual": "playwright test --config tests/playwright/playwright.config.js",
     "typecheck": "tsc --noEmit -p .",
     "lint": "eslint . --max-warnings 215",
     "lint:strict": "eslint .",
@@ -23,8 +24,10 @@
     "ci": "npm run typecheck && npm run lint && npm run test && npm run test:e2e && npm run perf:budget"
   },
   "devDependencies": {
-    "typescript": "^5.9.0",
+    "@eslint/js": "^9.10.0",
+    "@playwright/test": "^1.60.0",
     "eslint": "^9.10.0",
-    "@eslint/js": "^9.10.0"
+    "playwright": "^1.60.0",
+    "typescript": "^5.9.0"
   }
 }

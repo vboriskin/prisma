@@ -425,17 +425,31 @@ function renderSprintGauge(sg, prevSg, slope) {
     `;
   }
 
-  // Несколько спринтов — aggregate сверху + per-pk пилюли снизу.
+  // V22+ Sprint C4 — pk-pills → bullet-graphs:
+  // current progress (filled) + expected line (target tick).
+  // По Tufte: asymmetry читается без чтения цифр.
+  // Target pct = elapsed (по dayssLeft / sprintLength) если данные есть; иначе 50%.
   const pkPills = sg.sprints.map(s => {
     const sPace = s.pace || 'no-data';
     const sPaceLabel = PACE_LABEL[sPace] || '—';
-    const sDays = (typeof s.daysLeft === 'number')
-      ? ` · ${s.daysLeft}д`
-      : '';
+    const sDays = (typeof s.daysLeft === 'number') ? ` · ${s.daysLeft}д` : '';
+    const current = Math.max(0, Math.min(100, s.progressPct || 0));
+    // Expected — где должны быть «в норме». Если есть sprintLength/elapsed — используем.
+    let expected = 50;
+    if (typeof s.daysLeft === 'number' && typeof s.daysTotal === 'number' && s.daysTotal > 0) {
+      expected = Math.max(0, Math.min(100, Math.round((s.daysTotal - s.daysLeft) / s.daysTotal * 100)));
+    } else if (typeof s.elapsedPct === 'number') {
+      expected = Math.max(0, Math.min(100, s.elapsedPct));
+    }
+    const tooltipText = `${esc(s.pk)} «${esc(s.name || '')}» · ${s.done}/${s.total} done (${current}%) · ожидается ${expected}% · ${sPaceLabel}${sDays}`;
     return `
-      <span class="ts2-sprint-pk-pill ts2-sprint-pace-${sPace}" title="${esc(s.pk)} «${esc(s.name || '')}» · ${s.done}/${s.total} done · ${sPaceLabel}${sDays}">
+      <span class="ts2-sprint-pk-pill ts2-sprint-pk-bullet ts2-sprint-pace-${sPace}" title="${tooltipText}">
         <span class="ts2-sprint-pk-pill-key">${esc(s.pk)}</span>
-        <span class="ts2-sprint-pk-pill-pct">${s.progressPct}%</span>
+        <span class="ts2-pk-bullet-track">
+          <span class="ts2-pk-bullet-fill" style="width:${current}%"></span>
+          <span class="ts2-pk-bullet-target" style="left:${expected}%"></span>
+        </span>
+        <span class="ts2-sprint-pk-pill-pct">${current}%</span>
       </span>
     `;
   }).join('');

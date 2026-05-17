@@ -39,6 +39,11 @@ coverage/
 /tmp/
 junit.xml
 
+# ── Playwright artefacts (V22+ Sprint C visual smoke) ──────
+tests/playwright/_out/
+playwright-report/
+test-results/
+
 # ── IDE / editor ───────────────────────────────────────────
 .vscode/
 .idea/

@@ -543,6 +543,11 @@ export const TeamScanner2 = {
   /* ── Public entry ──────────────────────────────────── */
   async render(container) {
     this._container = container;
+    // V22+ Phase 5.2 — body.ts2-active для mascot-hide + sticky-aware contexts.
+    // Guarded: document.body может отсутствовать в test-shim'ах.
+    if (typeof document !== 'undefined' && document.body?.classList) {
+      document.body.classList.add('ts2-active');
+    }
     // V21 π5 — demo URL hash (`#scanner2/demo`) — высший приоритет, идёт ДО
     // projectKeys-проверки. Также если _demoMode уже включён (toggle / reload
     // в demo) — рендерим demo-fixture без обращения в Jira.
@@ -3763,6 +3768,10 @@ export const TeamScanner2 = {
    * нужны при возврате на subtab (cache hit без re-fetch).
    */
   unmount() {
+    // V22+ Phase 5.2 — restore mascot для других вкладок (guarded для test-shim'ов)
+    if (typeof document !== 'undefined' && document.body?.classList) {
+      document.body.classList.remove('ts2-active');
+    }
     // QF8: clear lastRawDiag + pending-share-key при unmount, чтобы
     // следующий mount не показал stale-данные предыдущей сессии.
     this._lastRawDiag = null;
