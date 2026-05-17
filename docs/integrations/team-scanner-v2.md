@@ -272,7 +272,7 @@ Audit: manual `axe` DevTools на `/integrations` — 0 violations при пос
 
 ## 15. Rollback procedure
 
-См. `audit-2026-05-V18/scanner2-graduation.md` § Rollback.
+Детали V18.1 Scanner graduation — `git log --grep="V18.1 P"`. Feature flag в `localStorage.q2_scanner_v2_disabled = '1'` отключает на текущем браузере.
 
 ## 16. Историческая справка
 

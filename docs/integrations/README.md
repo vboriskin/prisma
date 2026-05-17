@@ -193,7 +193,7 @@ for (const p of PATHS) {
 | Identity | unstructured | `state.employees[].{email, jiraAccountId, bitbucketLogin, confluenceAccountId}` |
 | `_ppFindByPartial` | production-active | dev-only за флагом `allowFuzzyAuthorMatch` |
 
-См. `audit-2026-05-V17/13-integrations-audit.md` для полного описания.
+Детали V17.2 (Identity-deterministic integrations): `git log --grep="V17.2 I"` + [`../state-contracts.md`](../state-contracts.md) § Identity.
 
 ## Когда писать код
 

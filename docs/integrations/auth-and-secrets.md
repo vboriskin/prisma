@@ -271,7 +271,7 @@ escapeCSV(v) {
 - [ ] Identity-поле в `state.employees[]` (если применимо), не fuzzy-name
 - [ ] localStorage migration / allowlist если новый ключ
 
-## Audit-источники
+## Историческая справка
 
-- `audit-2026-05-V17/01-tech-audit.md` § «Critical» — изначальный token-leak audit (CRIT-1)
-- `audit-2026-05-V17/13-integrations-audit.md` — V17.2 целиком (I1-I5 + I2c)
+- V17 CRIT-1 (изначальный token-leak audit): `git log --grep="CRIT-1"`
+- V17.2 I1-I5 + I2c (Identity-deterministic integrations): `git log --grep="V17.2 I"`

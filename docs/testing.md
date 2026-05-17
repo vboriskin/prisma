@@ -2,14 +2,15 @@
 
 Текущая база: **534 unit + 11 contract + 10 e2e + 104 testRunner = 659+ tests**.
 
-> **V18 P12 status (AUDIT_HOLISTIC O1, phase-1)**: миграция `testRunner.js`
-> → `node:test` начата. 15 тестов RiskEngine уже мигрировано в
-> `tests/unit/legacy/riskEngine.test.js` параллельно legacy (legacy
-> остаётся в `npm test` до окончания миграции). План:
-> [`audit-2026-05-V18/holistic-O1-test-migration.md`](../audit-2026-05-V18/holistic-O1-test-migration.md).
+> **Status**: миграция `testRunner.js` → `node:test` в работе. 15 тестов
+> RiskEngine мигрированы в `tests/unit/legacy/riskEngine.test.js` параллельно
+> с legacy (legacy остаётся в `npm test` до окончания миграции).
 >
 > **Новые тесты — ТОЛЬКО через `node:test` в `tests/unit/`**, никогда не
-> добавляй в `testRunner.js` (он retire'тся в фазе 3).
+> добавляй в `testRunner.js` (он retire'тся в финальной фазе).
+>
+> **V22+ Sprint C** добавил Playwright visual smoke в `tests/playwright/` —
+> отдельный уровень для UI regression.
 
 ## 4 уровня
 
@@ -136,8 +137,8 @@ try {
 inline-mirror'ами доменной логики (RiskEngine, FilterEngine, DependencyEngine,
 MetricsEngine, safeHtml, reactiveStore). Существует исторически.
 
-**Статус V18 P12**: фаза-1 миграции запущена. См.
-[`audit-2026-05-V18/holistic-O1-test-migration.md`](../audit-2026-05-V18/holistic-O1-test-migration.md).
+**Status**: фаза-1 миграции запущена (15 тестов RiskEngine уже на `node:test`).
+Детали — `git log --grep="V18 P12"`.
 
 | Группа в testRunner | Тестов | Мигрировано? | Файл node:test |
 |---|---|---|---|
@@ -191,7 +192,7 @@ MetricsEngine, safeHtml, reactiveStore). Существует историчес
 
 ## Тест-related в audit-папках
 
-Когда читаешь old audit (`audit-2026-04-29-v13/05-tests-pass.md` etc) — там описаны решения «почему этот тест устроен так». Полезно при изменении тестов чтобы не сломать существующий контракт.
+Для исторического контекста почему тест устроен именно так — `git log -S "describe('<test name>'"` поднимет коммит-добавление с обоснованием.
 
 ## Что слабо покрыто
 

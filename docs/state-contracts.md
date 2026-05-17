@@ -245,7 +245,7 @@ else {
 }
 ```
 
-→ Полная история migrations в `dataStore.js` `JSON_ALLOWED_BUNDLE_KEYS` + audit-папки
+→ Полная история migrations в `dataStore.js` `JSON_ALLOWED_BUNDLE_KEYS` + `git log --follow dataStore.js`
 
 ---
 

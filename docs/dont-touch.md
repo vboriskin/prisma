@@ -25,7 +25,7 @@ analysePulse(raw, { allowFuzzyAuthorMatch: true })
 - ❌ Не врубай как production
 - ❌ Не пиши новые тесты «должна найти Иванова в Ivanov» — тест `V17.2 I1c: fuzzy SUPPRESSED по умолчанию` явно проверяет что НЕ находит
 
-См. [`state-contracts.md` § Identity](./state-contracts.md), `audit-2026-05-V17/13-integrations-audit.md` § I1c.
+См. [`state-contracts.md` § Identity](./state-contracts.md). Для деталей V17.2 I1c — `git log --grep="V17.2 I1c"`.
 
 ## 2. `Reactive.silent` обвязка в `Storage.save / restore`
 

@@ -1,30 +1,29 @@
-# ARCHITECTURE.md (last full audit: V22 — partial AUDIT_ARCHITECTURE 2026-05-08)
+# ARCHITECTURE.md
 
-> **AUDIT_ARCHITECTURE #1 / #3 (2026-05-08):** документ актуализирован. Полный
-> draft replacement лежит в `AUDIT_ARCHITECTURE.md` § Часть Г (готов к копи-пасту).
-> Здесь — только критичные расхождения с реальным кодом исправлены:
+> Текущая активная итерация: **V22+ Phase 5.2** (Release 2.0 sub-tab + Scanner
+> visual grooming Sprint A/B/C + Playwright e2e harness).
 >
-> - **Reactive debounce = 200 ms** (было «100 ms» — устарело после P6 fix)
-> - **server.js = 6486 LOC** (CLAUDE.md говорил «~2.5k» — устарело)
-> - **`BulkEditPanel` вынесен** в `app/bulkEditPanel.js` (V18.1 P9)
-> - **`ALL_LOCALSTORAGE_KEYS` в `constants.js`** — единый реестр localStorage ключей (AUDIT_ARCHITECTURE #21/#22)
-> - **`app/migrations.js`** (V21 W versioned migration runner) подключён
+> История V11→V22+: [`docs/version-history.md`](./docs/version-history.md) или
+> `git log --oneline`. Audit-папки удалены (read-only ADR, находки давно вмерж'ены).
+>
+> Ключевые архитектурные факты (актуальные на V22+):
+>
+> - **Reactive debounce = 200 ms**
+> - **server.js ~ 6.6k LOC + server/* extracted modules** (jira-api / integrations-api / pulse-runner / logger)
+> - **`BulkEditPanel` в `app/bulkEditPanel.js`** (V18.1 P9)
+> - **`ALL_LOCALSTORAGE_KEYS` в `constants.js`** — единый реестр localStorage ключей
+> - **`app/migrations.js`** (V21 W versioned migration runner)
 > - **`server/logger.js`** NDJSON structured logger (V19 E4)
 > - **`pulse/index.js` facade** (V19 D3) — для всех импортов из integrations/
 > - **4-й контракт: Auto-rerender grace 250 ms** (`_AUTO_RERENDER_GRACE_MS`)
-> - **Async-job pattern** теперь используется И для Pulse, И для BlackDashboard (V18 P7) — не «только blackDashboard» как написано ниже
-> - **Operational endpoints** `/health`, `/ready`, `/metrics`, `/metrics/prom` (`server.js:6240+`)
-> - **Cross-tab sync** через `storage` event listener (`app.js:2127`)
+> - **Async-job pattern** для Pulse и BlackDashboard
+> - **Operational endpoints** `/health`, `/ready`, `/metrics`, `/metrics/prom`
+> - **Cross-tab sync** через `storage` event listener
+> - **V22+ Phase 5:** новая Release 2.0 sub-tab внутри Интеграций (`integrations/release2/*`)
+> - **V22+ Sprint A/B/C:** Scanner visual refactor + Playwright harness (`tests/playwright/`)
 >
-> **Stale-секции помечены ниже** `> **STALE — нуждается в обновлении (V21+)**`.
->
-> Текущая активная итерация: **V22** (mascot-pass + scanner consolidation).
-> Последний holistic-пасс: [`AUDIT_HOLISTIC.md`](./AUDIT_HOLISTIC.md) (2026-05-07).
->
-> История V11→V17.2: [`docs/version-history.md`](./docs/version-history.md).
 > LLM-агенту читать сначала [`CLAUDE.md`](./CLAUDE.md), потом этот файл.
 > Каноническая навигация по docs/: [`docs/README.md`](./docs/README.md).
-> Индекс audit-папок: [`docs/audits-index.md`](./docs/audits-index.md).
 
 ## Overview
 
@@ -217,13 +216,9 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 
 → [`docs/integrations/auth-and-secrets.md`](./docs/integrations/auth-and-secrets.md) для интеграций
 
-## Decomposition status (V17)
+## Decomposition status (V22+)
 
-> **STALE — нуждается в обновлении (V21+).** V18 продолжил decomposition
-> (`audit-2026-05-V18/09-app-decomposition.md`, `10-server-decomposition.md`).
-> Текущие LOC: `app.js` 2.2k, `server.js` 6.6k, `styles.css` 20k, `index.html`
-> 1.7k. Полный список под-модулей `app/*` шире, чем таблица ниже. Точный
-> срез — `wc -l app.js server.js styles.css` + `ls app/`.
+Текущие LOC: `app.js` 2.4k, `server.js` 1.8k + `server/*` модули, `styles.css` 23k+, `index.html` 1.8k. Точный срез — `wc -l app.js server.js styles.css` + `ls app/`.
 
 `app.js` исторически monolith. Постепенное вынесение:
 
@@ -239,13 +234,7 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 | `init` | `app/init.js` (welcome splash) |
 | `StorageSettings` | `app/storageSettings.js` |
 
-См. также `audit-2026-04-30/04-architecture-decomposition.md` (ADR).
-
 ## Что retired
-
-> **STALE — нуждается в обновлении (V21+).** Не отражены retired-эпохи
-> V18+ (legacy testRunner частично, V20 fuzzy-name-fallback в Сканнере,
-> 20 funny-loader phrases — кандидаты на удаление по AUDIT_HOLISTIC §6).
 
 | V-версия | Что retired |
 |---|---|
@@ -254,6 +243,10 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 | V15 | Editorial-Bold редизайн (отвергнут пользователем) |
 | V17 P9 | filled-pill chips в реестре → Spine-pill stripe-only |
 | V17.2 I1c | `_ppFindByPartial` fuzzy-name-match — production-disabled, оставлен dev-fallback за флагом |
+| V21 | «Инсайты» вкладка — свернута в Дашборд (`Nav.goTo('insights')` → редирект на `dashboard`) |
+| V22+ Phase 5.1 | 6-tab expand в Release 2.0 → 3 таба + Health (4-й tab после Phase 5.2) |
+| V22+ Sprint A | 9 hardcoded HEX в `.ts2-row-src-*` → CSS-токены; inline-CSS injection → `styles.css` |
+| V22+ Sprint B | PROD/SWITCH/~LOC chips в person-card → за флагом `q2_scanner_show_productivity` |
 
 → [`docs/version-history.md`](./docs/version-history.md) для полного списка
 → [`docs/dont-touch.md`](./docs/dont-touch.md) для «осознанной кривизны» что НЕ retired а живёт сознательно
@@ -266,7 +259,8 @@ Pattern «mobile-first»: render заполняет existing DOM-узел чер
 | ESLint | `npm run lint` | `--max-warnings 215` (есть legacy warnings) |
 | Tests | `npm test` | testRunner + node:test unit + contractTest |
 | Performance budget | `npm run perf:budget` | `scripts/perfBudget.js` (часть `npm run ci`) |
-| E2E | `npm run test:e2e` | `e2eTest.js` |
+| E2E HTTP | `npm run test:e2e` | `e2eTest.js` — HTTP smoke на server endpoints |
+| Playwright visual | `npm run test:visual` | V22+ Sprint C — visual smoke на демо-данных (~30 тестов) |
 
 → [`docs/testing.md`](./docs/testing.md) для подробного описания тест-уровней
 → [`docs/running.md`](./docs/running.md) для запуска

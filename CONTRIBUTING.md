@@ -63,16 +63,18 @@ Types: `feat / fix / refactor / docs / chore / test / perf / style`.
 
 ## V-эпохи и audit-метки в коде
 
-Проект развивается итерациями V11 → V12 → V14 → V15 → V16 → V17 → V17.1 → V17.2 → V18. Каждая закреплена в `audit-202X-XX/` папке + ярлыками в коде.
+Проект развивается итерациями V11 → V12 → V14 → … → V22+ (Phase 5.2 / Sprint A+B+C / Playwright). Каждая закреплена ярлыками в коде.
+
+Audit-папки `audit-2026-*` удалены (commit `afeb858`) — все находки реализованы и legacy-метки в коде самодостаточны. История V-эпохи: `git log --grep="V17.2 I1c"`.
 
 Когда добавляешь существенную правку:
 
 ```js
-// V18 P5 (Integrations — path-cascade) — extracted into helper
-function _cfPathCascade(paths, baseUrl, headers, opts) { ... }
+// V22+ Sprint A — tokenized (was hardcoded HEX × 9)
+.ts2-row-src-b { border-left-color: var(--prizma-on-course); }
 ```
 
-Формат: `V<version> P<number> [(<expert> §<section>)] — <короткое описание>`
+Формат: `V<version> [Sprint <X> | P<number>] — <короткое описание>`
 
 → Подробнее: [`docs/version-history.md`](./docs/version-history.md)
 
@@ -88,7 +90,6 @@ function _cfPathCascade(paths, baseUrl, headers, opts) { ... }
 
 ## Что НЕ трогать
 
-- `audit-2026-*/` папки — read-only ADR-history
 - `Reactive.silent` обвязка вокруг `Storage.save / restore` — без неё loop
 - `_ppFindByPartial` (dev-only fallback за флагом)
 - Vendored libs (`libs/xlsx.full.min.js`, `libs/sql-wasm.*`) — обновлять только через security review
@@ -150,9 +151,11 @@ function _cfPathCascade(paths, baseUrl, headers, opts) { ... }
 
 ```bash
 npm test                 # all (testRunner + unit + contract)
-npm run test:unit        # 534 unit (node:test, ~1s)
+npm run test:unit        # ~1613 unit (node:test, ~3s)
 npm run test:contract    # 11 contract (spawns fake-Jira + server.js, ~5s)
 npm run test:e2e         # 10 e2e HTTP smoke (spawns server.js)
+npm run test:visual      # V22+ Sprint C — Playwright visual smoke (~30 tests, ~2 min)
+npm run test:visual:ci   # same + JSON-reporter для CI artifact
 npm run test:coverage    # unit + coverage report
 ```
 

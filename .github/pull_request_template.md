@@ -30,7 +30,7 @@
 
 - [ ] Новый scope-status / релиз / тип-работы / роль identity → **обновить** [`docs/domain-glossary.md`](../docs/domain-glossary.md)
 - [ ] Изменён risk-engine (`riskEngine.js` rules) → **обновить** § Risk Engine в `domain-glossary.md`
-- [ ] Demo-данные (`onboarding/demoData.js`) меняются → проверить first-run experience и `audit-2026-05-V17/12-tour-audit.md`
+- [ ] Demo-данные (`onboarding/demoData.js`) меняются → проверить first-run experience + прогнать `npm run test:visual`
 
 ### Интеграции
 
@@ -65,13 +65,12 @@
 - [ ] Найдена «осознанная кривизна» (legacy / антипаттерн которое надо защитить от «починки») → **добавить** в [`docs/dont-touch.md`](../docs/dont-touch.md)
 - [ ] Закрыта V-эпоха (V17.3, V18, ...) → **обновить** `docs/version-history.md` + создать `audit-202X-XX/MASTER_PLAN.md`
 
-### Audit-метки в коде
+### Версионные метки в коде
 
-Если добавлены `// V17.3 Xy ...` или подобные ярлыки:
+Если добавлены `// V22+ Sprint X` или подобные ярлыки:
 
-- [ ] Соответствующая audit-папка (`audit-202X-XX/`) создана с `MASTER_PLAN.md`
-- [ ] Метка имеет формат `V<version> <group-id> [(<expert> §<section>)] — <короткое описание>`
-- [ ] В `docs/version-history.md` добавлена строка эпохи
+- [ ] Метка имеет формат `V<version> [Sprint <X> | P<n>] — <короткое описание>`
+- [ ] В `docs/version-history.md` добавлена строка эпохи (если новая итерация)
 
 ---
 

@@ -5,8 +5,8 @@
 > 2. [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — high-level архитектура
 > 3. Этот файл — куда копать дальше
 >
-> **Каноническая документация:** этот `docs/`. Аудит-папки (`audit-2026-*`) —
-> read-only ADR-history, см. [`audits-index.md`](./audits-index.md).
+> Audit-папки V14→V21 удалены (commit `afeb858`). История находится через
+> `git log --grep="V17.2 I1c"` или `git log --since=2026-05-01`.
 
 ---
 
@@ -14,18 +14,17 @@
 
 | Файл | Зачем |
 |---|---|
-| [`../CLAUDE.md`](../CLAUDE.md) | Первое что читает LLM. 3 контракта, как читать audit-метки, доменный словарь. |
+| [`../CLAUDE.md`](../CLAUDE.md) | Первое что читает LLM. 3 контракта, доменный словарь, V22+ актуальное. |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | High-level data flow, module boundaries, security defaults. |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Как сделать PR. ESLint / тесты / commits. |
 | [`running.md`](./running.md) | Как запустить локально (включая корп-proxy с MITM TLS). |
-| [`v20-scanner2-handoff.md`](./v20-scanner2-handoff.md) | Контекст для агента, продолжающего «Сканнер команд 2.0». |
 
 ## 2. Контракты и инварианты (must-read)
 
 | Файл | Зачем |
 |---|---|
 | [`state-contracts.md`](./state-contracts.md) | 3 неочевидных контракта: Reactive.silent, identity-deterministic attribution, `_scrubSecrets`. |
-| [`state-shape.md`](./state-shape.md) | Shape `state` / `Row` / `Employee` + invariants. Сгенерируется из JSDoc в P8 phase-2. |
+| [`state-shape.md`](./state-shape.md) | Shape `state` / `Row` / `Employee` + invariants. |
 | [`dont-touch.md`](./dont-touch.md) | Места «выглядит как баг, но это сознательный компромисс». |
 | [`sigma-isolation.md`](./sigma-isolation.md) | ADR: Sigma Jira как отдельный инстанс. |
 
@@ -33,11 +32,12 @@
 
 | Файл | Зачем |
 |---|---|
-| [`tone-of-voice.md`](./tone-of-voice.md) | TOV stub (BRAND_BOOK §7). Расширяется AU5 middleware. |
-| [`brand.md`](./brand.md) | Brand reference для разработчиков (минимум чтоб не сломать дизайн). |
+| [`tone-of-voice.md`](./tone-of-voice.md) | TOV stub (BRAND_BOOK §7). |
+| [`brand.md`](./brand.md) | Brand reference для разработчиков. |
 | [`spine-pill.md`](./spine-pill.md) | Дизайн-система V15+ — 3px stripe, mono numerals, CAPS sub-headers. |
+| [`pz-design-system.md`](./pz-design-system.md) | Токены/палитра/типографика. |
+| [`microcopy-style-guide.md`](./microcopy-style-guide.md) | Микрокопия (Birman-style). |
 | [`branding-proposals.md`](./branding-proposals.md) | **DEPRECATED** ранние концепции бренда. |
-| [`../my_prisma-brand/BRAND_BOOK.md`](../my_prisma-brand/BRAND_BOOK.md) | Полный brandbook (концепция, типографика, motion, splash, loaders). |
 
 ## 4. State / Migrations
 
@@ -45,7 +45,9 @@
 |---|---|
 | [`state-shape.md`](./state-shape.md) | Top-level state + Row + Employee shape. |
 | [`state-contracts.md` § Migration policy](./state-contracts.md) | Когда bump'ать `q2_*_v3` версию. |
-| [`version-history.md`](./version-history.md) | Карта эпох V11→V17.2 (расшифровка `// V14 (B2)` меток). |
+| [`persistence-keys.md`](./persistence-keys.md) | Список всех `localStorage` ключей. |
+| [`version-history.md`](./version-history.md) | Карта эпох V11→V22+ (расшифровка `// V14 (B2)` меток). |
+| [`window-globals-migration.md`](./window-globals-migration.md) | window.X → Services-pattern. |
 
 ## 5. Domain glossary
 
@@ -58,7 +60,7 @@
 
 | Файл | Зачем |
 |---|---|
-| [`testing.md`](./testing.md) | Уровни тестов: testRunner / unit / contract / e2e. |
+| [`testing.md`](./testing.md) | Уровни тестов: testRunner / unit / contract / e2e / Playwright. |
 | [`FOUND_BUGS.md`](./FOUND_BUGS.md) | Список найденных багов в процессе тестирования. |
 | [`REFACTOR_SUGGESTIONS.md`](./REFACTOR_SUGGESTIONS.md) | Места, тяжело тестируемые из-за архитектуры. |
 
@@ -69,27 +71,21 @@
 | [`integrations/README.md`](./integrations/) | Обзор + Pulse pipeline. |
 | [`integrations/api-endpoints.md`](./integrations/) | Таблица всех `/api/integrations/*`. |
 | [`integrations/auth-and-secrets.md`](./integrations/) | Token flow + scrub policy. |
-
-## 8. Audit-эры
-
-| Файл | Зачем |
-|---|---|
-| [`audits-index.md`](./audits-index.md) | Полный индекс аудит-папок V14 → V21 + holistic. |
-| [`v21-rollout-cadence.md`](./v21-rollout-cadence.md) | Ступенчатый rollout пилота 109 чел → организация. |
-| [`audit-2026-05-pilot-review.md`](./audit-2026-05-pilot-review.md) | V21 Pilot Review. |
-| [`audit-2026-05-tech-deep-dive.md`](./audit-2026-05-tech-deep-dive.md) | Технический deep-dive (~50 KLOC). |
-| [`audit-2026-05-03/`](./audit-2026-05-03/) | Ранний пилот V21 (12 отчётов). |
+| [`integrations/release2.md`](./integrations/release2.md) | **V22+ Phase 5** — Release 2.0 sub-tab (56 custom-fields, lazy-loading, expand-panel). |
+| [`integrations/scanner2-overview.md`](./integrations/scanner2-overview.md) | Сканнер команд 2.0 — model + render + retention. |
+| [`integrations/team-scanner-v2.md`](./integrations/team-scanner-v2.md) | Scanner v2 — detail design. |
+| [`integrations/scanner2-classifier.md`](./integrations/scanner2-classifier.md) | classifyPerson правила. |
 
 ---
 
-## 9. Документ-генератор (P8 phase-1)
+## Текущая итерация (V22+)
 
-[`../scripts/docgen.js`](../scripts/docgen.js) — minimal Node-script, который:
+См. `git log --oneline -20` для коммитов последней эпохи. Главное:
 
-- Сканирует `state.js` + `rowFactory.js` JSDoc → пишет `docs/state-shape.md`.
-- Читает MAP-блок из `CLAUDE.md` → копирует в `docs/architecture-map.md`.
-
-Запуск: `npm run docs:gen` (не в CI; phase-2).
+- **Phase 4** — chat-bot meta-navigator (CEO-update, Smart suggestions, Explain-engine)
+- **Phase 5** — Release 2.0 sub-tab + visual grooming Phase 5.1 / 5.2
+- **Sprint A/B/C** — Scanner visual refactor (brand / microcopy / density encoding)
+- **Playwright** — `tests/playwright/{scanner-smoke,full-audit}.spec.js` + CI `visual` job
 
 ---
 
@@ -99,12 +95,12 @@
 |---|---|
 | Контракт state / persistence | extends [`state-contracts.md`](./state-contracts.md) |
 | Новая интеграция | новый файл в [`integrations/`](./integrations/) |
-| ADR / решение | как audit-папка `audit-2026-MM-<topic>/` (read-only после merge) |
+| Architectural decision | новый файл в этой папке с префиксом-эпохой (`V22-<topic>.md`) |
 | Brand / tone правило | extends [`tone-of-voice.md`](./tone-of-voice.md) или [`spine-pill.md`](./spine-pill.md) |
 | LLM-onboarding fact | extends [`../CLAUDE.md`](../CLAUDE.md) |
 
 ## Что НЕ держать здесь
 
-- Корневые `AUDIT_*.md` (2026-05-07/08) — финальный пасс, не дублировать.
-- `audit-2026-*/` папки в корне — read-only ADR.
-- Auto-generated reports — кладут в `.gitignore`-папку.
+- Top-level `AUDIT_*.md` (удалены commit `afeb858` — read-only ADR)
+- `audit-2026-*` папки (удалены commit `afeb858`)
+- Auto-generated reports — кладут в `.gitignore`-папку

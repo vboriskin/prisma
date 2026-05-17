@@ -13,7 +13,7 @@
 
 Где исключения OK:
 - Onboarding tour (`app/onboarding.js` 24-step)
-- Some legacy ctx-menus в Ганте (постепенно мигрируют — см. Spine TODO в `audit-2026-05-V17`)
+- Some legacy ctx-menus в Ганте (постепенно мигрируют)
 
 ### 2. Без gradients
 
@@ -120,7 +120,7 @@
 
 ### 8. Spacing на 4/8 grid
 
-Padding / gap / margin должны быть из `4 / 8 / 12 / 16 / 24 / 32`. Не `5 / 7 / 11 / 18`. См. lapses в `audit-2026-05-V17/11-filters-audit.md` art-director §4.
+Padding / gap / margin должны быть из `4 / 8 / 12 / 16 / 24 / 32`. Не `5 / 7 / 11 / 18`.
 
 ### 9. Inline `style.X = …` → CSS custom-property (AUDIT_HOLISTIC O10)
 
@@ -241,16 +241,14 @@ V17 P10 F9 история: `topbar-logo` имел `linear-gradient(135deg, #a78b
 
 V17.1 K2 история: `.ceo-sev-*` имел fixed light hex для `--sev-bg` (`#fef2f2`, `#fffbeb`...) → на dark theme получался почти-белый фон. Фикс — переопределение токенов в dark на полупрозрачные `rgba(...)`.
 
-## Audit-источники
+## Историческая справка
 
-- `design-audit/01-art-director.md` — design language manifesto
-- `design-audit/02-designer.md` — interaction patterns
-- `audit-2026-05-V17/08-dashboard-tabs-audit.md` — Spine применение к dashboard
-- `audit-2026-05-V17/09-registry-audit.md` — Spine в Реестре
-- `audit-2026-05-V17/10-topbar-audit.md` — Spine в Шапке
-- `audit-2026-05-V17/11-filters-audit.md` — Spine в Фильтрах
+Spine-pill manifesto родился в V15 design-audit. Применение к разделам
+(Реестр / Дашборд / Шапка / Фильтры / Гант) — V17 P9-P11. Все детали
+поднимаются через `git log --grep="V15 Spine"` или `git log -S "spine-pill"`.
 
-Если делаешь визуальный change — пройди по этим док-ам, проверь что не нарушаешь зафиксированные ранее решения.
+V22+ Phase 5.2 + Sprint A — последняя массовая ревизия compliance
+(Release 2.0 sub-tab и Scanner team) — детали `git log --grep="V22+ Sprint A"`.
 
 ## Visual review checklist
 
