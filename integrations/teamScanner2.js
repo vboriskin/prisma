@@ -1869,6 +1869,17 @@ export const TeamScanner2 = {
     this._container.innerHTML = html;
     this._bindEvents();
     this._promoteTitlesToTooltips();
+    // 2026-05-17 — synchronize body class с _expandedKey. _renderFull
+    // вызывается из refresh / team-switch / active-sprint-toggle и т.д.
+    // Если эти пути меняют _expandedKey (например, пустая модель → reset),
+    // нам нужно подтянуть body-class. Click-обработчик панели и
+    // _closePanel() тоже трогают этот класс — но здесь страховка для
+    // всех остальных путей.
+    if (this._expandedKey) {
+      document.body.classList.add('is-ts2-modal-open');
+    } else {
+      document.body.classList.remove('is-ts2-modal-open');
+    }
     // V21 — если активна вкладка «Метрики», инжектируем scaffold + монтируем
     // ECharts. Renderer оставил пустой `#ts2-metrics-mount` — заполняем его
     // здесь (а не внутри renderer'а), потому что mount требует реального DOM.
@@ -2447,11 +2458,17 @@ export const TeamScanner2 = {
     });
     // Click по строке → открыть/закрыть side-panel.
     // V18.1 P7-S1.5 — keyboard activation Enter/Space (WCAG 2.1.1).
+    // 2026-05-17 — заменили `_renderFull()` (~2200 nodes innerHTML rewrite)
+    // на partial-update: переключаем `.ts2-row-expanded` class руками +
+    // вставляем/убираем panel через `_renderPanelOnly()` / `_closePanel()`.
+    // Раньше пользователь видел «2 jerk'а экрана»: 1) полный rebuild
+    // dashboard'а, 2) slide-in модалки. Теперь только slide-in.
     root.querySelectorAll('.ts2-row[data-key]').forEach(el => {
       const activate = (e) => {
         if (e.target.closest('a, button')) return;
         const key = el.dataset.key;
         const opening = (this._expandedKey !== key);
+        const wasExpanded = !!this._expandedKey;
         this._expandedKey = opening ? key : '';
         // V19 C4 — telemetry: detail-panel open/close (понимаем drill-down rate).
         if (opening) telemetryEmit('scanner2.detail_open', { mode: this._activeView });
@@ -2473,7 +2490,25 @@ export const TeamScanner2 = {
             }
           } catch (_) { /* defensive */ }
         }
-        this._renderFull();   // полный rebuild — меняется и dashboard (highlight active row)
+        // Snap dashboard row state: убираем `ts2-row-expanded` со всех
+        // строк, ставим на текущую если opening. Только class-toggle,
+        // НЕ полный re-render.
+        root.querySelectorAll('.ts2-row.ts2-row-expanded').forEach(r => {
+          r.classList.remove('ts2-row-expanded');
+          r.setAttribute('aria-expanded', 'false');
+        });
+        if (opening) {
+          el.classList.add('ts2-row-expanded');
+          el.setAttribute('aria-expanded', 'true');
+          // Если предыдущая модалка была открыта — _renderPanelOnly
+          // переиспользует слот; иначе вставит свежий panel + backdrop.
+          this._renderPanelOnly();
+          // body.is-ts2-modal-open: единый сигнал «модалка открыта»,
+          // используется CSS-rule'ом для скрытия FAB.
+          document.body.classList.add('is-ts2-modal-open');
+        } else if (wasExpanded) {
+          this._closePanel();
+        }
       };
       el.addEventListener('click', activate);
       el.addEventListener('keydown', (e) => {
@@ -3737,14 +3772,27 @@ export const TeamScanner2 = {
 
   _closePanel() {
     // V18.1 P7-S3.1 — сохранили key до сброса, чтобы restore focus
-    // на row после rebuild'а dashboard.
+    // на row после закрытия panel'и.
+    // 2026-05-17 — заменили `_renderFull()` (full rebuild ~2200 nodes) на
+    // partial DOM-update: удаляем panel + backdrop, снимаем
+    // `ts2-row-expanded` руками. Раньше закрытие модалки = «jerk экрана»
+    // как при открытии. Теперь — только slide-out панели.
     const focusKey = this._expandedKey;
     this._expandedKey = '';
     if (this._escHandler) {
       document.removeEventListener('keydown', this._escHandler);
       this._escHandler = null;
     }
-    this._renderFull();
+    if (this._container) {
+      this._container.querySelector('#ts2-panel-backdrop')?.remove();
+      this._container.querySelector('.ts2-panel')?.remove();
+      this._container.querySelectorAll('.ts2-row.ts2-row-expanded').forEach(r => {
+        r.classList.remove('ts2-row-expanded');
+        r.setAttribute('aria-expanded', 'false');
+      });
+    }
+    // Снимаем body-class «модалка открыта» — FAB снова видим.
+    document.body.classList.remove('is-ts2-modal-open');
     // Restore focus на row из которого открыли panel.
     if (focusKey && this._container) {
       const row = this._container.querySelector(`.ts2-row[data-key="${focusKey}"]`);
@@ -3769,8 +3817,12 @@ export const TeamScanner2 = {
    */
   unmount() {
     // V22+ Phase 5.2 — restore mascot для других вкладок (guarded для test-shim'ов)
+    // 2026-05-17 — также снимаем `is-ts2-modal-open` если уходим с открытой
+    // модалкой (например, click на nav.Реестр пока модалка сотрудника висит).
+    // Иначе body-class leak'ает на другие вкладки и FAB остаётся скрытым.
     if (typeof document !== 'undefined' && document.body?.classList) {
       document.body.classList.remove('ts2-active');
+      document.body.classList.remove('is-ts2-modal-open');
     }
     // QF8: clear lastRawDiag + pending-share-key при unmount, чтобы
     // следующий mount не показал stale-данные предыдущей сессии.
