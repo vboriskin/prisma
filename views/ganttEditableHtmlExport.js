@@ -239,9 +239,66 @@ const _EDITOR_JS = `
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  /** Применить накопленные edits к копии snapshot.data.rows. */
+  function _applyEditsToSnapshot(meta) {
+    const next = JSON.parse(JSON.stringify(meta));
+    const rows = next.snapshot?.data?.rows || [];
+    const byId = Object.create(null);
+    for (const r of rows) byId[r.id] = r;
+    const todayISO = new Date().toISOString();
+    const todayDate = todayISO.slice(0, 10);
+    for (const [, e] of edits) {
+      if (e.kind !== 'pill') continue;
+      const row = byId[e.rowId];
+      if (!row) continue;
+      if (!row.donePills) row.donePills = {};
+      if (!row.inProgressPills) row.inProgressPills = {};
+      const k = e.col + '__' + e.wt;
+      if (e.status === 'done') {
+        row.donePills[k] = { at: todayDate, comment: e.comment || '', ts: todayISO };
+        delete row.inProgressPills[k];
+      } else if (e.status === 'in-progress') {
+        row.inProgressPills[k] = { at: todayISO };
+        delete row.donePills[k];
+      } else {
+        delete row.donePills[k];
+        delete row.inProgressPills[k];
+      }
+      row.updatedAt = todayISO;
+    }
+    next.lastEditedAt = todayISO;
+    return next;
+  }
+
+  /** Скачать текущий документ с обновлённым snapshot. Удаляет runtime UI
+   *  (banner, popup, edit-marker class) перед сериализацией — получатель
+   *  откроет «чистый» файл и сможет править с нуля. */
   function _downloadUpdated() {
-    // TODO C4: re-serialize snapshot + download.
-    alert('C4: «Скачать обновлённую копию» появится следующим шагом.');
+    if (!edits.size) {
+      alert('Нет правок для сохранения.');
+      return;
+    }
+    const updatedMeta = _applyEditsToSnapshot(snap);
+    // Clone document, очистить runtime artifacts, заменить snapshot, скачать.
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('#prizma-edit-bar, #prizma-pill-popup').forEach(el => el.remove());
+    clone.querySelectorAll('.prizma-edited').forEach(el => el.classList.remove('prizma-edited'));
+    const snapEl = clone.querySelector('#prizma-snapshot');
+    if (snapEl) snapEl.textContent = JSON.stringify(updatedMeta).replace(/</g, '\\u003c');
+    const html = '<!DOCTYPE html>\\n' + clone.outerHTML;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.download = 'gantt_edited_' + dateStr + '_' + snap.exportId.slice(0, 8) + '.html';
+    a.click();
+    URL.revokeObjectURL(url);
+    // После save очистка edits + visual reset.
+    edits.clear();
+    document.querySelectorAll('.gantt-type-pill.prizma-edited').forEach(p => p.classList.remove('prizma-edited'));
+    _updateCounter();
+    alert('Файл скачан. Отправьте его обратно тому, кто прислал — он импортирует правки.');
   }
 
   function _init() {
