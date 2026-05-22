@@ -21901,6 +21901,84 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 .gantt-header-col:hover .gdt-col-eye { opacity: .6; }
 .gdt-col-eye:hover { opacity: 1; color: var(--prizma-off-course, #dc2626); background: var(--prizma-off-course-bg, rgba(220,38,38,.08)); }
 
+/* #1 — Release editor modal: чистый дизайн, date-pickers, smart-hint. */
+.re-modal-box {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.re-modal-box .modal-header {
+  padding: 18px 20px 0;
+  border: 0;
+  display: block;
+  position: relative;
+}
+.re-modal-eyebrow {
+  font: 700 10px/1 system-ui, sans-serif;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.re-modal-box .modal-header h3 {
+  font: 600 18px/1.3 system-ui, sans-serif;
+  color: var(--text-1);
+  margin: 0;
+}
+.re-modal-box .modal-close-btn {
+  position: absolute;
+  top: 12px; right: 12px;
+}
+.re-modal-body {
+  padding: 16px 20px 4px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.re-field { display: flex; flex-direction: column; gap: 4px; }
+.re-field-label {
+  font: 600 11px/1 system-ui, sans-serif;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.re-field-input {
+  padding: 9px 12px;
+  background: var(--card);
+  color: var(--text-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 500 14px/1.3 system-ui, sans-serif;
+  transition: border-color .12s, box-shadow .12s;
+}
+.re-field-input:focus {
+  border-color: var(--prizma-information, #4f46e5);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--prizma-information-bg, rgba(79,70,229,.12));
+}
+.re-field-hint {
+  font: 400 11px/1.4 system-ui, sans-serif;
+  color: var(--text-3);
+}
+.re-field-hint strong { color: var(--prizma-information, #4f46e5); font-weight: 600; }
+.re-dates-row { display: flex; align-items: center; gap: 8px; }
+.re-field-date { flex: 1; min-width: 0; }
+.re-dates-sep { color: var(--text-3); font-size: 14px; }
+.re-modal-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px 18px;
+  gap: 12px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 8px;
+}
+.re-modal-spacer { flex: 1; }
+.re-modal-actions { display: flex; gap: 8px; }
+.re-delete-btn {
+  color: var(--prizma-off-course, #dc2626);
+  border-color: var(--prizma-off-course, #dc2626);
+}
+.re-delete-btn:hover { background: var(--prizma-off-course, #dc2626); color: #fff; }
+
 /* #6 — week-ticks: лёгкие vertical-засечки по неделям в шапке колодца. */
 .gdt-week-tick {
   position: absolute;

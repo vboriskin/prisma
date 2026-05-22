@@ -2,9 +2,10 @@
 /* ============================================================
    RELEASE EDITOR MODAL — добавить/редактировать пользовательский релиз
 
-   #1 C4 — модалка для CRUD на state.releases. Открывается из шапки Ганта
-   (кнопка «+ релиз») и из header-col-action на самом колодце Гант'а
-   (для редактирования / удаления существующего custom релиза).
+   #1 — модалка с date-pickers и smart-pattern автоподстановкой ярлыка.
+   Парсит существующие shorts (legacy + custom), находит trailing numeric
+   pattern и инкрементирует последнее число: 1.22→1.23, 929.13→929.14,
+   72.1→72.2. Если паттерна нет — поле остаётся пустым.
    ============================================================ */
 
 import { state }    from '../state.js';
@@ -12,9 +13,62 @@ import { Storage }  from '../dataStore.js';
 import { Utils }    from '../utils.js';
 import { LEGACY_RELEASE_LIST } from '../constants.js';
 
+const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+
+function _padd(n) { return String(n).padStart(2, '0'); }
+
+/** «DD.MM–DD.MM» → { startISO, endISO } для текущего года (приближённо). */
+function _parseDatesToIso(datesStr) {
+  if (!datesStr) return { start: '', end: '' };
+  const m = String(datesStr).match(/^(\d{2})\.(\d{2})\D+(\d{2})\.(\d{2})/);
+  if (!m) return { start: '', end: '' };
+  const yr = new Date().getFullYear();
+  return {
+    start: `${yr}-${m[2]}-${m[1]}`,
+    end:   `${yr}-${m[4]}-${m[3]}`,
+  };
+}
+
+/** ISO YYYY-MM-DD → DD.MM. */
+function _isoToShort(iso) {
+  if (!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}.${m[2]}` : '';
+}
+
+/**
+ * Парсит существующие short'ы (legacy + custom), находит trailing numeric
+ * pattern и инкрементирует последний segment. Поддерживает:
+ *  «1.20»/«1.21»/«1.22» → «1.23»
+ *  «929.12»/«929.13» → «929.14»
+ *  «72.1»/«72.2» → «72.3»
+ *  «1.0»/«2.0» → «3.0» (если first segment растёт)
+ *  «Релиз A.1»/«Релиз A.2» → «Релиз A.3»
+ */
+export function suggestNextShort(existingShorts) {
+  if (!Array.isArray(existingShorts) || !existingShorts.length) return '';
+  // Берём последний — это правдоподобный «свежайший» паттерн (custom
+  // append'ятся в конец state.releases в порядке создания).
+  const last = existingShorts[existingShorts.length - 1];
+  if (!last) return '';
+  // Trailing dot-separated numeric block (e.g. "1.20", "929.13", "72.1"),
+  // с возможным non-digit prefix ("Релиз A.").
+  const m = String(last).match(/^(.*?)(\d+(?:\.\d+)*)(\D*)$/);
+  if (!m) return '';
+  const [, prefix, nums, suffix] = m;
+  const parts = nums.split('.');
+  const lastIdx = parts.length - 1;
+  const n = parseInt(parts[lastIdx], 10);
+  if (!Number.isFinite(n)) return '';
+  // Сохраняем ширину паддинга (если был "1.05" → "1.06", не "1.6").
+  const width = parts[lastIdx].length;
+  parts[lastIdx] = String(n + 1).padStart(width, '0');
+  return prefix + parts.join('.') + suffix;
+}
+
 /**
  * @param {object} opts
- * @param {string} [opts.key]      Если указан — редактирование, иначе создание.
+ * @param {string} [opts.key]
  * @param {function} [opts.onSaved]
  */
 export function openReleaseEditor(opts = {}) {
@@ -24,46 +78,62 @@ export function openReleaseEditor(opts = {}) {
     ? (state.releases || []).find(r => r.key === editKey)
     : null;
   const isEdit = !!existing;
-  // Legacy релизы редактировать нельзя.
   if (editKey && LEGACY_RELEASE_LIST.some(l => l.key === editKey)) {
     window.showToast?.('Встроенные релизы не редактируются', 'warning', 2200);
     return () => {};
   }
 
+  // Smart-suggestion для нового релиза.
+  const allShorts = [
+    ...LEGACY_RELEASE_LIST.filter(r => r.key !== 'backlog' && r.key !== 'overtime').map(r => r.short),
+    ...((state.releases || []).map(r => r.short)),
+  ].filter(Boolean);
+  const suggested = !isEdit ? suggestNextShort(allShorts) : '';
+
+  const existingDates = _parseDatesToIso(existing?.dates || '');
   const draft = {
     short: existing?.short || '',
     label: existing?.label || '',
-    dates: existing?.dates || '',
+    startISO: existingDates.start,
+    endISO:   existingDates.end,
   };
 
   document.getElementById('modal-release-editor')?.remove();
   const html = `
     <div class="modal-overlay" id="modal-release-editor" role="dialog" aria-modal="true" aria-labelledby="modal-release-editor-title">
-      <div class="modal-box ae-modal-box">
+      <div class="modal-box re-modal-box">
         <div class="modal-header">
-          <h3 id="modal-release-editor-title">${isEdit ? 'Релиз: ' + esc(existing.short || existing.label) : 'Добавить релиз'}</h3>
+          <div class="re-modal-eyebrow">${isEdit ? 'РЕДАКТИРОВАНИЕ РЕЛИЗА' : 'НОВЫЙ РЕЛИЗ'}</div>
+          <h3 id="modal-release-editor-title">${isEdit ? esc(existing.short || existing.label) : 'Добавить релиз'}</h3>
           <button class="modal-close-btn" type="button" aria-label="Закрыть" data-close-modal>×</button>
         </div>
-        <div class="ae-modal-body">
-          <div class="form-grid">
-            <label class="form-row">
-              <span class="form-label">Ярлык</span>
-              <input id="re-short" class="form-input" placeholder="Например: 1.23" maxlength="20" value="${esc(draft.short)}" autofocus>
-            </label>
-            <label class="form-row">
-              <span class="form-label">Полное название (опц.)</span>
-              <input id="re-label" class="form-input" placeholder="Например: Релиз 1.23" maxlength="60" value="${esc(draft.label)}">
-            </label>
-            <label class="form-row">
-              <span class="form-label">Диапазон дат</span>
-              <input id="re-dates" class="form-input" placeholder="DD.MM–DD.MM" maxlength="40" value="${esc(draft.dates)}">
-            </label>
+        <div class="re-modal-body">
+          <div class="re-field">
+            <label class="re-field-label" for="re-short">Ярлык</label>
+            <input id="re-short" class="re-field-input" placeholder="${esc(suggested || 'Например: 1.23')}" maxlength="20" value="${esc(draft.short)}" autocomplete="off" autofocus>
+            <div class="re-field-hint">${isEdit ? 'Например: 1.23, 929.14, 72.3' : (suggested ? `Подсказка: следующий — <strong>${esc(suggested)}</strong>` : 'Любой формат — у каждой команды свой стандарт')}</div>
+          </div>
+          <div class="re-field">
+            <label class="re-field-label" for="re-label">Полное название</label>
+            <input id="re-label" class="re-field-input" placeholder="Релиз 1.23 — quarterly drop" maxlength="60" value="${esc(draft.label)}" autocomplete="off">
+            <div class="re-field-hint">Опционально — показывается в названии колонки и тултипах.</div>
+          </div>
+          <div class="re-field re-field-dates">
+            <label class="re-field-label">Диапазон</label>
+            <div class="re-dates-row">
+              <input type="date" id="re-start" class="re-field-input re-field-date" value="${esc(draft.startISO)}">
+              <span class="re-dates-sep" aria-hidden="true">→</span>
+              <input type="date" id="re-end" class="re-field-input re-field-date" value="${esc(draft.endISO)}">
+            </div>
+            <div class="re-field-hint">Начало и конец окна планирования. Today-line будет интерполироваться внутри.</div>
           </div>
         </div>
-        <div class="ae-modal-footer">
-          ${isEdit ? '<button class="btn btn-outline btn-sm btn-danger" id="re-delete">Удалить релиз</button>' : ''}
-          <button class="btn btn-outline btn-sm" data-close-modal>Отмена</button>
-          <button class="btn btn-primary btn-sm" id="re-save">${isEdit ? 'Сохранить' : 'Добавить'}</button>
+        <div class="re-modal-footer">
+          ${isEdit ? '<button class="btn btn-outline btn-xs re-delete-btn" id="re-delete">Удалить релиз</button>' : '<span class="re-modal-spacer"></span>'}
+          <div class="re-modal-actions">
+            <button class="btn btn-outline btn-sm" data-close-modal>Отмена</button>
+            <button class="btn btn-primary btn-sm" id="re-save">${isEdit ? 'Сохранить' : 'Добавить'}</button>
+          </div>
         </div>
       </div>
     </div>`;
@@ -77,14 +147,27 @@ export function openReleaseEditor(opts = {}) {
     if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); }
   });
 
+  // Если есть suggestion и поле пустое — заполняем его (но юзер может стереть).
+  const shortInp = document.getElementById('re-short');
+  if (!isEdit && suggested && !shortInp.value) shortInp.value = suggested;
+
   document.getElementById('re-save').addEventListener('click', () => {
-    const short = document.getElementById('re-short').value.trim();
+    const short = shortInp.value.trim();
     const label = document.getElementById('re-label').value.trim();
-    const dates = document.getElementById('re-dates').value.trim();
+    const startISO = document.getElementById('re-start').value;
+    const endISO   = document.getElementById('re-end').value;
     if (!short) {
       window.showToast?.('Укажите ярлык релиза', 'warning', 1800);
+      shortInp.focus();
       return;
     }
+    if (startISO && endISO && startISO > endISO) {
+      window.showToast?.('Дата конца раньше даты начала', 'warning', 2200);
+      return;
+    }
+    const dates = (startISO && endISO)
+      ? `${_isoToShort(startISO)}–${_isoToShort(endISO)}`
+      : '';
     const key = editKey || ('r' + short.replace(/[^\w]/g, '').toLowerCase());
     if (!editKey) {
       if (LEGACY_RELEASE_LIST.some(l => l.key === key) || (state.releases || []).some(r => r.key === key)) {
