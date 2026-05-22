@@ -55,12 +55,13 @@ export function openEpicDepsModal({ epicKey, onSaved }) {
           <button class="modal-close-btn" type="button" aria-label="Закрыть" data-close-modal>×</button>
         </div>
         <div class="ed-body">
-          <div class="ed-help">Отметьте эпики, от которых зависит данный. Они появятся в «Графе зависимостей» со стрелками к этому эпику.</div>
-          <input type="text" class="ed-search" id="ed-search" placeholder="Поиск эпиков…" autocomplete="off" autofocus>
+          <div class="ed-help">Отметьте эпики, от которых зависит «${esc(epicKey)}». Они появятся в «Графе зависимостей» со стрелками к этому эпику.</div>
+          <div class="ed-selected-bar" id="ed-selected-bar"></div>
+          <input type="text" class="ed-search" id="ed-search" placeholder="Поиск по названию эпика…" autocomplete="off" autofocus>
           <div class="ed-list" id="ed-list"></div>
         </div>
         <div class="re-modal-footer">
-          <span class="re-modal-spacer"></span>
+          <span class="ed-footer-count" id="ed-footer-count"></span>
           <div class="re-modal-actions">
             <button class="btn btn-outline btn-sm" data-close-modal>Отмена</button>
             <button class="btn btn-primary btn-sm" id="ed-save">Сохранить</button>
@@ -80,28 +81,47 @@ export function openEpicDepsModal({ epicKey, onSaved }) {
 
   const listEl = document.getElementById('ed-list');
   const searchEl = document.getElementById('ed-search');
+  const selBarEl = document.getElementById('ed-selected-bar');
+  const countEl = document.getElementById('ed-footer-count');
+
+  const _check = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+
+  function _renderSelectedBar() {
+    const arr = [...selected];
+    if (!arr.length) { selBarEl.innerHTML = '<span class="ed-selected-empty">Зависимости не выбраны</span>'; }
+    else {
+      selBarEl.innerHTML = arr.map(e => `<span class="ed-chip" data-epic="${esc(e)}">${esc(e)}<button type="button" class="ed-chip-x" data-epic="${esc(e)}" aria-label="Убрать">×</button></span>`).join('');
+      selBarEl.querySelectorAll('.ed-chip-x').forEach(b => b.addEventListener('click', () => {
+        selected.delete(b.dataset.epic);
+        render();
+      }));
+    }
+    countEl.textContent = arr.length ? `Выбрано: ${arr.length}` : '';
+  }
+
   function render() {
     const q = searchEl.value.trim().toLowerCase();
     const items = allEpics.filter(e => !q || e.toLowerCase().includes(q));
     if (!items.length) {
       listEl.innerHTML = '<div class="ed-empty">Эпики не найдены</div>';
-      return;
-    }
-    listEl.innerHTML = items.map(e => {
-      const checked = selected.has(e) ? 'checked' : '';
-      return `<label class="ed-item${selected.has(e) ? ' is-selected' : ''}">
-        <input type="checkbox" data-epic="${esc(e)}" ${checked}>
-        <span class="ed-item-text">${esc(e)}</span>
-      </label>`;
-    }).join('');
-    listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-      cb.addEventListener('change', () => {
-        const ep = cb.dataset.epic;
-        if (cb.checked) selected.add(ep);
-        else selected.delete(ep);
-        cb.closest('.ed-item').classList.toggle('is-selected', cb.checked);
+    } else {
+      listEl.innerHTML = items.map(e => {
+        const on = selected.has(e);
+        return `<button type="button" class="ed-item${on ? ' is-selected' : ''}" data-epic="${esc(e)}">
+          <span class="ed-item-check">${on ? _check : ''}</span>
+          <span class="ed-item-text">${esc(e)}</span>
+        </button>`;
+      }).join('');
+      listEl.querySelectorAll('.ed-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ep = btn.dataset.epic;
+          if (selected.has(ep)) selected.delete(ep);
+          else selected.add(ep);
+          render();
+        });
       });
-    });
+    }
+    _renderSelectedBar();
   }
   render();
   searchEl.addEventListener('input', render);

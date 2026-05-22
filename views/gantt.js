@@ -1064,7 +1064,7 @@ export const GanttView = {
       .map(r => ({
         key:       r.key,
         label:     r.short || r.label,
-        sub:       r.dates || (r.key === 'overtime' ? 'Овертайм' : ''),
+        sub:       r.key === 'backlog' ? '' : (r.dates || (r.key === 'overtime' ? 'Овертайм' : '')),
         cls:       r.cls,
         kind:      r.kind,
         flatTypes: r.flatTypes,
@@ -1830,7 +1830,7 @@ export const GanttView = {
             <div class="v16-epic-sub gantt-row-label-sub">
               ${_depsBadge || ''}${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' : ''}<span class="v16-epic-cats">${catHtml}</span>
               <button type="button" class="v16-epic-deps-edit" data-epic-key="${esc(_epicKey)}" title="Зависимости эпика" aria-label="Указать зависимости">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><line x1="8.2" y1="10.7" x2="15.8" y2="6.3"/><line x1="8.2" y1="13.3" x2="15.8" y2="17.7"/></svg>
               </button>
             </div>
           </div>${cells.join('')}</div>`;
