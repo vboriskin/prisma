@@ -17,8 +17,18 @@ import { Reactive } from './reactiveStore.js';
 const _rawState = {
   rows: [],
   employees: [],
+  // #1 — пользовательские релизы поверх 5 legacy (r120/r121/r122/overtime/backlog).
+  // Каждый: { key, label, short, dates, barCls, winCls, order }. Persist'ится в
+  // SETTINGS_KEY. Legacy 5 — захардкожены в constants.js (RELEASE_WINDOWS) и
+  // не редактируются через этот список (мигрировать всех readers — отдельная задача).
+  releases: [],
+  // #1.1 — локальный «глаз» в Гант: список релиз-key, которые скрыты в Гант'е
+  // (показ продолжается во всех других views). Persist'ится с settings.
+  ganttHiddenReleases: [],
   filters: {
-    search:'', team:'', scope:'', release:'', workType:'', role:'', assignee:'', tag:'',
+    // V22 #1.1 — `release` теперь массив (мульти-выбор). Старые строковые
+    // значения адаптируются через FilterEngine.normalize'ом.
+    search:'', team:'', scope:'', release:[], workType:'', role:'', assignee:'', tag:'',
     onlyBlocking:false, onlyRisky:false, onlyDone:false, preset:null,
   },
   activeSection: 'dashboard',

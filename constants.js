@@ -112,6 +112,49 @@ export const RELEASE_WINDOWS = {
   overtime:{ label:'Овертайм',   short:'OT',   dates:'',            barCls:'gantt-bar-overtime', winCls:'gantt-window-overtime', stageCls:'stage-overtime' },
 };
 
+// #1 — legacy 5 релизов в каноническом порядке (backlog → r120 → r121 → r122 → overtime).
+// Custom релизы из state.releases[] вставляются ПЕРЕД overtime по полю `order`.
+// `kind: 'legacy'` означает, что row хранит данные в плоской схеме
+// (release120Types и т.п.); `kind: 'custom'` — в row.customReleaseTypes[key].
+export const LEGACY_RELEASE_LIST = [
+  { key:'backlog',  label:'Бэклог', short:'Бэклог',   dates:'ещё не запланировано', cls:'gantt-window-backlog', kind:'legacy', flatTypes:'backlogTypes',     flatHas:'isUnassigned' },
+  { key:'r120',     label:'1.20',   short:'1.20',     dates:'20.04–17.05',          cls:'gantt-window-r120',    kind:'legacy', flatTypes:'release120Types',  flatHas:'hasRelease120' },
+  { key:'r121',     label:'1.21',   short:'1.21',     dates:'18.05–14.06',          cls:'gantt-window-r121',    kind:'legacy', flatTypes:'release121Types',  flatHas:'hasRelease121' },
+  { key:'r122',     label:'1.22',   short:'1.22',     dates:'15.06–14.07',          cls:'gantt-window-r122',    kind:'legacy', flatTypes:'release122Types',  flatHas:'hasRelease122' },
+  { key:'overtime', label:'OT',     short:'OT',       dates:'Овертайм',             cls:'gantt-window-overtime',kind:'legacy', flatTypes:'overtimeTypes',    flatHas:'hasOvertime' },
+];
+
+/**
+ * Возвращает полный список релизов для UI = legacy 5 + custom из state.releases.
+ * Сортировка: backlog первый, overtime последний, custom вставляются между
+ * r122 и overtime в порядке поля `order` (по умолчанию append'ятся).
+ *
+ * @param {Array<{key, label, short, dates, order}>} customReleases — state.releases
+ * @returns {Array<{key, label, short, dates, cls, kind, flatTypes?, flatHas?}>}
+ */
+export function buildReleaseList(customReleases) {
+  const customs = (Array.isArray(customReleases) ? customReleases : [])
+    .filter(r => r && r.key && !LEGACY_RELEASE_LIST.some(l => l.key === r.key))
+    .slice()
+    .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0))
+    .map(r => ({
+      key: r.key,
+      label: r.label || r.key,
+      short: r.short || r.label || r.key,
+      dates: r.dates || '',
+      cls:   r.cls   || `gantt-window-${r.key}`,
+      kind:  'custom',
+    }));
+  if (!customs.length) return LEGACY_RELEASE_LIST.slice();
+  // Вставка custom'ов перед overtime (последний в legacy).
+  const out = [];
+  for (const l of LEGACY_RELEASE_LIST) {
+    if (l.key === 'overtime') out.push(...customs);
+    out.push(l);
+  }
+  return out;
+}
+
 /* V21 audit 4.1 — итерабельный источник для дашборда / метрик / KPI / progress.
    Единый список релизов с маппингом на rowFactory-поля. Когда квартал
    сдвинется (1.23/1.24/1.25), правится ТОЛЬКО эта константа — KPI и breakdown

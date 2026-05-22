@@ -17,6 +17,9 @@ export const RowFactory = {
       release120Raw:'', release121Raw:'', release122Raw:'', overtimeRaw:'',
       release120Types:[], release121Types:[], release122Types:[], overtimeTypes:[],
       hasRelease120:false, hasRelease121:false, hasRelease122:false, hasOvertime:false, isUnassigned:true,
+      // #1 — types для пользовательских релизов (key → wt[]). Старые 5
+      // legacy релизов продолжают жить в плоских release120Types и т.д.
+      customReleaseTypes: {},
       scopeStatus:'', role:'',
       blockingDependency:false, blockingDeadline:'',
       commitToCounterparty:false, commitDate:'',

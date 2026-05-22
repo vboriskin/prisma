@@ -430,3 +430,31 @@ Migrations.register({
     return parsed;
   },
 });
+
+/* ------------------------------------------------------------
+ * q2_settings_v3 3→4 — добавить пользовательские релизы (#1).
+ *
+ * `state.releases[]` — список custom релизов (legacy 5 не редактируются).
+ * `state.ganttHiddenReleases[]` — локальный «глаз» в Гант'е (по умолчанию пустой).
+ * `state.filters.release` теперь массив; старые строковые значения нормализуем
+ *   в одиночный массив для backward compatibility.
+ * ------------------------------------------------------------ */
+Migrations.register({
+  key: 'q2_settings_v3',
+  fromVersion: 3,
+  toVersion: 4,
+  migrate(parsed) {
+    if (!parsed || typeof parsed !== 'object') return parsed;
+    if (!Array.isArray(parsed.releases)) parsed.releases = [];
+    if (!Array.isArray(parsed.ganttHiddenReleases)) parsed.ganttHiddenReleases = [];
+    if (parsed.filters && typeof parsed.filters === 'object') {
+      const rel = parsed.filters.release;
+      if (typeof rel === 'string') {
+        parsed.filters.release = rel ? [rel] : [];
+      } else if (!Array.isArray(rel)) {
+        parsed.filters.release = [];
+      }
+    }
+    return parsed;
+  },
+});

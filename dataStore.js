@@ -67,12 +67,14 @@ function _buildSettingsPayload() {
     // featureFlags / version / lastSeenVersion / lastActiveAt / focus).
     // См. state.js + app/migrations.js (q2_settings_v3 2→3).
     meta:             state.meta,
-    // V21 W — settings payload version. Используется Migrations runner для
-    // последовательного up-migrate. Прежний payload не имел version (== 0);
-    // миграция 0→1 стрипает summaryMode (AUDIT_HOLISTIC O3).
-    // 1→2 — добавлено поле notifications (F4 Notification Center).
-    // 2→3 — добавлено поле meta (P3 + Идея 1: user/permissions/flags).
-    version:          3,
+    // #1 — пользовательские релизы (CRUD через Настройки) + локальный «глаз»
+    // в Гант (state.ganttHiddenReleases). Legacy 5 релизов (r120/r121/r122/
+    // overtime/backlog) не редактируются — они в constants.LEGACY_RELEASE_LIST.
+    releases:            Array.isArray(state.releases) ? state.releases : [],
+    ganttHiddenReleases: Array.isArray(state.ganttHiddenReleases) ? state.ganttHiddenReleases : [],
+    // V21 W — settings payload version.
+    // 0→1: drop summaryMode. 1→2: notifications. 2→3: meta. 3→4: releases + ganttHiddenReleases + filters.release массив.
+    version:          4,
   };
 }
 
@@ -281,6 +283,9 @@ export const Storage = {
         }
         if (m.focus == null || (typeof m.focus === 'object')) state.meta.focus = m.focus;
       }
+      // #1 — пользовательские релизы + локальный «глаз» Ганта.
+      if (Array.isArray(s.releases)) state.releases = s.releases;
+      if (Array.isArray(s.ganttHiddenReleases)) state.ganttHiddenReleases = s.ganttHiddenReleases;
       syncColumnSettings();
     });
   },
