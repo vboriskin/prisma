@@ -1997,9 +1997,14 @@ export const GanttView = {
             </div>`
           : '';
         const todayPctAttr = (todayPct !== null) ? ` data-today-pct="${todayPct.toFixed(2)}" data-today-label="${esc(todayLabel)}"` : '';
+        // #1 C5 — eye-button: скрыть колодец локально (state.ganttHiddenReleases).
+        // Для backlog не показываем (его скрывать смысла нет — наглядность пустых задач).
+        const eyeBtn = c.key === 'backlog' ? '' :
+          `<button type="button" class="gdt-col-eye" data-col-key="${esc(c.key)}" title="Скрыть колодец из Ганта" aria-label="Скрыть колодец ${esc(c.label)}">×</button>`;
         return `<div class="gantt-header-col" data-col="${esc(c.key)}"${todayPctAttr} style="position:relative">
           ${distSpark}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
+          ${eyeBtn}
           <div class="gdt-resize-handle" data-col-key="${esc(c.key)}" title="Потяните чтобы изменить ширину"></div>
         </div>`;
       }).join('');
@@ -2020,7 +2025,15 @@ export const GanttView = {
     // меняется.
     const _prevHeight = wrap.offsetHeight;
     if (_prevHeight > 0) wrap.style.minHeight = _prevHeight + 'px';
-    wrap.innerHTML = `<div class="gantt-container gdt-container">${header}<div class="gantt-body">${body}</div>${legend}<div class="gdt-today-line" hidden></div></div>`;
+    // #1 C5 — banner со списком скрытых колодцев + кнопкой «Показать все».
+    const _hiddenList = Array.isArray(state.ganttHiddenReleases) ? state.ganttHiddenReleases : [];
+    const hiddenBanner = _hiddenList.length
+      ? `<div class="gdt-hidden-releases" role="status">
+           <span class="gdt-hidden-releases-label">Скрыто колодцев: ${_hiddenList.length}</span>
+           <button type="button" class="gdt-hidden-releases-show-all">Показать все</button>
+         </div>`
+      : '';
+    wrap.innerHTML = `<div class="gantt-container gdt-container">${hiddenBanner}${header}<div class="gantt-body">${body}</div>${legend}<div class="gdt-today-line" hidden></div></div>`;
     // #2: do NOT force overflow:visible — that killed the horizontal scrollbar
     //   on #gantt-wrap (defined as overflow-x:auto in styles.css). Let CSS win.
     wrap.style.overflow = '';
@@ -2173,6 +2186,30 @@ export const GanttView = {
         });
       });
     });
+
+    /* #1 C5 — eye-button скрывает колодец из state.ganttHiddenReleases. */
+    wrap.querySelectorAll('.gdt-col-eye').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        const key = btn.dataset.colKey;
+        if (!key) return;
+        const current = Array.isArray(state.ganttHiddenReleases) ? state.ganttHiddenReleases.slice() : [];
+        if (!current.includes(key)) current.push(key);
+        state.ganttHiddenReleases = current;
+        try { Storage.save(); } catch (_) {}
+        GanttView.renderChart();
+      });
+    });
+
+    const _bannerShowAll = wrap.querySelector('.gdt-hidden-releases-show-all');
+    if (_bannerShowAll) {
+      _bannerShowAll.addEventListener('click', () => {
+        state.ganttHiddenReleases = [];
+        try { Storage.save(); } catch (_) {}
+        GanttView.renderChart();
+      });
+    }
 
     /* Cell-risks glyph — открывает попап рисков для ячейки. */
     wrap.querySelectorAll('.gdt-cell-risk-glyph').forEach(glyph => {
