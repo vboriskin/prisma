@@ -1091,37 +1091,41 @@ export const GanttView = {
     const _colByKey = Object.create(null);
     for (const c of cols) _colByKey[c.key] = c;
     const _colKind = (key) => _colByKey[key]?.kind || 'legacy';
+    // AUDIT-2/4 — legacy vs custom определяем по принадлежности к этому набору,
+    // НЕ по _colByKey (который содержит только видимые cols → move в скрытый
+    // колодец ломался). Так move/add/ctx работают для любого колодца.
+    const _FLAT_FIELD = { backlog: 'backlogTypes', r120: 'release120Types', r121: 'release121Types', r122: 'release122Types', overtime: 'overtimeTypes' };
+    const _FLAT_HAS   = { backlog: 'isUnassigned', r120: 'hasRelease120', r121: 'hasRelease121', r122: 'hasRelease122', overtime: 'hasOvertime' };
+    const _isLegacyCol = (key) => Object.prototype.hasOwnProperty.call(_FLAT_FIELD, key);
     const _readTypes = (row, key) => {
-      const meta = _colByKey[key];
-      if (meta?.kind === 'custom') {
-        const map = row.customReleaseTypes || {};
-        return Array.isArray(map[key]) ? map[key] : [];
-      }
-      return Array.isArray(row[meta?.flatTypes]) ? row[meta.flatTypes] : [];
+      if (_isLegacyCol(key)) return Array.isArray(row[_FLAT_FIELD[key]]) ? row[_FLAT_FIELD[key]] : [];
+      const map = row.customReleaseTypes || {};
+      return Array.isArray(map[key]) ? map[key] : [];
     };
     const _writeTypes = (row, key, arr) => {
-      const meta = _colByKey[key];
-      if (meta?.kind === 'custom') {
-        if (!row.customReleaseTypes) row.customReleaseTypes = {};
-        row.customReleaseTypes[key] = Array.isArray(arr) ? arr : [];
-      } else if (meta?.flatTypes) {
-        row[meta.flatTypes] = Array.isArray(arr) ? arr : [];
-      }
+      if (_isLegacyCol(key)) { row[_FLAT_FIELD[key]] = Array.isArray(arr) ? arr : []; return; }
+      if (!row.customReleaseTypes) row.customReleaseTypes = {};
+      row.customReleaseTypes[key] = Array.isArray(arr) ? arr : [];
     };
     const _hasTypes = (row, key) => {
-      const meta = _colByKey[key];
-      if (!meta) return false;
-      if (meta.kind === 'custom') {
-        const arr = row.customReleaseTypes?.[key];
-        return Array.isArray(arr) && arr.length > 0;
-      }
-      // Backlog has flatHas='isUnassigned' (truthy when nothing in the 4 releases).
-      return !!row[meta.flatHas];
+      if (_isLegacyCol(key)) return !!row[_FLAT_HAS[key]];
+      const arr = row.customReleaseTypes?.[key];
+      return Array.isArray(arr) && arr.length > 0;
     };
-    const hasMap    = {backlog:'isUnassigned',r120:'hasRelease120',r121:'hasRelease121',r122:'hasRelease122',overtime:'hasOvertime'};
-    const tfMap     = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
-    const colKeyMap = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
-    const COL_LABEL_MAP = GANTT_COL_LABELS;
+    // Лейбл колодца с fallback на ярлык кастомного релиза (AUDIT-23 — убрать
+    // «undefined» в тостах). cols строятся из buildReleaseList → берём оттуда.
+    const _colLabelFor = (key) => {
+      const c = _colByKey[key];
+      if (c) return c.label;
+      const rel = (state.releases || []).find(r => r.key === key);
+      return GANTT_COL_LABELS[key] || rel?.short || rel?.label || key;
+    };
+    // AUDIT-23 — лейблы колодцев с кастомными релизами (иначе undefined в
+    // KB-drag/trail). hasMap/tfMap/colKeyMap (legacy-only) удалены — везде
+    // теперь _readTypes/_writeTypes/_hasTypes.
+    const COL_LABEL_MAP = { ...GANTT_COL_LABELS };
+    for (const r of (state.releases || [])) COL_LABEL_MAP[r.key] = r.short || r.label || r.key;
+    for (const c of cols) COL_LABEL_MAP[c.key] = c.label;
 
     /* V15 Spine redesign 2026-04-30 — emoji-prefix helpers retired
        (avatar circle, 📅, 📬). Pill content is now a two-row layout:
@@ -1189,15 +1193,11 @@ export const GanttView = {
       // выражает интент «массив обновился», (б) защищён от случаев когда
       // raw-array извлекли через RAW_TARGET, (в) совместим с будущей
       // оптимизацией PROXY_CACHE.
-      const srcField = colKeyMap[srcCol];
-      const dstField = colKeyMap[dstCol];
-      if (srcField && Array.isArray(row[srcField])) {
-        row[srcField] = row[srcField].filter(t => t !== wt);
-      }
-      if (dstField) {
-        const existing = Array.isArray(row[dstField]) ? row[dstField] : [];
-        row[dstField] = existing.includes(wt) ? existing : [...existing, wt];
-      }
+      // AUDIT-2 — custom-aware через _readTypes/_writeTypes (был legacy-only
+      // colKeyMap → перенос в кастомный колодец = тихая потеря данных).
+      _writeTypes(row, srcCol, _readTypes(row, srcCol).filter(t => t !== wt));
+      const dstExisting = _readTypes(row, dstCol);
+      if (!dstExisting.includes(wt)) _writeTypes(row, dstCol, [...dstExisting, wt]);
       const at = new Date().toISOString();
       // V15 (1.4.2): preserve full history of moves. Earlier we filtered out
       // any prior arrow for the same `wt` ("pill can only have ONE current
@@ -1235,16 +1235,10 @@ export const GanttView = {
       const idx = arrows.findIndex(a => a.dstCol === currentCol && a.wt === wt);
       if (idx < 0) return null;
       const a = arrows[idx];
-      const srcField = colKeyMap[a.srcCol];
-      const dstField = colKeyMap[a.dstCol];
-      // V22 G-02 — spread-pattern для consistency с moveWtBetweenCols.
-      if (dstField && Array.isArray(row[dstField])) {
-        row[dstField] = row[dstField].filter(t => t !== wt);
-      }
-      if (srcField) {
-        const existing = Array.isArray(row[srcField]) ? row[srcField] : [];
-        row[srcField] = existing.includes(wt) ? existing : [...existing, wt];
-      }
+      // AUDIT-2 — custom-aware (был legacy-only colKeyMap).
+      _writeTypes(row, a.dstCol, _readTypes(row, a.dstCol).filter(t => t !== wt));
+      const srcExisting = _readTypes(row, a.srcCol);
+      if (!srcExisting.includes(wt)) _writeTypes(row, a.srcCol, [...srcExisting, wt]);
       row.ganttArrows = arrows.filter((_, i) => i !== idx);
       row.dirty = true;
       row.updatedAt = new Date().toISOString();
@@ -1566,7 +1560,7 @@ export const GanttView = {
         const up = row.unplannedPills || {};
         const pillUnplanned = (colKey, wt) => !!up[`${colKey}__${wt}`];
         // Labels for ghost-marker (kept in sync with NEXT_RELEASE/COL_LABEL below)
-        const _GHOST_COL_LABEL = GANTT_COL_LABELS;
+        const _GHOST_COL_LABEL = COL_LABEL_MAP;
         // V15 (1.4): inline ghost-pills in cells were retired — every move
         // is now rendered as its own dedicated sub-row beneath the parent
         // epic row, so the «↗ ghost» and the destination marker sit on the
@@ -2752,17 +2746,13 @@ export const GanttView = {
           const choice = await Services.App?.openGanttAddTargetModal?.({ summary });
           if (!choice) return;     // cancelled
           const { bucket, comment } = choice;
-          Services.HistoryManager?.checkpoint(`добавить ${selected.length} тип(ов) в ${COL_LABEL[bucket] || bucket}`);
-          const dstField = colKeyMap[bucket];
-          if (dstField) {
-            // V22 G-02 (audit-experts-2026-05-15 Demin C2) — spread-pattern.
-            // Раньше: `row[dstField].push(t)` в forEach. Теперь — один
-            // reassign с deduped list. Преимущество: один set-trigger на
-            // batch, а не N (batched-debounce у Reactive всё равно сольёт,
-            // но семантически чище).
-            const current = Array.isArray(row[dstField]) ? row[dstField] : [];
+          Services.HistoryManager?.checkpoint(`добавить ${selected.length} тип(ов) в ${_colLabelFor(bucket)}`);
+          // AUDIT-4 — custom-aware add (был legacy-only colKeyMap → в кастомный
+          // колодец типы не добавлялись).
+          {
+            const current = _readTypes(row, bucket);
             const toAdd = selected.filter(t => !current.includes(t));
-            if (toAdd.length) row[dstField] = [...current, ...toAdd];
+            if (toAdd.length) _writeTypes(row, bucket, [...current, ...toAdd]);
           }
           // V14 (B5/B8): record the action in transferComments so the trail
           // is uniform regardless of how a pill landed in a bucket.
@@ -2837,8 +2827,14 @@ export const GanttView = {
     });
 
     /* ---- context menu: per-pill done + перенос в след релиз ---- */
-    const NEXT_RELEASE  = { backlog:'r120', r120:'r121', r121:'r122', r122:'overtime' };
-    const COL_LABEL     = GANTT_COL_LABELS;
+    // AUDIT-22/23 — динамические соседи и лейблы из cols (включая кастомные
+    // релизы), а не legacy-хардкод. NEXT по порядку видимых колодцев;
+    // COL_LABEL покрывает и кастомные (иначе «undefined» в тостах).
+    const NEXT_RELEASE = {};
+    for (let i = 0; i < cols.length - 1; i++) NEXT_RELEASE[cols[i].key] = cols[i + 1].key;
+    const COL_LABEL = { ...GANTT_COL_LABELS };
+    for (const r of (state.releases || [])) COL_LABEL[r.key] = r.short || r.label || r.key;
+    for (const c of cols) COL_LABEL[c.key] = c.label;
 
     const removeCtxMenu = () => document.getElementById('gdt-ctx-menu')?.remove();
 
@@ -2903,9 +2899,9 @@ export const GanttView = {
       const nextCol = NEXT_RELEASE[srcCol];
       const nextLabel = nextCol ? COL_LABEL[nextCol] : null;
 
-      // Index of this wt within its current column array (for reorder)
-      const fieldKey = colKeyMap[srcCol];
-      const arr = (fieldKey && Array.isArray(row[fieldKey])) ? row[fieldKey] : [];
+      // Index of this wt within its current column array (for reorder).
+      // AUDIT-22 — custom-aware через _readTypes (был legacy-only colKeyMap).
+      const arr = _readTypes(row, srcCol);
       const idxInCol = arr.indexOf(wt);
       const canLeft  = !isGhost && idxInCol > 0;
       const canRight = !isGhost && idxInCol >= 0 && idxInCol < arr.length - 1;
@@ -3271,9 +3267,9 @@ export const GanttView = {
 
         if (action === 'delete') {
           Services.HistoryManager?.checkpoint(`удалить ${wt} из ${COL_LABEL[srcCol]}`);
-          if (fieldKey && Array.isArray(row[fieldKey])) {
-            row[fieldKey] = row[fieldKey].filter(t => t !== wt);
-          }
+          // AUDIT-22 — custom-aware delete (был legacy-only colKeyMap → no-op
+          // по данным в кастомном колодце).
+          _writeTypes(row, srcCol, _readTypes(row, srcCol).filter(t => t !== wt));
           // Also drop any "done"-flag and any arrow trail tied to this wt
           if (row.donePills) delete row.donePills[doneKey];
           // V17 P2 (CRIT-4): scope the arrow-trail purge to arrows that
@@ -3309,12 +3305,15 @@ export const GanttView = {
         }
 
         if (action === 'move-left' || action === 'move-right') {
-          if (!fieldKey || idxInCol < 0) { removeCtxMenu(); return; }
+          if (idxInCol < 0) { removeCtxMenu(); return; }
           const targetIdx = action === 'move-left' ? idxInCol - 1 : idxInCol + 1;
           if (targetIdx < 0 || targetIdx >= arr.length) { removeCtxMenu(); return; }
           Services.HistoryManager?.checkpoint(`переставить ${wt}`);
-          [arr[idxInCol], arr[targetIdx]] = [arr[targetIdx], arr[idxInCol]];
-          row[fieldKey] = arr;
+          // AUDIT-22 — custom-aware reorder. arr = _readTypes(row, srcCol),
+          // переставляем копию и пишем обратно через _writeTypes.
+          const reordered = arr.slice();
+          [reordered[idxInCol], reordered[targetIdx]] = [reordered[targetIdx], reordered[idxInCol]];
+          _writeTypes(row, srcCol, reordered);
           row.dirty = true;
           Storage.save();
           removeCtxMenu();
@@ -3519,21 +3518,17 @@ export const GanttView = {
       e.preventDefault();
       const row = state.rows.find(r => r.id === _dragData.rowId);
       if (!row) { _dragData = null; return; }
-      const fieldKey = colKeyMap[_dragData.srcCol];
-      if (!fieldKey || !Array.isArray(row[fieldKey])) return;
-      const arr = row[fieldKey];
+      // AUDIT-22 — custom-aware intra-cell reorder (был legacy-only colKeyMap).
+      const arr = _readTypes(row, _dragData.srcCol);
+      if (!arr.length) return;
       const fromIdx = arr.indexOf(_dragData.wt);
       const toIdx   = arr.indexOf(target.dataset.wt);
       if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
       Services.HistoryManager?.checkpoint(`переставить ${_dragData.wt}`);
-      // V22 G-02 (audit-experts-2026-05-15 Demin C2) — splice → reassign
-      // через перестроенный массив. Раньше: arr.splice + reassign того же
-      // arr. После splice на proxy-wrapped массиве `arr` уже модифицирован,
-      // reassign — no-op (prev === rawValue). Теперь явно: новый массив.
       const next = [...arr];
       next.splice(fromIdx, 1);
       next.splice(toIdx, 0, _dragData.wt);
-      row[fieldKey] = next;
+      _writeTypes(row, _dragData.srcCol, next);
       row.dirty = true;
       Storage.save();
       _dragData = null;

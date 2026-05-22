@@ -8,7 +8,7 @@
    ============================================================ */
 
 import { state, getAllCols, syncColumnSettings, subscribe, notify, toBool } from './state.js';
-import { STORAGE_KEY, SETTINGS_KEY, LLM_SETTINGS_KEY, DEFAULT_LLM_SYSTEM_PROMPT, REGISTRY_COLS, WORK_TYPES, SCOPE_OPTIONS } from './constants.js';
+import { STORAGE_KEY, SETTINGS_KEY, LLM_SETTINGS_KEY, DEFAULT_LLM_SYSTEM_PROMPT, REGISTRY_COLS, WORK_TYPES, SCOPE_OPTIONS, buildReleaseList } from './constants.js';
 import { Storage, CSV, XLSXImporter, JSONExport, JSONImport, applyBulkAction, autoAssignRelease, normalizeAssignees, batchRiskRecompute, exportSelectedCSV } from './dataStore.js';
 import { FilterEngine } from './filters.js';
 import { RiskEngine } from './riskEngine.js';
@@ -1914,8 +1914,16 @@ const App = {
     summaryEl.textContent = summary || '';
     cmtEl.value = '';
     okBtn.disabled = true;
-    // reset to Backlog default
-    const def = bucketsBox.querySelector('input[value="backlog"]');
+    // AUDIT-4 — динамический список колодцев (legacy + кастомные релизы),
+    // раньше был захардкожен legacy-only → в кастомный колодец не добавить.
+    try {
+      const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+      const cols = buildReleaseList(state.releases || []);
+      bucketsBox.innerHTML = '<legend class="visually-hidden">Колодец назначения</legend>' +
+        cols.map((c, i) => `<label class="gantt-bucket-radio"><input type="radio" name="gantt-add-bucket" value="${esc(c.key)}"${i === 0 ? ' checked' : ''}> ${esc(c.short || c.label)}</label>`).join('');
+    } catch (_) { /* fallback — оставить статичный HTML */ }
+    // reset to first default
+    const def = bucketsBox.querySelector('input[value="backlog"]') || bucketsBox.querySelector('input[type="radio"]');
     if (def) def.checked = true;
     overlay.classList.remove('hidden');
     setTimeout(() => cmtEl.focus(), 50);
