@@ -358,6 +358,14 @@ export const GanttView = {
         mod.openReleaseEditor({ onSaved: () => GanttView.renderChart() });
       });
     }
+    const annoBtn = document.getElementById('btn-gantt-annotations');
+    if (annoBtn && !annoBtn._gdtAnnoBound) {
+      annoBtn._gdtAnnoBound = true;
+      annoBtn.addEventListener('click', async () => {
+        const mod = await import('../components/cellAnnotationsBrowser.js');
+        mod.openAnnotationsBrowser();
+      });
+    }
   },
   /** V16 roadmap-2 (B6) — keyboard navigation across the gantt grid.
    *  Roving tabindex; ←/→/↑/↓ between pills; Enter/F2 ctx-menu; Esc blur. */

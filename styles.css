@@ -21979,6 +21979,128 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 .re-delete-btn:hover { background: var(--prizma-off-course, #dc2626); color: #fff; }
 
+/* #4 — Cell-annotations browser. */
+.cab-modal-box {
+  width: min(540px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 64px));
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.cab-modal-box .modal-header {
+  padding: 18px 20px 12px;
+  border: 0;
+  position: relative;
+}
+.cab-modal-box .modal-header h3 {
+  font: 600 18px/1.3 system-ui, sans-serif;
+  color: var(--text-1);
+  margin: 0;
+}
+.cab-modal-box .modal-close-btn { position: absolute; top: 12px; right: 12px; }
+.cab-tabs {
+  display: flex; gap: 4px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border-light);
+}
+.cab-tab {
+  background: transparent; border: 0;
+  padding: 10px 14px;
+  font: 600 13px/1 system-ui, sans-serif;
+  color: var(--text-3);
+  cursor: pointer;
+  position: relative;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.cab-tab.is-active { color: var(--text-1); border-bottom-color: var(--prizma-information, #4f46e5); }
+.cab-tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--prizma-bg-tertiary, #f1f5f9);
+  color: var(--text-2);
+  font: 700 10px/16px ui-monospace, monospace;
+}
+.cab-tab.is-active .cab-tab-count {
+  background: var(--prizma-information-bg, #eef2ff);
+  color: var(--prizma-information, #4f46e5);
+}
+.cab-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px 20px;
+}
+.cab-pane { display: none; flex-direction: column; gap: 8px; }
+.cab-pane.is-active { display: flex; }
+.cab-card {
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px;
+  transition: border-color .12s, background .12s, transform .08s;
+}
+.cab-card:hover {
+  border-color: var(--prizma-information, #4f46e5);
+  background: var(--prizma-information-bg, #eef2ff);
+}
+.cab-card:active { transform: scale(0.998); }
+.cab-card-head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px;
+}
+.cab-card-epic { font-weight: 600; color: var(--text-1); }
+.cab-card-team { color: var(--text-3); }
+.cab-card-team::before { content: '· '; margin-right: 2px; }
+.cab-card-rel {
+  margin-left: auto;
+  padding: 2px 8px;
+  background: var(--prizma-bg-tertiary, #f1f5f9);
+  border-radius: 10px;
+  font: 600 10px/1.4 ui-monospace, monospace;
+  color: var(--text-2);
+}
+.cab-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.cab-kind {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font: 600 10px/1.4 system-ui, sans-serif;
+  background: var(--prizma-drift-bg, #fef3c7);
+  color: var(--prizma-drift, #f59e0b);
+}
+.cab-kind-dangling      { background: var(--prizma-information-bg, #eef2ff); color: var(--prizma-information, #4f46e5); }
+.cab-kind-hard-deadline { background: var(--prizma-off-course-bg, #fee2e2); color: var(--prizma-off-course, #dc2626); }
+.cab-due { font-size: 11px; color: var(--prizma-off-course, #dc2626); font-weight: 600; }
+.cab-card-text {
+  font-size: 13px; line-height: 1.45; color: var(--text-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.cab-card-time {
+  font-size: 11px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.cab-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+/* Подсветка cell при scroll-to. */
+.gantt-cell.gdt-cell-highlight {
+  outline: 2px solid var(--prizma-information, #4f46e5);
+  outline-offset: -2px;
+  background: var(--prizma-information-bg, rgba(79,70,229,.12));
+  transition: background .3s, outline-color .3s;
+}
+
 /* #6 — week-ticks: лёгкие vertical-засечки по неделям в шапке колодца. */
 .gdt-week-tick {
   position: absolute;
