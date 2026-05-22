@@ -5530,6 +5530,32 @@ body.theme-dark .assistant-panel-header { background: var(--card, #121a2f); }
   stroke-width: 2.2;
   opacity: 1;
 }
+/* «×» на середине ребра — удалить зависимость. */
+.dep-edge-del {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  background: var(--card);
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font: 700 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+  z-index: 6;
+  opacity: .5;
+  transition: opacity .12s, background .12s, color .12s, border-color .12s, transform .12s;
+}
+.dep-graph-canvas:hover .dep-edge-del { opacity: .85; }
+.dep-edge-del:hover {
+  opacity: 1;
+  background: var(--prizma-off-course, #dc2626);
+  color: #fff;
+  border-color: var(--prizma-off-course, #dc2626);
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
 .dep-node-wrap { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .dep-node {
   position: absolute;

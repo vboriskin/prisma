@@ -15,8 +15,24 @@
 import { state } from '../state.js';
 import { buildGraphLayout } from '../dependencyEngine.js';
 import { Services } from '../app/services.js';
+import { Storage } from '../dataStore.js';
 
 const OVERLAY_ID = 'dep-graph-overlay';
+
+/** Удалить зависимость: `dependent` больше не зависит от `dependency`.
+ *  state.epicDeps[dependent] может быть string (legacy) ИЛИ Array<to>. */
+function _removeDep(dependent, dependency) {
+  const map = { ...(state.epicDeps || {}) };
+  const v = map[dependent];
+  if (Array.isArray(v)) {
+    const next = v.filter(x => String(x) !== String(dependency));
+    if (next.length) map[dependent] = next; else delete map[dependent];
+  } else if (String(v) === String(dependency)) {
+    delete map[dependent];
+  }
+  state.epicDeps = map;
+  try { Storage.save(); } catch (_) {}
+}
 
 function _esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -79,6 +95,19 @@ function _renderOverlay() {
     return `<path class="${cls}" d="${_edgePath(from, to, nodeSize)}" marker-end="url(#dep-arrow${e.critical ? '-critical' : ''})"/>`;
   }).join('');
 
+  // «×» на середине каждого ребра — удалить зависимость. edge.to зависит
+  // от edge.from; удаление убирает edge.from из epicDeps[edge.to].
+  const edgeDelBtns = edges.map(e => {
+    const from = nodeByName.get(e.from);
+    const to   = nodeByName.get(e.to);
+    if (!from || !to) return '';
+    const x1 = from.x + nodeSize.w, y1 = from.y + nodeSize.h / 2;
+    const x2 = to.x,                y2 = to.y + nodeSize.h / 2;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const tip = `Удалить зависимость: «${_esc(e.to)}» больше не зависит от «${_esc(e.from)}»`;
+    return `<button class="dep-edge-del" data-dependent="${_esc(e.to)}" data-dependency="${_esc(e.from)}" style="left:${mx}px;top:${my}px" title="${tip}" aria-label="${tip}">×</button>`;
+  }).join('');
+
   const nodesHtml = nodes.map(n => {
     const cls = critical.has(n.name) ? 'dep-node-wrap dep-node-critical'
               : n.blockers > 0       ? 'dep-node-wrap dep-node-blocker'
@@ -122,6 +151,7 @@ function _renderOverlay() {
             ${edgesSvg}
           </svg>
           ${nodesHtml}
+          ${edgeDelBtns}
         </div>
       </div>
     </div>`;
@@ -167,6 +197,22 @@ export const DependencyGraphView = {
       const wrap = root.querySelector('#dep-graph-canvas-wrap');
       if (wrap) { wrap.scrollLeft = 0; wrap.scrollTop = 0; }
     });
+    // «×» на ребре — удалить зависимость + перерисовать граф.
+    root.querySelectorAll('.dep-edge-del').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dependent  = btn.dataset.dependent;
+        const dependency = btn.dataset.dependency;
+        if (!window.confirm(`Удалить зависимость?\n«${dependent}» больше не будет зависеть от «${dependency}».`)) return;
+        _removeDep(dependent, dependency);
+        // Перерисовать overlay на месте (граф мог стать пустым).
+        root.innerHTML = _renderOverlay();
+        DependencyGraphView._bind(root);
+        try { Services.GanttView?.renderChart?.() || window.GanttView?.renderChart?.(); } catch (_) {}
+        window.showToast?.('Зависимость удалена', 'success', 1800);
+      });
+    });
+
     // Click по узлу — попытаться скроллить в Гант к этому эпику.
     root.querySelectorAll('.dep-node').forEach(node => {
       node.addEventListener('click', () => {
