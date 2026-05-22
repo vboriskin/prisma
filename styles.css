@@ -2139,6 +2139,23 @@ body[data-gdt-density="minimal"] .gantt-type-pill {
 body[data-gdt-density="minimal"] .gantt-row-trail { min-height: 12px; }
 body[data-gdt-density="minimal"] .gantt-team-header.v16-team-row { min-height: 28px; }
 
+/* AUDIT-11 — разгрузка ячейки по плотности. Эксперт отметил перегруз:
+   пилюля + note-icon + risk-glyph + бейджи в ~40px. Решение через density:
+   · compact — прячем ПУСТЫЕ add-иконки заметок/рисков (активные с данными
+     остаются — они несут информацию), плюс cmt-marker меты пилюли.
+   · minimal — прячем cell-аннотации целиком и progress-подчёркивание:
+     режим «максимум пилюль на экране», детали уводим из поля зрения. */
+body[data-gdt-density="compact"] .gdt-cell-note-icon.is-empty,
+body[data-gdt-density="compact"] .gdt-cell-risk-glyph.is-empty {
+  display: none;
+}
+body[data-gdt-density="minimal"] .gdt-cell-note-icon,
+body[data-gdt-density="minimal"] .gdt-cell-risk-glyph,
+body[data-gdt-density="minimal"] .gdt-pill-cmt-marker,
+body[data-gdt-density="minimal"] .gdt-pill-progress {
+  display: none;
+}
+
 /* V16 roadmap-2 (B2) — assignee initials slot in pill row-1. Hidden in
    Regular density (the meta-row carries the full ФИО); only revealed in
    Compact density where meta-row is collapsed. */
