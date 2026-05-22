@@ -307,16 +307,15 @@ export function drawPostponeArrows(wrap) {
   // unique key so the SVG arrow is purely horizontal (same row → same y).
   // Fallback to the legacy by-cell lookup keeps old data renderable
   // while we settle the new format.
-  const cssEsc = (s) => (window.CSS?.escape ? window.CSS.escape(s) : String(s).replace(/"/g, '\\"'));
-  const findTrailPair = (rowId, at) => {
-    const src = wrap.querySelector(`.gdt-trail-src[data-row-id="${cssEsc(rowId)}"][data-arrow-at="${cssEsc(at || '')}"]`);
-    const dst = wrap.querySelector(`.gdt-trail-dst[data-row-id="${cssEsc(rowId)}"][data-arrow-at="${cssEsc(at || '')}"]`);
-    return { src, dst };
-  };
-  const findCell = (rowId, col) =>
-    wrap.querySelector(`.gantt-cell[data-col="${cssEsc(col)}"][data-row-id="${cssEsc(rowId)}"]`);
+  // AUDIT-13 — индексируем DOM ОДНИМ проходом (querySelectorAll), вместо
+  // 2-4 querySelector на каждую стрелку по всему wrap. На 200 строк × N
+  // переносов это убирает тысячи DOM-обходов. Скрытые/отфильтрованные
+  // строки просто отсутствуют в индексах — их стрелки тихо пропускаются.
+  const trailSrc = new Map(), trailDst = new Map(), cellByKey = new Map();
+  wrap.querySelectorAll('.gdt-trail-src[data-row-id][data-arrow-at]').forEach(el => trailSrc.set(el.dataset.rowId + '|' + el.dataset.arrowAt, el));
+  wrap.querySelectorAll('.gdt-trail-dst[data-row-id][data-arrow-at]').forEach(el => trailDst.set(el.dataset.rowId + '|' + el.dataset.arrowAt, el));
+  wrap.querySelectorAll('.gantt-cell[data-col][data-row-id]').forEach(el => cellByKey.set(el.dataset.rowId + '|' + el.dataset.col, el));
 
-  /* collect all recorded arrows from visible rows */
   const arrows = [];
   const diag   = { rowsWithArrows: 0, arrowsTotal: 0, srcMissing: 0, dstMissing: 0, drawn: 0 };
   state.rows.forEach(row => {
@@ -324,9 +323,9 @@ export function drawPostponeArrows(wrap) {
     diag.rowsWithArrows++;
     row.ganttArrows.forEach(a => {
       diag.arrowsTotal++;
-      const pair = findTrailPair(row.id, a.at);
-      const srcEl = pair.src || findCell(row.id, a.srcCol);
-      const dstEl = pair.dst || findCell(row.id, a.dstCol);
+      const akey = row.id + '|' + (a.at || '');
+      const srcEl = trailSrc.get(akey) || cellByKey.get(row.id + '|' + a.srcCol);
+      const dstEl = trailDst.get(akey) || cellByKey.get(row.id + '|' + a.dstCol);
       if (!srcEl) diag.srcMissing++;
       if (!dstEl) diag.dstMissing++;
       if (srcEl && dstEl) { arrows.push({ srcEl, dstEl, wt: a.wt }); diag.drawn++; }

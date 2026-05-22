@@ -1012,6 +1012,11 @@ export const GanttView = {
     GanttView.scheduleRenderChart();
   },
   _renderChartImmediate() {
+    // AUDIT-12 — отмечаем grace-окно в НАЧАЛЕ render (не только в конце на
+    // 2138). Иначе при тяжёлом DOM/throttled rAF render длится >250ms,
+    // grace истекает, и subscriber-flush от Storage.save даёт второй полный
+    // re-render. Ранний mark покрывает это окно.
+    try { Services.App?.markRenderedNow?.(); } catch (_) {}
     GanttView._clearTransientInteractions();
     if (GanttView._docTipListener) {
       document.removeEventListener('mousemove', GanttView._docTipListener);
@@ -3625,22 +3630,27 @@ export const GanttView = {
     line.hidden = false;
   },
   _todayLineResizeBound: false,
+  _todayLineRO: null,
   _bindTodayLineResize(wrap) {
-    if (GanttView._todayLineResizeBound) return;
-    GanttView._todayLineResizeBound = true;
     const reposition = () => {
       const w = document.getElementById('gantt-wrap');
       if (w) GanttView._positionTodayLine(w);
     };
-    window.addEventListener('resize', reposition);
-    // Scroll внутри #gantt-wrap не двигает линию (она внутри .gantt-container,
-    // который скроллится вместе с контентом), но column-resize меняет ширину
-    // — слушаем custom event, который аналитика resize-handle уже эмитит,
-    // если есть. Fallback: ResizeObserver на header.
+    // window-resize — стабильный таргет, биндим один раз.
+    if (!GanttView._todayLineResizeBound) {
+      GanttView._todayLineResizeBound = true;
+      window.addEventListener('resize', reposition);
+    }
+    // AUDIT-8 — `.gantt-header` пересоздаётся каждым renderChart, поэтому RO
+    // нужно reobserve свежий узел: иначе observer навсегда висит на detached
+    // header и линия перестаёт реагировать на ресайз колонок (+ утечка DOM).
     try {
-      const ro = new ResizeObserver(reposition);
+      if (GanttView._todayLineRO) GanttView._todayLineRO.disconnect();
       const hdr = wrap.querySelector('.gantt-header');
-      if (hdr) ro.observe(hdr);
+      if (hdr && typeof ResizeObserver !== 'undefined') {
+        GanttView._todayLineRO = new ResizeObserver(reposition);
+        GanttView._todayLineRO.observe(hdr);
+      }
     } catch (_) { /* old browsers */ }
   },
   /** Lightweight body-attached tooltip — replaces native `title=` (which
