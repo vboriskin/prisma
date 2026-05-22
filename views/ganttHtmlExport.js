@@ -1271,10 +1271,15 @@ async function _buildRoadmapHtml() {
   const rowHtml = (e) => {
     const left = ((e.startDOY - tlStart) / tlSpan) * 100;
     const width = Math.max(2, ((e.endDOY - e.startDOY) / tlSpan) * 100);
+    // Доля завершённости (0..100). Серый bar + зелёная заливка слева на donePct%.
+    const donePct = e.total > 0 ? Math.round((e.done / e.total) * 100) : 0;
+    const fillTitle = `${esc(e.team)} · ${esc(e.category)} · готово ${e.done} из ${e.total} (${donePct}%)`;
     return `<div class="rm-row">
       <div class="rm-row-label" title="${esc(e.epic)}">${esc(e.epic)}</div>
       <div class="rm-row-track">
-        <div class="rm-bar rm-bar-${e.status}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" title="${esc(e.team)} · ${esc(e.category)} · ${e.done}/${e.total} pills"></div>
+        <div class="rm-bar" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" title="${fillTitle}">
+          ${donePct > 0 ? `<div class="rm-bar-fill" style="width:${donePct}%"></div>` : ''}
+        </div>
       </div>
     </div>`;
   };
@@ -1335,10 +1340,10 @@ body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px
 .rm-row { display: contents; }
 .rm-row-label { grid-column: 1; padding: 6px 12px; font-size: 13px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-light, #f1f5f9); }
 .rm-row-track { grid-column: 2; position: relative; height: 28px; border-bottom: 1px solid var(--border-light, #f1f5f9); }
-.rm-bar { position: absolute; top: 6px; height: 16px; border-radius: 3px; min-width: 6px; transition: opacity .12s; }
+/* Bar = серая база; зелёная заливка слева пропорционально доле done. */
+.rm-bar { position: absolute; top: 6px; height: 16px; border-radius: 3px; min-width: 6px; background: #94a3b8; overflow: hidden; transition: opacity .12s; }
 .rm-bar:hover { opacity: .82; }
-.rm-bar-done { background: #16a34a; }
-.rm-bar-in-progress { background: #94a3b8; }
+.rm-bar-fill { position: absolute; top: 0; left: 0; bottom: 0; background: #16a34a; border-radius: 3px 0 0 3px; }
 .rm-footer { margin-top: 20px; font-size: 11px; color: var(--text-3); }
 </style>
 </head>
@@ -1350,8 +1355,8 @@ body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px
   </div>
   <div class="rm-meta">
     <div class="rm-legend">
-      <span class="rm-legend-item"><span class="rm-legend-swatch rm-done"></span> Завершено</span>
-      <span class="rm-legend-item"><span class="rm-legend-swatch rm-progress"></span> В работе / план</span>
+      <span class="rm-legend-item"><span class="rm-legend-swatch rm-done"></span> Завершённая часть</span>
+      <span class="rm-legend-item"><span class="rm-legend-swatch rm-progress"></span> Осталось</span>
     </div>
     <div class="rm-toolbar">
       <button data-group="team" class="is-active">По командам</button>
