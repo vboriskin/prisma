@@ -51,9 +51,27 @@ const _EDITOR_JS = `
   })();
   if (!snap) return;
 
-  // Накопитель правок (Map<rowId, partialRow>). Naполняется в C2-C3.
+  // Карта правок: ключ — \`pill:<rowId>__<col>__<wt>\` (pills) либо
+  // \`note:<rowId>__<col>__<noteId>\` / \`risk:...\` (C3). Значение — payload
+  // правки + ts. Идемпотентно: повторное изменение того же pill пере-пишет.
   const edits = new Map();
   let editMode = false;
+
+  function _rowById(rowId) {
+    return (snap.snapshot?.data?.rows || []).find(r => r.id === rowId);
+  }
+  function _currentPillStatus(rowId, col, wt) {
+    const row = _rowById(rowId);
+    if (!row) return 'planned';
+    const k = col + '__' + wt;
+    if (row.donePills && row.donePills[k]) return 'done';
+    if (row.inProgressPills && row.inProgressPills[k]) return 'in-progress';
+    return 'planned';
+  }
+  function _pendingPillStatus(rowId, col, wt) {
+    const key = 'pill:' + rowId + '__' + col + '__' + wt;
+    return edits.has(key) ? edits.get(key).status : null;
+  }
 
   function _renderBanner() {
     let bar = document.getElementById('prizma-edit-bar');
@@ -94,32 +112,150 @@ const _EDITOR_JS = `
     if (dl) dl.hidden = (n === 0 || !editMode);
   }
 
-  // C2/C3 точки расширения. Сейчас пустые.
-  function _wireEditors() { /* TODO C2: pill click → done-popup */ }
-  function _downloadUpdated() {
-    // TODO C4: re-serialize snapshot + download.
-    alert('C4: «Скачать обновлённую копию» в разработке.');
+  function _markPillEdited(rowId, col, wt) {
+    const pills = document.querySelectorAll(\`.gantt-type-pill[data-row-id="\${CSS.escape(rowId)}"][data-src-col="\${CSS.escape(col)}"][data-wt="\${CSS.escape(wt)}"]\`);
+    pills.forEach(p => p.classList.add('prizma-edited'));
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    _renderBanner();
-    document.getElementById('prizma-edit-toggle').addEventListener('click', () => {
-      editMode = !editMode;
-      _renderBanner();
-      if (editMode) _wireEditors();
+  // Pill click → mini-popup со статусом + comment.
+  function _wireEditors() {
+    document.querySelectorAll('.gantt-type-pill[data-row-id][data-src-col][data-wt]').forEach(pill => {
+      if (pill._prizmaWired) return;
+      pill._prizmaWired = true;
+      pill.addEventListener('click', (e) => {
+        if (!editMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _openPillPopup(pill);
+      });
     });
-    document.getElementById('prizma-edit-download')?.addEventListener('click', _downloadUpdated);
-  });
-  // Если DOM уже загружен (script внизу body) — fire сразу.
-  if (document.readyState !== 'loading') {
+  }
+
+  function _openPillPopup(pill) {
+    document.getElementById('prizma-pill-popup')?.remove();
+    const rowId = pill.dataset.rowId;
+    const col   = pill.dataset.srcCol;
+    const wt    = pill.dataset.wt;
+    const row = _rowById(rowId);
+    const epicLabel = (row?.epic || row?.tasks || '(без эпика)').slice(0, 60);
+    const current = _pendingPillStatus(rowId, col, wt) || _currentPillStatus(rowId, col, wt);
+    const key = 'pill:' + rowId + '__' + col + '__' + wt;
+    const existingEdit = edits.get(key);
+    const initComment = existingEdit?.comment ?? (row?.donePills?.[col + '__' + wt]?.comment || '');
+
+    const pop = document.createElement('div');
+    pop.id = 'prizma-pill-popup';
+    pop.className = 'prizma-pop';
+    pop.innerHTML = \`
+      <div class="prizma-pop-head">
+        <div class="prizma-pop-eyebrow">\${_esc(epicLabel)}</div>
+        <div class="prizma-pop-title">\${_esc(wt)} · \${_esc(col)}</div>
+        <button type="button" class="prizma-pop-close" aria-label="Закрыть">×</button>
+      </div>
+      <div class="prizma-pop-body">
+        <div class="prizma-pop-field">
+          <label class="prizma-pop-label">Статус</label>
+          <div class="prizma-pop-radios">
+            \${['planned','in-progress','done'].map(s => \`
+              <label class="prizma-pop-radio\${current===s?' is-active':''}" data-status="\${s}">
+                <input type="radio" name="prizma-pill-status" value="\${s}" \${current===s?'checked':''}>
+                <span>\${{'planned':'План','in-progress':'В работе','done':'Завершено'}[s]}</span>
+              </label>
+            \`).join('')}
+          </div>
+        </div>
+        <div class="prizma-pop-field" id="prizma-pop-comment-field" \${current==='done'?'':'hidden'}>
+          <label class="prizma-pop-label" for="prizma-pop-comment">Комментарий (опц.)</label>
+          <textarea id="prizma-pop-comment" class="prizma-pop-text" rows="2" placeholder="Например: закрыто за 3 дня раньше срока">\${_esc(initComment)}</textarea>
+        </div>
+      </div>
+      <div class="prizma-pop-footer">
+        \${existingEdit ? '<button type="button" class="prizma-edit-btn" id="prizma-pop-revert">Отменить правку</button>' : '<span></span>'}
+        <div class="prizma-pop-actions">
+          <button type="button" class="prizma-edit-btn" id="prizma-pop-cancel">Отмена</button>
+          <button type="button" class="prizma-edit-btn prizma-edit-btn-primary" id="prizma-pop-save">Сохранить</button>
+        </div>
+      </div>
+    \`;
+    document.body.appendChild(pop);
+
+    // Position возле pill (под ним, с clamp'ом по viewport).
+    const r = pill.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let left = r.left + r.width / 2 - pr.width / 2;
+    let top  = r.bottom + 6;
+    left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, r.top - pr.height - 6);
+    pop.style.left = left + 'px';
+    pop.style.top  = top  + 'px';
+
+    let selectedStatus = current;
+    pop.querySelectorAll('.prizma-pop-radio').forEach(r => {
+      r.addEventListener('click', () => {
+        selectedStatus = r.dataset.status;
+        pop.querySelectorAll('.prizma-pop-radio').forEach(x => x.classList.toggle('is-active', x === r));
+        r.querySelector('input').checked = true;
+        document.getElementById('prizma-pop-comment-field').hidden = (selectedStatus !== 'done');
+      });
+    });
+    pop.querySelector('.prizma-pop-close').addEventListener('click', () => pop.remove());
+    document.getElementById('prizma-pop-cancel').addEventListener('click', () => pop.remove());
+    document.getElementById('prizma-pop-revert')?.addEventListener('click', () => {
+      edits.delete(key);
+      _renderPillVisualState(rowId, col, wt);
+      pop.remove();
+      _updateCounter();
+    });
+    document.getElementById('prizma-pop-save').addEventListener('click', () => {
+      const comment = (document.getElementById('prizma-pop-comment')?.value || '').trim();
+      const baseline = _currentPillStatus(rowId, col, wt);
+      const baselineComment = row?.donePills?.[col + '__' + wt]?.comment || '';
+      if (selectedStatus === baseline && (selectedStatus !== 'done' || comment === baselineComment)) {
+        edits.delete(key);
+      } else {
+        edits.set(key, { kind: 'pill', rowId, col, wt, status: selectedStatus, comment, ts: new Date().toISOString() });
+      }
+      _renderPillVisualState(rowId, col, wt);
+      pop.remove();
+      _updateCounter();
+    });
+    // Click outside → cancel.
+    setTimeout(() => {
+      function onDoc(ev) {
+        if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('mousedown', onDoc, true); }
+      }
+      document.addEventListener('mousedown', onDoc, true);
+    }, 0);
+  }
+
+  function _renderPillVisualState(rowId, col, wt) {
+    const pills = document.querySelectorAll(\`.gantt-type-pill[data-row-id="\${CSS.escape(rowId)}"][data-src-col="\${CSS.escape(col)}"][data-wt="\${CSS.escape(wt)}"]\`);
+    const key = 'pill:' + rowId + '__' + col + '__' + wt;
+    const edited = edits.has(key);
+    pills.forEach(p => p.classList.toggle('prizma-edited', edited));
+  }
+
+  function _esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function _downloadUpdated() {
+    // TODO C4: re-serialize snapshot + download.
+    alert('C4: «Скачать обновлённую копию» появится следующим шагом.');
+  }
+
+  function _init() {
     _renderBanner();
     document.getElementById('prizma-edit-toggle')?.addEventListener('click', () => {
       editMode = !editMode;
       _renderBanner();
       if (editMode) _wireEditors();
+      else document.getElementById('prizma-pill-popup')?.remove();
     });
     document.getElementById('prizma-edit-download')?.addEventListener('click', _downloadUpdated);
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _init);
+  else _init();
 })();
 `;
 
@@ -146,9 +282,76 @@ const _EDITOR_CSS = `
 .prizma-edit-btn:hover { background: rgba(0,0,0,.05); }
 .prizma-edit-btn-primary { background: #16a34a; color: #fff; border-color: #16a34a; }
 .prizma-edit-btn-primary:hover { background: #15803d; }
-/* Edit-mode visual: лёгкая dashed-рамка на editable hover'ах. Активируется в C2. */
+/* Edit-mode visual: лёгкая dashed-рамка на editable hover'ах. */
 body.prizma-edit-mode .gantt-type-pill { cursor: pointer; }
 body.prizma-edit-mode .gantt-type-pill:hover { outline: 2px dashed rgba(220,38,38,.5); outline-offset: 2px; }
+.gantt-type-pill.prizma-edited {
+  outline: 2px solid #16a34a !important;
+  outline-offset: 2px;
+  position: relative;
+}
+.gantt-type-pill.prizma-edited::after {
+  content: '●';
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 10px; height: 10px;
+  background: #16a34a;
+  color: #16a34a;
+  font-size: 0;
+  border-radius: 50%;
+  z-index: 5;
+}
+
+/* Pill popup. */
+.prizma-pop {
+  position: fixed;
+  z-index: 1100;
+  width: 320px;
+  background: #fff;
+  border: 1px solid #d4d4d8;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  color: #18181b;
+  font: 13px/1.4 system-ui, sans-serif;
+}
+.prizma-pop-head {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid #e4e4e7;
+  position: relative;
+}
+.prizma-pop-eyebrow { font: 600 10px/1 system-ui; color: #71717a; letter-spacing: .6px; text-transform: uppercase; margin-bottom: 4px; }
+.prizma-pop-title { font: 600 14px/1.3 system-ui; }
+.prizma-pop-close {
+  position: absolute; top: 6px; right: 8px;
+  background: transparent; border: 0; font-size: 18px; line-height: 1; color: #71717a;
+  cursor: pointer; padding: 4px 6px;
+}
+.prizma-pop-close:hover { color: #18181b; }
+.prizma-pop-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+.prizma-pop-field { display: flex; flex-direction: column; gap: 4px; }
+.prizma-pop-label { font: 600 10px/1 system-ui; color: #71717a; letter-spacing: .6px; text-transform: uppercase; }
+.prizma-pop-radios { display: flex; gap: 6px; }
+.prizma-pop-radio {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border: 1px solid #d4d4d8; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-weight: 500; background: #fff;
+  transition: border-color .12s, background .12s;
+}
+.prizma-pop-radio:hover { border-color: #4f46e5; }
+.prizma-pop-radio input { margin: 0; }
+.prizma-pop-radio.is-active { border-color: #16a34a; background: #f0fdf4; color: #166534; }
+.prizma-pop-text {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px; border: 1px solid #d4d4d8; border-radius: 4px;
+  font: inherit; font-size: 13px; resize: vertical; min-height: 50px;
+}
+.prizma-pop-text:focus { border-color: #4f46e5; outline: 0; box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+.prizma-pop-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px 12px; gap: 8px;
+  border-top: 1px solid #e4e4e7;
+}
+.prizma-pop-actions { display: flex; gap: 6px; }
 `;
 
 /**
@@ -156,7 +359,9 @@ body.prizma-edit-mode .gantt-type-pill:hover { outline: 2px dashed rgba(220,38,3
  * (без модификации того модуля) + инъекции snapshot и editor перед </body>.
  */
 async function _buildEditableHtml() {
-  const baseHtml = await GanttHTMLExport.build();
+  // keepIds: true — НЕ стрипать data-row-id / data-src-col на pills/cells,
+  // editor нужен для identify (rowId + colKey + wt).
+  const baseHtml = await GanttHTMLExport.build({ keepIds: true });
   if (!baseHtml) return '';
 
   const snapshot = JSONExport.buildSnapshot();

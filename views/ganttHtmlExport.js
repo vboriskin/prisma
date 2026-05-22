@@ -104,7 +104,7 @@ function _equalizeBucketWidths(root) {
 
 /** Strip everything that requires JS bindings or could be misinterpreted
  *  as editable. Operates on a CLONED node — never on the live DOM. */
-function _stripInteractive(root) {
+function _stripInteractive(root, opts = {}) {
   _dropBacklogColumn(root);
   _equalizeBucketWidths(root);              // V15 — even bucket widths
 
@@ -129,11 +129,14 @@ function _stripInteractive(root) {
   // KEEP `data-wt` (paints pill colours via CSS), `data-team-key` (used by
   // the static expand/collapse script) and `data-arrow-at` (pairs ghost
   // src/dst across trail rows).
-  root.querySelectorAll('[data-row-id], [data-src-col], [data-dst-col]').forEach(el => {
-    el.removeAttribute('data-row-id');
-    el.removeAttribute('data-src-col');
-    el.removeAttribute('data-dst-col');
-  });
+  // keepIds — для editable export (нужно identify pill ↔ row + col).
+  if (!opts.keepIds) {
+    root.querySelectorAll('[data-row-id], [data-src-col], [data-dst-col]').forEach(el => {
+      el.removeAttribute('data-row-id');
+      el.removeAttribute('data-src-col');
+      el.removeAttribute('data-dst-col');
+    });
+  }
   root.querySelectorAll('.gantt-cell-dragover').forEach(el => el.classList.remove('gantt-cell-dragover'));
   root.querySelectorAll('[style*="cursor:pointer"]').forEach(el => {
     el.setAttribute('style', el.getAttribute('style').replace(/cursor:\s*pointer\s*;?/g, ''));
@@ -1016,7 +1019,7 @@ async function _buildHtml(opts = {}) {
     return '';
   }
   const cloned = wrap.cloneNode(true);
-  _stripInteractive(cloned);
+  _stripInteractive(cloned, { keepIds: !!opts.keepIds });
   // Roadmap mode — заодно убираем today-line overlay из клона
   // (он был absolute-positioned и в экспорте теряет привязку к bbox).
   if (isRoadmap) {
