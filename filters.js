@@ -5,6 +5,7 @@
 
 import { state } from './state.js';
 import { Utils } from './utils.js';
+import { LEGACY_RELEASE_LIST } from './constants.js';
 
 export const FilterEngine = {
   _cacheKey: '',
@@ -14,6 +15,7 @@ export const FilterEngine = {
     const roleKey = Array.isArray(f.role) ? f.role.join('|') : (f.role || '');
     const assigneeKey = Array.isArray(f.assignee) ? f.assignee.join('|') : (f.assignee || '');
     const tagKey = Array.isArray(f.tag) ? f.tag.join('|') : (f.tag || '');
+    const releaseKey = Array.isArray(f.release) ? f.release.join('|') : (f.release || '');
     // F12 fix (codebase-01 audit) — раньше cache_hash зависел от _dataVersion;
     // если subscriber пропускал invalidate (re-entry guard в app.js:2065),
     // кэш оставался stale. Добавили `state.rows.length` как fallback fingerprint:
@@ -24,7 +26,7 @@ export const FilterEngine = {
       f.search || '',
       f.team || '',
       f.scope || '',
-      f.release || '',
+      releaseKey,
       f.workType || '',
       roleKey,
       assigneeKey,
@@ -49,12 +51,24 @@ export const FilterEngine = {
       }
       if (f.team && row.team!==f.team) return false;
       if (f.scope && row.scopeStatus!==f.scope) return false;
-      if (f.release) {
-        if (f.release==='1.20'&&!row.hasRelease120) return false;
-        if (f.release==='1.21'&&!row.hasRelease121) return false;
-        if (f.release==='1.22'&&!row.hasRelease122) return false;
-        if (f.release==='overtime'&&!row.hasOvertime) return false;
-        if (f.release==='none'&&!row.isUnassigned) return false;
+      // #1 C3 — мульти-фильтр. f.release теперь массив; ANY-match.
+      // Legacy ключи: '1.20'/'1.21'/'1.22'/'overtime'/'none' (backward
+      // compat — мапим на hasReleaseXYZ / isUnassigned). Custom ключи:
+      // совпадение через row.customReleaseTypes[key].length > 0.
+      const releases = Array.isArray(f.release) ? f.release.filter(Boolean)
+        : (f.release ? [f.release] : []);
+      if (releases.length) {
+        const matches = releases.some(rel => {
+          if (rel === '1.20')     return !!row.hasRelease120;
+          if (rel === '1.21')     return !!row.hasRelease121;
+          if (rel === '1.22')     return !!row.hasRelease122;
+          if (rel === 'overtime') return !!row.hasOvertime;
+          if (rel === 'none')     return !!row.isUnassigned;
+          // Custom — поиск в row.customReleaseTypes по ключу.
+          const arr = row.customReleaseTypes?.[rel];
+          return Array.isArray(arr) && arr.length > 0;
+        });
+        if (!matches) return false;
       }
       if (f.workType) {
         const all=[...row.release120Types,...row.release121Types,...row.release122Types,...row.overtimeTypes];
@@ -115,7 +129,7 @@ export const FilterEngine = {
     if (f.search) n++;
     if (f.team) n++;
     if (f.scope) n++;
-    if (f.release) n++;
+    n += Array.isArray(f.release) ? f.release.length : (f.release ? 1 : 0);
     if (f.workType) n++;
     n += Array.isArray(f.role)     ? f.role.length     : (f.role     ? 1 : 0);
     n += Array.isArray(f.assignee) ? f.assignee.length : (f.assignee ? 1 : 0);

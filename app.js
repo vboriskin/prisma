@@ -454,7 +454,20 @@ const FiltersUI = {
     // V17 P11 (full-stack F-4 + QA B1) — search has its own debounced `input`
     // listener below; binding `change` here would race the trailing setTimeout.
     bind('filter-team','team'); bind('filter-scope','scope');
-    bind('filter-release','release'); bind('filter-worktype','workType'); bind('filter-role','role'); bind('filter-assignee','assignee');
+    // #1 C3 — release теперь массив; адаптируем generic bind: пустая строка → [].
+    const _relSelect = document.getElementById('filter-release');
+    if (_relSelect && !_relSelect._gdtMultiBound) {
+      _relSelect._gdtMultiBound = true;
+      _relSelect.addEventListener('change', e => {
+        if (state.filters.preset && 'release' !== 'preset') state.filters.preset = null;
+        const val = e.target.value;
+        state.filters.release = val ? [val] : [];
+        state.filters._source = 'manual';
+        try { _telFilter('apply', 'release'); } catch (_) {}
+        App.refreshCurrentSection();
+      });
+    }
+    bind('filter-worktype','workType'); bind('filter-role','role'); bind('filter-assignee','assignee');
     bind('filter-blocking','onlyBlocking',true);
     bind('filter-risky','onlyRisky',true); bind('filter-done','onlyDone',true);
     if (FiltersUI._searchTimer) clearTimeout(FiltersUI._searchTimer);
@@ -501,7 +514,7 @@ const FiltersUI = {
     state.filters.assignee='';
     state.filters.tag='';
     state.filters.scope='';
-    state.filters.release='';
+    state.filters.release=[];
     state.filters.onlyBlocking=false;
     state.filters.onlyRisky=false;
     state.filters.onlyDone=false;
@@ -510,16 +523,18 @@ const FiltersUI = {
     const btn=document.querySelector(`.preset-btn[data-preset="${preset}"]`);
     if (btn) btn.classList.add('active');
     if (preset==='critical') state.filters.onlyRisky=true;
-    else if (preset==='no-release') state.filters.release='none';
+    else if (preset==='no-release') state.filters.release=['none'];
     else if (preset==='needs-confirm') state.filters.scope='Требует подтверждения';
     else if (preset==='has-blocker') state.filters.onlyBlocking=true;
-    else if (preset==='overtime') state.filters.release='overtime';
+    else if (preset==='overtime') state.filters.release=['overtime'];
     else if (preset==='done') state.filters.onlyDone=true;
     FiltersUI.syncUI(); FiltersUI.populateDropdowns(); App.refreshCurrentSection();
   },
   syncUI() {
     document.getElementById('filter-scope').value=state.filters.scope||'';
-    document.getElementById('filter-release').value=state.filters.release||'';
+    const _rel = state.filters.release;
+    const _relSingle = Array.isArray(_rel) ? (_rel[0] || '') : (_rel || '');
+    document.getElementById('filter-release').value=_relSingle;
     ['blocking','risky','done'].forEach(k=>{
       const fk='only'+k.charAt(0).toUpperCase()+k.slice(1);
       const cb=document.getElementById(`filter-${k}`);
@@ -531,7 +546,7 @@ const FiltersUI = {
     const assigneeSel=document.getElementById('filter-assignee'); if(assigneeSel) assigneeSel.value=Array.isArray(state.filters.assignee)?'':(state.filters.assignee||'');
   },
   reset() {
-    state.filters={search:'',team:'',scope:'',release:'',workType:'',role:'',assignee:'',tag:'',onlyBlocking:false,onlyRisky:false,onlyDone:false,preset:null};
+    state.filters={search:'',team:'',scope:'',release:[],workType:'',role:'',assignee:'',tag:'',onlyBlocking:false,onlyRisky:false,onlyDone:false,preset:null};
     document.getElementById('filter-search').value=''; document.getElementById('filter-team').value='';
     document.getElementById('filter-scope').value=''; document.getElementById('filter-release').value='';
     document.getElementById('filter-worktype').value=''; document.getElementById('filter-role').value='';
@@ -549,6 +564,24 @@ const FiltersUI = {
     };
     const teamSel=document.getElementById('filter-team'), cur1=teamSel.value;
     _setOptions(teamSel, FilterEngine.getTeams(), cur1);
+    // #1 C3 — релиз-select динамический: legacy 5 + custom из state.releases.
+    const relSel = document.getElementById('filter-release');
+    if (relSel) {
+      const legacyOpts = [
+        { value: '1.20',    label: '1.20' },
+        { value: '1.21',    label: '1.21' },
+        { value: '1.22',    label: '1.22' },
+        { value: 'overtime',label: 'Овертайм' },
+        { value: 'none',    label: 'Без релиза' },
+      ];
+      const customOpts = (Array.isArray(state.releases) ? state.releases : [])
+        .filter(r => r && r.key)
+        .map(r => ({ value: r.key, label: r.short || r.label || r.key }));
+      const opts = [...legacyOpts, ...customOpts];
+      const cur = Array.isArray(state.filters.release) ? (state.filters.release[0] || '') : (state.filters.release || '');
+      const html = '<option value="">Все</option>' + opts.map(o => `<option value="${o.value}"${cur===o.value?' selected':''}>${o.label}</option>`).join('');
+      if (relSel.dataset._cache !== html) { relSel.innerHTML = html; relSel.dataset._cache = html; }
+    }
     const wtSel=document.getElementById('filter-worktype'), cur2=wtSel.value;
     _setOptions(wtSel, FilterEngine.getWorkTypes(), cur2);
     const roleSel=document.getElementById('filter-role'), cur3=Array.isArray(state.filters.role)?'':roleSel.value;
