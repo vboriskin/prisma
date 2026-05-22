@@ -117,16 +117,54 @@ const _EDITOR_JS = `
     pills.forEach(p => p.classList.add('prizma-edited'));
   }
 
-  // Pill click → mini-popup со статусом + comment. Note/risk icons тоже.
+  // Список колодцев (legacy 5 + custom) для меню «Перенести».
+  function _releaseCols() {
+    const LEGACY = [
+      { key: 'backlog', label: 'Бэклог' },
+      { key: 'r120', label: '1.20' },
+      { key: 'r121', label: '1.21' },
+      { key: 'r122', label: '1.22' },
+      { key: 'overtime', label: 'Овертайм' },
+    ];
+    const customs = (snap.snapshot?.settings?.releases || [])
+      .filter(r => r && r.key)
+      .map(r => ({ key: r.key, label: r.short || r.label || r.key }));
+    // Custom вставляем перед overtime.
+    const out = [];
+    for (const l of LEGACY) {
+      if (l.key === 'overtime') out.push(...customs);
+      out.push(l);
+    }
+    return out;
+  }
+  function _colLabel(key) {
+    const f = _releaseCols().find(c => c.key === key);
+    return f ? f.label : key;
+  }
+  function _pendingMove(rowId, wt, fromCol) {
+    const key = 'move:' + rowId + '__' + wt + '__' + fromCol;
+    return edits.has(key) ? edits.get(key).toCol : null;
+  }
+
+  // Pill right-click → контекстное меню (статус + перенос). Note/risk icons —
+  // left-click popover (отдельные кнопки).
   function _wireEditors() {
     document.querySelectorAll('.gantt-type-pill[data-row-id][data-src-col][data-wt]').forEach(pill => {
       if (pill._prizmaWired) return;
       pill._prizmaWired = true;
+      pill.addEventListener('contextmenu', (e) => {
+        if (!editMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _openPillMenu(pill, e.clientX, e.clientY);
+      });
+      // Left-click тоже открывает меню (для тач/трекпада без right-click).
       pill.addEventListener('click', (e) => {
         if (!editMode) return;
         e.preventDefault();
         e.stopPropagation();
-        _openPillPopup(pill);
+        const r = pill.getBoundingClientRect();
+        _openPillMenu(pill, r.left, r.bottom);
       });
     });
     document.querySelectorAll('.gdt-cell-note-icon[data-row-id][data-col]').forEach(el => {
@@ -151,98 +189,90 @@ const _EDITOR_JS = `
     });
   }
 
-  function _openPillPopup(pill) {
-    document.getElementById('prizma-pill-popup')?.remove();
+  // Right-click контекстное меню pill (статус + перенос) — стиль in-app.
+  function _openPillMenu(pill, clientX, clientY) {
+    document.getElementById('prizma-pill-menu')?.remove();
     const rowId = pill.dataset.rowId;
     const col   = pill.dataset.srcCol;
     const wt    = pill.dataset.wt;
     const row = _rowById(rowId);
-    const epicLabel = (row?.epic || row?.tasks || '(без эпика)').slice(0, 60);
+    const epicLabel = (row?.epic || row?.tasks || '(без эпика)').slice(0, 50);
     const current = _pendingPillStatus(rowId, col, wt) || _currentPillStatus(rowId, col, wt);
-    const key = 'pill:' + rowId + '__' + col + '__' + wt;
-    const existingEdit = edits.get(key);
-    const initComment = existingEdit?.comment ?? (row?.donePills?.[col + '__' + wt]?.comment || '');
+    const pendingMove = _pendingMove(rowId, wt, col);
 
-    const pop = document.createElement('div');
-    pop.id = 'prizma-pill-popup';
-    pop.className = 'prizma-pop';
-    pop.innerHTML = \`
-      <div class="prizma-pop-head">
-        <div class="prizma-pop-eyebrow">\${_esc(epicLabel)}</div>
-        <div class="prizma-pop-title">\${_esc(wt)} · \${_esc(col)}</div>
-        <button type="button" class="prizma-pop-close" aria-label="Закрыть">×</button>
-      </div>
-      <div class="prizma-pop-body">
-        <div class="prizma-pop-field">
-          <label class="prizma-pop-label">Статус</label>
-          <div class="prizma-pop-radios">
-            \${['planned','in-progress','done'].map(s => \`
-              <label class="prizma-pop-radio\${current===s?' is-active':''}" data-status="\${s}">
-                <input type="radio" name="prizma-pill-status" value="\${s}" \${current===s?'checked':''}>
-                <span>\${{'planned':'План','in-progress':'В работе','done':'Завершено'}[s]}</span>
-              </label>
-            \`).join('')}
-          </div>
-        </div>
-        <div class="prizma-pop-field" id="prizma-pop-comment-field" \${current==='done'?'':'hidden'}>
-          <label class="prizma-pop-label" for="prizma-pop-comment">Комментарий (опц.)</label>
-          <textarea id="prizma-pop-comment" class="prizma-pop-text" rows="2" placeholder="Например: закрыто за 3 дня раньше срока">\${_esc(initComment)}</textarea>
-        </div>
-      </div>
-      <div class="prizma-pop-footer">
-        \${existingEdit ? '<button type="button" class="prizma-edit-btn" id="prizma-pop-revert">Отменить правку</button>' : '<span></span>'}
-        <div class="prizma-pop-actions">
-          <button type="button" class="prizma-edit-btn" id="prizma-pop-cancel">Отмена</button>
-          <button type="button" class="prizma-edit-btn prizma-edit-btn-primary" id="prizma-pop-save">Сохранить</button>
-        </div>
-      </div>
+    const STATUS = [
+      { v: 'planned',     l: 'Запланировано' },
+      { v: 'in-progress', l: 'В работе' },
+      { v: 'done',        l: 'Завершено' },
+    ];
+    const moveTargets = _releaseCols().filter(c => c.key !== col);
+
+    const menu = document.createElement('div');
+    menu.id = 'prizma-pill-menu';
+    menu.className = 'prizma-ctx';
+    menu.innerHTML = \`
+      <div class="prizma-ctx-eyebrow">\${_esc(epicLabel)} · \${_esc(wt)}</div>
+      <div class="prizma-ctx-sub">Статус</div>
+      \${STATUS.map(s => \`
+        <button type="button" class="prizma-ctx-item\${current === s.v ? ' is-active' : ''}" data-act="status" data-status="\${s.v}">
+          <span class="prizma-ctx-dot"></span><span>\${s.l}</span>
+        </button>\`).join('')}
+      <div class="prizma-ctx-sep"></div>
+      <div class="prizma-ctx-sub">Перенести в колодец</div>
+      \${moveTargets.map(t => \`
+        <button type="button" class="prizma-ctx-item\${pendingMove === t.key ? ' is-active' : ''}" data-act="move" data-to="\${t.key}">
+          <span class="prizma-ctx-arrow">→</span><span>\${_esc(t.label)}</span>
+        </button>\`).join('')}
+      \${pendingMove ? '<button type="button" class="prizma-ctx-item prizma-ctx-revert" data-act="move-cancel">Отменить перенос</button>' : ''}
     \`;
-    document.body.appendChild(pop);
+    document.body.appendChild(menu);
 
-    // Position возле pill (под ним, с clamp'ом по viewport).
-    const r = pill.getBoundingClientRect();
-    const pr = pop.getBoundingClientRect();
-    let left = r.left + r.width / 2 - pr.width / 2;
-    let top  = r.bottom + 6;
-    left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
-    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, r.top - pr.height - 6);
-    pop.style.left = left + 'px';
-    pop.style.top  = top  + 'px';
+    // Position у курсора с clamp.
+    const mr = menu.getBoundingClientRect();
+    let left = clientX, top = clientY;
+    if (left + mr.width + 8 > window.innerWidth) left = Math.max(8, window.innerWidth - mr.width - 8);
+    if (top + mr.height + 8 > window.innerHeight) top = Math.max(8, window.innerHeight - mr.height - 8);
+    menu.style.left = left + 'px';
+    menu.style.top  = top + 'px';
 
-    let selectedStatus = current;
-    pop.querySelectorAll('.prizma-pop-radio').forEach(r => {
-      r.addEventListener('click', () => {
-        selectedStatus = r.dataset.status;
-        pop.querySelectorAll('.prizma-pop-radio').forEach(x => x.classList.toggle('is-active', x === r));
-        r.querySelector('input').checked = true;
-        document.getElementById('prizma-pop-comment-field').hidden = (selectedStatus !== 'done');
+    menu.querySelectorAll('[data-act="status"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const status = btn.dataset.status;
+        const key = 'pill:' + rowId + '__' + col + '__' + wt;
+        const baseline = _currentPillStatus(rowId, col, wt);
+        if (status === 'done') {
+          // Prompt для комментария (опц.).
+          const cmt = prompt('Комментарий к завершению (опционально):', edits.get(key)?.comment || '') || '';
+          edits.set(key, { kind: 'pill', rowId, col, wt, status, comment: cmt.trim(), ts: new Date().toISOString() });
+        } else if (status === baseline) {
+          edits.delete(key);
+        } else {
+          edits.set(key, { kind: 'pill', rowId, col, wt, status, comment: '', ts: new Date().toISOString() });
+        }
+        _renderPillVisualState(rowId, col, wt);
+        _updateCounter();
+        menu.remove();
       });
     });
-    pop.querySelector('.prizma-pop-close').addEventListener('click', () => pop.remove());
-    document.getElementById('prizma-pop-cancel').addEventListener('click', () => pop.remove());
-    document.getElementById('prizma-pop-revert')?.addEventListener('click', () => {
-      edits.delete(key);
-      _renderPillVisualState(rowId, col, wt);
-      pop.remove();
-      _updateCounter();
+    menu.querySelectorAll('[data-act="move"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const toCol = btn.dataset.to;
+        const key = 'move:' + rowId + '__' + wt + '__' + col;
+        edits.set(key, { kind: 'move', rowId, wt, fromCol: col, toCol, ts: new Date().toISOString() });
+        _renderPillVisualState(rowId, col, wt);
+        _updateCounter();
+        menu.remove();
+      });
     });
-    document.getElementById('prizma-pop-save').addEventListener('click', () => {
-      const comment = (document.getElementById('prizma-pop-comment')?.value || '').trim();
-      const baseline = _currentPillStatus(rowId, col, wt);
-      const baselineComment = row?.donePills?.[col + '__' + wt]?.comment || '';
-      if (selectedStatus === baseline && (selectedStatus !== 'done' || comment === baselineComment)) {
-        edits.delete(key);
-      } else {
-        edits.set(key, { kind: 'pill', rowId, col, wt, status: selectedStatus, comment, ts: new Date().toISOString() });
-      }
+    menu.querySelector('[data-act="move-cancel"]')?.addEventListener('click', () => {
+      edits.delete('move:' + rowId + '__' + wt + '__' + col);
       _renderPillVisualState(rowId, col, wt);
-      pop.remove();
       _updateCounter();
+      menu.remove();
     });
-    // Click outside → cancel.
     setTimeout(() => {
       function onDoc(ev) {
-        if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('mousedown', onDoc, true); }
+        if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', onDoc, true); }
       }
       document.addEventListener('mousedown', onDoc, true);
     }, 0);
@@ -250,9 +280,23 @@ const _EDITOR_JS = `
 
   function _renderPillVisualState(rowId, col, wt) {
     const pills = document.querySelectorAll(\`.gantt-type-pill[data-row-id="\${CSS.escape(rowId)}"][data-src-col="\${CSS.escape(col)}"][data-wt="\${CSS.escape(wt)}"]\`);
-    const key = 'pill:' + rowId + '__' + col + '__' + wt;
-    const edited = edits.has(key);
-    pills.forEach(p => p.classList.toggle('prizma-edited', edited));
+    const pillKey = 'pill:' + rowId + '__' + col + '__' + wt;
+    const moveKey = 'move:' + rowId + '__' + wt + '__' + col;
+    const edited = edits.has(pillKey) || edits.has(moveKey);
+    const moveTo = edits.has(moveKey) ? edits.get(moveKey).toCol : null;
+    pills.forEach(p => {
+      p.classList.toggle('prizma-edited', edited);
+      // Бейдж «→ колодец» при pending move.
+      let badge = p.querySelector('.prizma-move-badge');
+      if (moveTo) {
+        if (!badge) { badge = document.createElement('span'); badge.className = 'prizma-move-badge'; p.appendChild(badge); }
+        badge.textContent = '→ ' + _colLabel(moveTo);
+        p.classList.add('prizma-moved');
+      } else {
+        badge?.remove();
+        p.classList.remove('prizma-moved');
+      }
+    });
   }
 
   /** Текущее (с учётом edits) состояние notes/risks для cell. */
@@ -464,6 +508,28 @@ const _EDITOR_JS = `
         } else if (e.action === 'add') {
           row[field].push({ id: e.tempId, ...e.payload });
         }
+      } else if (e.kind === 'move') {
+        // Перенос wt из fromCol в toCol. legacy → плоские release-arrays,
+        // custom → row.customReleaseTypes[col].
+        const FLAT = { backlog: 'backlogTypes', r120: 'release120Types', r121: 'release121Types', r122: 'release122Types', overtime: 'overtimeTypes' };
+        const _arr = (key) => {
+          if (FLAT[key]) { if (!Array.isArray(row[FLAT[key]])) row[FLAT[key]] = []; return row[FLAT[key]]; }
+          if (!row.customReleaseTypes) row.customReleaseTypes = {};
+          if (!Array.isArray(row.customReleaseTypes[key])) row.customReleaseTypes[key] = [];
+          return row.customReleaseTypes[key];
+        };
+        const from = _arr(e.fromCol);
+        const to   = _arr(e.toCol);
+        const fi = from.indexOf(e.wt);
+        if (fi >= 0) from.splice(fi, 1);
+        if (!to.includes(e.wt)) to.push(e.wt);
+        // Заодно перенести pill-статус (done/in-progress), если был привязан к колодцу.
+        for (const sp of ['donePills', 'inProgressPills']) {
+          if (row[sp] && row[sp][e.fromCol + '__' + e.wt] !== undefined) {
+            row[sp][e.toCol + '__' + e.wt] = row[sp][e.fromCol + '__' + e.wt];
+            delete row[sp][e.fromCol + '__' + e.wt];
+          }
+        }
       }
       row.updatedAt = todayISO;
     }
@@ -650,6 +716,50 @@ body.prizma-edit-mode .gantt-type-pill:hover { outline: 2px dashed rgba(220,38,3
 }
 .prizma-anno-text { font-size: 12px; }
 .prizma-anno-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+
+/* Pill right-click context menu (стиль in-app .gdt-ctx-menu). */
+.prizma-ctx {
+  position: fixed; z-index: 1200;
+  min-width: 200px; max-width: 260px;
+  background: #fff; border: 1px solid #d4d4d8;
+  border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  padding: 6px; color: #18181b;
+  font: 13px/1.4 system-ui, sans-serif;
+}
+.prizma-ctx-eyebrow {
+  padding: 4px 10px 6px; font: 600 11px/1.3 system-ui; color: #71717a;
+  border-bottom: 1px solid #f0f0f2; margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.prizma-ctx-sub {
+  padding: 4px 10px 2px; font: 700 9px/1 system-ui; letter-spacing: .6px;
+  text-transform: uppercase; color: #a1a1aa;
+}
+.prizma-ctx-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: 0; background: transparent; cursor: pointer;
+  border-radius: 6px; font: 500 13px/1 system-ui; color: #18181b; text-align: left;
+}
+.prizma-ctx-item:hover { background: #f4f4f5; }
+.prizma-ctx-item.is-active { color: #16a34a; font-weight: 600; }
+.prizma-ctx-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1.5px solid #d4d4d8; flex-shrink: 0;
+}
+.prizma-ctx-item.is-active .prizma-ctx-dot { background: #16a34a; border-color: #16a34a; }
+.prizma-ctx-arrow { color: #4f46e5; font-weight: 700; width: 10px; flex-shrink: 0; }
+.prizma-ctx-sep { height: 1px; background: #f0f0f2; margin: 6px 0; }
+.prizma-ctx-revert { color: #dc2626; }
+.prizma-ctx-revert:hover { background: #fee2e2; }
+
+/* Move-бейдж на pill при pending переносе. */
+.gantt-type-pill.prizma-moved { opacity: .6; }
+.prizma-move-badge {
+  display: inline-block; margin-left: 4px;
+  padding: 0 5px; border-radius: 8px;
+  background: #4f46e5; color: #fff;
+  font: 700 9px/1.6 system-ui; vertical-align: middle;
+}
 
 body.prizma-edit-mode .gdt-cell-note-icon,
 body.prizma-edit-mode .gdt-cell-risk-glyph { cursor: pointer; }

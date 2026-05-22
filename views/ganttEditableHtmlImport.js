@@ -72,7 +72,11 @@ const TYPE_LABEL = {
   'inProgressPills': 'Статус «в работе»',
   'cellNotes':       'Заметка',
   'cellRisks':       'Риск',
+  'releaseTypes':    'Состав работ колодца',
 };
+
+const COL_LABEL = { backlog: 'Бэклог', r120: '1.20', r121: '1.21', r122: '1.22', overtime: 'Овертайм' };
+function _colLabel(key) { return COL_LABEL[key] || key; }
 
 /**
  * Возвращает Array<Change>:
@@ -158,6 +162,36 @@ export function computeDiff(meta) {
         });
       }
     }
+
+    // 3. release-types membership (перенос pill между колодцами / состав работ).
+    const RELEASE_FIELDS = [
+      ['release120Types', 'r120'], ['release121Types', 'r121'],
+      ['release122Types', 'r122'], ['overtimeTypes', 'overtime'], ['backlogTypes', 'backlog'],
+    ];
+    const pushRt = (col, wt, action) => {
+      changes.push({
+        id: 'c' + (++cId), type: 'releaseTypes', action,
+        rowId: impRow.id, epic: epicLabel, subKey: col + '__' + wt, col, wt,
+        imported: action === 'add' ? wt : null,
+        local: action === 'delete' ? wt : null,
+        isConflict: wasEditedLocally,
+      });
+    };
+    for (const [field, col] of RELEASE_FIELDS) {
+      const impArr = Array.isArray(impRow[field]) ? impRow[field] : [];
+      const locArr = Array.isArray(local[field]) ? local[field] : [];
+      for (const wt of impArr) if (!locArr.includes(wt)) pushRt(col, wt, 'add');
+      for (const wt of locArr) if (!impArr.includes(wt)) pushRt(col, wt, 'delete');
+    }
+    // Custom releases.
+    const impCustom = impRow.customReleaseTypes || {};
+    const locCustom = local.customReleaseTypes || {};
+    for (const key of new Set([...Object.keys(impCustom), ...Object.keys(locCustom)])) {
+      const impArr = Array.isArray(impCustom[key]) ? impCustom[key] : [];
+      const locArr = Array.isArray(locCustom[key]) ? locCustom[key] : [];
+      for (const wt of impArr) if (!locArr.includes(wt)) pushRt(key, wt, 'add');
+      for (const wt of locArr) if (!impArr.includes(wt)) pushRt(key, wt, 'delete');
+    }
   }
   return changes;
 }
@@ -170,6 +204,7 @@ export function describeChange(c) {
   }
   if (c.type === 'cellNotes') return `Заметка в ячейке`;
   if (c.type === 'cellRisks') return `Риск в ячейке`;
+  if (c.type === 'releaseTypes') return `«${c.wt}» в колодце ${_colLabel(c.col)}`;
   return t;
 }
 
@@ -188,6 +223,9 @@ export function snippetValue(c, which) {
   }
   if (c.type === 'cellRisks') {
     return `${v.kind || ''} · ${(v.text || '').slice(0, 80)}${v.dueDate ? ' (до ' + v.dueDate + ')' : ''}`;
+  }
+  if (c.type === 'releaseTypes') {
+    return which === 'imported' ? `есть в ${_colLabel(c.col)}` : `есть в ${_colLabel(c.col)}`;
   }
   try { return JSON.stringify(v).slice(0, 80); } catch (_) { return '(значение)'; }
 }

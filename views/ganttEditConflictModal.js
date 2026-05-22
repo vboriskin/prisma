@@ -168,6 +168,18 @@ function _applyChanges(toApply) {
           if (idx >= 0) row[c.type][idx] = c.imported;
           else row[c.type].push(c.imported);
         }
+      } else if (c.type === 'releaseTypes') {
+        // Перенос/состав работ: добавить/удалить wt в release-array колодца.
+        const FLAT = { backlog: 'backlogTypes', r120: 'release120Types', r121: 'release121Types', r122: 'release122Types', overtime: 'overtimeTypes' };
+        const arrOf = (col) => {
+          if (FLAT[col]) { if (!Array.isArray(row[FLAT[col]])) row[FLAT[col]] = []; return row[FLAT[col]]; }
+          if (!row.customReleaseTypes) row.customReleaseTypes = {};
+          if (!Array.isArray(row.customReleaseTypes[col])) row.customReleaseTypes[col] = [];
+          return row.customReleaseTypes[col];
+        };
+        const arr = arrOf(c.col);
+        if (c.action === 'add') { if (!arr.includes(c.wt)) arr.push(c.wt); }
+        else if (c.action === 'delete') { const i = arr.indexOf(c.wt); if (i >= 0) arr.splice(i, 1); }
       }
       row.updatedAt = nowISO;
     }
