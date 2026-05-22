@@ -1072,6 +1072,34 @@ const App = {
       }
     });
 
+    document.getElementById('btn-import-gantt-edits')?.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.html,text/html';
+      input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        let text = '';
+        try { text = await file.text(); } catch (e) { showToast('Не удалось прочитать файл', 'error', 3500); return; }
+        try {
+          const mod = await import('./views/ganttEditableHtmlImport.js');
+          const meta = mod.parseEditableHtml(text);
+          const warnings = mod.preCheck(meta);
+          const changes = mod.computeDiff(meta);
+          if (!changes.length) {
+            showToast('Изменений в файле не найдено — всё уже совпадает', 'info', 3000);
+            return;
+          }
+          const conflictMod = await import('./views/ganttEditConflictModal.js');
+          conflictMod.openImportConflictModal({ meta, warnings, changes, onApplied: () => {} });
+        } catch (e) {
+          console.error(e);
+          showToast('Импорт не удался: ' + (e?.message || e), 'error', 4500);
+        }
+      });
+      input.click();
+    });
+
     // XLSX export — round-trip-safe: same headers as XLSXImporter.import,
     // one sheet per team. No extra columns beyond the import template.
     document.getElementById('btn-export-xlsx')?.addEventListener('click', async () => {
