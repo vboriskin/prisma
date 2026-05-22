@@ -1281,8 +1281,11 @@ async function _buildRoadmapHtml() {
   const byCategory = groupHtml(groupBy('category'));
 
   const ticksHtml = ticks.map(t => `<div class="rm-tick" style="left:${t.pct.toFixed(2)}%"><span class="rm-tick-label">${esc(t.label)}</span></div>`).join('');
+  // Today-line вынесен из header в `.rm-board`, чтобы пунктир шёл через всю
+  // дорожную карту. Позицию ставит runtime-JS по data-today-pct (CSS calc с
+  // pct * length не вычисляется надёжно).
   const todayLineHtml = todayPct !== null
-    ? `<div class="rm-today" style="left:${todayPct.toFixed(2)}%" title="Сегодня"><span class="rm-today-label">сегодня</span></div>`
+    ? `<div class="rm-today" data-today-pct="${todayPct.toFixed(2)}" title="Сегодня"><span class="rm-today-label">сегодня</span></div>`
     : '';
 
   const totalEpics = epics.length;
@@ -1316,8 +1319,8 @@ body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px
 .rm-tl-header { grid-column: 2; position: relative; height: 36px; border-bottom: 1px solid var(--border, #e5e7eb); }
 .rm-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border, #e5e7eb); width: 0; }
 .rm-tick-label { position: absolute; top: 8px; left: 4px; font: 500 11px system-ui; color: var(--text-3); white-space: nowrap; }
-.rm-today { position: absolute; top: 0; bottom: 0; border-left: 2px solid #dc2626; width: 0; z-index: 4; }
-.rm-today-label { position: absolute; top: -22px; left: -28px; padding: 1px 7px; background: #dc2626; color: #fff; border-radius: 3px; font: 600 10px system-ui; }
+.rm-today { position: absolute; top: 0; bottom: 0; border-left: 1.5px dashed #dc2626; width: 0; z-index: 4; pointer-events: none; }
+.rm-today-label { position: absolute; top: 4px; left: -28px; padding: 1px 7px; background: #dc2626; color: #fff; border-radius: 3px; font: 600 10px system-ui; white-space: nowrap; pointer-events: auto; }
 .rm-pane { display: none; }
 .rm-pane.is-active { display: contents; }
 .rm-group { display: contents; }
@@ -1350,9 +1353,9 @@ body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px
   </div>
 </div>
 <div class="rm-board">
+  ${todayLineHtml}
   <div class="rm-tl-header" style="grid-column:2">
     ${ticksHtml}
-    ${todayLineHtml}
   </div>
   <div class="rm-pane is-active" data-pane="team">${byTeam}</div>
   <div class="rm-pane" data-pane="category">${byCategory}</div>
@@ -1374,6 +1377,21 @@ body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px
       try { localStorage.setItem(KEY, g); } catch(_) {}
     });
   });
+})();
+(function positionToday() {
+  const LABEL_W = 240;
+  function place() {
+    const today = document.querySelector('.rm-today');
+    const board = document.querySelector('.rm-board');
+    if (!today || !board) return;
+    const pct = parseFloat(today.dataset.todayPct || '0');
+    const bRect = board.getBoundingClientRect();
+    const trackWidth = Math.max(0, bRect.width - LABEL_W);
+    const left = LABEL_W + (trackWidth * pct / 100);
+    today.style.left = left.toFixed(1) + 'px';
+  }
+  place();
+  window.addEventListener('resize', place);
 })();
 </script>
 </body>
