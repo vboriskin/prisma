@@ -11,7 +11,35 @@
 import { state }    from '../state.js';
 import { Storage }  from '../dataStore.js';
 import { Utils }    from '../utils.js';
+import { Reactive } from '../reactiveStore.js';
+import { ConfirmDialog } from '../app/uxKit.js';
 import { LEGACY_RELEASE_LIST } from '../constants.js';
+
+/** AUDIT-5 — вычистить все следы удаляемого релиза из строк и UI-состояния,
+ *  иначе остаются орфаны (donePills/notes/risks/customReleaseTypes), а ключ
+ *  застревает в ganttHiddenReleases/filters.release и «воскресает» при
+ *  повторном создании того же ярлыка. */
+function _purgeReleaseEverywhere(key) {
+  Reactive.silent(() => {
+    state.ganttHiddenReleases = (state.ganttHiddenReleases || []).filter(k => k !== key);
+    if (Array.isArray(state.filters?.release)) {
+      state.filters.release = state.filters.release.filter(k => k !== key);
+    }
+    for (const row of (state.rows || [])) {
+      if (row.customReleaseTypes && row.customReleaseTypes[key]) delete row.customReleaseTypes[key];
+      const prefix = key + '__';
+      for (const mapKey of ['donePills', 'inProgressPills', 'assigneePills', 'unplannedPills']) {
+        const m = row[mapKey];
+        if (m && typeof m === 'object') {
+          for (const k of Object.keys(m)) if (k.startsWith(prefix)) delete m[k];
+        }
+      }
+      if (Array.isArray(row.cellNotes)) row.cellNotes = row.cellNotes.filter(n => n.col !== key);
+      if (Array.isArray(row.cellRisks)) row.cellRisks = row.cellRisks.filter(n => n.col !== key);
+      if (Array.isArray(row.ganttArrows)) row.ganttArrows = row.ganttArrows.filter(a => a.srcCol !== key && a.dstCol !== key);
+    }
+  });
+}
 
 const MONTHS_RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
 
@@ -199,10 +227,18 @@ export function openReleaseEditor(opts = {}) {
   });
 
   if (isEdit) {
-    document.getElementById('re-delete').addEventListener('click', () => {
-      if (!confirm(`Удалить релиз «${draft.short}»? Заметки и риски в колодке сохранятся в данных, но колодец исчезнет из Ганта.`)) return;
-      const arr = (state.releases || []).filter(r => r.key !== editKey);
-      state.releases = arr;
+    document.getElementById('re-delete').addEventListener('click', async () => {
+      // AUDIT-20 — in-app ConfirmDialog вместо native confirm().
+      const ok = await ConfirmDialog.show({
+        title: `Удалить релиз «${draft.short}»?`,
+        message: 'Колодец и все его пилюли, заметки, риски и переносы будут удалены из всех эпиков. Действие необратимо.',
+        confirmLabel: 'Удалить релиз',
+        cancelLabel: 'Отмена',
+        danger: true,
+      }).catch(() => false);
+      if (!ok) return;
+      _purgeReleaseEverywhere(editKey);
+      state.releases = (state.releases || []).filter(r => r.key !== editKey);
       try { Storage.save(); } catch (_) {}
       close();
       try { opts.onSaved?.(); } catch (_) {}
