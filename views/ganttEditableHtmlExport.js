@@ -784,6 +784,13 @@ async function _buildEditableHtml() {
   if (!baseHtml) return '';
 
   const snapshot = JSONExport.buildSnapshot();
+  // SECURITY (AUDIT-1): buildSnapshot.bundle содержит localStorage целиком,
+  // включая токены интеграций и GigaChat (KEYS_PRESERVE_SECRETS). Editable
+  // round-trip правит ТОЛЬКО rows (pills/notes/risks) — bundle для импорта
+  // не нужен. Файл по дизайну рассылается бизнес-аналитикам, поэтому
+  // вырезаем bundle целиком, чтобы credentials не утекли наружу.
+  delete snapshot.bundle;
+  snapshot._includesSecrets = false;
   const meta = {
     version: 1,
     exportId: _uuid(),
