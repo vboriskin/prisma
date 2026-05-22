@@ -15,6 +15,7 @@ import { Storage } from '../dataStore.js';
 import { Reactive } from '../reactiveStore.js';
 import { Utils } from '../utils.js';
 import { Services } from '../app/services.js';
+import { RowFactory } from '../rowFactory.js';
 import { describeChange, snippetValue } from './ganttEditableHtmlImport.js';
 
 const esc = (s) => Utils.escapeHtml(String(s ?? ''));
@@ -142,11 +143,13 @@ function _applyChanges(toApply) {
   if (!Array.isArray(toApply) || !toApply.length) return;
   const rowsById = Object.create(null);
   for (const r of (state.rows || [])) rowsById[r.id] = r;
+  const touched = new Set();
   Reactive.silent(() => {
     const nowISO = new Date().toISOString();
     for (const c of toApply) {
       const row = rowsById[c.rowId];
       if (!row) continue;
+      touched.add(row);
       if (c.type === 'donePills' || c.type === 'inProgressPills') {
         if (!row[c.type]) row[c.type] = {};
         if (c.action === 'delete') {
@@ -182,6 +185,12 @@ function _applyChanges(toApply) {
         else if (c.action === 'delete') { const i = arr.indexOf(c.wt); if (i >= 0) arr.splice(i, 1); }
       }
       row.updatedAt = nowISO;
+    }
+    // AUDIT-3 — пересчитать derived-поля (hasReleaseXYZ/isUnassigned/
+    // releaseXYZRaw/riskFlags) после releaseTypes/pill изменений, иначе
+    // фильтры/счётчики/риски остаются stale до следующего сохранения.
+    for (const row of touched) {
+      try { RowFactory.updateDerived(row); } catch (_) {}
     }
   });
   try { Storage.save(); } catch (_) {}
