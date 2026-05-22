@@ -79,7 +79,7 @@ function _renderOverlay() {
         <div class="prizma-card-eyebrow">PRIZMA · ЗАВИСИМОСТИ</div>
         <div class="dep-graph-empty-title">Зависимости не заданы</div>
         <div class="dep-graph-empty-sub">
-          Чтобы увидеть граф, добавьте связи эпиков в Реестре через колонку «Зависимость от эпика».
+          Чтобы увидеть граф, задайте связи: в Ганте на строке эпика нажмите иконку зависимостей (узелки) рядом с категорией и отметьте, от каких эпиков он зависит.
         </div>
         <button class="btn btn-outline btn-xs" id="dep-graph-close">Закрыть</button>
       </div>`;

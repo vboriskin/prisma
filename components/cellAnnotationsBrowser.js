@@ -10,6 +10,7 @@
 import { state } from '../state.js';
 import { Utils } from '../utils.js';
 import { buildReleaseList } from '../constants.js';
+import { GanttView } from '../views/gantt.js';
 
 const RISK_KIND_LABELS = {
   'open-question':  'Открытый вопрос',
@@ -121,13 +122,22 @@ export function openAnnotationsBrowser() {
 
 function _scrollAndHighlight(rowId, col) {
   const esc = (s) => (window.CSS?.escape ? CSS.escape(s) : String(s).replace(/"/g, '\\"'));
-  // Если колодец скрыт через локальный «глаз» — возвращаем его, чтобы можно
-  // было увидеть аннотацию.
+  let needRerender = false;
+  // AUDIT-16 — раньше скролл полагался на reactive-flush (200ms) + setTimeout
+  // (250ms) — гонка; а если строка в свёрнутой команде (display:none) или
+  // колодец скрыт, scrollIntoView/highlight не работали вовсе. Теперь:
+  // (1) раскрываем скрытый колодец, (2) раскрываем свёрнутую команду строки,
+  // (3) синхронный renderChart, (4) скролл через двойной rAF (после рендера).
   if (Array.isArray(state.ganttHiddenReleases) && state.ganttHiddenReleases.includes(col)) {
     state.ganttHiddenReleases = state.ganttHiddenReleases.filter(k => k !== col);
-    // re-render Ганта произойдёт через reactive
+    needRerender = true;
   }
-  setTimeout(() => {
+  const row = (state.rows || []).find(r => r.id === rowId);
+  if (row && GanttView._dtHiddenTeams) {
+    const tk = String(row.team || '').replace(/[^a-zA-Zа-яА-ЯёЁъЪ0-9]/g, '_');
+    if (GanttView._dtHiddenTeams.has(tk)) { GanttView._dtHiddenTeams.delete(tk); needRerender = true; }
+  }
+  const doScroll = () => {
     const cell = document.querySelector(`.gantt-cell[data-row-id="${esc(rowId)}"][data-col="${esc(col)}"]`);
     if (!cell) {
       window.showToast?.('Не удалось найти ячейку', 'warning', 2000);
@@ -136,7 +146,13 @@ function _scrollAndHighlight(rowId, col) {
     cell.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
     cell.classList.add('gdt-cell-highlight');
     setTimeout(() => cell.classList.remove('gdt-cell-highlight'), 1800);
-  }, 250);
+  };
+  if (needRerender) {
+    try { GanttView._renderChartImmediate?.(); } catch (_) {}
+    requestAnimationFrame(() => requestAnimationFrame(doScroll));
+  } else {
+    requestAnimationFrame(doScroll);
+  }
 }
 
 function _fmtTime(iso) {
