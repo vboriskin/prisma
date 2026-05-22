@@ -17,7 +17,7 @@ import { Storage } from '../dataStore.js';
 import {
   PHASE_ORDER, PHASE_COLORS,
   PHASE_COLOR_TOKENS, PHASE_COLOR_TOKEN_FALLBACK,
-  WORK_TYPES, GANTT_COL_LABELS,
+  WORK_TYPES, GANTT_COL_LABELS, buildReleaseList,
 } from '../constants.js';
 import { GANTT_LEGEND } from './gantt/legendContent.js';
 // V18.3 B1 (partial split) — 4 self-contained method'а вынесены в aux.
@@ -1019,13 +1019,23 @@ export const GanttView = {
     //   («20 апреля – 17 мая») через formatLongRange при сборке header'а;
     //   `sub` оставляем в исходном `DD.MM–DD.MM` потому что parser today-pill
     //   завязан на этот формат.
-    const cols=[
-      {key:'backlog',label:'Бэклог',sub:'ещё не запланировано',cls:'gantt-window-backlog'},
-      {key:'r120',label:'1.20',sub:'20.04–17.05',cls:'gantt-window-r120'},
-      {key:'r121',label:'1.21',sub:'18.05–14.06',cls:'gantt-window-r121'},
-      {key:'r122',label:'1.22',sub:'15.06–14.07',cls:'gantt-window-r122'},
-      {key:'overtime',label:'OT',sub:'Овертайм',cls:'gantt-window-overtime'},
-    ];
+    // #1 C2 — cols строятся из buildReleaseList(state.releases). Legacy 5
+    // («backlog/r120/r121/r122/overtime») получают kind='legacy' и flatTypes/
+    // flatHas (для чтения row.release120Types и т.п.). Custom релизы — kind='custom',
+    // данные в row.customReleaseTypes[key]. Скрытые через локальный «глаз»
+    // (state.ganttHiddenReleases) — отфильтрованы.
+    const hiddenSet = new Set(Array.isArray(state.ganttHiddenReleases) ? state.ganttHiddenReleases : []);
+    const cols = buildReleaseList(state.releases)
+      .filter(r => !hiddenSet.has(r.key))
+      .map(r => ({
+        key:       r.key,
+        label:     r.short || r.label,
+        sub:       r.dates || (r.key === 'overtime' ? 'Овертайм' : ''),
+        cls:       r.cls,
+        kind:      r.kind,
+        flatTypes: r.flatTypes,
+        flatHas:   r.flatHas,
+      }));
     // Only `detailedTasks` mode is reachable here — `arrowsNew` was handled
     // above (delegates to GanttV2). The legacy `compact` and team-wells
     // modes were removed (audit recommendation #4 / user request).
@@ -1039,7 +1049,41 @@ export const GanttView = {
     // Категория уже выводится текстом, дублирующий эмодзи не нужен.
     const wtEmoji = () => '';
 
-    /* ---- field maps ---- */
+    /* ---- field maps ----
+       Legacy 5 релизов хранят данные в плоских полях row.release120Types и т.п.
+       Custom релизы — в row.customReleaseTypes[key]. Helpers ниже унифицируют
+       read/write для обоих kind. Maps ещё используются legacy code-path'ами
+       (overview header counts, DnD по legacy ключам). */
+    const _colByKey = Object.create(null);
+    for (const c of cols) _colByKey[c.key] = c;
+    const _colKind = (key) => _colByKey[key]?.kind || 'legacy';
+    const _readTypes = (row, key) => {
+      const meta = _colByKey[key];
+      if (meta?.kind === 'custom') {
+        const map = row.customReleaseTypes || {};
+        return Array.isArray(map[key]) ? map[key] : [];
+      }
+      return Array.isArray(row[meta?.flatTypes]) ? row[meta.flatTypes] : [];
+    };
+    const _writeTypes = (row, key, arr) => {
+      const meta = _colByKey[key];
+      if (meta?.kind === 'custom') {
+        if (!row.customReleaseTypes) row.customReleaseTypes = {};
+        row.customReleaseTypes[key] = Array.isArray(arr) ? arr : [];
+      } else if (meta?.flatTypes) {
+        row[meta.flatTypes] = Array.isArray(arr) ? arr : [];
+      }
+    };
+    const _hasTypes = (row, key) => {
+      const meta = _colByKey[key];
+      if (!meta) return false;
+      if (meta.kind === 'custom') {
+        const arr = row.customReleaseTypes?.[key];
+        return Array.isArray(arr) && arr.length > 0;
+      }
+      // Backlog has flatHas='isUnassigned' (truthy when nothing in the 4 releases).
+      return !!row[meta.flatHas];
+    };
     const hasMap    = {backlog:'isUnassigned',r120:'hasRelease120',r121:'hasRelease121',r122:'hasRelease122',overtime:'hasOvertime'};
     const tfMap     = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
     const colKeyMap = {backlog:'backlogTypes',r120:'release120Types',r121:'release121Types',r122:'release122Types',overtime:'overtimeTypes'};
@@ -1364,7 +1408,7 @@ export const GanttView = {
       //   default  → count chip («1.20 4»)
       //   overview → horizontal stacked-bar of work-types + total count
       const _bucketCells = cols.map(col => {
-        const cnt = teamRows.filter(r => r[hasMap[col.key]]).length;
+        const cnt = teamRows.filter(r => _hasTypes(r, col.key)).length;
         const isActive = cnt > 0;
         if (_isOverview) {
           const wtMap = teamWtBuckets.get(team)?.[col.key] || {};
@@ -1436,9 +1480,9 @@ export const GanttView = {
         // Aggregate work-type tally across the row's buckets to pick the
         // dominant accent colour for the row's left-stripe.
         const _wtTally = Object.create(null);
-        ['release120Types','release121Types','release122Types','overtimeTypes','backlogTypes'].forEach(field => {
-          (row[field] || []).forEach(t => { _wtTally[t] = (_wtTally[t] || 0) + 1; });
-        });
+        for (const c of cols) {
+          for (const t of _readTypes(row, c.key)) { _wtTally[t] = (_wtTally[t] || 0) + 1; }
+        }
         let _domWt = '';
         let _domCount = 0;
         for (const [t, n] of Object.entries(_wtTally)) {
@@ -1695,7 +1739,7 @@ export const GanttView = {
               const idx = PHASE_ORDER.indexOf(t);
               return idx >= 0 ? idx : 999 + t.localeCompare(' ', 'ru');
             };
-            const bTypes = [...(row.backlogTypes || [])].sort((a, b) => _phaseRank(a) - _phaseRank(b));
+            const bTypes = _readTypes(row, 'backlog').slice().sort((a, b) => _phaseRank(a) - _phaseRank(b));
             const shown  = bTypes.slice(0, 12);
             const more   = bTypes.length - shown.length;
             const pills  = shown.map(t => _buildPill('backlog', t)).join('');
@@ -1709,14 +1753,14 @@ export const GanttView = {
             </div>`;
           }
           /* ---- release / overtime cells ---- */
-          const has   = row[hasMap[col.key]];
+          const has   = _hasTypes(row, col.key);
           // V16 roadmap-2 (C2) — same PHASE_ORDER sort as backlog above
           // (BA → analytics → BE → FE → QA → внедрение → стабилизация → hotfix).
           const _phaseRankR = (t) => {
             const idx = PHASE_ORDER.indexOf(t);
             return idx >= 0 ? idx : 999 + t.localeCompare(' ', 'ru');
           };
-          const types = [...(row[tfMap[col.key]] || [])].sort((a, b) => _phaseRankR(a) - _phaseRankR(b));
+          const types = _readTypes(row, col.key).slice().sort((a, b) => _phaseRankR(a) - _phaseRankR(b));
           const shown = types.slice(0, 12);
           const more  = types.length - shown.length;
           const pills = shown.map(t => _buildPill(col.key, t)).join('');
