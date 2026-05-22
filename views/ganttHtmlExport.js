@@ -116,14 +116,18 @@ function _stripInteractive(root, opts = {}) {
   // settles the new layout.
   root.querySelectorAll('.gdt-arrows-svg').forEach(el => el.remove());
 
-  root.querySelectorAll(
-    '.gdt-add-type-btn, .gantt-team-vis-btn, ' +
-    '.gantt-row-resize, .gdt-resize-handle, .gdt-col-resize, ' +
-    '.gdt-drag-handle, ' +
-    // #8 — read-only экспорт: убираем все «add/edit» кнопки аннотаций/зависимостей.
-    '.gdt-cell-note-icon.is-empty, .gdt-cell-risk-glyph.is-empty, ' +
-    '.gdt-col-eye, .v16-epic-deps-edit, .gdt-hidden-releases'
-  ).forEach(el => el.remove());
+  const stripSelectors = [
+    '.gdt-add-type-btn', '.gantt-team-vis-btn',
+    '.gantt-row-resize', '.gdt-resize-handle', '.gdt-col-resize',
+    '.gdt-drag-handle',
+    '.gdt-col-eye', '.v16-epic-deps-edit', '.gdt-hidden-releases',
+  ];
+  // Empty add-bubbles annotations убираем для viewer'а; для editable export
+  // оставляем (юзер сможет добавить заметку/риск кликом).
+  if (!opts.keepEditable) {
+    stripSelectors.push('.gdt-cell-note-icon.is-empty', '.gdt-cell-risk-glyph.is-empty');
+  }
+  root.querySelectorAll(stripSelectors.join(', ')).forEach(el => el.remove());
   root.querySelectorAll('[draggable]').forEach(el => el.removeAttribute('draggable'));
   // Wipe data-* attrs that were used purely for events.
   // KEEP `data-wt` (paints pill colours via CSS), `data-team-key` (used by
@@ -1019,7 +1023,7 @@ async function _buildHtml(opts = {}) {
     return '';
   }
   const cloned = wrap.cloneNode(true);
-  _stripInteractive(cloned, { keepIds: !!opts.keepIds });
+  _stripInteractive(cloned, { keepIds: !!opts.keepIds, keepEditable: !!opts.keepEditable });
   // Roadmap mode — заодно убираем today-line overlay из клона
   // (он был absolute-positioned и в экспорте теряет привязку к bbox).
   if (isRoadmap) {

@@ -117,7 +117,7 @@ const _EDITOR_JS = `
     pills.forEach(p => p.classList.add('prizma-edited'));
   }
 
-  // Pill click → mini-popup со статусом + comment.
+  // Pill click → mini-popup со статусом + comment. Note/risk icons тоже.
   function _wireEditors() {
     document.querySelectorAll('.gantt-type-pill[data-row-id][data-src-col][data-wt]').forEach(pill => {
       if (pill._prizmaWired) return;
@@ -127,6 +127,26 @@ const _EDITOR_JS = `
         e.preventDefault();
         e.stopPropagation();
         _openPillPopup(pill);
+      });
+    });
+    document.querySelectorAll('.gdt-cell-note-icon[data-row-id][data-col]').forEach(el => {
+      if (el._prizmaWired) return;
+      el._prizmaWired = true;
+      el.addEventListener('click', (e) => {
+        if (!editMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _openAnnotationPopup(el, 'note');
+      });
+    });
+    document.querySelectorAll('.gdt-cell-risk-glyph[data-row-id][data-col]').forEach(el => {
+      if (el._prizmaWired) return;
+      el._prizmaWired = true;
+      el.addEventListener('click', (e) => {
+        if (!editMode) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _openAnnotationPopup(el, 'risk');
       });
     });
   }
@@ -235,6 +255,175 @@ const _EDITOR_JS = `
     pills.forEach(p => p.classList.toggle('prizma-edited', edited));
   }
 
+  /** Текущее (с учётом edits) состояние notes/risks для cell. */
+  function _annotationsFor(rowId, col, kind) {
+    const row = _rowById(rowId);
+    if (!row) return [];
+    const baseKey = kind === 'note' ? 'cellNotes' : 'cellRisks';
+    const base = (row[baseKey] || []).filter(n => n && n.col === col);
+    // Накладываем pending edits: delete/edit/add.
+    const result = [];
+    const editedIds = new Set();
+    for (const item of base) {
+      const key = kind + ':' + rowId + '__' + item.id;
+      const ed = edits.get(key);
+      if (!ed) { result.push(item); continue; }
+      if (ed.action === 'delete') { editedIds.add(item.id); continue; }
+      if (ed.action === 'edit') { result.push({ ...item, ...ed.payload }); editedIds.add(item.id); continue; }
+    }
+    // Plus newly-added items.
+    for (const [k, ed] of edits) {
+      if (!k.startsWith(kind + ':' + rowId + '__new__')) continue;
+      if (ed.action !== 'add') continue;
+      result.push({ ...ed.payload, id: ed.tempId, _pending: true });
+    }
+    return result;
+  }
+
+  const RISK_KIND_LABELS = { 'open-question': 'Открытый вопрос', 'dangling': 'Подвешено', 'hard-deadline': 'Жёсткий дедлайн' };
+
+  function _openAnnotationPopup(anchor, kind) {
+    document.getElementById('prizma-anno-popup')?.remove();
+    const rowId = anchor.dataset.rowId;
+    const col   = anchor.dataset.col;
+    const row = _rowById(rowId);
+    const epicLabel = (row?.epic || row?.tasks || '(без эпика)').slice(0, 60);
+    let editingId = null;  // id заметки в edit-mode (null = list)
+
+    function _render() {
+      const items = _annotationsFor(rowId, col, kind);
+      const editingItem = editingId ? items.find(i => i.id === editingId) : null;
+      const isEditing = !!editingItem || editingId === 'new';
+      const draft = editingItem || (editingId === 'new'
+        ? (kind === 'note'
+            ? { text: '' }
+            : { kind: 'open-question', text: '', dueDate: '' })
+        : null);
+
+      const listHtml = items.length
+        ? items.map(item => {
+            const meta = kind === 'risk' ? \`<span class="prizma-anno-kind prizma-anno-kind-\${_esc(item.kind)}">\${_esc(RISK_KIND_LABELS[item.kind] || item.kind)}</span>\` : '';
+            const due  = item.dueDate ? \`<span class="prizma-anno-due">до \${_esc(item.dueDate)}</span>\` : '';
+            return \`<div class="prizma-anno-item\${item._pending ? ' is-pending' : ''}" data-id="\${_esc(item.id)}">
+              <div class="prizma-anno-item-meta">\${meta}\${due}</div>
+              <div class="prizma-anno-item-text">\${_esc(item.text)}</div>
+              <div class="prizma-anno-item-actions">
+                <button type="button" class="prizma-anno-edit" data-id="\${_esc(item.id)}" \${item._pending ? 'disabled title="Сначала сохраните, потом редактируйте"' : ''}>Изменить</button>
+                <button type="button" class="prizma-anno-delete" data-id="\${_esc(item.id)}">Удалить</button>
+              </div>
+            </div>\`;
+          }).join('')
+        : '<div class="prizma-anno-empty">Пока пусто.</div>';
+
+      const formHtml = isEditing ? \`
+        <div class="prizma-anno-form">
+          \${kind === 'risk' ? \`
+            <label class="prizma-pop-label">Тип</label>
+            <select class="prizma-anno-kind-select">
+              \${['open-question','dangling','hard-deadline'].map(k => \`<option value="\${k}" \${draft.kind === k ? 'selected' : ''}>\${RISK_KIND_LABELS[k]}</option>\`).join('')}
+            </select>
+          \` : ''}
+          <label class="prizma-pop-label">\${kind === 'note' ? 'Текст заметки' : 'Описание риска'}</label>
+          <textarea class="prizma-pop-text prizma-anno-text" rows="3" placeholder="...">\${_esc(draft.text || '')}</textarea>
+          \${kind === 'risk' ? \`
+            <label class="prizma-pop-label">Дедлайн (опц.)</label>
+            <input type="date" class="prizma-anno-due-input" value="\${_esc(draft.dueDate || '')}">
+          \` : ''}
+          <div class="prizma-anno-form-actions">
+            <button type="button" class="prizma-edit-btn" data-anno-action="cancel">Отмена</button>
+            <button type="button" class="prizma-edit-btn prizma-edit-btn-primary" data-anno-action="save">Сохранить</button>
+          </div>
+        </div>
+      \` : \`<button type="button" class="prizma-anno-add" data-anno-action="add-new">+ Добавить \${kind === 'note' ? 'заметку' : 'риск'}</button>\`;
+
+      pop.innerHTML = \`
+        <div class="prizma-pop-head">
+          <div class="prizma-pop-eyebrow">\${_esc(epicLabel)}</div>
+          <div class="prizma-pop-title">\${kind === 'note' ? 'Заметки' : 'Риски'} · \${_esc(col)}</div>
+          <button type="button" class="prizma-pop-close" aria-label="Закрыть">×</button>
+        </div>
+        <div class="prizma-anno-list">\${listHtml}</div>
+        \${formHtml}
+      \`;
+
+      pop.querySelector('.prizma-pop-close').addEventListener('click', () => pop.remove());
+      pop.querySelectorAll('.prizma-anno-edit').forEach(b => b.addEventListener('click', () => { editingId = b.dataset.id; _render(); }));
+      pop.querySelectorAll('.prizma-anno-delete').forEach(b => b.addEventListener('click', () => {
+        const id = b.dataset.id;
+        const item = items.find(i => i.id === id);
+        if (item?._pending) {
+          // Pending add — просто очистить из edits.
+          for (const [k] of edits) {
+            if (edits.get(k).tempId === id) { edits.delete(k); break; }
+          }
+        } else {
+          const key = kind + ':' + rowId + '__' + id;
+          edits.set(key, { kind, action: 'delete', rowId, col, id, ts: new Date().toISOString() });
+        }
+        _markCellEdited(rowId, col, kind);
+        _updateCounter();
+        _render();
+      }));
+      pop.querySelector('[data-anno-action="add-new"]')?.addEventListener('click', () => { editingId = 'new'; _render(); });
+      pop.querySelector('[data-anno-action="cancel"]')?.addEventListener('click', () => { editingId = null; _render(); });
+      pop.querySelector('[data-anno-action="save"]')?.addEventListener('click', () => {
+        const text = pop.querySelector('.prizma-anno-text').value.trim();
+        if (!text) return;
+        const payload = { col, text, createdAt: new Date().toISOString() };
+        if (kind === 'risk') {
+          payload.kind = pop.querySelector('.prizma-anno-kind-select').value;
+          payload.dueDate = pop.querySelector('.prizma-anno-due-input').value || '';
+        }
+        if (editingId === 'new') {
+          const tempId = (kind === 'note' ? 'note_' : 'risk_') + 'tmp_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+          edits.set(kind + ':' + rowId + '__new__' + tempId, { kind, action: 'add', rowId, col, tempId, payload, ts: new Date().toISOString() });
+        } else {
+          edits.set(kind + ':' + rowId + '__' + editingId, { kind, action: 'edit', rowId, col, id: editingId, payload, ts: new Date().toISOString() });
+        }
+        editingId = null;
+        _markCellEdited(rowId, col, kind);
+        _updateCounter();
+        _render();
+      });
+    }
+
+    const pop = document.createElement('div');
+    pop.id = 'prizma-anno-popup';
+    pop.className = 'prizma-pop prizma-anno-pop';
+    document.body.appendChild(pop);
+    _render();
+    // Position
+    const r = anchor.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let left = r.left + r.width / 2 - pr.width / 2;
+    let top  = r.bottom + 6;
+    left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, r.top - pr.height - 6);
+    pop.style.left = left + 'px';
+    pop.style.top  = top  + 'px';
+    setTimeout(() => {
+      function onDoc(ev) {
+        if (!pop.contains(ev.target) && ev.target !== anchor) { pop.remove(); document.removeEventListener('mousedown', onDoc, true); }
+      }
+      document.addEventListener('mousedown', onDoc, true);
+    }, 0);
+  }
+
+  function _markCellEdited(rowId, col, kind) {
+    // Маркируем cell-anchor когда у этой клетки есть pending edits.
+    const sel = kind === 'note' ? '.gdt-cell-note-icon' : '.gdt-cell-risk-glyph';
+    const els = document.querySelectorAll(\`\${sel}[data-row-id="\${CSS.escape(rowId)}"][data-col="\${CSS.escape(col)}"]\`);
+    // Есть ли pending edit для этой клетки?
+    let hasEdit = false;
+    for (const [k] of edits) {
+      if (k.startsWith(kind + ':' + rowId + '__')) {
+        const e = edits.get(k);
+        if (e.col === col) { hasEdit = true; break; }
+      }
+    }
+    els.forEach(el => el.classList.toggle('prizma-edited', hasEdit));
+  }
+
   function _esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -248,21 +437,33 @@ const _EDITOR_JS = `
     const todayISO = new Date().toISOString();
     const todayDate = todayISO.slice(0, 10);
     for (const [, e] of edits) {
-      if (e.kind !== 'pill') continue;
       const row = byId[e.rowId];
       if (!row) continue;
-      if (!row.donePills) row.donePills = {};
-      if (!row.inProgressPills) row.inProgressPills = {};
-      const k = e.col + '__' + e.wt;
-      if (e.status === 'done') {
-        row.donePills[k] = { at: todayDate, comment: e.comment || '', ts: todayISO };
-        delete row.inProgressPills[k];
-      } else if (e.status === 'in-progress') {
-        row.inProgressPills[k] = { at: todayISO };
-        delete row.donePills[k];
-      } else {
-        delete row.donePills[k];
-        delete row.inProgressPills[k];
+      if (e.kind === 'pill') {
+        if (!row.donePills) row.donePills = {};
+        if (!row.inProgressPills) row.inProgressPills = {};
+        const k = e.col + '__' + e.wt;
+        if (e.status === 'done') {
+          row.donePills[k] = { at: todayDate, comment: e.comment || '', ts: todayISO };
+          delete row.inProgressPills[k];
+        } else if (e.status === 'in-progress') {
+          row.inProgressPills[k] = { at: todayISO };
+          delete row.donePills[k];
+        } else {
+          delete row.donePills[k];
+          delete row.inProgressPills[k];
+        }
+      } else if (e.kind === 'note' || e.kind === 'risk') {
+        const field = e.kind === 'note' ? 'cellNotes' : 'cellRisks';
+        if (!Array.isArray(row[field])) row[field] = [];
+        if (e.action === 'delete') {
+          row[field] = row[field].filter(n => n.id !== e.id);
+        } else if (e.action === 'edit') {
+          const idx = row[field].findIndex(n => n.id === e.id);
+          if (idx >= 0) row[field][idx] = { ...row[field][idx], ...e.payload };
+        } else if (e.action === 'add') {
+          row[field].push({ id: e.tempId, ...e.payload });
+        }
       }
       row.updatedAt = todayISO;
     }
@@ -409,6 +610,55 @@ body.prizma-edit-mode .gantt-type-pill:hover { outline: 2px dashed rgba(220,38,3
   border-top: 1px solid #e4e4e7;
 }
 .prizma-pop-actions { display: flex; gap: 6px; }
+
+/* Annotation popup (notes + risks). */
+.prizma-anno-pop { width: 340px; }
+.prizma-anno-list { padding: 8px 14px; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.prizma-anno-empty { padding: 12px; text-align: center; color: #71717a; font-size: 12px; }
+.prizma-anno-item {
+  background: #fafafa; border: 1px solid #e4e4e7; border-radius: 6px;
+  padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.prizma-anno-item.is-pending { border-color: #16a34a; background: #f0fdf4; }
+.prizma-anno-item-meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 10px; }
+.prizma-anno-kind {
+  padding: 2px 6px; border-radius: 8px; font-weight: 700;
+  background: #fef3c7; color: #92400e;
+}
+.prizma-anno-kind-dangling { background: #eef2ff; color: #4338ca; }
+.prizma-anno-kind-hard-deadline { background: #fee2e2; color: #991b1b; }
+.prizma-anno-due { color: #dc2626; font-weight: 600; }
+.prizma-anno-item-text { color: #18181b; white-space: pre-wrap; word-break: break-word; }
+.prizma-anno-item-actions { display: flex; gap: 4px; justify-content: flex-end; }
+.prizma-anno-item-actions button {
+  background: transparent; border: 0; padding: 2px 6px; font-size: 11px;
+  color: #71717a; cursor: pointer; border-radius: 3px;
+}
+.prizma-anno-item-actions button:hover { color: #4f46e5; background: #eef2ff; }
+.prizma-anno-item-actions .prizma-anno-delete:hover { color: #dc2626; background: #fee2e2; }
+.prizma-anno-item-actions button:disabled { opacity: .4; cursor: default; }
+.prizma-anno-add {
+  margin: 4px 14px 12px; padding: 8px 12px;
+  background: transparent; border: 1px dashed #d4d4d8; border-radius: 6px;
+  color: #71717a; cursor: pointer; font: 600 12px system-ui;
+}
+.prizma-anno-add:hover { border-color: #4f46e5; color: #4f46e5; }
+.prizma-anno-form { padding: 6px 14px 12px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #e4e4e7; }
+.prizma-anno-kind-select, .prizma-anno-due-input {
+  padding: 6px 8px; border: 1px solid #d4d4d8; border-radius: 4px; font: inherit; font-size: 12px;
+  background: #fff; color: #18181b;
+}
+.prizma-anno-text { font-size: 12px; }
+.prizma-anno-form-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+
+body.prizma-edit-mode .gdt-cell-note-icon,
+body.prizma-edit-mode .gdt-cell-risk-glyph { cursor: pointer; }
+.gdt-cell-note-icon.prizma-edited,
+.gdt-cell-risk-glyph.prizma-edited {
+  outline: 2px solid #16a34a;
+  outline-offset: 1px;
+  border-radius: 50%;
+}
 `;
 
 /**
@@ -418,7 +668,9 @@ body.prizma-edit-mode .gantt-type-pill:hover { outline: 2px dashed rgba(220,38,3
 async function _buildEditableHtml() {
   // keepIds: true — НЕ стрипать data-row-id / data-src-col на pills/cells,
   // editor нужен для identify (rowId + colKey + wt).
-  const baseHtml = await GanttHTMLExport.build({ keepIds: true });
+  // keepEditable: true — оставить .gdt-cell-note-icon.is-empty / risk-glyph.is-empty
+  // чтобы редактор мог открывать popover для add-note/risk.
+  const baseHtml = await GanttHTMLExport.build({ keepIds: true, keepEditable: true });
   if (!baseHtml) return '';
 
   const snapshot = JSONExport.buildSnapshot();
