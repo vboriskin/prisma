@@ -29,6 +29,9 @@
 
 import { Utils } from '../utils.js';
 import { Services } from '../app/services.js';
+import { state } from '../state.js';
+import { Storage } from '../dataStore.js';
+import { LEGACY_RELEASE_LIST } from '../constants.js';
 
 /* ── Константы ─────────────────────────────────────────────── */
 export const SETTINGS_TAB_KEY = 'prizma.settings.activeTab';
@@ -39,6 +42,7 @@ export const SETTINGS_SECTIONS = Object.freeze([
   { key: 'general',       label: 'Общее',             eyebrow: 'НАСТРОЙКИ' },
   { key: 'theme',         label: 'Тема и брендинг',   eyebrow: 'ОФОРМЛЕНИЕ' },
   { key: 'mascot',        label: 'Маскот',            eyebrow: 'ПАРТНЁР' },
+  { key: 'releases',      label: 'Релизы',            eyebrow: 'КВАРТАЛ' },
   { key: 'integrations',  label: 'Интеграции',        eyebrow: 'СВЯЗИ' },
   { key: 'prompts',       label: 'AI промпты',        eyebrow: 'AI' },
   { key: 'notifications', label: 'Уведомления',       eyebrow: 'СИГНАЛЫ' },
@@ -189,6 +193,45 @@ function _section_mascot() {
   `;
 }
 
+function _section_releases() {
+  const customs = Array.isArray(state.releases) ? state.releases : [];
+  const legacyHtml = LEGACY_RELEASE_LIST
+    .map(r => `<li class="prizma-rel-item is-legacy">
+      <span class="prizma-rel-key">${_esc(r.short || r.label)}</span>
+      <span class="prizma-rel-dates">${_esc(r.dates || '—')}</span>
+      <span class="prizma-rel-tag">встроенный</span>
+    </li>`).join('');
+  const customRows = customs.map((r, i) => `
+    <li class="prizma-rel-item" data-idx="${i}">
+      <input type="text" class="prizma-rel-input prizma-rel-short" data-field="short" data-idx="${i}" value="${_esc(r.short || r.label || '')}" placeholder="Ярлык (напр. 1.23)" maxlength="20">
+      <input type="text" class="prizma-rel-input prizma-rel-label" data-field="label" data-idx="${i}" value="${_esc(r.label || '')}" placeholder="Полное название (напр. Релиз 1.23)" maxlength="60">
+      <input type="text" class="prizma-rel-input prizma-rel-dates" data-field="dates" data-idx="${i}" value="${_esc(r.dates || '')}" placeholder="Диапазон (15.07–14.08)" maxlength="40">
+      <button type="button" class="btn btn-outline btn-xs prizma-rel-delete" data-settings-action="release-delete" data-idx="${i}" title="Удалить релиз">Удалить</button>
+    </li>`).join('');
+  return `
+    <div class="prizma-settings-section" data-section-key="releases">
+      <h2 class="prizma-settings-section-title">Релизы</h2>
+      <p class="prizma-settings-help">
+        Окна планирования квартала. Встроенные 5 (Бэклог, 1.20, 1.21, 1.22, Овертайм) —
+        не редактируются: они зашиты в legacy-схему и используются интеграциями.
+        Дополнительные релизы добавляются ниже и появляются в Ганте между 1.22 и Овертаймом.
+      </p>
+      <h3 class="prizma-settings-h3" style="margin-top:16px;">Встроенные</h3>
+      <ul class="prizma-rel-list">${legacyHtml}</ul>
+      <h3 class="prizma-settings-h3" style="margin-top:24px;">Пользовательские</h3>
+      ${customs.length
+        ? `<ul class="prizma-rel-list">${customRows}</ul>`
+        : '<p class="prizma-settings-help">Пока пусто. Добавьте релиз через форму ниже.</p>'}
+      <form class="prizma-rel-add" data-settings-form="release-add">
+        <input type="text" class="prizma-rel-input" data-field="short" placeholder="Ярлык (напр. 1.23)" maxlength="20" required>
+        <input type="text" class="prizma-rel-input" data-field="label" placeholder="Полное название (опц.)" maxlength="60">
+        <input type="text" class="prizma-rel-input" data-field="dates" placeholder="Диапазон дат (DD.MM–DD.MM)" maxlength="40">
+        <button type="submit" class="btn btn-primary btn-sm">+ Добавить</button>
+      </form>
+    </div>
+  `;
+}
+
 function _section_integrations() {
   return `
     <div class="prizma-settings-section" data-section-key="integrations">
@@ -324,6 +367,7 @@ const _SECTION_RENDERERS = {
   general:       _section_general,
   theme:         _section_theme,
   mascot:        _section_mascot,
+  releases:      _section_releases,
   integrations:  _section_integrations,
   prompts:       _section_prompts,
   notifications: _section_notifications,
@@ -386,10 +430,71 @@ function _wireSectionActions(panel) {
           m?.migrateSqliteToLocal?.();
           break;
         }
+        case 'release-delete': {
+          const idx = parseInt(btn.getAttribute('data-idx') || '-1', 10);
+          if (!Number.isFinite(idx) || idx < 0) break;
+          const arr = Array.isArray(state.releases) ? state.releases.slice() : [];
+          if (idx >= arr.length) break;
+          arr.splice(idx, 1);
+          state.releases = arr;
+          try { Storage.save(); } catch (_) {}
+          // Перерендер секции + ганта.
+          _refreshReleasesPanel(panel);
+          try { window.App?.populateFilterDropdowns?.(); } catch (_) {}
+          break;
+        }
         default: /* unknown action — no-op */ break;
       }
     });
   });
+
+  // Inline-edit: input changes сразу пишут в state.releases[idx][field].
+  panel.querySelectorAll('.prizma-rel-input[data-idx]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const idx = parseInt(inp.getAttribute('data-idx') || '-1', 10);
+      const field = inp.getAttribute('data-field');
+      if (!Number.isFinite(idx) || idx < 0 || !field) return;
+      const arr = Array.isArray(state.releases) ? state.releases.slice() : [];
+      if (idx >= arr.length) return;
+      arr[idx] = { ...arr[idx], [field]: inp.value.trim() };
+      state.releases = arr;
+      try { Storage.save(); } catch (_) {}
+      try { Services.GanttView?.renderChart?.(); } catch (_) {}
+      try { window.App?.populateFilterDropdowns?.(); } catch (_) {}
+    });
+  });
+
+  // Add-release form.
+  const addForm = panel.querySelector('[data-settings-form="release-add"]');
+  if (addForm) {
+    addForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fd = new FormData(addForm);
+      const short = String(fd.get('short') || addForm.querySelector('[data-field="short"]')?.value || '').trim();
+      const label = String(fd.get('label') || addForm.querySelector('[data-field="label"]')?.value || '').trim();
+      const dates = String(fd.get('dates') || addForm.querySelector('[data-field="dates"]')?.value || '').trim();
+      if (!short) {
+        window.showToast?.('Укажите ярлык релиза (например 1.23)', 'warning', 2000);
+        return;
+      }
+      // Генерируем безопасный key из short.
+      const key = 'r' + short.replace(/[^\w]/g, '').toLowerCase();
+      if (LEGACY_RELEASE_LIST.some(l => l.key === key) || (state.releases || []).some(r => r.key === key)) {
+        window.showToast?.('Релиз с таким ярлыком уже есть', 'warning', 2200);
+        return;
+      }
+      const order = (state.releases?.length || 0) + 1;
+      const next = (Array.isArray(state.releases) ? state.releases.slice() : []).concat([{
+        key, short, label: label || `Релиз ${short}`, dates, cls: 'gantt-window-' + key, order,
+      }]);
+      state.releases = next;
+      try { Storage.save(); } catch (_) {}
+      _refreshReleasesPanel(panel);
+      try { Services.GanttView?.renderChart?.(); } catch (_) {}
+      try { window.App?.populateFilterDropdowns?.(); } catch (_) {}
+      window.showToast?.(`Добавлен релиз ${short}`, 'success', 1800);
+    });
+  }
 
   // Mascot mood-ring toggle — пишем напрямую в localStorage, как F11-агент.
   const moodCb = panel.querySelector('[data-settings-control="mascot-mood"]');
@@ -400,6 +505,15 @@ function _wireSectionActions(panel) {
       }
     } catch (_) {}
   });
+}
+
+/** Перерендер только панели «Релизы» (без полной перезагрузки sidebar). */
+function _refreshReleasesPanel(panel) {
+  const sec = panel.querySelector?.('[data-section-key="releases"]');
+  if (!sec) return;
+  const parent = sec.parentElement;
+  parent.innerHTML = _section_releases();
+  _wireSectionActions(parent);
 }
 
 /* ── Public API ────────────────────────────────────────────── */

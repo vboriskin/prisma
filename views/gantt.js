@@ -342,6 +342,22 @@ export const GanttView = {
     GanttView.bindMode();             // V16 roadmap-2 (A4)
     GanttView.bindJumpPalette();      // V16 #5
     GanttView.bindKeyboardNav();      // V16 roadmap-2 (B6)
+    GanttView.bindReleaseEditor();    // #1 C4 — «+ релиз» и edit через header
+  },
+  /**
+   * #1 C4 — кнопка «+ релиз» в шапке Ганта открывает модалку CRUD. На
+   * header-cell custom релиза cls-доп `gdt-custom-release` + клик на самой
+   * заголовочной ячейке (но не на elements внутри) тоже открывает редактор.
+   */
+  bindReleaseEditor() {
+    const btn = document.getElementById('btn-gantt-add-release');
+    if (btn && !btn._gdtReleaseBound) {
+      btn._gdtReleaseBound = true;
+      btn.addEventListener('click', async () => {
+        const mod = await import('../components/releaseEditorModal.js');
+        mod.openReleaseEditor({ onSaved: () => GanttView.renderChart() });
+      });
+    }
   },
   /** V16 roadmap-2 (B6) — keyboard navigation across the gantt grid.
    *  Roving tabindex; ←/→/↑/↓ between pills; Enter/F2 ctx-menu; Esc blur. */
