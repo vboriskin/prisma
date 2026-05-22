@@ -22170,15 +22170,21 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   transition: background .3s, outline-color .3s;
 }
 
-/* #6 — week-ticks: лёгкие vertical-засечки по неделям в шапке колодца. */
+/* #6 — week-ticks: аккуратные vertical-засечки по неделям в шапке колодца.
+   Идут от низа до маленькой высоты, контраст через border-color. */
 .gdt-week-tick {
   position: absolute;
   bottom: 0;
   width: 0;
-  height: 6px;
-  border-left: 1px solid var(--border);
+  height: 14px;
+  border-left: 1px solid var(--text-2);
   opacity: .5;
   pointer-events: none;
+}
+body.theme-dark .gdt-week-tick,
+[data-theme="dark"] .gdt-week-tick {
+  border-left-color: var(--text-2);
+  opacity: .35;
 }
 
 /* Banner о скрытых колодцах. */
