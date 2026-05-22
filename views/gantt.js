@@ -561,6 +561,16 @@ export const GanttView = {
         btn.setAttribute('aria-label', `Плотность строк: ${LABEL[next]}`);
         window.showToast?.(`Плотность: ${LABEL[next]}`, 'info', 1400);
       });
+      // #7 — density change меняет row heights через CSS, но pre-render'ные
+      // SVG-стрелки переносов остаются с устаревшими координатами. Re-draw
+      // через двойной rAF (один кадр на CSS-reflow, второй на актуальные
+      // bbox'ы pills). Также обновляем today-line.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const wrap = document.getElementById('gantt-wrap');
+        if (!wrap) return;
+        try { GanttView.drawPostponeArrows(wrap); } catch (_) {}
+        try { GanttView._positionTodayLine(wrap); } catch (_) {}
+      }));
     });
   },
   /** V16 (gantt-roadmap #5) — Cmd+K palette: fuzzy search across teams +
@@ -1709,11 +1719,16 @@ export const GanttView = {
             _notesByCol[n.col] = (_notesByCol[n.col] || 0) + 1;
           }
         }
+        const _NOTE_ICON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
         const _noteBubble = (colKey) => {
+          // Backlog не получает annotations (notes/risks) — это область
+          // незапланированного; контекста ячейки в смысле релиза нет.
+          if (colKey === 'backlog') return '';
           const count = _notesByCol[colKey] || 0;
           const empty = count === 0;
           const label = empty ? 'Добавить заметку' : `Заметок: ${count}`;
-          return `<button type="button" class="gdt-cell-note-bubble${empty ? ' is-empty' : ''}" data-col="${esc(colKey)}" data-row-id="${esc(row.id)}" aria-label="${esc(label)}" title="${esc(label)}">${empty ? '+' : count}</button>`;
+          const countBadge = empty ? '' : `<span class="gdt-cell-note-count">${count}</span>`;
+          return `<button type="button" class="gdt-cell-note-icon${empty ? ' is-empty' : ''}" data-col="${esc(colKey)}" data-row-id="${esc(row.id)}" aria-label="${esc(label)}" title="${esc(label)}">${_NOTE_ICON_SVG}${countBadge}</button>`;
         };
         // Per-cell риски. Glyph в левом верхнем углу cell; цвет = приоритет
         // (hard-deadline > dangling > open-question). Click → попап.
@@ -1727,6 +1742,7 @@ export const GanttView = {
         const _RISK_GLYPHS = { 'open-question': '?', 'dangling': '◇', 'hard-deadline': '!' };
         const _RISK_LABELS = { 'open-question': 'Открытый вопрос', 'dangling': 'Подвешенная активность', 'hard-deadline': 'Жёсткий дедлайн' };
         const _riskGlyph = (colKey) => {
+          if (colKey === 'backlog') return '';
           const list = _risksByCol[colKey] || [];
           if (!list.length) {
             // Empty-state — мелкая «!» иконка, видна только на hover cell.
@@ -1764,8 +1780,6 @@ export const GanttView = {
             return `<div class="gantt-cell gantt-window-backlog" data-col="backlog" data-row-id="${esc(row.id)}">
               ${inner}
               <button class="gdt-add-type-btn" data-row-id="${esc(row.id)}" title="Добавить тип задачи">+</button>
-              ${_riskGlyph('backlog')}
-              ${_noteBubble('backlog')}
             </div>`;
           }
           /* ---- release / overtime cells ---- */
@@ -2001,8 +2015,30 @@ export const GanttView = {
         // Для backlog не показываем (его скрывать смысла нет — наглядность пустых задач).
         const eyeBtn = c.key === 'backlog' ? '' :
           `<button type="button" class="gdt-col-eye" data-col-key="${esc(c.key)}" title="Скрыть колодец из Ганта" aria-label="Скрыть колодец ${esc(c.label)}">×</button>`;
+        // #6 — week-ticks: тонкие vertical засечки по 7 дней внутри окна
+        // (только для колодцев с реальным диапазоном дат).
+        const weekTicks = (() => {
+          if (!_bounds) return '';
+          const yr = today.getFullYear();
+          const toDoy = (mmdd) => {
+            const mm = Math.floor(mmdd / 100);
+            const dd = mmdd % 100;
+            return Math.floor((Date.UTC(yr, mm - 1, dd) - Date.UTC(yr, 0, 1)) / 86400000);
+          };
+          let s = toDoy(_bounds.start), e = toDoy(_bounds.end);
+          if (e < s) e += 365;
+          const total = e - s;
+          if (total < 7) return '';
+          const ticks = [];
+          for (let d = 7; d < total; d += 7) {
+            const pct = (d / total) * 100;
+            ticks.push(`<span class="gdt-week-tick" style="left:${pct.toFixed(2)}%"></span>`);
+          }
+          return ticks.join('');
+        })();
         return `<div class="gantt-header-col" data-col="${esc(c.key)}"${todayPctAttr} style="position:relative">
           ${distSpark}
+          ${weekTicks}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
           ${eyeBtn}
           <div class="gdt-resize-handle" data-col-key="${esc(c.key)}" title="Потяните чтобы изменить ширину"></div>
@@ -2161,8 +2197,8 @@ export const GanttView = {
       });
     });
 
-    /* Cell-notes bubble — открывает попап заметок для ячейки. */
-    wrap.querySelectorAll('.gdt-cell-note-bubble').forEach(bubble => {
+    /* Cell-notes icon — открывает попап заметок для ячейки. */
+    wrap.querySelectorAll('.gdt-cell-note-icon').forEach(bubble => {
       bubble.addEventListener('mousedown', e => e.stopPropagation());
       bubble.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -2974,7 +3010,11 @@ export const GanttView = {
           top = flipped >= PAD ? flipped : Math.max(PAD, vh - mr.height - PAD);
         }
         // AUDIT_HOLISTIC O10 — позиция через CSS custom-property.
+        // #10 — обнуляем inline top/left, иначе они (specificity 1000)
+        // выигрывают у CSS-vars и clamp игнорируется у правого/нижнего края.
         menu.dataset.pos = '1';
+        menu.style.top = '';
+        menu.style.left = '';
         menu.style.setProperty('--prizma-menu-x', left + 'px');
         menu.style.setProperty('--prizma-menu-y', top  + 'px');
         menu.style.visibility = 'visible';
@@ -3094,6 +3134,14 @@ export const GanttView = {
             const result = await Services.App?.openGanttCompleteModal?.({
               summary: `${(row.epic || row.tasks || '(без эпика)')} · ${wt} · ${COL_LABEL[srcCol]}`,
             });
+            // #9 — гарантированно закрываем модалку (на случай если openGantt-
+            // CompleteModal оставила её visible после resolve — встречалось
+            // в edge-case'ах при быстром повторе action).
+            const _completeModal = document.getElementById('modal-gantt-complete');
+            if (_completeModal && !_completeModal.classList.contains('hidden')) {
+              _completeModal.classList.add('hidden');
+              _completeModal.dataset.busy = '0';
+            }
             if (!result) return;     // cancelled
             Services.HistoryManager?.checkpoint(`завершить ${wt}`);
             if (!row.donePills) row.donePills = {};
@@ -3543,6 +3591,10 @@ export const GanttView = {
     const ctnRect = container.getBoundingClientRect();
     const leftPx = (hdrRect.left - ctnRect.left) + (hdrRect.width * pct / 100);
     line.style.left = `${leftPx.toFixed(1)}px`;
+    // Высота: bottom:0 у container даёт только viewport-part'а, потому что
+    // у container `overflow-y:auto` (см. styles.css:6875). Используем
+    // scrollHeight чтобы линия покрывала ВСЕ rows + trails ниже viewport.
+    line.style.height = `${container.scrollHeight}px`;
     line.title = label ? `Сегодня — ${label}` : 'Сегодня';
     line.hidden = false;
   },

@@ -2039,10 +2039,11 @@ body.theme-dark .gantt-header-col .gdt-rail-today {
 }
 /* Today-line — вертикальная пунктирная линия сквозь Гант. Позиционируется
    JS внутри .gantt-container, интерполируя сегодняшнюю дату в окно
-   текущего колодца. */
+   текущего колодца. Height задаётся JS = container.scrollHeight, потому
+   что у container `overflow-y:auto` обрезает bottom:0 до viewport. */
 .gdt-today-line {
   position: absolute;
-  top: 0; bottom: 0;
+  top: 0;
   width: 0;
   border-left: 1px dashed var(--prizma-information, #4f46e5);
   pointer-events: none;
@@ -21682,38 +21683,44 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
    Cell-level annotations (notes + risks) — #2/#3
    ============================================================ */
 
-/* Bubble на cell — счётчик заметок (визуально не агрессивный). */
-.gdt-cell-note-bubble {
+/* Note-icon на cell — SVG speech-bubble, top-right. Empty-state виден на
+   hover cell (для add); active — постоянно. Counter badge в углу. */
+.gdt-cell-note-icon {
   position: absolute;
-  top: 2px; right: 2px;
-  min-width: 16px; height: 16px;
-  padding: 0 4px;
+  top: 4px; right: 4px;
+  width: 16px; height: 16px;
   display: inline-flex; align-items: center; justify-content: center;
-  font: 600 10px/1 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-  font-feature-settings: "tnum" 1;
+  padding: 0;
+  background: transparent;
+  border: 0;
   color: var(--prizma-information, #4f46e5);
-  background: var(--card);
-  border: 1px solid var(--prizma-information, #4f46e5);
-  border-radius: 8px;
   cursor: pointer;
   z-index: 3;
-  transition: background .12s, color .12s;
+  transition: opacity .12s, color .12s;
 }
-.gdt-cell-note-bubble:hover {
-  background: var(--prizma-information, #4f46e5);
-  color: #fff;
-}
-/* Empty cell — bubble показывается только на hover самой cell (для add). */
-.gantt-cell .gdt-cell-note-bubble.is-empty {
+.gdt-cell-note-icon:hover { color: var(--prizma-information, #4f46e5); filter: brightness(0.85); }
+.gdt-cell-note-icon.is-empty {
   opacity: 0;
   pointer-events: none;
-  border-style: dashed;
+  color: var(--text-3);
 }
-.gantt-cell:hover .gdt-cell-note-bubble.is-empty {
+.gantt-cell:hover .gdt-cell-note-icon.is-empty {
   opacity: .55;
   pointer-events: auto;
 }
-.gantt-cell .gdt-cell-note-bubble.is-empty:hover { opacity: 1; }
+.gantt-cell .gdt-cell-note-icon.is-empty:hover { opacity: 1; color: var(--prizma-information, #4f46e5); }
+.gdt-cell-note-count {
+  position: absolute;
+  top: -5px; right: -6px;
+  min-width: 13px; height: 13px;
+  padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 9px/1 ui-monospace, monospace;
+  background: var(--prizma-information, #4f46e5);
+  color: #fff;
+  border-radius: 7px;
+  pointer-events: none;
+}
 
 /* Popover. */
 .gdt-cellpop {
@@ -21795,10 +21802,11 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 .gdt-cellpop-text:focus { border-color: var(--prizma-information); outline: 0; }
 
-/* Risk-glyph на cell — слева сверху, цвет по kind. */
+/* Risk-glyph на cell — снизу слева, цвет по kind. Bottom-left чтобы не
+   overlap'ать pills (top-aligned flow) и notes-icon (top-right corner). */
 .gdt-cell-risk-glyph {
   position: absolute;
-  top: 2px; left: 2px;
+  bottom: 4px; left: 4px;
   width: 16px; height: 16px;
   display: inline-flex; align-items: center; justify-content: center;
   font: 700 11px/1 system-ui, sans-serif;
@@ -21892,6 +21900,17 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 .gantt-header-col:hover .gdt-col-eye { opacity: .6; }
 .gdt-col-eye:hover { opacity: 1; color: var(--prizma-off-course, #dc2626); background: var(--prizma-off-course-bg, rgba(220,38,38,.08)); }
+
+/* #6 — week-ticks: лёгкие vertical-засечки по неделям в шапке колодца. */
+.gdt-week-tick {
+  position: absolute;
+  bottom: 0;
+  width: 0;
+  height: 6px;
+  border-left: 1px solid var(--border);
+  opacity: .5;
+  pointer-events: none;
+}
 
 /* Banner о скрытых колодцах. */
 .gdt-hidden-releases {
