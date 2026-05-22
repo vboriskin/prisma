@@ -16,6 +16,7 @@
 
 import { state } from '../state.js';
 import { GANTT_LEGEND } from './gantt/legendContent.js';
+import { buildReleaseList, LEGACY_RELEASE_LIST } from '../constants.js';
 
 /* HTML-escape helper — needed for the export header where we
    stitch user-controlled text directly into innerHTML. */
@@ -118,7 +119,10 @@ function _stripInteractive(root) {
   root.querySelectorAll(
     '.gdt-add-type-btn, .gantt-team-vis-btn, ' +
     '.gantt-row-resize, .gdt-resize-handle, .gdt-col-resize, ' +
-    '.gdt-drag-handle'
+    '.gdt-drag-handle, ' +
+    // #8 — read-only экспорт: убираем все «add/edit» кнопки аннотаций/зависимостей.
+    '.gdt-cell-note-icon.is-empty, .gdt-cell-risk-glyph.is-empty, ' +
+    '.gdt-col-eye, .v16-epic-deps-edit, .gdt-hidden-releases'
   ).forEach(el => el.remove());
   root.querySelectorAll('[draggable]').forEach(el => el.removeAttribute('draggable'));
   // Wipe data-* attrs that were used purely for events.
@@ -1027,7 +1031,15 @@ async function _buildHtml(opts = {}) {
 
   const rows = state.rows || [];
   const teamCount = new Set(rows.map(r => r.team || '—').filter(Boolean)).size || 0;
-  const doneCount = rows.filter(r => r.isDone).length;
+  // #bonus — раньше считалось только r.isDone (row-level), но в UI
+  // отмечают завершение pills через donePills[col__wt]. Считаем суммарно
+  // количество завершённых pills (== «задач»).
+  const doneCount = rows.reduce((n, r) => {
+    if (r.isDone) n++;
+    const dp = r.donePills || {};
+    for (const v of Object.values(dp)) { if (v) n++; }
+    return n;
+  }, 0);
   const lockBadge = state.planLocked
     ? `<span class="gex-readonly-badge" style="background:var(--prizma-drift-bg,#fef3c7);color:var(--prizma-drift-fg,#78350f);border-color:var(--prizma-drift,#f59e0b);">${gexIcon("lock")} План зафиксирован — ${esc(new Date(state.planLocked.at).toLocaleString('ru'))}</span>`
     : '';
@@ -1126,9 +1138,251 @@ export const GanttHTMLExport = {
   build(opts) { return _buildHtml(opts); },
 };
 
+/* ──────────────────────────────────────────────────────────────
+   #8 — Roadmap HTML export. Эпик = одна сплошная линия (continuous
+   bar) от самой ранней даты до самой поздней по его буckets, без
+   детализации по типам работ. Группировка переключается в самом
+   HTML viewer'е (команда / категория). Цвет: зелёный — все pills
+   эпика в donePills; серый — иначе. Без add/edit-кнопок.
+   ────────────────────────────────────────────────────────────── */
+
+/** Парсит "DD.MM–DD.MM" в {startISO, endISO} для current year. */
+function _parseDatesISO(s) {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{2})\.(\d{2})\D+(\d{2})\.(\d{2})/);
+  if (!m) return null;
+  const yr = new Date().getFullYear();
+  return { startISO: `${yr}-${m[2]}-${m[1]}`, endISO: `${yr}-${m[4]}-${m[3]}` };
+}
+
+function _doy(iso) {
+  if (!iso) return 0;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return 0;
+  const start = Date.UTC(d.getUTCFullYear(), 0, 1);
+  return Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - start) / 86400000);
+}
+
+/** Собирает данные о эпиках для roadmap. */
+function _buildRoadmapData(rows, releaseList) {
+  // Map releaseKey → {startDOY, endDOY}.
+  const relRange = Object.create(null);
+  for (const r of releaseList) {
+    const dr = _parseDatesISO(r.dates);
+    if (!dr) continue;
+    relRange[r.key] = { startDOY: _doy(dr.startISO), endDOY: _doy(dr.endISO) };
+  }
+  const epics = [];
+  for (const row of rows) {
+    const types = (key) => {
+      if (key === 'backlog') return Array.isArray(row.backlogTypes) ? row.backlogTypes : [];
+      const meta = LEGACY_RELEASE_LIST.find(l => l.key === key);
+      if (meta && meta.flatTypes) {
+        return Array.isArray(row[meta.flatTypes]) ? row[meta.flatTypes] : [];
+      }
+      const m = row.customReleaseTypes || {};
+      return Array.isArray(m[key]) ? m[key] : [];
+    };
+    let minStart = Infinity, maxEnd = -Infinity;
+    let totalPills = 0, donePills = 0;
+    for (const rel of releaseList) {
+      if (rel.key === 'backlog' || rel.key === 'overtime') continue;
+      const range = relRange[rel.key];
+      if (!range) continue;
+      const tList = types(rel.key);
+      if (!tList.length) continue;
+      if (range.startDOY < minStart) minStart = range.startDOY;
+      if (range.endDOY   > maxEnd)   maxEnd   = range.endDOY;
+      for (const wt of tList) {
+        totalPills++;
+        if (row.donePills?.[`${rel.key}__${wt}`]) donePills++;
+      }
+    }
+    if (!isFinite(minStart) || !isFinite(maxEnd)) continue;  // только backlog/overtime — пропускаем
+    epics.push({
+      id: row.id,
+      epic: String(row.epic || row.tasks || '(без эпика)').trim(),
+      team: String(row.team || '—').trim(),
+      category: String(row.category || row.tags || '—').split(/[,|]/).map(s => s.trim()).filter(Boolean)[0] || '—',
+      startDOY: minStart,
+      endDOY: maxEnd,
+      status: (totalPills > 0 && donePills === totalPills) ? 'done' : 'in-progress',
+      done: donePills,
+      total: totalPills,
+    });
+  }
+  return epics;
+}
+
+async function _buildRoadmapHtml() {
+  const rows = state.rows || [];
+  if (!rows.length) {
+    window.showToast?.('Нет данных для экспорта', 'info', 2400);
+    return '';
+  }
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const releaseList = buildReleaseList(state.releases || []);
+  const epics = _buildRoadmapData(rows, releaseList);
+  if (!epics.length) {
+    window.showToast?.('Нет эпиков с привязкой к релизам', 'info', 2800);
+    return '';
+  }
+  // Timeline range: min/max DOY by all epics.
+  const tlStart = Math.min(...epics.map(e => e.startDOY));
+  const tlEnd   = Math.max(...epics.map(e => e.endDOY));
+  const tlSpan  = Math.max(1, tlEnd - tlStart);
+  const yr = new Date().getFullYear();
+  const ticks = [];
+  // Quarterly + monthly ticks.
+  for (let m = 0; m < 12; m++) {
+    const doy = Math.floor((Date.UTC(yr, m, 1) - Date.UTC(yr, 0, 1)) / 86400000);
+    if (doy < tlStart - 5 || doy > tlEnd + 5) continue;
+    const pct = ((doy - tlStart) / tlSpan) * 100;
+    const label = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'][m];
+    ticks.push({ pct, label });
+  }
+  // Today marker.
+  const todayDOY = _doy(new Date().toISOString());
+  const todayPct = (todayDOY >= tlStart && todayDOY <= tlEnd)
+    ? ((todayDOY - tlStart) / tlSpan) * 100 : null;
+
+  let cssText = '';
+  try {
+    const res = await fetch('styles.css');
+    if (res.ok) cssText = await res.text();
+  } catch (_) { /* ignore — baseline нам не нужен в roadmap */ }
+
+  // Render rows for BOTH group modes — switch via JS.
+  const groupBy = (key) => {
+    const groups = Object.create(null);
+    for (const e of epics) {
+      const g = e[key] || '—';
+      (groups[g] = groups[g] || []).push(e);
+    }
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0], 'ru'));
+  };
+  const rowHtml = (e) => {
+    const left = ((e.startDOY - tlStart) / tlSpan) * 100;
+    const width = Math.max(2, ((e.endDOY - e.startDOY) / tlSpan) * 100);
+    return `<div class="rm-row">
+      <div class="rm-row-label" title="${esc(e.epic)}">${esc(e.epic)}</div>
+      <div class="rm-row-track">
+        <div class="rm-bar rm-bar-${e.status}" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" title="${esc(e.team)} · ${esc(e.category)} · ${e.done}/${e.total} pills"></div>
+      </div>
+    </div>`;
+  };
+  const groupHtml = (entries) => entries.map(([g, list]) =>
+    `<div class="rm-group">
+      <div class="rm-group-title">${esc(g)}</div>
+      ${list.map(rowHtml).join('')}
+    </div>`
+  ).join('');
+  const byTeam     = groupHtml(groupBy('team'));
+  const byCategory = groupHtml(groupBy('category'));
+
+  const ticksHtml = ticks.map(t => `<div class="rm-tick" style="left:${t.pct.toFixed(2)}%"><span class="rm-tick-label">${esc(t.label)}</span></div>`).join('');
+  const todayLineHtml = todayPct !== null
+    ? `<div class="rm-today" style="left:${todayPct.toFixed(2)}%" title="Сегодня"><span class="rm-today-label">сегодня</span></div>`
+    : '';
+
+  const totalEpics = epics.length;
+  const doneEpics  = epics.filter(e => e.status === 'done').length;
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Призма — Дорожная карта · ${esc(new Date().toLocaleString('ru'))}</title>
+<style>${cssText}</style>
+<style>
+body { background: var(--prizma-bg-primary, #fff); margin: 0; padding: 32px 40px; color: var(--text-1); font-family: system-ui, -apple-system, sans-serif; }
+.rm-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.rm-header h1 { font: 700 28px/1.2 system-ui, sans-serif; margin: 0 0 6px; color: var(--text-1); }
+.rm-header h1::after { content: ''; display: block; width: 44px; height: 3px; background: var(--prizma-information, #16a34a); margin-top: 6px; }
+.rm-subtitle { font-size: 14px; color: var(--text-2); }
+.rm-meta { display: flex; gap: 18px; font-size: 13px; color: var(--text-3); align-items: center; }
+.rm-meta strong { color: var(--text-1); }
+.rm-legend { display: inline-flex; align-items: center; gap: 14px; padding: 6px 0; font-size: 12px; color: var(--text-3); }
+.rm-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.rm-legend-swatch { width: 14px; height: 10px; border-radius: 2px; }
+.rm-legend-swatch.rm-done { background: #16a34a; }
+.rm-legend-swatch.rm-progress { background: #94a3b8; }
+.rm-toolbar { display: inline-flex; gap: 4px; padding: 2px; background: var(--prizma-bg-tertiary, #f1f5f9); border-radius: 6px; }
+.rm-toolbar button { background: transparent; border: 0; padding: 6px 12px; font: 600 12px system-ui; color: var(--text-3); cursor: pointer; border-radius: 4px; }
+.rm-toolbar button.is-active { background: var(--card, #fff); color: var(--text-1); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.rm-board { display: grid; grid-template-columns: 240px 1fr; border-top: 1px solid var(--border, #e5e7eb); position: relative; }
+.rm-board-header { display: contents; }
+.rm-tl-header { grid-column: 2; position: relative; height: 36px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.rm-tick { position: absolute; top: 0; bottom: 0; border-left: 1px dashed var(--border, #e5e7eb); width: 0; }
+.rm-tick-label { position: absolute; top: 8px; left: 4px; font: 500 11px system-ui; color: var(--text-3); white-space: nowrap; }
+.rm-today { position: absolute; top: 0; bottom: 0; border-left: 2px solid #dc2626; width: 0; z-index: 4; }
+.rm-today-label { position: absolute; top: -22px; left: -28px; padding: 1px 7px; background: #dc2626; color: #fff; border-radius: 3px; font: 600 10px system-ui; }
+.rm-pane { display: none; }
+.rm-pane.is-active { display: contents; }
+.rm-group { display: contents; }
+.rm-group-title { grid-column: 1 / -1; padding: 10px 14px; background: var(--prizma-bg-tertiary, #f1f5f9); font: 700 13px system-ui; color: var(--text-1); border-top: 1px solid var(--border, #e5e7eb); border-bottom: 1px solid var(--border-light, #f1f5f9); }
+.rm-row { display: contents; }
+.rm-row-label { grid-column: 1; padding: 6px 12px; font-size: 13px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border-light, #f1f5f9); }
+.rm-row-track { grid-column: 2; position: relative; height: 28px; border-bottom: 1px solid var(--border-light, #f1f5f9); }
+.rm-bar { position: absolute; top: 6px; height: 16px; border-radius: 3px; min-width: 6px; transition: opacity .12s; }
+.rm-bar:hover { opacity: .82; }
+.rm-bar-done { background: #16a34a; }
+.rm-bar-in-progress { background: #94a3b8; }
+.rm-footer { margin-top: 20px; font-size: 11px; color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="rm-header">
+  <div>
+    <h1>Дорожная карта</h1>
+    <div class="rm-subtitle">Статус на ${esc(new Date().toLocaleDateString('ru-RU'))} · <strong>${doneEpics}</strong> из <strong>${totalEpics}</strong> эпиков завершено</div>
+  </div>
+  <div class="rm-meta">
+    <div class="rm-legend">
+      <span class="rm-legend-item"><span class="rm-legend-swatch rm-done"></span> Завершено</span>
+      <span class="rm-legend-item"><span class="rm-legend-swatch rm-progress"></span> В работе / план</span>
+    </div>
+    <div class="rm-toolbar">
+      <button data-group="team" class="is-active">По командам</button>
+      <button data-group="category">По категориям</button>
+    </div>
+  </div>
+</div>
+<div class="rm-board">
+  <div class="rm-tl-header" style="grid-column:2">
+    ${ticksHtml}
+    ${todayLineHtml}
+  </div>
+  <div class="rm-pane is-active" data-pane="team">${byTeam}</div>
+  <div class="rm-pane" data-pane="category">${byCategory}</div>
+</div>
+<div class="rm-footer">Призма · экспорт ${esc(new Date().toLocaleString('ru-RU'))}</div>
+<script>
+(function() {
+  const KEY = 'prizma.rm.group';
+  const stored = (function(){ try { return localStorage.getItem(KEY); } catch(_) { return null; } })();
+  if (stored === 'team' || stored === 'category') {
+    document.querySelectorAll('.rm-toolbar button').forEach(b => b.classList.toggle('is-active', b.dataset.group === stored));
+    document.querySelectorAll('.rm-pane').forEach(p => p.classList.toggle('is-active', p.dataset.pane === stored));
+  }
+  document.querySelectorAll('.rm-toolbar button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const g = btn.dataset.group;
+      document.querySelectorAll('.rm-toolbar button').forEach(b => b.classList.toggle('is-active', b === btn));
+      document.querySelectorAll('.rm-pane').forEach(p => p.classList.toggle('is-active', p.dataset.pane === g));
+      try { localStorage.setItem(KEY, g); } catch(_) {}
+    });
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
 export const GanttRoadmapHTMLExport = {
   async download() {
-    const html = await _buildHtml({ mode: 'roadmap' });
+    const html = await _buildRoadmapHtml();
     if (!html) return;
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -1139,7 +1393,7 @@ export const GanttRoadmapHTMLExport = {
     URL.revokeObjectURL(url);
     window.showToast?.('Дорожная карта экспортирована в HTML', 'success', 2200);
   },
-  build(opts) { return _buildHtml({ ...(opts || {}), mode: 'roadmap' }); },
+  build() { return _buildRoadmapHtml(); },
 };
 
 // V15 testing surface — pure helpers exposed for unit tests. Browser code
