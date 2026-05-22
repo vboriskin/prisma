@@ -980,66 +980,82 @@ body.theme-dark .gex-summary { background: var(--prizma-bg-elevated); border-col
 .gex-status-unplanned { color: var(--prizma-drift, #b45309); }
 `;
 
-export const GanttHTMLExport = {
-  /** Synchronous convenience — fetches stylesheet, builds, downloads. */
-  async download() {
-    const html = await GanttHTMLExport.build();
-    if (!html) return;
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gantt_${new Date().toISOString().slice(0, 10)}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
-    window.showToast?.('Гант экспортирован в HTML', 'success', 2200);
-  },
+/* Roadmap-mode overrides: упрощённый pill (только wt-название + stripe),
+   без assignee-summary / trail-rows / arrows / state-glyph / progress.
+   Применяется через body[data-export-mode="roadmap"]. */
+const _ROADMAP_CSS = `
+body[data-export-mode="roadmap"] .gdt-pill-row-2,
+body[data-export-mode="roadmap"] .gdt-pill-state,
+body[data-export-mode="roadmap"] .gdt-pill-initials,
+body[data-export-mode="roadmap"] .gdt-pill-cmt-marker,
+body[data-export-mode="roadmap"] .gdt-pill-progress,
+body[data-export-mode="roadmap"] .gantt-row-trail,
+body[data-export-mode="roadmap"] .gdt-arrows-svg,
+body[data-export-mode="roadmap"] .gdt-rail-flow,
+body[data-export-mode="roadmap"] .gdt-rail-dist,
+body[data-export-mode="roadmap"] .v16-epic-deps-badge,
+body[data-export-mode="roadmap"] .gdt-pill-legend,
+body[data-export-mode="roadmap"] .gantt-legend,
+body[data-export-mode="roadmap"] #gex-current-release-btn { display: none !important; }
+body[data-export-mode="roadmap"] .gantt-type-pill {
+  padding: 4px 8px; font-size: 12px; min-height: 22px;
+}
+body[data-export-mode="roadmap"] .gantt-row { min-height: 30px; }
+body[data-export-mode="roadmap"] .gex-page-title::after { content: ' — Roadmap'; }
+`;
 
-  /** Build the full HTML string. Returns '' (and toasts) when there's no
-   *  rendered Gantt to capture. */
-  async build() {
-    const wrap = document.getElementById('gantt-wrap');
-    if (!wrap || !wrap.firstChild) {
-      window.showToast?.('Сначала откройте вкладку «Гант» — экспортируется текущее представление', 'info', 3000);
-      return '';
-    }
-    const cloned = wrap.cloneNode(true);
-    _stripInteractive(cloned);
+async function _buildHtml(opts = {}) {
+  const isRoadmap = opts.mode === 'roadmap';
+  const wrap = document.getElementById('gantt-wrap');
+  if (!wrap || !wrap.firstChild) {
+    window.showToast?.('Сначала откройте вкладку «Гант» — экспортируется текущее представление', 'info', 3000);
+    return '';
+  }
+  const cloned = wrap.cloneNode(true);
+  _stripInteractive(cloned);
+  // Roadmap mode — заодно убираем today-line overlay из клона
+  // (он был absolute-positioned и в экспорте теряет привязку к bbox).
+  if (isRoadmap) {
+    cloned.querySelectorAll('.gdt-today-line, .gantt-row-trail, .gdt-arrows-svg').forEach(el => el.remove());
+  }
 
-    let cssText = '';
-    try {
-      const res = await fetch('styles.css');
-      if (res.ok) cssText = await res.text();
-    } catch (_) { /* fall back to baseline if styles.css unreachable */ }
+  let cssText = '';
+  try {
+    const res = await fetch('styles.css');
+    if (res.ok) cssText = await res.text();
+  } catch (_) { /* fall back to baseline if styles.css unreachable */ }
 
-    const rows = state.rows || [];
-    const teamCount = new Set(rows.map(r => r.team || '—').filter(Boolean)).size || 0;
-    const doneCount = rows.filter(r => r.isDone).length;
-    const lockBadge = state.planLocked
-      // Wave1 P-GR §D8 — inline hex заменены на CSS-vars c fallback (см. §D7).
-      ? `<span class="gex-readonly-badge" style="background:var(--prizma-drift-bg,#fef3c7);color:var(--prizma-drift-fg,#78350f);border-color:var(--prizma-drift,#f59e0b);">${gexIcon("lock")} План зафиксирован — ${esc(new Date(state.planLocked.at).toLocaleString('ru'))}</span>`
-      : '';
-    const summaryHtml    = _buildAssigneeSummary(rows);
-    const unassignedHtml = _buildUnassignedSummary(rows);
-    const legendHtml  = _buildLegend();
+  const rows = state.rows || [];
+  const teamCount = new Set(rows.map(r => r.team || '—').filter(Boolean)).size || 0;
+  const doneCount = rows.filter(r => r.isDone).length;
+  const lockBadge = state.planLocked
+    ? `<span class="gex-readonly-badge" style="background:var(--prizma-drift-bg,#fef3c7);color:var(--prizma-drift-fg,#78350f);border-color:var(--prizma-drift,#f59e0b);">${gexIcon("lock")} План зафиксирован — ${esc(new Date(state.planLocked.at).toLocaleString('ru'))}</span>`
+    : '';
+  const summaryHtml    = isRoadmap ? '' : _buildAssigneeSummary(rows);
+  const unassignedHtml = isRoadmap ? '' : _buildUnassignedSummary(rows);
+  const legendHtml     = isRoadmap ? '' : _buildLegend();
+  const title          = isRoadmap ? 'Призма — Roadmap' : 'Призма — Гант';
+  const bodyAttr       = isRoadmap ? ' data-export-mode="roadmap"' : '';
+  const arrowsScript   = isRoadmap ? '' : `<script>${_REDRAW_ARROWS_JS}</script>`;
+  const releaseScript  = isRoadmap ? '' : `<script>${_CURRENT_RELEASE_JS}</script>`;
+  const releaseBtn     = isRoadmap ? ''
+    : `<button id="gex-current-release-btn" type="button" title="Показать только текущий релиз и Овертайм">Текущий релиз</button>`;
 
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Призма — Гант · ${esc(new Date().toLocaleString('ru'))}</title>
+<title>${esc(title)} · ${esc(new Date().toLocaleString('ru'))}</title>
 <style>${_BASELINE_CSS}</style>
 <style>${cssText}</style>
-<style>
-/* Force-disable any cursor:grab / hover effects in the export — read-only. */
+<style>${_ROADMAP_CSS}
 .gantt-pill { cursor: default !important; }
 .gantt-pill:hover { transform: none !important; }
 .gantt-cell { cursor: default !important; }
 .gex-chev { color: var(--prizma-text-secondary); }
 .gex-chev:hover { color: inherit !important; }
 
-/* V17.1 D1 — collapsible legend wrapper */
 .gex-legend-details { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: 10px; margin: 12px 0; overflow: hidden; }
 body.theme-dark .gex-legend-details { background: var(--prizma-bg-elevated); border-color: var(--prizma-border); }
 .gex-legend-summary {
@@ -1056,7 +1072,6 @@ body.theme-dark .gex-legend-details { background: var(--prizma-bg-elevated); bor
 .gex-legend-details:not([open]) .gex-legend-summary::before { transform: rotate(-90deg); }
 .gex-legend-details .gex-legend { margin: 0; border: 0; border-top: 1px solid var(--prizma-border); border-radius: 0; }
 
-/* V17.1 D2 — current-release toggle */
 #gex-current-release-btn {
   margin-left: 4px;
   padding: 6px 12px; border: 1px solid var(--prizma-border-strong, var(--prizma-border)); background: transparent; color: inherit;
@@ -1067,23 +1082,20 @@ body.theme-dark .gex-legend-details { background: var(--prizma-bg-elevated); bor
 #gex-current-release-btn.active { background: var(--prizma-information); color: #fff; border-color: var(--prizma-information); }
 </style>
 </head>
-<body>
+<body${bodyAttr}>
 <div class="gex-page-header">
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <div class="gex-page-title">Призма — Гант</div>
     <span class="gex-readonly-badge">Только просмотр</span>
     ${lockBadge}
     <button id="gex-theme-btn" type="button" title="Переключить тему">${gexIcon("moon")} Тёмная</button>
-    <!-- V17.1 D2 — toggle: показать только текущий релиз (тот, в чьём диапазоне
-         today попадает) + колодец Овертайм. Остальные колодцы скрываются. -->
-    <button id="gex-current-release-btn" type="button" title="Показать только текущий релиз и Овертайм">Текущий релиз</button>
+    ${releaseBtn}
   </div>
   <div class="gex-page-meta">
     <span class="gex-meta-item">${gexIcon("calendar")} ${esc(new Date().toLocaleString('ru'))}</span>
     <span class="gex-meta-item">${gexIcon("clipboard")} <span class="gex-meta-num">${rows.length}</span> задач</span>
     <span class="gex-meta-item">${gexIcon("users")} <span class="gex-meta-num">${teamCount}</span> команд</span>
     <span class="gex-meta-item">${gexIcon("check-circle")} <span class="gex-meta-num">${doneCount}</span> завершено</span>
-    <span class="gex-meta-item" style="opacity:.6">Клик на заголовок команды — свернуть/развернуть</span>
   </div>
 </div>
 ${legendHtml}
@@ -1092,11 +1104,42 @@ ${summaryHtml}
 ${unassignedHtml}
 <script>${_THEME_JS}</script>
 <script>${_COLLAPSE_JS}</script>
-<script>${_REDRAW_ARROWS_JS}</script>
-<script>${_CURRENT_RELEASE_JS}</script>
+${arrowsScript}
+${releaseScript}
 </body>
 </html>`;
+}
+
+export const GanttHTMLExport = {
+  async download() {
+    const html = await GanttHTMLExport.build();
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gantt_${new Date().toISOString().slice(0, 10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    window.showToast?.('Гант экспортирован в HTML', 'success', 2200);
   },
+  build(opts) { return _buildHtml(opts); },
+};
+
+export const GanttRoadmapHTMLExport = {
+  async download() {
+    const html = await _buildHtml({ mode: 'roadmap' });
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `roadmap_${new Date().toISOString().slice(0, 10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    window.showToast?.('Дорожная карта экспортирована в HTML', 'success', 2200);
+  },
+  build(opts) { return _buildHtml({ ...(opts || {}), mode: 'roadmap' }); },
 };
 
 // V15 testing surface — pure helpers exposed for unit tests. Browser code

@@ -1017,6 +1017,17 @@ const App = {
       }
     });
 
+    document.getElementById('btn-export-gantt-roadmap')?.addEventListener('click', async () => {
+      try {
+        const { GanttRoadmapHTMLExport } = await import('./views/ganttHtmlExport.js');
+        await GanttRoadmapHTMLExport.download();
+        HistoryLog.data('export_gantt_roadmap', `Выгрузка дорожной карты в HTML (${state.rows.length} строк)`, { rows: state.rows.length });
+      } catch (e) {
+        console.error(e);
+        showToast('Экспорт дорожной карты прерван · ' + (e?.message || e), 'error', ToastDuration.LONG);
+      }
+    });
+
     // XLSX export — round-trip-safe: same headers as XLSXImporter.import,
     // one sheet per team. No extra columns beyond the import template.
     document.getElementById('btn-export-xlsx')?.addEventListener('click', async () => {

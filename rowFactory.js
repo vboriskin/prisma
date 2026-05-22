@@ -49,6 +49,12 @@ export const RowFactory = {
       // factual completion fields. All optional — older rows without them
       // get undefined / empty defaults via createRow().
       transferComments: [],   // [{at, from, to, wt?, text}]
+      // Заметки/риски на ячейке (релиз × эпик). Confluence-style — несколько
+      // независимых записей в одной cell, badge со счётчиком, попап-навигация.
+      // cellNotes: [{ id, col, text, createdAt, author? }]
+      // cellRisks: [{ id, col, kind, text, dueDate? }] — kind: 'open-question'|'dangling'|'hard-deadline'
+      cellNotes: [],
+      cellRisks: [],
       workStartDate: '',
       workEndDate: '',
       actualDoneDate: '',

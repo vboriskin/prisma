@@ -2037,14 +2037,22 @@ body.theme-dark .gantt-header-col .gdt-rail-today {
   color: #a5b4fc;
   background: rgba(99, 102, 241, .18);
 }
-/* Highlight the «current» column itself — subtle accent top-border so the
-   rail visually points at where work is happening THIS week. */
-.gantt-header-col.gdt-rail-current {
-  box-shadow: inset 0 2px 0 0 var(--prizma-information, #4f46e5);
+/* Today-line — вертикальная пунктирная линия сквозь Гант. Позиционируется
+   JS внутри .gantt-container, интерполируя сегодняшнюю дату в окно
+   текущего колодца. */
+.gdt-today-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--prizma-information, #4f46e5);
+  pointer-events: none;
+  z-index: 4;
 }
-body.theme-dark .gantt-header-col.gdt-rail-current {
-  box-shadow: inset 0 2px 0 0 #818cf8;
+body.theme-dark .gdt-today-line,
+[data-theme="dark"] .gdt-today-line {
+  border-left-color: #818cf8;
 }
+.gdt-today-line[hidden] { display: none; }
 
 /* V17.1 C3 — пользователь попросил убрать «разноцветную линию» (sparkline
    распределения work-types) в шапке колодцев. Скрываем .gdt-rail-dist
@@ -2371,13 +2379,6 @@ body.theme-dark .gantt-row:hover .gantt-cell,
   font-size: 10.5px;
   color: var(--text-3);
   margin-top: 2px;
-}
-.v16-epic-meta {
-  font-family: var(--font-mono);
-  font-size: 10px; font-weight: 500;
-  color: var(--text-3);
-  letter-spacing: 0;
-  font-variant-numeric: tabular-nums;
 }
 .v16-epic-cats { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .v16-epic-cat {
@@ -3706,7 +3707,8 @@ body.theme-dark .employees-ctrl-btn.active { background: var(--prizma-informatio
   padding: 6px 12px; font-size: 12px; color: var(--text-2); cursor: pointer;
   border-bottom: 1px solid var(--border-light);
 }
-.tag-suggest-item:hover { background: var(--prizma-information-bg); color: var(--prizma-information); }
+.tag-suggest-item:hover,
+.tag-suggest-item.is-active { background: var(--prizma-information-bg); color: var(--prizma-information); }
 .tag-suggest-item:last-child { border-bottom: none; }
 
 /* Role preset buttons */
@@ -21675,6 +21677,201 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 
 /* O10 #6 — Gantt: collapsed-team rows (was rowEl.style.display='none'/'grid'). */
 .gantt-row.is-team-collapsed { display: none !important; }
+
+/* ============================================================
+   Cell-level annotations (notes + risks) — #2/#3
+   ============================================================ */
+
+/* Bubble на cell — счётчик заметок (визуально не агрессивный). */
+.gdt-cell-note-bubble {
+  position: absolute;
+  top: 2px; right: 2px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 600 10px/1 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-feature-settings: "tnum" 1;
+  color: var(--prizma-information, #4f46e5);
+  background: var(--card);
+  border: 1px solid var(--prizma-information, #4f46e5);
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 3;
+  transition: background .12s, color .12s;
+}
+.gdt-cell-note-bubble:hover {
+  background: var(--prizma-information, #4f46e5);
+  color: #fff;
+}
+/* Empty cell — bubble показывается только на hover самой cell (для add). */
+.gantt-cell .gdt-cell-note-bubble.is-empty {
+  opacity: 0;
+  pointer-events: none;
+  border-style: dashed;
+}
+.gantt-cell:hover .gdt-cell-note-bubble.is-empty {
+  opacity: .55;
+  pointer-events: auto;
+}
+.gantt-cell .gdt-cell-note-bubble.is-empty:hover { opacity: 1; }
+
+/* Popover. */
+.gdt-cellpop {
+  position: fixed;
+  width: 320px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 1100;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.gdt-cellpop-arrow {
+  position: absolute;
+  top: -6px; left: 50%; transform: translateX(-50%) rotate(45deg);
+  width: 10px; height: 10px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+.gdt-cellpop.is-flipped .gdt-cellpop-arrow {
+  top: auto; bottom: -6px;
+  transform: translateX(-50%) rotate(225deg);
+}
+.gdt-cellpop-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+.gdt-cellpop-title {
+  flex: 1;
+  font-size: 11px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.gdt-cellpop-close {
+  background: transparent; border: 0; color: var(--text-3);
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.gdt-cellpop-close:hover { color: var(--text-1); }
+.gdt-cellpop-stepper-wrap {
+  display: flex; align-items: center; justify-content: center;
+  padding: 6px 12px 0;
+  min-height: 22px;
+  font-size: 11px; color: var(--text-3);
+}
+.gdt-cellpop-stepper {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.gdt-cellpop-step {
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  font-size: 14px; line-height: 1; cursor: pointer; color: var(--text-2);
+}
+.gdt-cellpop-step:hover:not(:disabled) { border-color: var(--prizma-information); color: var(--prizma-information); }
+.gdt-cellpop-step:disabled { opacity: .35; cursor: default; }
+.gdt-cellpop-counter { font-variant-numeric: tabular-nums; }
+.gdt-cellpop-body, .gdt-cellpop-editor { padding: 8px 12px 12px; }
+.gdt-cellpop-text-view {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 13px; line-height: 1.45;
+  max-height: 160px; overflow-y: auto;
+}
+.gdt-cellpop-meta {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; font-size: 11px; color: var(--text-3);
+}
+.gdt-cellpop-actions, .gdt-cellpop-editor-actions {
+  display: flex; gap: 6px; justify-content: flex-end;
+  margin-top: 10px;
+}
+.gdt-cellpop-text {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: 13px; line-height: 1.4;
+  resize: vertical; min-height: 60px;
+}
+.gdt-cellpop-text:focus { border-color: var(--prizma-information); outline: 0; }
+
+/* Risk-glyph на cell — слева сверху, цвет по kind. */
+.gdt-cell-risk-glyph {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font: 700 11px/1 system-ui, sans-serif;
+  color: #fff;
+  background: var(--prizma-drift, #f59e0b);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 3;
+  padding: 0;
+  transition: transform .12s;
+}
+.gdt-cell-risk-glyph[data-kind="dangling"]      { background: var(--prizma-information, #4f46e5); }
+.gdt-cell-risk-glyph[data-kind="hard-deadline"] { background: var(--prizma-off-course, #dc2626); }
+.gdt-cell-risk-glyph:hover { transform: scale(1.12); }
+.gdt-cell-risk-glyph.is-empty {
+  opacity: 0;
+  pointer-events: none;
+  background: var(--card);
+  color: var(--text-3);
+  border: 1px dashed var(--text-3);
+}
+.gantt-cell:hover .gdt-cell-risk-glyph.is-empty {
+  opacity: .55;
+  pointer-events: auto;
+}
+.gantt-cell .gdt-cell-risk-glyph.is-empty:hover { opacity: 1; }
+.gdt-cell-risk-count {
+  position: absolute;
+  top: -4px; right: -6px;
+  min-width: 12px; height: 12px;
+  padding: 0 3px;
+  font: 700 9px/1 ui-monospace, monospace;
+  background: var(--card);
+  color: var(--prizma-off-course, #dc2626);
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Risk popover — отдельные поля типа + дедлайн. */
+.gdt-cellpop-field { display: block; margin-bottom: 8px; }
+.gdt-cellpop-field-label {
+  display: block;
+  font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 4px;
+}
+.gdt-cellpop-kind, .gdt-cellpop-due {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: 13px;
+  background: var(--card); color: var(--text-1);
+}
+.gdt-cellpop-kind-view {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px; font-weight: 700;
+  background: var(--prizma-drift-bg, #fef3c7);
+  color: var(--prizma-drift, #f59e0b);
+}
+.gdt-cellpop-kind-view[data-kind="dangling"]      { background: var(--prizma-information-bg, #eef2ff); color: var(--prizma-information, #4f46e5); }
+.gdt-cellpop-kind-view[data-kind="hard-deadline"] { background: var(--prizma-off-course-bg, #fee2e2); color: var(--prizma-off-course, #dc2626); }
+.gdt-cellpop-kind-glyph {
+  width: 16px; height: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: currentColor;
+  color: var(--card);
+  border-radius: 50%;
+  font-weight: 700;
+}
+.gdt-cellpop-due-view { font-size: 11px; color: var(--prizma-off-course, #dc2626); font-weight: 600; }
 
 /* O10 #7 — Gantt: type-pill while dragging (was pill.style.opacity='.4'). */
 .gantt-type-pill.is-dragging { opacity: .4; }

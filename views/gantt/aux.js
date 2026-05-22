@@ -24,6 +24,8 @@ import { RiskEngine }  from '../../riskEngine.js';
 import { Storage }     from '../../dataStore.js';
 import { FocusTrap }   from '../../app/uxKit.js';
 import { Services }    from '../../app/services.js';
+import { attachAutocomplete } from '../../components/textAutocomplete.js';
+import { getUniqueTagValues } from '../../components/tagInput.js';
 import {
   SCOPE_OPTIONS, WORK_TYPES, PHASE_COLORS,
   PHASE_COLOR_TOKENS, PHASE_COLOR_TOKEN_FALLBACK,
@@ -127,16 +129,15 @@ export function openAddEpicModal(presetTeam, opts = {}) {
           <div class="form-grid">
             <label class="form-row">
               <span class="form-label">Команда</span>
-              <input list="ae-teams" id="ae-team" class="form-input" placeholder="Команда…" value="${escH(presetTeam || '')}">
-              <datalist id="ae-teams">${allTeams.map(t => `<option value="${escH(t)}">`).join('')}</datalist>
+              <input id="ae-team" class="form-input" placeholder="Команда…" autocomplete="off" value="${escH(presetTeam || '')}">
             </label>
             <label class="form-row">
               <span class="form-label">Эпик</span>
-              <input id="ae-epic" class="form-input" placeholder="Название эпика…" autofocus>
+              <input id="ae-epic" class="form-input" placeholder="Название эпика…" autocomplete="off" autofocus>
             </label>
             <label class="form-row">
               <span class="form-label">Категория / тэги</span>
-              <input id="ae-category" class="form-input" placeholder="Например: BE, FE, QA">
+              <input id="ae-category" class="form-input" placeholder="Например: BE, FE, QA" autocomplete="off">
             </label>
             <label class="form-row">
               <span class="form-label">Scope</span>
@@ -158,7 +159,7 @@ export function openAddEpicModal(presetTeam, opts = {}) {
             </fieldset>
             <label class="form-row">
               <span class="form-label">Зависимости (через запятую)</span>
-              <input id="ae-deps" class="form-input" placeholder="Например: SBOF-101, SBOF-102">
+              <input id="ae-deps" class="form-input" placeholder="Например: SBOF-101, SBOF-102" autocomplete="off">
             </label>
             <label class="form-row form-row-checkbox">
               <input type="checkbox" id="ae-blocking">
@@ -183,7 +184,20 @@ export function openAddEpicModal(presetTeam, opts = {}) {
   // FocusTrap reinforces) — фокус не утечёт за пределы модалки при Tab.
   let detachTrap = null;
   try { detachTrap = FocusTrap.attach(overlay, { initialFocus: overlay.querySelector('#ae-epic') }); } catch (_) {}
-  const close = () => { try { detachTrap?.(); } catch (_) {} overlay?.remove(); };
+  const cleanups = [];
+  const teamInput = document.getElementById('ae-team');
+  const epicInput = document.getElementById('ae-epic');
+  const catInput  = document.getElementById('ae-category');
+  const depsInput = document.getElementById('ae-deps');
+  if (teamInput) cleanups.push(attachAutocomplete(teamInput, () => Utils.unique(state.rows.map(r => r.team).filter(Boolean))));
+  if (epicInput) cleanups.push(attachAutocomplete(epicInput, () => Utils.unique(state.rows.map(r => r.epic).filter(Boolean))));
+  if (catInput)  cleanups.push(attachAutocomplete(catInput,  () => getUniqueTagValues('category')));
+  if (depsInput) cleanups.push(attachAutocomplete(depsInput, () => Utils.unique(state.rows.map(r => r.epic).filter(Boolean))));
+  const close = () => {
+    cleanups.forEach(fn => { try { fn(); } catch (_) {} });
+    try { detachTrap?.(); } catch (_) {}
+    overlay?.remove();
+  };
   overlay?.addEventListener('click', (ev) => {
     if (ev.target === overlay || ev.target.closest?.('[data-close-modal]')) close();
   });

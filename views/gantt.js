@@ -57,10 +57,6 @@ function pl(n, forms) {
 }
 // V22 G-10 (audit-experts-2026-05-15 Vrba S0-2) — «N задач» создавал
 // иллюзию что показано N Jira-тикетов, тогда как реально это N **типов
-// работ** (BE/FE/QA) в составе эпика, не отдельные тикеты. Переименовано
-// на честное «N типов работ» — терминологически совпадает с CLAUDE.md
-// доменным глоссарием («N задач у эпика = типы работ»).
-const TASK_FORMS = ['тип работ', 'типа работ', 'типов работ'];
 const EPIC_FORMS = ['эпик', 'эпика', 'эпиков'];
 
 // V17.1 C4 — длинный русский формат «20 апреля – 17 мая» для подзаголовка
@@ -244,11 +240,6 @@ export const GanttView = {
   line-height: 1.3;
   opacity: .72; /* «легче» родителя — иерархия через прозрачность, не размер */
 }
-.v16-epic-meta {
-  font-variant-numeric: tabular-nums lining-nums;
-  font-feature-settings: "tnum" 1, "lnum" 1;
-}
-
 /* V22-G-18 — font-size scale в Ганте теперь 4 размера вместо 11:
      12px (счётчики, бейджы, мелочь — tnum)
      13px (имя эпика, имя пилла)
@@ -898,9 +889,15 @@ export const GanttView = {
     const section = document.getElementById('section-gantt');
     const toggle = () => {
       const on = section.classList.toggle('gdt-fullscreen');
-      // E4 fix (codebase-03 audit) — glyph-only → текст без unicode-glyph.
-      btn.textContent = on ? 'Выйти' : 'Развернуть';
-      btn.title = on ? 'Выйти из полного экрана' : 'Полный экран';
+      // textContent затирал SVG-иконку и оставлял голый текст «Развернуть»,
+      // который выходил за границы .prizma-icon-only-btn (min-width:28px) и
+      // визуально наезжал на соседнюю кнопку. Icon-swap по тому же паттерну,
+      // что и btn-gantt-expand-all.
+      const iconName = on ? 'minimize' : 'maximize';
+      const label    = on ? 'Выйти из полного экрана' : 'Полный экран';
+      btn.innerHTML  = Services.Icons?.get?.(iconName, { size: 14, label }) || '';
+      btn.title      = label;
+      btn.setAttribute('aria-label', label);
       GanttView._dtColWidths = {};
       GanttView.renderChart();
     };
@@ -1450,13 +1447,6 @@ export const GanttView = {
         /* AUDIT-ART #11 — epic-row left-stripe через theme-aware var-token,
            PHASE_COLORS остался ТОЛЬКО в HTML-export (см. constants.js). */
         const _epicStripeColor = (PHASE_COLOR_TOKENS && PHASE_COLOR_TOKENS[_domWt]) || PHASE_COLOR_TOKEN_FALLBACK;
-        const _totalWorks = Object.values(_wtTally).reduce((n, v) => n + v, 0);
-        const _moveCount  = Array.isArray(row.ganttArrows) ? row.ganttArrows.length : 0;
-        // V22 G-10 (audit-experts-2026-05-15 Vrba S0-2) — счётчик отражает
-        // КОЛИЧЕСТВО ТИПОВ РАБОТ (BE/FE/QA), а не Jira-тикетов. Раньше
-        // отображалось «N задач» что путало PM-ов: они интерпретировали
-        // число как ticket-count и принимали решения по неверной величине.
-        const _epicMeta   = `${_totalWorks} ${pl(_totalWorks, TASK_FORMS)}${_moveCount ? ' · ' + _moveCount + ' ' + pl(_moveCount, ['перенос','переноса','переносов']) : ''}`;
         // V22 G-11 (audit-experts-2026-05-15 Vrba S0-3) — visualise epic
         // dependencies in the meta line: `_depsOut` = эпики, ОТ которых
         // зависит этот (он стрелочкой влево «← N»), `_depsIn` = эпики,
@@ -1650,6 +1640,47 @@ export const GanttView = {
           </span>`;
         };
 
+        // Per-cell счётчик заметок (Confluence-style). Bubble стоит абсолютно
+        // в правом верхнем углу cell; click → попап.
+        const _notesByCol = Object.create(null);
+        if (Array.isArray(row.cellNotes)) {
+          for (const n of row.cellNotes) {
+            if (!n || !n.col) continue;
+            _notesByCol[n.col] = (_notesByCol[n.col] || 0) + 1;
+          }
+        }
+        const _noteBubble = (colKey) => {
+          const count = _notesByCol[colKey] || 0;
+          const empty = count === 0;
+          const label = empty ? 'Добавить заметку' : `Заметок: ${count}`;
+          return `<button type="button" class="gdt-cell-note-bubble${empty ? ' is-empty' : ''}" data-col="${esc(colKey)}" data-row-id="${esc(row.id)}" aria-label="${esc(label)}" title="${esc(label)}">${empty ? '+' : count}</button>`;
+        };
+        // Per-cell риски. Glyph в левом верхнем углу cell; цвет = приоритет
+        // (hard-deadline > dangling > open-question). Click → попап.
+        const _risksByCol = Object.create(null);
+        if (Array.isArray(row.cellRisks)) {
+          for (const r of row.cellRisks) {
+            if (!r || !r.col) continue;
+            (_risksByCol[r.col] ||= []).push(r);
+          }
+        }
+        const _RISK_GLYPHS = { 'open-question': '?', 'dangling': '◇', 'hard-deadline': '!' };
+        const _RISK_LABELS = { 'open-question': 'Открытый вопрос', 'dangling': 'Подвешенная активность', 'hard-deadline': 'Жёсткий дедлайн' };
+        const _riskGlyph = (colKey) => {
+          const list = _risksByCol[colKey] || [];
+          if (!list.length) {
+            // Empty-state — мелкая «!» иконка, видна только на hover cell.
+            return `<button type="button" class="gdt-cell-risk-glyph is-empty" data-kind="open-question" data-col="${esc(colKey)}" data-row-id="${esc(row.id)}" aria-label="Добавить риск" title="Добавить риск">!</button>`;
+          }
+          const dominant = list.some(r => r.kind === 'hard-deadline') ? 'hard-deadline'
+            : list.some(r => r.kind === 'dangling') ? 'dangling' : 'open-question';
+          const label = list.length === 1
+            ? _RISK_LABELS[dominant]
+            : `${list.length} риск(ов): ${list.map(r => _RISK_LABELS[r.kind] || r.kind).join(', ')}`;
+          const countBadge = list.length > 1 ? `<span class="gdt-cell-risk-count">${list.length}</span>` : '';
+          return `<button type="button" class="gdt-cell-risk-glyph" data-kind="${esc(dominant)}" data-col="${esc(colKey)}" data-row-id="${esc(row.id)}" aria-label="${esc(label)}" title="${esc(label)}">${_RISK_GLYPHS[dominant]}${countBadge}</button>`;
+        };
+
         const cells = cols.map(col => {
           const ghosts = '';
 
@@ -1673,6 +1704,8 @@ export const GanttView = {
             return `<div class="gantt-cell gantt-window-backlog" data-col="backlog" data-row-id="${esc(row.id)}">
               ${inner}
               <button class="gdt-add-type-btn" data-row-id="${esc(row.id)}" title="Добавить тип задачи">+</button>
+              ${_riskGlyph('backlog')}
+              ${_noteBubble('backlog')}
             </div>`;
           }
           /* ---- release / overtime cells ---- */
@@ -1697,21 +1730,20 @@ export const GanttView = {
             : '';
           return `<div class="gantt-cell ${col.cls}" data-col="${esc(col.key)}" data-row-id="${esc(row.id)}">
             ${inner}
+            ${_riskGlyph(col.key)}
+            ${_noteBubble(col.key)}
           </div>`;
         });
 
         // #1: risk badges removed from epic-column header — they cluttered
         //   the title and the dedicated risks panel on the dashboard already
         //   surfaces them. Keep the no-assignee triangle.
-        body += `<div class="gantt-row gdt-grid-row" data-team-key="${esc(tk)}" data-row-id="${esc(row.id)}" style="display:${isHidden?'none':'grid'};grid-template-columns:${makeGT()}">
+        body += `<div class="gantt-row gdt-grid-row${isHidden ? ' is-team-collapsed' : ''}" data-team-key="${esc(tk)}" data-row-id="${esc(row.id)}" style="grid-template-columns:${makeGT()}">
           <div class="gantt-row-label v16-epic-label">
             <span class="v16-epic-stripe" style="background:${_epicStripeColor}" aria-hidden="true"></span>
             <div class="v16-epic-name gantt-row-label-name">${esc(epicText)}</div>
             <div class="v16-epic-sub gantt-row-label-sub">
-              <span class="v16-epic-meta">${esc(_epicMeta)}</span>
-              ${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' + _depsBadge : ''}
-              ${cats.length ? '<span class="v16-epic-cat-sep">·</span>' : ''}
-              <span class="v16-epic-cats">${catHtml}</span>
+              ${_depsBadge || ''}${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' : ''}<span class="v16-epic-cats">${catHtml}</span>
             </div>
           </div>${cells.join('')}</div>`;
 
@@ -1792,7 +1824,7 @@ export const GanttView = {
             }
             return `<div class="gantt-cell ${col.cls} gdt-trail-cell gdt-trail-empty" data-col="${esc(col.key)}"></div>`;
           }).join('');
-          body += `<div class="gantt-row gantt-row-trail gdt-grid-row" data-team-key="${esc(tk)}" data-arrow-at="${esc(a.at || '')}" style="display:${isHidden?'none':'grid'};grid-template-columns:${makeGT()}">
+          body += `<div class="gantt-row gantt-row-trail gdt-grid-row${isHidden ? ' is-team-collapsed' : ''}" data-team-key="${esc(tk)}" data-arrow-at="${esc(a.at || '')}" style="grid-template-columns:${makeGT()}">
             <div class="gantt-row-label gdt-trail-label"></div>${trailCells}</div>`;
         });
       });
@@ -1839,33 +1871,32 @@ export const GanttView = {
           if (start > end) return now >= start || now <= end;
           return now >= start && now <= end;
         })();
-        // V22 G-09 — pct позиции today внутри окна. Считается ТОЛЬКО для
-        // активного bucket'а. Если today вне окна (overtime / backlog
-        // headers, или релиз ещё не наступил) — pct=null, маркер не рисуем.
+        // V22 G-09 — pct позиции today внутри окна. _bounds хранит даты как
+        // MM*100+DD (компактно), но для линейной интерполяции нужны day-of-year:
+        // например, между 18.05 (DOY 138) и 14.06 (DOY 165) — 27 дней, а
+        // 522-518=4 ≠ 27. Конвертируем через Date.UTC, чтобы не зависеть
+        // от длин месяцев.
         const todayPct = (() => {
           if (!isCurrent || !_bounds) return null;
           const { start, end, now } = _bounds;
-          // Year-rollover: разворачиваем шкалу как (start..366 + 1..end)
-          if (start > end) {
-            const totalDays = (1231 - start) + end;
-            const elapsed   = now >= start ? (now - start) : (1231 - start + now);
-            return Math.max(0, Math.min(100, (elapsed / totalDays) * 100));
+          const yr = today.getFullYear();
+          const toDoy = (mmdd) => {
+            const mm = Math.floor(mmdd / 100);
+            const dd = mmdd % 100;
+            return Math.floor((Date.UTC(yr, mm - 1, dd) - Date.UTC(yr, 0, 1)) / 86400000);
+          };
+          const s = toDoy(start), e = toDoy(end), n = toDoy(now);
+          if (e < s) {
+            // year-rollover (например 28.12–15.01)
+            const total   = (365 - s) + e;
+            const elapsed = n >= s ? (n - s) : ((365 - s) + n);
+            return Math.max(0, Math.min(100, (elapsed / total) * 100));
           }
-          if (end === start) return 50;
-          return Math.max(0, Math.min(100, ((now - start) / (end - start)) * 100));
+          if (e === s) return 50;
+          return Math.max(0, Math.min(100, ((n - s) / (e - s)) * 100));
         })();
-        // V16 roadmap-2 (B5) — simplify today-pill: drop the DD.MM duplicate
-        // (the date is already in the meta-line right above + the inset-
-        // accent border already says «THIS column is today»).
         const todayPill = isCurrent
           ? `<span class="gdt-rail-today" title="Сегодня ${esc(todayLabel)}">сегодня</span>`
-          : '';
-        // V22 G-09 — вертикальная линия today внутри активного bucket'а.
-        // Position абсолютная относительно `.gantt-header-col` (у которого
-        // style="position:relative"). Линия высотой через весь header,
-        // в позиции todayPct%. Tooltip: «N% окна пройдено».
-        const todayMarker = (todayPct !== null)
-          ? `<span class="gantt-bucket-today-marker" style="left:${todayPct.toFixed(1)}%" title="Сегодня — пройдено ${todayPct.toFixed(0)}% окна"></span>`
           : '';
         // V17.1 C4 — render long Russian range («20 апреля – 17 мая»);
         // c.sub оставляем DD.MM–DD.MM выше для today-pill parser.
@@ -1905,9 +1936,9 @@ export const GanttView = {
               }).join('')}
             </div>`
           : '';
-        return `<div class="gantt-header-col${isCurrent ? ' gdt-rail-current' : ''}" data-col="${esc(c.key)}" style="position:relative">
+        const todayPctAttr = (todayPct !== null) ? ` data-today-pct="${todayPct.toFixed(2)}" data-today-label="${esc(todayLabel)}"` : '';
+        return `<div class="gantt-header-col" data-col="${esc(c.key)}"${todayPctAttr} style="position:relative">
           ${distSpark}
-          ${todayMarker}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
           <div class="gdt-resize-handle" data-col-key="${esc(c.key)}" title="Потяните чтобы изменить ширину"></div>
         </div>`;
@@ -1929,7 +1960,7 @@ export const GanttView = {
     // меняется.
     const _prevHeight = wrap.offsetHeight;
     if (_prevHeight > 0) wrap.style.minHeight = _prevHeight + 'px';
-    wrap.innerHTML = `<div class="gantt-container gdt-container">${header}<div class="gantt-body">${body}</div>${legend}</div>`;
+    wrap.innerHTML = `<div class="gantt-container gdt-container">${header}<div class="gantt-body">${body}</div>${legend}<div class="gdt-today-line" hidden></div></div>`;
     // #2: do NOT force overflow:visible — that killed the horizontal scrollbar
     //   on #gantt-wrap (defined as overflow-x:auto in styles.css). Let CSS win.
     wrap.style.overflow = '';
@@ -2054,6 +2085,58 @@ export const GanttView = {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         try { Services.DependencyGraphView?.open?.(); } catch (_) {}
+      });
+    });
+
+    /* Cell-notes bubble — открывает попап заметок для ячейки. */
+    wrap.querySelectorAll('.gdt-cell-note-bubble').forEach(bubble => {
+      bubble.addEventListener('mousedown', e => e.stopPropagation());
+      bubble.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const rowId = bubble.dataset.rowId;
+        const colKey = bubble.dataset.col;
+        const targetRow = state.rows.find(r => r.id === rowId);
+        if (!targetRow) return;
+        const colMeta = cols.find(c => c.key === colKey);
+        const releaseLabel = colMeta ? `${colMeta.label}${colMeta.sub ? ' · ' + colMeta.sub : ''}` : colKey;
+        const mod = await import('../components/cellNotesPopover.js');
+        mod.openCellNotesPopover({
+          row: targetRow,
+          col: colKey,
+          anchorEl: bubble,
+          releaseLabel,
+          onChange: () => {
+            try { Storage.save(); } catch (_) {}
+            GanttView.renderChart();
+          },
+        });
+      });
+    });
+
+    /* Cell-risks glyph — открывает попап рисков для ячейки. */
+    wrap.querySelectorAll('.gdt-cell-risk-glyph').forEach(glyph => {
+      glyph.addEventListener('mousedown', e => e.stopPropagation());
+      glyph.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const rowId = glyph.dataset.rowId;
+        const colKey = glyph.dataset.col;
+        const targetRow = state.rows.find(r => r.id === rowId);
+        if (!targetRow) return;
+        const colMeta = cols.find(c => c.key === colKey);
+        const releaseLabel = colMeta ? `${colMeta.label}${colMeta.sub ? ' · ' + colMeta.sub : ''}` : colKey;
+        const mod = await import('../components/cellRisksPopover.js');
+        mod.openCellRisksPopover({
+          row: targetRow,
+          col: colKey,
+          anchorEl: glyph,
+          releaseLabel,
+          onChange: () => {
+            try { Storage.save(); } catch (_) {}
+            GanttView.renderChart();
+          },
+        });
       });
     });
 
@@ -3326,6 +3409,9 @@ export const GanttView = {
     // we re-use the same `#gantt-wrap` node.
     GanttView.bindFastTooltip(wrap);
 
+    GanttView._positionTodayLine(wrap);
+    GanttView._bindTodayLineResize(wrap);
+
     // V22 G-03 (audit-experts-2026-05-15 Demin C3) + G-08 (Demin H7) —
     // эмитим 'gantt-rendered' для подписчиков (keyboard-nav setupRoving,
     // dependency-arrows, post-render hooks). Раньше эти подписки делались
@@ -3335,6 +3421,52 @@ export const GanttView = {
         globalThis.EventBus.emit('gantt-rendered');
       }
     } catch (_) { /* defensive */ }
+  },
+  /**
+   * Today-line — вертикальная пунктирная линия сквозь всю высоту Ганта.
+   * Источник позиции: header-col c data-today-pct (тот колодец, в окно
+   * которого попадает текущая дата). Левая координата = bbox header-col
+   * относительно .gantt-container + ширина колодца × pct/100.
+   *
+   * Скрывается, если активного колодца нет (например, today вне всех окон).
+   */
+  _positionTodayLine(wrap) {
+    if (!wrap) return;
+    const container = wrap.querySelector('.gantt-container');
+    const line = container?.querySelector('.gdt-today-line');
+    if (!container || !line) return;
+    const activeHeader = container.querySelector('.gantt-header-col[data-today-pct]');
+    if (!activeHeader) {
+      line.hidden = true;
+      return;
+    }
+    const pct = parseFloat(activeHeader.dataset.todayPct || '0');
+    const label = activeHeader.dataset.todayLabel || '';
+    const hdrRect = activeHeader.getBoundingClientRect();
+    const ctnRect = container.getBoundingClientRect();
+    const leftPx = (hdrRect.left - ctnRect.left) + (hdrRect.width * pct / 100);
+    line.style.left = `${leftPx.toFixed(1)}px`;
+    line.title = label ? `Сегодня — ${label}` : 'Сегодня';
+    line.hidden = false;
+  },
+  _todayLineResizeBound: false,
+  _bindTodayLineResize(wrap) {
+    if (GanttView._todayLineResizeBound) return;
+    GanttView._todayLineResizeBound = true;
+    const reposition = () => {
+      const w = document.getElementById('gantt-wrap');
+      if (w) GanttView._positionTodayLine(w);
+    };
+    window.addEventListener('resize', reposition);
+    // Scroll внутри #gantt-wrap не двигает линию (она внутри .gantt-container,
+    // который скроллится вместе с контентом), но column-resize меняет ширину
+    // — слушаем custom event, который аналитика resize-handle уже эмитит,
+    // если есть. Fallback: ResizeObserver на header.
+    try {
+      const ro = new ResizeObserver(reposition);
+      const hdr = wrap.querySelector('.gantt-header');
+      if (hdr) ro.observe(hdr);
+    } catch (_) { /* old browsers */ }
   },
   /** Lightweight body-attached tooltip — replaces native `title=` (which
    *  has a ~1.5 s delay browsers don't expose any API to shorten). 200 ms
