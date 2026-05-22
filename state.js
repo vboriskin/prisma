@@ -213,13 +213,16 @@ export function syncColumnSettings() {
   state.sidebarCollapsed=toBool(state.sidebarCollapsed,false);
   state.presetsCollapsed=toBool(state.presetsCollapsed,false);
 
-  // Epic dependencies cleanup.
+  // Epic dependencies cleanup. #11 — value может быть string (legacy)
+  // ИЛИ Array<to> (multi-deps). Нормализуем в array, дедуплицируем,
+  // выбрасываем self-deps и пустые ссылки.
   const deps={};
-  Object.entries(state.epicDeps||{}).forEach(([a,b])=>{
+  Object.entries(state.epicDeps||{}).forEach(([a,raw])=>{
     const from=String(a||'').trim();
-    const to=String(b||'').trim();
-    if (!from||!to||from===to) return;
-    deps[from]=to;
+    if (!from) return;
+    const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    const tos = [...new Set(arr.map(v => String(v||'').trim()).filter(v => v && v !== from))];
+    if (tos.length) deps[from] = tos.length === 1 && typeof raw === 'string' ? tos[0] : tos;
   });
   state.epicDeps=deps;
 }

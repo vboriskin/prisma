@@ -22,6 +22,20 @@ import { state } from './state.js';
 import { Services } from './app/services.js';
 
 /* ── Cycle detection ──────────────────────────────────────── */
+/** #11 — multi-deps adapter: epicDeps[from] может быть string ИЛИ Array<to>.
+ *  Возвращает массив pairs `[[from, to], ...]` для итерации. */
+function _depsPairs(deps) {
+  const pairs = [];
+  for (const [a, v] of Object.entries(deps || {})) {
+    if (!a || v == null) continue;
+    const arr = Array.isArray(v) ? v : [v];
+    for (const b of arr) {
+      if (b) pairs.push([a, String(b)]);
+    }
+  }
+  return pairs;
+}
+
 export function detectCycles(deps) {
   const visited = new Set(), inStack = new Set();
   function dfs(node) {
@@ -29,7 +43,8 @@ export function detectCycles(deps) {
     if (visited.has(node)) return false;
     visited.add(node); inStack.add(node);
     const dep = deps[node];
-    if (dep && dfs(dep)) return true;
+    const arr = Array.isArray(dep) ? dep : (dep ? [dep] : []);
+    for (const d of arr) { if (d && dfs(d)) return true; }
     inStack.delete(node);
     return false;
   }
@@ -56,10 +71,10 @@ function topoSort(nodes, adjOut) {
 export function getCriticalPath(deps, weights) {
   // Сильнейший longest path с учётом весов (по умолчанию все 1).
   const nodes = new Set();
-  Object.entries(deps).forEach(([a, b]) => { nodes.add(a); nodes.add(b); });
+  _depsPairs(deps).forEach(([a, b]) => { nodes.add(a); nodes.add(b); });
   const adjOut = new Map();
   for (const n of nodes) adjOut.set(n, []);
-  Object.entries(deps).forEach(([a, b]) => {
+  _depsPairs(deps).forEach(([a, b]) => {
     if (!adjOut.has(b)) adjOut.set(b, []);
     adjOut.get(b).push(a); // b → a (a depends on b)
   });
@@ -108,7 +123,7 @@ export function weighEpic(epicName, rows) {
 export function buildGraphLayout(deps, rows) {
   const dependsOn = deps || {};
   const allNames = new Set();
-  Object.entries(dependsOn).forEach(([a, b]) => { allNames.add(a); allNames.add(b); });
+  _depsPairs(dependsOn).forEach(([a, b]) => { allNames.add(a); allNames.add(b); });
   // Также добавим эпики которые упомянуты в rows но не в deps (orphan).
   const orphans = new Set();
   for (const r of (rows || [])) {
@@ -127,7 +142,7 @@ export function buildGraphLayout(deps, rows) {
   // adjOut: node → [successors]. Edge a depends on b == b → a.
   const adjOut = new Map(); const adjIn = new Map();
   for (const n of allNames) { adjOut.set(n, []); adjIn.set(n, []); }
-  Object.entries(dependsOn).forEach(([a, b]) => {
+  _depsPairs(dependsOn).forEach(([a, b]) => {
     if (allNames.has(a) && allNames.has(b)) {
       adjOut.get(b).push(a);
       adjIn.get(a).push(b);
@@ -187,7 +202,7 @@ export function buildGraphLayout(deps, rows) {
   });
 
   const edges = [];
-  Object.entries(dependsOn).forEach(([a, b]) => {
+  _depsPairs(dependsOn).forEach(([a, b]) => {
     if (!allNames.has(a) || !allNames.has(b)) return;
     edges.push({
       from: b, to: a,

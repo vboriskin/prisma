@@ -1537,12 +1537,15 @@ export const GanttView = {
         let _depsOutList = [], _depsInList = [];
         if (_epicKey && state.epicDeps) {
           const deps = state.epicDeps;
-          // Этот эпик зависит от другого — depKey ↦ ourKey: ищем where key === _epicKey
+          // #11 — multi-deps: значение может быть Array<to> ИЛИ string.
           const out = deps[_epicKey];
-          if (out) { _depsOut = 1; _depsOutList.push(String(out)); }
-          // Этот эпик блокирует других — entries where value === _epicKey
+          const outArr = Array.isArray(out) ? out.filter(Boolean) : (out ? [String(out)] : []);
+          _depsOut = outArr.length;
+          _depsOutList = outArr.map(String);
+          // Этот эпик блокирует других — entries where value (или элемент массива) === _epicKey.
           for (const [from, to] of Object.entries(deps)) {
-            if (String(to) === _epicKey) { _depsIn++; _depsInList.push(String(from)); }
+            const toArr = Array.isArray(to) ? to.filter(Boolean) : (to ? [String(to)] : []);
+            if (toArr.includes(_epicKey)) { _depsIn++; _depsInList.push(String(from)); }
           }
         }
         const _depsTooltip = [
@@ -1826,6 +1829,9 @@ export const GanttView = {
             <div class="v16-epic-name gantt-row-label-name">${esc(epicText)}</div>
             <div class="v16-epic-sub gantt-row-label-sub">
               ${_depsBadge || ''}${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' : ''}<span class="v16-epic-cats">${catHtml}</span>
+              <button type="button" class="v16-epic-deps-edit" data-epic-key="${esc(_epicKey)}" title="Зависимости эпика" aria-label="Указать зависимости">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </button>
             </div>
           </div>${cells.join('')}</div>`;
 
@@ -2202,6 +2208,20 @@ export const GanttView = {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         try { Services.DependencyGraphView?.open?.(); } catch (_) {}
+      });
+    });
+
+    /* #11 — иконка зависимостей рядом с категорией эпика → модалка multi-dep. */
+    wrap.querySelectorAll('.v16-epic-deps-edit').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const epicKey = btn.dataset.epicKey;
+        if (!epicKey) return;
+        const mod = await import('../components/epicDepsModal.js');
+        mod.openEpicDepsModal({
+          epicKey,
+          onSaved: () => GanttView.renderChart(),
+        });
       });
     });
 
