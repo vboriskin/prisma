@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 10 · Цвет, который не лжёт</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 26px 24px 64px; }
+  .head { margin-bottom: 18px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 14px; margin: 18px 0 16px; }
+  .bar .spacer { flex: 1; }
+  /* большой переключатель «честный цвет» */
+  .switch { display: inline-flex; align-items: center; gap: 11px; padding: 8px 14px 8px 12px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); background: var(--prizma-bg-elevated); cursor: pointer; user-select: none; transition: border-color .2s; }
+  .switch:hover { border-color: var(--prizma-information); }
+  .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--prizma-bg-tertiary); position: relative; transition: background .3s var(--ease-calm); flex: none; }
+  .switch .knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--prizma-text-secondary); transition: transform .3s var(--ease-calm), background .3s var(--ease-calm); }
+  .switch.on .track { background: var(--prizma-on-course-bg); }
+  .switch.on .knob { transform: translateX(18px); background: var(--prizma-on-course); }
+  .switch .txt { display: flex; flex-direction: column; gap: 2px; }
+  .switch .txt .lab { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .switch .txt .val { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); }
+
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 18px; align-items: start; }
+  @media (max-width: 860px){ .layout { grid-template-columns: 1fr; } }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 200px repeat(5, minmax(120px,1fr)); min-width: 820px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 44px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; transition: background .45s var(--ease-calm), box-shadow .45s var(--ease-calm); }
+  .ghead .rel { font: 300 20px/1 var(--mono); transition: color .45s var(--ease-calm); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; } .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .elabel .nm .riskdot { width: 7px; height: 7px; border-radius: 50%; flex: none; opacity: 0; transition: opacity .45s var(--ease-calm); }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; transition: background .45s var(--ease-calm), box-shadow .45s var(--ease-calm); }
+
+  /* пилюли */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); user-select: none; transition: opacity .45s var(--ease-calm); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--prizma-border-strong); transition: background .45s var(--ease-calm); }
+  .pill .nm { font: 600 11px/1 var(--font); color: var(--prizma-text-primary); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; opacity: 0; transition: opacity .45s var(--ease-calm); }
+
+  /* ── OFF (баг): колонки залиты signal-оттенками; пилюли — типом работы (нейтрально-категориально) ── */
+  .grid.bug .ghead[data-sig="info"]      { background: var(--prizma-information-bg); box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .grid.bug .ghead[data-sig="on-course"] { background: var(--prizma-on-course-bg);   box-shadow: inset 0 -2px 0 var(--prizma-on-course); }
+  .grid.bug .ghead[data-sig="drift"]     { background: var(--prizma-drift-bg);       box-shadow: inset 0 -2px 0 var(--prizma-drift); }
+  .grid.bug .ghead[data-sig="off-course"]{ background: var(--prizma-off-course-bg);  box-shadow: inset 0 -2px 0 var(--prizma-off-course); }
+  .grid.bug .ghead[data-sig="info"] .rel       { color: var(--prizma-information); }
+  .grid.bug .ghead[data-sig="on-course"] .rel  { color: var(--prizma-on-course); }
+  .grid.bug .ghead[data-sig="drift"] .rel      { color: var(--prizma-drift); }
+  .grid.bug .ghead[data-sig="off-course"] .rel { color: var(--prizma-off-course); }
+  .grid.bug .cell[data-sig="info"]      { background: color-mix(in srgb, var(--prizma-information) 6%, transparent); }
+  .grid.bug .cell[data-sig="on-course"] { background: color-mix(in srgb, var(--prizma-on-course) 6%, transparent); }
+  .grid.bug .cell[data-sig="drift"]     { background: color-mix(in srgb, var(--prizma-drift) 6%, transparent); }
+  .grid.bug .cell[data-sig="off-course"]{ background: color-mix(in srgb, var(--prizma-off-course) 6%, transparent); }
+  /* в баге пилюли «generic» — полоса по типу работы, статус не выражен */
+  .grid.bug .pill::before { background: var(--wt, var(--prizma-border-strong)); }
+
+  /* ── ON (фикс): колонки нейтральны; signal освобождён под реальный статус ── */
+  .grid.honest .pill[data-risk="drift"]::before      { background: var(--prizma-drift); }
+  .grid.honest .pill[data-risk="off-course"]::before { background: var(--prizma-off-course); }
+  .grid.honest .pill[data-state="done"] { opacity: .48; }
+  .grid.honest .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .grid.honest .pill[data-state="done"] .dot { opacity: 1; background: var(--prizma-on-course); }
+  .grid.honest .pill[data-state="progress"] .dot { opacity: 1; background: var(--prizma-information); }
+  .grid.honest .elabel .nm .riskdot { opacity: 1; }
+
+  /* ── сайд-капшн ── */
+  .caption { position: sticky; top: 12px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 18px; }
+  .caption .ce { margin-bottom: 12px; }
+  .caption h3 { font: 700 13px/1.3 var(--font); margin: 0 0 6px; color: var(--prizma-text-primary); }
+  .caption p { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: var(--prizma-text-secondary); }
+  .caption .one { font: 600 14px/1.35 var(--font); color: var(--prizma-text-primary); padding: 12px 0 0; border-top: 1px solid var(--prizma-border); }
+  .caption .one .hl { color: var(--prizma-information); }
+  .swatch { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 7px; }
+  .swatch i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .swatch .role { color: var(--prizma-text-tertiary); }
+  .state-block { transition: opacity .35s var(--ease-calm); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="pz-eyebrow">Скетч 10 · Аудит цвета</div>
+    <h1>Цвет, который не лжёт</h1>
+    <p>Колонки релизов сейчас переиспользуют <b>сигнальные</b> цвета: 1.20 — голубой, 1.21 — зелёный, 1.22 — амбер, Овертайм — красный. Зелёная колонка читается как «здоров», красная — как «провал». Но это просто корзины. Включите честный цвет — и палитра освободится под реальный статус.</p>
+  </div>
+
+  <div class="bar">
+    <button class="switch" id="switch" aria-pressed="false">
+      <span class="track"><span class="knob"></span></span>
+      <span class="txt"><span class="lab">Честный цвет</span><span class="val" id="swVal">выкл</span></span>
+    </button>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="layout">
+    <div class="gantt"><div class="grid bug" id="grid"></div></div>
+
+    <aside class="caption">
+      <div class="ce"><div class="pz-eyebrow">Принцип</div></div>
+      <div class="state-block" id="capBug">
+        <h3>Сейчас: цвет лжёт</h3>
+        <p>Сигнальные оттенки висят на колонках-корзинах. Команда видит «красный Овертайм» и читает аварию там, где её нет. Статус самих работ при этом не виден.</p>
+      </div>
+      <div class="state-block" id="capHonest" style="display:none">
+        <h3>Честно: цвет означает статус</h3>
+        <div class="swatch"><i style="background:var(--prizma-information)"></i>голубой<span class="role">· в работе / сегодня</span></div>
+        <div class="swatch"><i style="background:var(--prizma-on-course)"></i>зелёный<span class="role">· завершено</span></div>
+        <div class="swatch"><i style="background:var(--prizma-drift)"></i>амбер<span class="role">· дрейф</span></div>
+        <div class="swatch"><i style="background:var(--prizma-off-course)"></i>красный<span class="role">· риск срыва</span></div>
+        <p style="margin-top:12px">Колонки стали нейтрально-серыми. Теперь красный встречается только там, где правда риск.</p>
+      </div>
+      <div class="one">Цвет должен означать <span class="hl">одно</span>.</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  // карта колонка → сигнал (демонстрация бага)
+  const sigByCol = { backlog:'', r120:'info', r121:'on-course', r122:'drift', overtime:'off-course' };
+  const grid = document.getElementById('grid');
+
+  let html = '';
+  html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+  cols.forEach(c => {
+    const sig = sigByCol[c.key] || '';
+    const dates = c.dated ? new Date(c.start).toLocaleDateString('ru',{day:'2-digit',month:'short'})+' – '+new Date(c.end).toLocaleDateString('ru',{day:'2-digit',month:'short'}) : 'без даты';
+    html += '<div class="gcell ghead" data-sig="'+sig+'"><span class="rel'+(c.dated?'':' muted')+'">'+c.short+'</span><span class="dates">'+dates+'</span></div>';
+  });
+
+  D.teams.forEach(team => {
+    const eps = D.epics.filter(e => e.team === team);
+    html += '<div class="teamrow"><span class="mono">'+team.slice(0,2)+'</span><b>'+team+'</b></div>';
+    eps.forEach(e => {
+      const riskColor = e.risk === 'off-course' ? 'var(--prizma-off-course)' : (e.risk === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+      html += '<div class="gcell elabel"><span class="nm"><span class="riskdot" style="background:'+riskColor+'"></span>'+e.epic+'</span><span class="meta">'+Object.values(e.est||{}).reduce((a,b)=>a+b,0)+' дн</span></div>';
+      cols.forEach(c => {
+        const sig = sigByCol[c.key] || '';
+        html += '<div class="gcell cell" data-sig="'+sig+'">';
+        e.pills.filter(p=>p.col===c.key).forEach(p => {
+          // статус-окраска применяется только в honest-режиме (CSS); риск наследуется от эпика
+          const risk = (p.state !== 'done' && e.risk) ? e.risk : '';
+          html += '<div class="pill" data-state="'+p.state+'" data-risk="'+risk+'" style="--wt:'+wtVar(p.wt)+'">'+
+            '<span class="dot"></span><span class="nm">'+p.wt+'</span>'+
+            (p.who?'<span class="who">'+p.who+'</span>':'')+'</div>';
+        });
+        html += '</div>';
+      });
+    });
+  });
+  grid.innerHTML = html;
+
+  // ── переключатель ──
+  const sw = document.getElementById('switch'), swVal = document.getElementById('swVal');
+  const capBug = document.getElementById('capBug'), capHonest = document.getElementById('capHonest');
+  let honest = false;
+  function apply(){
+    grid.classList.toggle('honest', honest);
+    grid.classList.toggle('bug', !honest);
+    sw.classList.toggle('on', honest);
+    sw.setAttribute('aria-pressed', honest ? 'true' : 'false');
+    swVal.textContent = honest ? 'вкл' : 'выкл';
+    capBug.style.display = honest ? 'none' : '';
+    capHonest.style.display = honest ? '' : 'none';
+  }
+  apply();
+  sw.addEventListener('click', () => { honest = !honest; apply(); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

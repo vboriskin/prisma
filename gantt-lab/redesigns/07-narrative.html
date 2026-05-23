@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 07 · Сюжетная лента</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top button { color: var(--prizma-text-secondary); }
+
+  /* ── layout: feed + toc ── */
+  .body { flex: 1; display: flex; min-height: 0; }
+  .feed { flex: 1; overflow: auto; }
+  .doc { max-width: 760px; margin: 0 auto; padding: 26px 32px 80px; }
+  .lede { margin-bottom: 10px; }
+  .lede h1 { font-size: 21px; font-weight: 700; letter-spacing: -.01em; margin: 7px 0 6px; }
+  .lede p { margin: 0; font-size: 13.5px; color: var(--prizma-text-secondary); max-width: 620px; }
+
+  /* team section header */
+  .teamhead { margin: 34px 0 6px; padding-bottom: 9px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: baseline; gap: 10px; }
+  .teamhead:first-of-type { margin-top: 22px; }
+  .teamhead h2 { font-size: 13px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; margin: 0; color: var(--prizma-text-primary); }
+  .teamhead .cnt { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* epic section */
+  .epic { padding: 18px 0 18px 18px; border-bottom: 1px solid var(--prizma-border); position: relative; }
+  .epic::before { content: ""; position: absolute; left: 0; top: 22px; bottom: 22px; width: 3px; border-radius: 2px; background: transparent; }
+  .epic.risk-off::before { background: var(--prizma-off-course); }
+  .epic.risk-drift::before { background: var(--prizma-drift); opacity: .7; }
+  .epic .name { font-size: 16px; font-weight: 700; letter-spacing: -.01em; margin: 0 0 4px; }
+  .epic .by { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .epic .by .rdot { width: 7px; height: 7px; border-radius: 50%; }
+  .epic .by .rlabel { color: var(--prizma-text-secondary); }
+
+  /* one-line plain status */
+  .status { font-size: 14.5px; line-height: 1.6; color: var(--prizma-text-primary); margin: 0 0 14px; max-width: 600px; }
+  .status b { font-weight: 600; }
+  .status .done { color: var(--prizma-on-course); }
+  .status .prog { color: var(--prizma-information); }
+  .status .plan { color: var(--prizma-text-secondary); }
+
+  /* inline mini-track */
+  .track { display: grid; grid-template-columns: repeat(var(--ncols), 1fr); gap: 0; border: 1px solid var(--prizma-border); border-radius: var(--r-md); overflow: hidden; margin-bottom: 12px; }
+  .track .col { padding: 8px 9px 9px; border-left: 1px solid var(--prizma-border); min-height: 56px; }
+  .track .col:first-child { border-left: none; }
+  .track .col.cur { background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  .track .col.neutral { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+  .track .col .ch { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-text-tertiary); margin-bottom: 7px; display: block; }
+  .track .col.cur .ch { color: var(--prizma-information); }
+  .track .pl { position: relative; display: flex; align-items: center; gap: 5px; padding: 3px 6px 3px 8px; font: 600 10px/1.2 var(--font); color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: 3px; overflow: hidden; margin-bottom: 4px; }
+  .track .pl::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.5px; background: var(--wt, var(--prizma-information)); }
+  .track .pl .who { font: 500 8.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .track .pl[data-state="done"] { opacity: .55; }
+  .track .pl[data-state="done"] .nm { text-decoration: line-through; }
+  .track .pl[data-state="progress"] .nm { color: var(--prizma-text-primary); }
+  .track .pl[data-state="unplanned"] { border: 1px dashed var(--prizma-drift); background: transparent; }
+  .track .col .none { font: 500 10px/1 var(--mono); color: var(--prizma-border-strong); }
+
+  /* narrative move note */
+  .moves { display: flex; flex-direction: column; gap: 5px; }
+  .move { display: inline-flex; align-items: center; gap: 7px; font: 500 12px/1.3 var(--font); color: var(--prizma-drift); }
+  .move svg { width: 13px; height: 13px; flex: none; }
+  .move .mono { font: 600 11px/1 var(--mono); }
+
+  /* TOC */
+  .toc { width: 184px; flex: none; border-left: 1px solid var(--prizma-border); padding: 22px 16px; overflow: auto; }
+  .toc .pz-eyebrow { display: block; margin-bottom: 12px; }
+  .toc a { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--r-sm); font-size: 12.5px; color: var(--prizma-text-secondary); text-decoration: none; cursor: pointer; transition: background .15s, color .15s; border-left: 2px solid transparent; }
+  .toc a:hover { background: var(--prizma-bg-elevated); color: var(--prizma-text-primary); }
+  .toc a.active { color: var(--prizma-text-primary); border-left-color: var(--prizma-information); background: var(--prizma-bg-elevated); }
+  .toc a .n { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .toc a .risk { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Сюжетная лента</span>
+    <span class="sub">план как читаемый документ</span>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="body">
+    <div class="feed" id="feed">
+      <div class="doc" id="doc">
+        <div class="lede">
+          <div class="pz-eyebrow">Редизайн 07 · Сюжет</div>
+          <h1>Квартал, рассказанный словами</h1>
+          <p>Не сетка, а лента. Каждый эпик — абзац: понятный статус обычным языком, мини-дорожка работ по окнам релизов и заметки о переносах. Рисковые эпики помечены полосой слева.</p>
+        </div>
+        <div id="sections"></div>
+      </div>
+    </div>
+    <nav class="toc" id="toc"><span class="pz-eyebrow">Команды</span></nav>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const cols = D.releases;
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const relShort = k => { const c = cols.find(c => c.key === k); return c ? c.short : k; };
+
+  // ── авто-генерация статуса обычным русским из pills ──
+  // группируем по дисциплине (wt) и по состоянию → собираем фразы.
+  function buildStatus(e) {
+    const parts = [];
+    // что готово
+    const done = e.pills.filter(p => p.state === 'done');
+    const prog = e.pills.filter(p => p.state === 'progress');
+    const plan = e.pills.filter(p => p.state === 'planned');
+    const unpl = e.pills.filter(p => p.state === 'unplanned');
+
+    const lbl = wt => (D.WT[wt] ? D.WT[wt].label : wt);
+    const uniqLbl = arr => [...new Set(arr.map(p => lbl(p.wt)))];
+
+    if (done.length) {
+      const names = uniqLbl(done);
+      parts.push('<span class="done"><b>' + cap(joinRu(names)) + '</b> готов' + ending(names) + '</span>');
+    }
+    prog.forEach(p => {
+      const who = p.who ? ' у ' + declWho(p.who) : '';
+      parts.push('<span class="prog"><b>' + cap(lbl(p.wt)) + '</b> в работе' + who + '</span>');
+    });
+    if (plan.length) {
+      // сгруппировать планы по окну релиза
+      const byCol = {};
+      plan.forEach(p => { (byCol[p.col] = byCol[p.col] || []).push(lbl(p.wt)); });
+      Object.keys(byCol).forEach(col => {
+        const names = [...new Set(byCol[col])];
+        const where = (col === 'backlog') ? 'в бэклоге' : (col === 'overtime') ? 'в овертайме' : 'на ' + relShort(col);
+        parts.push('<span class="plan">' + cap(joinRu(names)) + ' запланирован' + ending(names) + ' ' + where + '</span>');
+      });
+    }
+    if (unpl.length) {
+      parts.push('<span class="plan" style="color:var(--prizma-drift)">есть внеплановая работа (' + uniqLbl(unpl).map(cap).join(', ') + ')</span>');
+    }
+    if (!parts.length) return 'Работы пока не заведены.';
+    return parts.join(', ') + '.';
+  }
+
+  // лёгкая русская склейка перечислений
+  function joinRu(arr) {
+    if (arr.length === 1) return arr[0];
+    if (arr.length === 2) return arr[0] + ' и ' + arr[1];
+    return arr.slice(0, -1).join(', ') + ' и ' + arr[arr.length - 1];
+  }
+  // окончание «готова/готов/готовы» — упрощённо по количеству
+  function ending(arr) { return arr.length > 1 ? 'ы' : 'а'; }
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+  // фамилия «у Сидорова» — добавляем -а если кончается на согласную (грубо, демо)
+  function declWho(name) {
+    if (/[аяуюы]$/i.test(name)) return name; // уже похоже на склонённое/женское
+    if (/(ов|ев|ин|ын|ский|цкий|ёв)$/i.test(name)) return name + 'а';
+    return name;
+  }
+
+  function trackHtml(e) {
+    let h = '<div class="track" style="--ncols:' + cols.length + '">';
+    cols.forEach(c => {
+      const neutral = (c.key === 'backlog' || c.key === 'overtime');
+      const cls = ['col']; if (c.current) cls.push('cur'); else if (neutral) cls.push('neutral');
+      h += '<div class="' + cls.join(' ') + '"><span class="ch">' + c.short + '</span>';
+      const ps = H.pillsOf(e, c.key);
+      if (!ps.length) h += '<span class="none">·</span>';
+      ps.forEach(p => {
+        const who = p.who ? '<span class="who">' + p.who + '</span>' : '';
+        h += '<span class="pl" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + '"><span class="nm">' + p.wt + '</span>' + who + '</span>';
+      });
+      h += '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  // moves → нарратив переноса. PZ_DATA даёт число moves, не историю окон;
+  // выводим осмысленную заметку, опираясь на dominant-окно как «куда».
+  function movesHtml(e) {
+    if (!e.moves) return '';
+    // приблизим «откуда→куда» по соседним датированным окнам относительно current
+    const dated = cols.filter(c => c.dated);
+    const curIdx = dated.findIndex(c => c.current);
+    const from = dated[Math.max(0, curIdx - 1)];
+    const to = dated[Math.min(dated.length - 1, curIdx)];
+    let h = '<div class="moves">';
+    const word = e.moves === 1 ? 'перенос' : (e.moves < 5 ? 'переноса' : 'переносов');
+    h += '<span class="move"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>'
+       + 'Переносился <span class="mono">' + from.short + ' → ' + to.short + '</span>, всего <span class="mono">' + e.moves + '</span> ' + word + '</span>';
+    h += '</div>';
+    return h;
+  }
+
+  // ── render ──
+  const sections = document.getElementById('sections');
+  const toc = document.getElementById('toc');
+  let html = '', tocHtml = '';
+  D.teams.forEach(team => {
+    const eps = H.teamEpics(team);
+    const tid = 'team-' + team;
+    const works = eps.reduce((n, e) => n + e.pills.length, 0);
+    const risky = eps.filter(e => e.risk).length;
+    html += '<div class="teamhead" id="' + tid + '"><h2>' + team + '</h2><span class="cnt">' + eps.length + ' эпик · ' + works + ' работ' + (risky ? ' · ' + risky + ' с риском' : '') + '</span></div>';
+    const riskDot = risky ? '<span class="risk" style="background:var(--prizma-' + (eps.some(e => e.risk === 'off-course') ? 'off-course' : 'drift') + ')"></span>' : '<span></span>';
+    tocHtml += '<a data-t="' + tid + '"><span class="risk-wrap" style="display:flex;align-items:center;gap:8px">' + riskDot + team + '</span><span class="n">' + eps.length + '</span></a>';
+
+    eps.forEach(e => {
+      const rc = e.risk === 'off-course' ? ' risk-off' : (e.risk === 'drift' ? ' risk-drift' : '');
+      const riskLabel = e.risk === 'off-course' ? 'риск срыва' : (e.risk === 'drift' ? 'дрейф сроков' : '');
+      const rdot = e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span><span class="rlabel">' + riskLabel + '</span>' : '';
+      const est = Object.values(e.est || {}).reduce((a, b) => a + b, 0);
+      html += '<section class="epic' + rc + '">';
+      html += '<h3 class="name">' + esc(e.epic) + '</h3>';
+      html += '<div class="by">' + team + ' · ' + est + ' чел.-дн' + (rdot ? ' · ' + rdot : '') + '</div>';
+      html += '<p class="status">' + buildStatus(e) + '</p>';
+      html += trackHtml(e);
+      html += movesHtml(e);
+      html += '</section>';
+    });
+  });
+  sections.innerHTML = html;
+  toc.insertAdjacentHTML('beforeend', tocHtml);
+
+  // TOC nav + scroll-spy
+  const feed = document.getElementById('feed');
+  toc.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', () => {
+      const el = document.getElementById(a.dataset.t);
+      if (el) feed.scrollTo({ top: el.offsetTop - 14, behavior: 'smooth' });
+    });
+  });
+  const heads = D.teams.map(t => document.getElementById('team-' + t));
+  function spy() {
+    let active = heads[0];
+    const y = feed.scrollTop + 80;
+    heads.forEach(h => { if (h && h.offsetTop <= y) active = h; });
+    toc.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.t === (active && active.id)));
+  }
+  // синхронно + таймер + scroll/resize (не только rAF)
+  spy();
+  setTimeout(spy, 60);
+  feed.addEventListener('scroll', spy);
+  window.addEventListener('resize', spy);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+})();
+</script>
+</body>
+</html>

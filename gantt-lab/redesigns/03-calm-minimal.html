@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 03 · Спокойный минимум</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+
+  /* ── gantt ── */
+  .scroll { flex: 1; overflow: auto; }
+  .grid { display: grid; grid-template-columns: 260px repeat(5, minmax(150px, 1fr)); min-width: 920px; position: relative; }
+  .h { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg); padding: 16px 14px 12px; border-bottom: 1px solid var(--prizma-border); }
+  .h .rel { font: 300 20px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .h .rel.cur { color: var(--prizma-text-primary); }
+  .h .dt { display: block; margin-top: 5px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .h.first { display: flex; align-items: flex-end; }
+  .h.first .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  .team { grid-column: 1 / -1; position: sticky; left: 0; padding: 10px 16px 6px; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+
+  .lbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 11px 14px; border-bottom: 1px solid var(--prizma-border); }
+  .lbl .nm { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 7px; }
+  .lbl .nm .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .lbl .est { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; }
+
+  .c { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 9px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .c.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+
+  /* пилюля: монохром; цвет — только если эпик рисковый (наследует через --tint) */
+  .p { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--prizma-text-secondary); padding-left: 9px; position: relative; }
+  .p::before { content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 2px; background: var(--prizma-border-strong); border-radius: 2px; }
+  .p.done { opacity: .45; }
+  .p.done .nm { text-decoration: line-through; }
+  .p.progress::before { background: var(--prizma-text-secondary); }
+  .p .nm { font-weight: 500; color: var(--prizma-text-primary); font-size: 12px; }
+  .p .wt { font: 600 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  /* единственный цвет в сетке — риск */
+  .p.r-drift::before { background: var(--prizma-drift); }
+  .p.r-off::before { background: var(--prizma-off-course); }
+
+  /* today-axis — тонкая информационная линия сквозь всё тело */
+  .today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-information); opacity: .8; pointer-events: none; z-index: 5; }
+  .today .cap { position: absolute; top: 6px; left: -1px; transform: translateX(-50%); font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); background: var(--prizma-bg); padding: 2px 5px; border-radius: 0 0 3px 3px; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Гант квартала</span>
+    <span class="sub">Q2 · 16 эпиков · 5 команд</span>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-drift)"></i>дрейф</span><span><i style="background:var(--prizma-off-course)"></i>риск срыва</span><span><i style="background:var(--prizma-information)"></i>сегодня</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Тема"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="scroll"><div class="grid" id="grid"></div></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases, grid = document.getElementById('grid');
+  let html = '';
+  html += '<div class="h first"><span class="pz-eyebrow">Эпик</span></div>';
+  cols.forEach(c => {
+    const dt = c.dated ? new Date(c.start).toLocaleDateString('ru',{day:'2-digit',month:'short'})+' – '+new Date(c.end).toLocaleDateString('ru',{day:'2-digit',month:'short'}) : 'без даты';
+    html += '<div class="h"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span><span class="dt">'+dt+'</span></div>';
+  });
+  D.teams.forEach(team => {
+    html += '<div class="team">'+team+'</div>';
+    D.epics.filter(e=>e.team===team).forEach(e => {
+      const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-'+(e.risk==='off-course'?'off-course':'drift')+')"></span>' : '';
+      const est = Object.values(e.est||{}).reduce((a,b)=>a+b,0);
+      html += '<div class="lbl"><span class="nm">'+riskDot+e.epic+'</span><span class="est">'+est+' дн · '+e.pills.length+' работ</span></div>';
+      cols.forEach(c => {
+        const bz = c.key==='backlog' || c.key==='overtime';
+        html += '<div class="c'+(bz?' bz':'')+'">';
+        e.pills.filter(p=>p.col===c.key).forEach(p => {
+          const rc = e.risk==='off-course' ? ' r-off' : (e.risk==='drift' ? ' r-drift' : '');
+          html += '<div class="p '+p.state+(p.state==='done'?'':rc)+'"><span class="nm">'+(D.WT[p.wt]?D.WT[p.wt].label:p.wt)+'</span><span class="wt">'+p.wt+'</span></div>';
+        });
+        html += '</div>';
+      });
+    });
+  });
+  grid.innerHTML = html;
+
+  // today-axis: позиция = сегодня пропорционально внутри текущего окна.
+  // Считаем синхронно (layout уже доступен) + fallback по resize; НЕ полагаемся
+  // только на requestAnimationFrame — в фоновой вкладке он может не сработать.
+  function placeToday() {
+    grid.querySelector('.today')?.remove();
+    const heads = [...grid.querySelectorAll('.h')];
+    const curIdx = cols.findIndex(c=>c.current);
+    const cur = heads[curIdx+1]; // +1 за первую колонку-лейбл
+    if (!cur) return;
+    const c = cols[curIdx];
+    const total = (new Date(c.end) - new Date(c.start));
+    const pct = total>0 ? (new Date(D.today)-new Date(c.start))/total : .5;
+    const gr = grid.getBoundingClientRect(), hr = cur.getBoundingClientRect();
+    const left = (hr.left - gr.left) + hr.width * Math.max(0,Math.min(1,pct));
+    const line = document.createElement('div'); line.className = 'today';
+    line.style.left = left.toFixed(1)+'px'; line.style.height = grid.scrollHeight+'px';
+    line.innerHTML = '<span class="cap">СЕГОДНЯ 23.05</span>';
+    grid.appendChild(line);
+  }
+  placeToday();
+  setTimeout(placeToday, 60);
+  window.addEventListener('resize', placeToday);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

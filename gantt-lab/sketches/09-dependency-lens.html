@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 09 · Линза зависимостей</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .top { display: flex; align-items: flex-start; gap: 16px; padding: 18px 24px 14px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .head h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 5px 0 4px; }
+  .top .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 13px; max-width: 560px; }
+  .top .spacer { flex: 1; }
+
+  /* readout-плашка */
+  .readout { display: flex; flex-direction: column; gap: 6px; min-width: 280px; padding: 12px 14px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: var(--prizma-bg-elevated); transition: border-color .2s; }
+  .readout.active { border-color: var(--prizma-information); }
+  .readout .r1 { font: 600 12px/1.3 var(--font); color: var(--prizma-text-primary); }
+  .readout .r1 .muted { color: var(--prizma-text-tertiary); font-weight: 500; }
+  .readout .counts { display: flex; gap: 16px; font: 600 11px/1 var(--mono); }
+  .readout .counts .dep { color: var(--prizma-information); }
+  .readout .counts .blk { color: var(--prizma-off-course); }
+  .readout .crit { font: 600 11px/1.4 var(--mono); color: var(--prizma-text-secondary); }
+  .readout .crit b { color: var(--prizma-drift); font-weight: 700; }
+  .readout .empty { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+
+  /* сцена */
+  .scene { position: relative; flex: 1; overflow: auto; padding: 22px 24px 60px; }
+  svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 1; }
+
+  .teams { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 20px; }
+  .teamblock .tname { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  .epic { position: relative; display: flex; flex-direction: column; gap: 5px; width: 215px; padding: 12px 14px 12px 16px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md);
+    cursor: pointer; transition: opacity .25s var(--ease-calm), border-color .2s, transform .2s var(--ease-calm), box-shadow .2s; }
+  .epic::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-border-strong); border-radius: var(--r-md) 0 0 var(--r-md); transition: background .2s; }
+  .epic:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.28); }
+  .epic .nm { font: 600 12.5px/1.25 var(--font); color: var(--prizma-text-primary); }
+  .epic .sub { display: flex; align-items: center; gap: 8px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .epic .sub .rel { color: var(--prizma-text-secondary); }
+  .epic .depflag { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* состояния линзы */
+  .scene.focusing .epic:not(.in-chain):not(.focused) { opacity: .16; }
+  .epic.focused { border-color: var(--prizma-information); }
+  .epic.focused::before { background: var(--prizma-information); }
+  .epic.is-ancestor::before { background: var(--prizma-information); }
+  .epic.is-descendant::before { background: var(--prizma-off-course); }
+  .epic.on-crit { box-shadow: 0 0 0 1px var(--prizma-drift), 0 4px 14px rgba(0,0,0,.3); }
+  .epic.on-crit::before { background: var(--prizma-drift); }
+
+  .role { font: 700 9px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; display: none; }
+  .epic.is-ancestor .role.anc { display: inline-block; color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .epic.is-descendant .role.desc { display: inline-block; color: var(--prizma-off-course); background: var(--prizma-off-course-bg); }
+  .epic.focused .role.foc { display: inline-block; color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); }
+
+  .hint { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend { display: flex; gap: 16px; margin-top: 10px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="head">
+      <div class="pz-eyebrow">Скетч 09 · Граф</div>
+      <h1>Линза зависимостей</h1>
+      <p>Наведите или кликните эпик — всё несвязанное гаснет, проявляется цепочка: предки (от кого зависит) и потомки (кто зависит). Жёлтым отмечен <b>критический путь</b> — самая длинная цепь через эпик.</p>
+      <div class="legend">
+        <span><i style="border-color:var(--prizma-information)"></i>зависит от (предки)</span>
+        <span><i style="border-color:var(--prizma-off-course)"></i>блокирует (потомки)</span>
+        <span><i style="border-color:var(--prizma-drift)"></i>крит-путь</span>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <div class="readout" id="readout">
+      <div class="empty" id="roEmpty">Наведите эпик, чтобы увидеть его цепочку зависимостей.</div>
+      <div class="r1" id="roTitle" style="display:none"></div>
+      <div class="counts" id="roCounts" style="display:none"><span class="dep">зависит от <span id="roDep">0</span></span><span class="blk">блокирует <span id="roBlk">0</span></span></div>
+      <div class="crit" id="roCrit" style="display:none"></div>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="scene" id="scene">
+    <svg class="wires" id="wires" aria-hidden="true"></svg>
+    <div class="teams" id="teams"></div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+  const relShort = k => { const c = D.releases.find(r=>r.key===k); return c ? c.short : k; };
+  // первый «активный» релиз эпика для контекста
+  const epicRel = e => { const cols = ['r120','r121','r122','overtime','backlog']; for (const c of cols){ if (e.pills.some(p=>p.col===c)) return c; } return e.pills[0]?.col || 'backlog'; };
+
+  // ── граф: deps = «зависит от». Рёбра dep→e означают «dep блокирует e». ──
+  const ancestorsOf = {}; // транзитивные предки (на кого опирается)
+  const descendantsOf = {}; // транзитивные потомки (кто опирается на него)
+  D.epics.forEach(e => { ancestorsOf[e.id] = new Set(); descendantsOf[e.id] = new Set(); });
+  function collectAnc(id, acc){ (byId[id].deps||[]).forEach(d => { if (byId[d] && !acc.has(d)){ acc.add(d); collectAnc(d, acc); } }); }
+  // потомки: кто перечисляет id в своих deps (прямо или транзитивно)
+  const directChildren = {}; D.epics.forEach(e => directChildren[e.id] = []);
+  D.epics.forEach(e => (e.deps||[]).forEach(d => { if (directChildren[d]) directChildren[d].push(e.id); }));
+  function collectDesc(id, acc){ (directChildren[id]||[]).forEach(c => { if (!acc.has(c)){ acc.add(c); collectDesc(c, acc); } }); }
+  D.epics.forEach(e => { collectAnc(e.id, ancestorsOf[e.id]); collectDesc(e.id, descendantsOf[e.id]); });
+
+  // ── критический путь через узел = (длиннейшая цепь предков) + узел + (длиннейшая цепь потомков) ──
+  const upMemo = {}, downMemo = {};
+  function longestUp(id){ // самая длинная цепочка вверх по deps, возвращает массив id (без самого узла), от корня к узлу
+    if (upMemo[id]) return upMemo[id];
+    let best = [];
+    (byId[id].deps||[]).forEach(d => { if (byId[d]){ const chain = longestUp(d).concat([d]); if (chain.length > best.length) best = chain; } });
+    return (upMemo[id] = best);
+  }
+  function longestDown(id){ // самая длинная цепочка вниз по потомкам, массив id (без узла), от узла к листу
+    if (downMemo[id]) return downMemo[id];
+    let best = [];
+    (directChildren[id]||[]).forEach(c => { const chain = [c].concat(longestDown(c)); if (chain.length > best.length) best = chain; });
+    return (downMemo[id] = best);
+  }
+  function criticalPath(id){ return longestUp(id).concat([id]).concat(longestDown(id)); }
+
+  // ── рендер ──
+  const teamsRoot = document.getElementById('teams');
+  teamsRoot.innerHTML = D.teams.map(team => {
+    const eps = D.epics.filter(e => e.team === team);
+    const cards = eps.map(e => {
+      const rk = epicRel(e);
+      const depN = (e.deps||[]).length;
+      const blkN = directChildren[e.id].length;
+      const flag = (depN || blkN)
+        ? '<span class="depflag"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>'+(depN+blkN)+'</span>'
+        : '<span style="opacity:.5">—</span>';
+      return '<div class="epic" data-id="'+e.id+'" tabindex="0">'+
+        '<span class="nm">'+e.epic+'</span>'+
+        '<span class="sub"><span class="rel">'+relShort(rk)+'</span>'+flag+
+          '<span class="role anc">предок</span><span class="role desc">потомок</span><span class="role foc">фокус</span></span>'+
+        '</div>';
+    }).join('');
+    return '<div class="teamblock"><div class="tname">'+team+'</div><div class="row">'+cards+'</div></div>';
+  }).join('');
+
+  const scene = document.getElementById('scene');
+  const wires = document.getElementById('wires');
+  const cardEls = {}; scene.querySelectorAll('.epic').forEach(el => cardEls[el.dataset.id] = el);
+
+  function center(el, edge){
+    const s = scene.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const x = r.left - s.left + scene.scrollLeft, y = r.top - s.top + scene.scrollTop;
+    if (edge === 'l') return [x, y + r.height/2];
+    if (edge === 'r') return [x + r.width, y + r.height/2];
+    return [x + r.width/2, y + r.height/2];
+  }
+
+  let focusId = null;
+
+  function clearFocus(){
+    focusId = null;
+    scene.classList.remove('focusing');
+    Object.values(cardEls).forEach(el => el.classList.remove('focused','in-chain','is-ancestor','is-descendant','on-crit'));
+    wires.innerHTML = '';
+    document.getElementById('readout').classList.remove('active');
+    document.getElementById('roEmpty').style.display = '';
+    ['roTitle','roCounts','roCrit'].forEach(i => document.getElementById(i).style.display = 'none');
+  }
+
+  function focus(id){
+    focusId = id;
+    const anc = ancestorsOf[id], desc = descendantsOf[id];
+    const crit = criticalPath(id);
+    const critSet = new Set(crit);
+
+    scene.classList.add('focusing');
+    Object.values(cardEls).forEach(el => el.classList.remove('focused','in-chain','is-ancestor','is-descendant','on-crit'));
+    cardEls[id].classList.add('focused','in-chain');
+    anc.forEach(a => { cardEls[a]?.classList.add('in-chain','is-ancestor'); });
+    desc.forEach(d => { cardEls[d]?.classList.add('in-chain','is-descendant'); });
+    crit.forEach(c => { if (c !== id) cardEls[c]?.classList.add('on-crit'); });
+    cardEls[id].classList.add('on-crit');
+
+    drawWires(id, anc, desc, critSet);
+
+    // readout
+    document.getElementById('readout').classList.add('active');
+    document.getElementById('roEmpty').style.display = 'none';
+    const t = document.getElementById('roTitle'); t.style.display = ''; t.innerHTML = byId[id].epic + ' <span class="muted">· '+byId[id].team+'</span>';
+    document.getElementById('roCounts').style.display = '';
+    document.getElementById('roDep').textContent = anc.size;
+    document.getElementById('roBlk').textContent = desc.size;
+    const rc = document.getElementById('roCrit'); rc.style.display = '';
+    const labels = crit.map(c => c === id ? '<b>'+byId[c].epic.split(' ').slice(0,2).join(' ')+'</b>' : byId[c].epic.split(' ').slice(0,2).join(' '));
+    rc.innerHTML = 'крит-путь: ' + (crit.length > 1 ? labels.join(' → ') : '— (изолирован)');
+  }
+
+  function drawWires(id, anc, desc, critSet){
+    const focusEl = cardEls[id];
+    let s = '';
+    // тонкие коннекторы от фокуса к каждому члену цепи
+    const draw = (fromEl, toEl, color, onCrit) => {
+      const a = center(fromEl), b = center(toEl);
+      const left = a[0] <= b[0];
+      const from = left ? center(fromEl,'r') : center(fromEl,'l');
+      const to = left ? center(toEl,'l') : center(toEl,'r');
+      const mx = (from[0] + to[0]) / 2;
+      s += '<path d="M'+from[0].toFixed(1)+' '+from[1].toFixed(1)+' C '+mx.toFixed(1)+' '+from[1].toFixed(1)+', '+mx.toFixed(1)+' '+to[1].toFixed(1)+', '+to[0].toFixed(1)+' '+to[1].toFixed(1)+'" fill="none" stroke="'+color+'" stroke-width="'+(onCrit?2:1.3)+'" '+(onCrit?'':'stroke-dasharray="4 3" ')+'opacity="'+(onCrit?1:.85)+'"/>';
+      s += '<circle cx="'+to[0].toFixed(1)+'" cy="'+to[1].toFixed(1)+'" r="'+(onCrit?3:2.4)+'" fill="'+color+'"/>';
+    };
+    anc.forEach(a => draw(focusEl, cardEls[a], 'var(--prizma-information)', critSet.has(a)));
+    desc.forEach(d => draw(focusEl, cardEls[d], 'var(--prizma-off-course)', critSet.has(d)));
+    wires.innerHTML = s;
+  }
+
+  // ── взаимодействие ──
+  scene.querySelectorAll('.epic').forEach(el => {
+    el.addEventListener('mouseenter', () => { if (!locked) focus(el.dataset.id); });
+    el.addEventListener('click', (e) => { e.stopPropagation(); if (locked && focusId === el.dataset.id){ locked = false; clearFocus(); } else { locked = true; focus(el.dataset.id); } });
+    el.addEventListener('focus', () => focus(el.dataset.id));
+  });
+  let locked = false;
+  scene.addEventListener('mouseleave', () => { if (!locked) clearFocus(); });
+  scene.addEventListener('click', () => { locked = false; clearFocus(); });
+
+  // перерисовка коннекторов при скролле/resize (синхронно + setTimeout)
+  function redraw(){ if (focusId) focus(focusId); }
+  scene.addEventListener('scroll', () => { if (focusId) drawWires(focusId, ancestorsOf[focusId], descendantsOf[focusId], new Set(criticalPath(focusId))); });
+  setTimeout(redraw, 60);
+  window.addEventListener('resize', redraw);
+
+  document.getElementById('tt').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+    redraw();
+  });
+})();
+</script>
+</body>
+</html>

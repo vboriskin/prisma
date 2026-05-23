@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 07 · Инлайн-добавление работы</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 20px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); margin: 0 0 14px; }
+  .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: visible; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 240px repeat(5, 1fr); min-width: 900px; }
+  .ghead { position: sticky; top: 0; z-index: 5; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 13px 12px 11px; }
+  .ghead.first { display: flex; align-items: flex-end; }
+  .ghead .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .ghead .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .dt { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; padding: 8px 16px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border);
+    font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+
+  .lbl { border-bottom: 1px solid var(--prizma-border); padding: 11px 14px; display: flex; flex-direction: column; gap: 3px; }
+  .lbl .nm { font-size: 13px; font-weight: 600; }
+  .lbl .meta { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { position: relative; border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border);
+    min-height: 48px; padding: 8px 9px; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; transition: background .12s; }
+  .cell.empty { cursor: pointer; }
+  .cell.empty:hover { background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  .cell.open { background: var(--prizma-information-bg); box-shadow: inset 0 0 0 1px var(--prizma-information); }
+
+  /* faint «+» в пустой ячейке на hover */
+  .plus { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center; border: 1px dashed var(--prizma-border-strong);
+    border-radius: var(--r-sm); color: var(--prizma-text-tertiary); opacity: 0; transition: opacity .12s, color .12s, border-color .12s; pointer-events: none; }
+  .cell.empty:hover .plus { opacity: 1; }
+  .cell.open .plus { opacity: 0; }
+  .plus svg { width: 13px; height: 13px; }
+
+  /* пилюля */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill[data-state="done"] { opacity: .78; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); }
+  .pill.new { animation: springIn .34s var(--ease-spring); }
+  @keyframes springIn { from { opacity: 0; transform: scale(.6) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+
+  /* ── anchored popover ── */
+  .pop { position: fixed; z-index: var(--z-dropdown); width: 232px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); box-shadow: 0 16px 44px rgba(0,0,0,.5);
+    padding: 12px; opacity: 0; transform: scale(.94) translateY(-4px); transform-origin: top center;
+    transition: opacity .14s var(--ease-calm), transform .18s var(--ease-spring); pointer-events: none; }
+  .pop.show { opacity: 1; transform: scale(1) translateY(0); pointer-events: auto; }
+  .pop .pt { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .pop .pt .t { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); }
+  .pop .pt .where { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pop .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .chip { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+    padding: 8px 8px 8px 11px; background: var(--prizma-bg-tertiary); border: 1px solid transparent; border-radius: var(--r-md);
+    cursor: pointer; overflow: hidden; transition: border-color .12s, transform .1s; text-align: left; }
+  .chip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .chip .code { font: 700 12px/1 var(--mono); color: var(--prizma-text-primary); }
+  .chip .lab { font-size: 9.5px; color: var(--prizma-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .chip:hover { border-color: var(--prizma-border-strong); }
+  .chip.focus { border-color: var(--prizma-information); }
+  .chip:active { transform: scale(.95); }
+  .pop .ph { margin-top: 10px; font-size: 10.5px; color: var(--prizma-text-tertiary); display: flex; gap: 10px; }
+  .pop .ph kbd { font: 600 9px/1 var(--mono); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 2px 4px; margin-right: 3px; color: var(--prizma-text-secondary); }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    display: flex; align-items: center; gap: 10px; padding: 11px 16px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transition: opacity .2s, transform .22s var(--ease-calm); z-index: var(--z-modal); font-size: 13.5px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .arr { color: var(--prizma-information); font-family: var(--mono); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 07 · Инлайн-добавление работы</div>
+      <h1>Добавление работы рядом с ячейкой</h1>
+      <p>Не центральная модалка, а закреплённый поповер у самой ячейки — контекст не теряется. Пустая ячейка на наведении показывает бледный «+»; клик открывает компактную сетку типов работ прямо здесь.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <p class="hint">Наведите на пустую ячейку → <b>«+»</b>. Клик или двойной клик открывает выбор. В поповере: стрелки двигают фокус, <b>Enter</b> добавляет, <b>Esc</b> закрывает.</p>
+  <div class="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<div class="pop" id="pop" role="dialog" aria-label="Выбор типа работы"></div>
+<div class="toast" id="toast"><span class="arr">+</span><span id="toastText"></span></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const WT_ORDER = ['BE','FE','QA','AN','BA','IMPL','MIG','STAB','HF'];
+
+  // рабочая копия эпиков (мутируем pills локально)
+  const state = JSON.parse(JSON.stringify(D.epics));
+  const grid = document.getElementById('grid');
+
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  function relShort(k){ const c = cols.find(c=>c.key===k); return c?c.short:k; }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  function render() {
+    let html = '<div class="ghead first"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      const dt = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="ghead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span><span class="dt">'+dt+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      html += '<div class="teamrow">'+team+'</div>';
+      state.filter(e => e.team === team).forEach(e => {
+        html += '<div class="lbl"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+e.pills.length+' работ</span></div>';
+        cols.forEach(c => {
+          const pills = e.pills.filter(p => p.col === c.key);
+          const empty = pills.length === 0;
+          html += '<div class="cell'+(empty?' empty':'')+'" data-epic="'+e.id+'" data-col="'+c.key+'" tabindex="'+(empty?0:-1)+'">';
+          pills.forEach(p => {
+            const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+            const justNew = p._new ? ' new' : ''; delete p._new;
+            html += '<span class="pill'+justNew+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'"><span class="nm">'+p.wt+'</span>'+who+'</span>';
+          });
+          if (empty) html += '<span class="plus"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>';
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+    wireCells();
+  }
+
+  /* ── поповер ── */
+  const pop = document.getElementById('pop');
+  let openCell = null, chipFocus = 0;
+
+  function chipsHtml() {
+    let h = '';
+    WT_ORDER.forEach((wt, i) => {
+      h += '<button class="chip'+(i===chipFocus?' focus':'')+'" data-wt="'+wt+'" data-ci="'+i+'" style="--wt:'+wtVar(wt)+'" tabindex="-1">' +
+        '<span class="code">'+wt+'</span><span class="lab">'+(D.WT[wt]?D.WT[wt].label:wt)+'</span></button>';
+    });
+    return h;
+  }
+
+  function openPop(cell) {
+    closePop();
+    openCell = cell; chipFocus = 0;
+    cell.classList.add('open');
+    const epic = state.find(e => e.id === cell.dataset.epic);
+    pop.innerHTML = '<div class="pt"><span class="t">Тип работы</span><span class="where">'+esc(epic.epic.slice(0,16))+(epic.epic.length>16?'…':'')+' · '+relShort(cell.dataset.col)+'</span></div>' +
+      '<div class="chips">'+chipsHtml()+'</div>' +
+      '<div class="ph"><span><kbd>↑↓←→</kbd>выбор</span><span><kbd>↵</kbd>добавить</span><span><kbd>esc</kbd>закрыть</span></div>';
+    pop.classList.add('show');
+    positionPop(cell);
+    wireChips();
+  }
+
+  function positionPop(cell) {
+    const r = cell.getBoundingClientRect();
+    pop.style.visibility = 'hidden';
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = r.left + r.width / 2 - pw / 2;
+    let top = r.bottom + 6;
+    pop.style.transformOrigin = 'top center';
+    if (top + ph > window.innerHeight - 10) { top = r.top - ph - 6; pop.style.transformOrigin = 'bottom center'; }
+    left = Math.max(10, Math.min(left, window.innerWidth - pw - 10));
+    pop.style.left = left.toFixed(0) + 'px';
+    pop.style.top = top.toFixed(0) + 'px';
+    pop.style.visibility = '';
+  }
+
+  function closePop() {
+    if (openCell) openCell.classList.remove('open');
+    openCell = null;
+    pop.classList.remove('show');
+  }
+
+  function paintChips() {
+    pop.querySelectorAll('.chip').forEach(c => c.classList.toggle('focus', +c.dataset.ci === chipFocus));
+  }
+
+  function pick(wt) {
+    if (!openCell) return;
+    const epic = state.find(e => e.id === openCell.dataset.epic);
+    epic.pills.push({ wt: wt, col: openCell.dataset.col, state: 'planned', who: null, _new: true });
+    const where = epic.epic + ' · ' + relShort(openCell.dataset.col);
+    closePop();
+    render();
+    showToast(wt + ' → ' + where);
+  }
+
+  function wireCells() {
+    grid.querySelectorAll('.cell.empty').forEach(cell => {
+      cell.addEventListener('click', () => openPop(cell));
+      cell.addEventListener('dblclick', () => openPop(cell));
+      cell.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPop(cell); }
+      });
+    });
+  }
+
+  function wireChips() {
+    pop.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('mouseenter', () => { chipFocus = +chip.dataset.ci; paintChips(); });
+      chip.addEventListener('click', () => pick(chip.dataset.wt));
+    });
+  }
+
+  // клавиатура поповера: 3-колоночная сетка
+  const COLS = 3;
+  document.addEventListener('keydown', e => {
+    if (!openCell) return;
+    const n = WT_ORDER.length;
+    if (e.key === 'Escape') { e.preventDefault(); closePop(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); chipFocus = (chipFocus + 1) % n; paintChips(); }
+    else if (e.key === 'ArrowLeft')  { e.preventDefault(); chipFocus = (chipFocus - 1 + n) % n; paintChips(); }
+    else if (e.key === 'ArrowDown')  { e.preventDefault(); chipFocus = Math.min(chipFocus + COLS, n - 1); paintChips(); }
+    else if (e.key === 'ArrowUp')    { e.preventDefault(); chipFocus = Math.max(chipFocus - COLS, 0); paintChips(); }
+    else if (e.key === 'Enter')      { e.preventDefault(); pick(WT_ORDER[chipFocus]); }
+  });
+
+  // outside-click закрывает
+  document.addEventListener('mousedown', e => {
+    if (!openCell) return;
+    if (pop.contains(e.target) || openCell.contains(e.target)) return;
+    closePop();
+  });
+  window.addEventListener('scroll', () => { if (openCell) positionPop(openCell); }, true);
+  window.addEventListener('resize', () => { if (openCell) positionPop(openCell); });
+
+  /* ── toast ── */
+  const toast = document.getElementById('toast'), tText = document.getElementById('toastText');
+  let tTimer;
+  function showToast(text) {
+    tText.textContent = text;
+    toast.classList.add('show');
+    clearTimeout(tTimer);
+    tTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

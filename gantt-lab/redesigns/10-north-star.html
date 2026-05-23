@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 10 · Северная звезда</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
+  /* ── hero header ── */
+  .hero { position: relative; flex: none; padding: 18px 24px 16px; border-bottom: 1px solid var(--prizma-border); overflow: hidden; }
+  /* faint constellation rays — CSS only, reduced-motion safe */
+  .hero .rays { position: absolute; inset: 0; pointer-events: none; opacity: .5; }
+  .hero .hd { position: relative; display: flex; align-items: center; gap: 14px; }
+  .hero .star { width: 30px; height: 30px; color: var(--prizma-information); flex: none; }
+  .hero h1 { font-size: 19px; font-weight: 800; letter-spacing: -.01em; margin: 0; }
+  .hero .sub { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); margin-top: 4px; }
+  .hero .today-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border: 1px solid var(--prizma-information); border-radius: var(--r-md); color: var(--prizma-information); font: 700 11px/1 var(--mono); letter-spacing: .3px; }
+  .hero .today-badge .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-information); }
+
+  /* milestone spine */
+  .spine { position: relative; margin-top: 16px; height: 40px; }
+  .spine .axis { position: absolute; left: 0; right: 0; top: 19px; height: 1px; background: var(--prizma-border-strong); }
+  .spine .now { position: absolute; top: 4px; bottom: 4px; width: 0; border-left: 2px solid var(--prizma-information); }
+  .spine .now .cap { position: absolute; top: -2px; left: 50%; transform: translateX(-50%); font: 700 8.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); background: var(--prizma-bg); padding: 0 5px; white-space: nowrap; }
+  .ms { position: absolute; top: 12px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .ms .flag { width: 0; height: 0; }
+  .ms .dot { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--prizma-text-secondary); background: var(--prizma-bg); }
+  .ms .lb { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .ms .dd { font: 600 9px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .ms.past .dot { border-color: var(--prizma-text-tertiary); opacity: .55; }
+  .ms.soon .dot { border-color: var(--prizma-information); background: var(--prizma-information); }
+
+  /* ── zones ── */
+  .zones { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; min-height: 0; }
+  .zone { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--prizma-border); }
+  .zone:last-child { border-right: 0; }
+  .zh { position: sticky; top: 0; z-index: 5; background: var(--prizma-bg); padding: 14px 16px 11px; border-bottom: 1px solid var(--prizma-border); }
+  .zh .zt { display: flex; align-items: baseline; gap: 8px; }
+  .zh .zt b { font-size: 13px; font-weight: 700; }
+  .zh .zt .cnt { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .zh .zsub { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .zone.focus .zh { box-shadow: inset 3px 0 0 var(--prizma-information); }
+  .zone.focus .zh .zt b { color: var(--prizma-text-primary); }
+
+  .zlist { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .attn-hd { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); padding: 2px 2px 0; display: flex; align-items: center; gap: 6px; }
+
+  /* epic card (compact) */
+  .ec { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 9px 11px 9px 12px; transition: border-color .15s; }
+  .ec::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-border-strong); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .ec.r-drift::before { background: var(--prizma-drift); width: 3px; }
+  .ec.r-off::before { background: var(--prizma-off-course); width: 3px; }
+  .ec.active { border-color: var(--prizma-information); box-shadow: inset 0 0 0 1px var(--prizma-information-bg); }
+  .ec:hover { border-color: var(--prizma-border-strong); }
+  .ec-hd { display: flex; align-items: flex-start; gap: 7px; }
+  .ec .mono { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font: 700 9px/1 var(--mono); letter-spacing: .3px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+  .ec-nm { font-size: 12px; font-weight: 600; line-height: 1.3; flex: 1; }
+  .ec .rk { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; }
+  .ec .rk.drift { background: var(--prizma-drift); } .ec .rk.off { background: var(--prizma-off-course); }
+  .ec-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+  .wtchip { position: relative; display: inline-flex; align-items: center; padding: 2px 6px 2px 8px; font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .wtchip.done { opacity: .5; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .wtchip.prog::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); margin-left: 4px; }
+  .ec-ft { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; }
+  .ec-ft .who { font-size: 10px; color: var(--prizma-text-tertiary); }
+  .ec-ft .eff { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .empty { font-size: 11px; color: var(--prizma-text-tertiary); padding: 8px 4px; font-style: italic; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Северная звезда</span>
+    <span class="pz-eyebrow">Редизайн 10 · compass</span>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-drift)"></i>дрейф</span><span><i style="background:var(--prizma-off-course)"></i>риск</span><span><i style="background:var(--prizma-information)"></i>сейчас</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="hero">
+    <svg class="rays" id="rays" aria-hidden="true" preserveAspectRatio="none"></svg>
+    <div class="hd">
+      <svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 1.5 14 10l8.5 2-8.5 2-2 8.5-2-8.5L1.5 12 10 10z"/>
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+      </svg>
+      <div>
+        <h1>Компас квартала</h1>
+        <div class="sub">сегодня 23 мая · окно 1.21 · до релиз-кандидата 7 дней</div>
+      </div>
+      <span class="today-badge"><span class="pulse"></span>СЕЙЧАС</span>
+    </div>
+    <div class="spine" id="spine">
+      <div class="axis"></div>
+      <div class="now" id="now"><span class="cap">СЕГОДНЯ</span></div>
+    </div>
+  </div>
+
+  <div class="zones" id="zones"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const now = new Date(D.today);
+
+  // --- зоны по близости к «сейчас» ---
+  // Эта неделя: эпик с активной (progress) пилюлей в текущем окне 1.21 — то, что реально движется.
+  // Этот релиз: остальные эпики, запланированные в 1.21 (ещё не в работе).
+  // Дальше: доминанта в 1.22/овертайм (и нет 1.21).
+  // Бэклог: всё в бэклоге / без будущих.
+  function classify(e) {
+    const has = k => e.pills.some(p => p.col === k);
+    const hasProg = e.pills.some(p => p.col === 'r121' && p.state === 'progress');
+    if (hasProg) return 'week';
+    if (has('r121')) return 'rel';
+    if (has('r122') || has('overtime')) return 'next';
+    return 'backlog';
+  }
+  // важность: риск срыва > дрейф > in-progress > прочее (для сортировки «что требует внимания»)
+  function weight(e) {
+    let w = 0;
+    if (e.risk === 'off-course') w += 100; else if (e.risk === 'drift') w += 50;
+    if (e.pills.some(p => p.state === 'progress')) w += 20;
+    w += (e.moves || 0);
+    return w;
+  }
+
+  const ZONES = [
+    { key: 'week',    title: 'Эта неделя',     sub: 'в работе · окно 1.21',       focus: true },
+    { key: 'rel',     title: 'Этот релиз 1.21', sub: 'запланировано на текущее окно' },
+    { key: 'next',    title: 'Дальше · 1.22+',  sub: 'следующие окна и овертайм' },
+    { key: 'backlog', title: 'Бэклог',          sub: 'без даты — резерв' },
+  ];
+
+  function ecHtml(e) {
+    const riskCls = e.risk === 'off-course' ? 'r-off' : (e.risk === 'drift' ? 'r-drift' : '');
+    const rk = e.risk === 'off-course' ? '<span class="rk off" title="риск срыва"></span>'
+             : e.risk === 'drift' ? '<span class="rk drift" title="дрейф"></span>' : '';
+    const active = e.pills.some(p => p.state === 'progress');
+    const chips = e.pills.map(p => {
+      const cls = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : '');
+      return '<span class="wtchip' + cls + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '">' + esc(p.wt) + '</span>';
+    }).join('');
+    const who = (e.pills.find(p => p.who) || {}).who;
+    return '<div class="ec ' + riskCls + (active ? ' active' : '') + '">' +
+      '<div class="ec-hd"><span class="mono" title="' + esc(e.team) + '">' + esc(e.team.slice(0,2)) + '</span><span class="ec-nm">' + esc(e.epic) + '</span>' + rk + '</div>' +
+      '<div class="ec-chips">' + chips + '</div>' +
+      '<div class="ec-ft"><span class="who">' + (who ? esc(who) : esc(e.team)) + '</span><span class="eff pz-mono">' + D.helpers.effortOf(e) + ' дн</span></div>' +
+      '</div>';
+  }
+
+  function renderZones() {
+    const bucket = { week: [], rel: [], next: [], backlog: [] };
+    D.epics.forEach(e => bucket[classify(e)].push(e));
+    Object.values(bucket).forEach(arr => arr.sort((a, b) => weight(b) - weight(a)));
+
+    const zones = document.getElementById('zones');
+    zones.innerHTML = ZONES.map(z => {
+      const arr = bucket[z.key];
+      const attn = z.key === 'week' && arr.length
+        ? '<div class="attn-hd"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>требует внимания сейчас</div>'
+        : '';
+      const body = arr.length ? attn + arr.map(ecHtml).join('') : '<div class="empty">пусто</div>';
+      return '<div class="zone' + (z.focus ? ' focus' : '') + '"><div class="zh"><div class="zt"><b>' + esc(z.title) + '</b><span class="cnt">' + arr.length + '</span></div><span class="zsub">' + esc(z.sub) + '</span></div><div class="zlist">' + body + '</div></div>';
+    }).join('');
+  }
+
+  // --- milestone spine: позиции по датам, центр = сейчас ---
+  function renderSpine() {
+    const spine = document.getElementById('spine');
+    spine.querySelectorAll('.ms').forEach(n => n.remove());
+    // временной диапазон шкалы: от начала 1.20 до конца 1.22
+    const lo = new Date(cols.find(c => c.key === 'r120').start).getTime();
+    const hi = new Date(cols.find(c => c.key === 'r122').end).getTime();
+    const span = hi - lo || 1;
+    const pos = t => Math.max(2, Math.min(98, ((t - lo) / span) * 100));
+
+    // now-линия
+    document.getElementById('now').style.left = pos(now.getTime()).toFixed(2) + '%';
+
+    D.milestones.forEach(m => {
+      const t = new Date(m.date).getTime();
+      const cls = t < now.getTime() ? 'past' : (Math.abs(t - now.getTime()) <= 9 * 864e5 ? 'soon' : '');
+      const dd = new Date(m.date).toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+      const el = document.createElement('div');
+      el.className = 'ms ' + cls;
+      el.style.left = pos(t).toFixed(2) + '%';
+      el.innerHTML = '<span class="dot"></span><span class="lb">' + esc(m.label) + '</span><span class="dd">' + dd + '</span>';
+      spine.appendChild(el);
+    });
+  }
+
+  // --- faint constellation rays (decorative, static) ---
+  function renderRays() {
+    const svg = document.getElementById('rays');
+    const w = svg.clientWidth || window.innerWidth, h = svg.clientHeight || 130;
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    // лучи исходят из левой точки-«звезды» (~46,46) — тонкие линии к созвездию точек
+    const ox = 46, oy = 46;
+    const pts = [[w*0.30,28],[w*0.46,70],[w*0.62,22],[w*0.78,58],[w*0.90,34],[w*0.55,18]];
+    let s = '';
+    pts.forEach(([x,y]) => {
+      s += '<line x1="' + ox + '" y1="' + oy + '" x2="' + x.toFixed(0) + '" y2="' + y + '" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+      s += '<circle cx="' + x.toFixed(0) + '" cy="' + y + '" r="1.4" fill="var(--prizma-text-tertiary)"/>';
+    });
+    s += '<circle cx="' + ox + '" cy="' + oy + '" r="2" fill="var(--prizma-information)"/>';
+    svg.innerHTML = s;
+  }
+
+  function layout() { renderSpine(); renderRays(); }
+
+  renderZones();
+  layout();
+  setTimeout(layout, 60); // страховка к rAF
+  window.addEventListener('resize', layout);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

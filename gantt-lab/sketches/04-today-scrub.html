@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 04 · Скраб линии сегодня</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 64px; }
+  .head { margin-bottom: 22px; position: relative; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .tt { position: absolute; top: 0; right: 0; }
+
+  /* ── readout-панель ── */
+  .readout { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-bottom: 18px;
+    padding: 14px 18px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); }
+  .readout .blk { display: flex; flex-direction: column; gap: 4px; }
+  .readout .blk .k { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .readout .blk .v { font: 300 22px/1 var(--mono); letter-spacing: -.01em; }
+  .readout .blk .v.info { color: var(--prizma-information); }
+  .readout .risk .v { color: var(--prizma-text-primary); }
+  .readout .risk.hot .v { color: var(--prizma-off-course); }
+  .readout .risk .v small { font-size: 12px; color: var(--prizma-text-tertiary); font-weight: 400; }
+  .readout .sep { width: 1px; align-self: stretch; background: var(--prizma-border); }
+  .readout .spacer { flex: 1; }
+  .readout .reset { }
+
+  /* ── ось ── */
+  .axis-wrap { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 18px 0 0; overflow: hidden; }
+  .zones { position: relative; height: 56px; margin: 0 18px; }
+  .zone { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--prizma-border); display: flex; flex-direction: column; justify-content: center; padding-left: 12px; }
+  .zone:last-child { border-right: none; }
+  .zone.cur { background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  .zone .rl { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .zone .rl.cur { color: var(--prizma-text-primary); }
+  .zone .dt { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; }
+
+  /* линейка дат под зонами */
+  .ruler { position: relative; height: 26px; margin: 0 18px; border-top: 1px solid var(--prizma-border); }
+  .tick { position: absolute; top: 0; transform: translateX(-50%); padding-top: 5px; font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .tick::before { content: ""; position: absolute; top: 0; left: 50%; width: 1px; height: 4px; background: var(--prizma-border-strong); }
+
+  /* трек + ручка скраба */
+  .track { position: relative; height: 30px; margin: 6px 18px 0; cursor: ew-resize; touch-action: none; }
+  .scrub { position: absolute; top: -150px; bottom: 0; width: 0; z-index: 6; pointer-events: none; }
+  .scrub .line { position: absolute; top: 0; bottom: 8px; left: 0; border-left: 2px solid var(--prizma-information); }
+  .scrub .grip { position: absolute; bottom: 0; left: 0; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 9px; background: var(--prizma-information); color: #0A0A0F; border-radius: var(--r-md);
+    font: 700 11px/1 var(--mono); letter-spacing: .2px; cursor: ew-resize; pointer-events: auto; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .scrub .grip svg { width: 11px; height: 11px; }
+  .scrub.drag .grip { box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  /* «настоящее сегодня» — пунктир-якорь */
+  .anchor { position: absolute; top: -150px; bottom: 8px; width: 0; border-left: 1px dashed var(--prizma-text-secondary); opacity: .55; z-index: 5; pointer-events: none; }
+  .anchor .cap { position: absolute; top: -16px; left: 0; transform: translateX(-50%); font: 700 8px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-text-secondary); white-space: nowrap; }
+
+  /* ── список работ ── */
+  .work { margin-top: 26px; }
+  .work .wh { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .work .wh .pz-eyebrow { color: var(--prizma-text-secondary); }
+  .work .wh .sub { font-size: 12px; color: var(--prizma-text-tertiary); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  .pill { position: relative; display: flex; align-items: center; gap: 9px; padding: 9px 12px 9px 14px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md);
+    transition: border-color .15s, background .15s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .pill .wt { font: 700 11px/1 var(--mono); width: 30px; flex: none; }
+  .pill .nm { font-size: 12.5px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill .deadline { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); flex: none; }
+  .pill .st { font: 600 9px/1 var(--font); letter-spacing: .4px; text-transform: uppercase; padding: 3px 6px; border-radius: var(--r-sm); flex: none; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); }
+  .pill[data-done] { opacity: .6; }
+  .pill[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  /* просрочено — красный stripe + бейдж (semantic only) */
+  .pill.overdue::before { background: var(--prizma-off-course); }
+  .pill.overdue { border-color: color-mix(in srgb, var(--prizma-off-course) 35%, var(--prizma-border)); background: var(--prizma-off-course-bg); }
+  .pill.overdue .st { color: var(--prizma-off-course); border-color: color-mix(in srgb, var(--prizma-off-course) 40%, transparent); }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); flex: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+    <div class="pz-eyebrow">Скетч 04 · Время</div>
+    <h1>Скраб линии сегодня</h1>
+    <p>Время становится осязаемым. Тащите курсор-линию вдоль окон релизов 1.20 → 1.22 — дата читается на ручке, а счётчик сразу пересчитывает, сколько работ оказывается «под риском»: запланированы, не готовы и их окно завершается до выбранной даты.</p>
+  </div>
+
+  <div class="readout">
+    <div class="blk">
+      <span class="k">Курсор</span>
+      <span class="v info pz-mono" id="curDate">23.05</span>
+    </div>
+    <div class="sep"></div>
+    <div class="blk risk" id="riskBlk">
+      <span class="k">Под риском к дате</span>
+      <span class="v pz-mono"><span id="riskN">0</span> <small id="riskWord">работ</small></span>
+    </div>
+    <div class="sep"></div>
+    <div class="blk">
+      <span class="k">Впереди</span>
+      <span class="v pz-mono" id="aheadN">0</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="pz-btn reset" id="resetToday">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+      К сегодня
+    </button>
+  </div>
+
+  <div class="axis-wrap">
+    <div class="zones" id="zones"></div>
+    <div class="ruler" id="ruler"></div>
+    <div class="track" id="track">
+      <div class="anchor" id="anchor"><span class="cap">СЕГОДНЯ 23.05</span></div>
+      <div class="scrub" id="scrub">
+        <div class="line"></div>
+        <div class="grip" id="grip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6L9 18"/><path d="M15 6L15 18"/></svg>
+          <span id="gripDate">23.05</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="work">
+    <div class="wh">
+      <span class="pz-eyebrow">Работы с дедлайном</span>
+      <span class="sub" id="workSub"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const fmtDM = d => d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+  const fmtShort = d => d.toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+  const DAY = 86400000;
+
+  const dated = D.releases.filter(c => c.dated); // r120 r121 r122
+  const T0 = new Date(dated[0].start).getTime();
+  const T1 = new Date(dated[dated.length - 1].end).getTime();
+  const SPAN = T1 - T0;
+
+  const xToTime = pct => T0 + SPAN * Math.max(0, Math.min(1, pct));
+  const timeToPct = t => (t - T0) / SPAN;
+
+  const zonesEl = document.getElementById('zones');
+  const rulerEl = document.getElementById('ruler');
+  const track = document.getElementById('track');
+  const scrub = document.getElementById('scrub');
+  const anchor = document.getElementById('anchor');
+  const gripDate = document.getElementById('gripDate');
+  const grid = document.getElementById('grid');
+
+  // ── собираем датируемые работы: pill в датированном окне → дедлайн = end окна ──
+  // (бэклог/овертайм без дат исключаем — у них нет дедлайна на оси)
+  const items = [];
+  D.epics.forEach(e => {
+    e.pills.forEach(p => {
+      const rel = D.releases.find(r => r.key === p.col);
+      if (!rel || !rel.dated) return;
+      items.push({
+        wt: p.wt, state: p.state, who: p.who,
+        epic: e.epic, team: e.team,
+        relShort: rel.short,
+        deadline: new Date(rel.end).getTime(),
+        relStart: new Date(rel.start).getTime()
+      });
+    });
+  });
+  // стабильный порядок: по дедлайну, затем по команде
+  items.sort((a, b) => a.deadline - b.deadline || a.team.localeCompare(b.team, 'ru'));
+
+  // ── рендер зон релизов ──
+  function renderZones() {
+    let zh = '';
+    dated.forEach(c => {
+      const s = new Date(c.start).getTime(), en = new Date(c.end).getTime();
+      const left = timeToPct(s) * 100, w = (en - s) / SPAN * 100;
+      zh += '<div class="zone' + (c.current ? ' cur' : '') + '" style="left:' + left + '%;width:' + w + '%">' +
+            '<span class="rl' + (c.current ? ' cur' : '') + '">' + c.short + '</span>' +
+            '<span class="dt">' + fmtShort(new Date(c.start)) + ' – ' + fmtShort(new Date(c.end)) + '</span></div>';
+    });
+    zonesEl.innerHTML = zh;
+  }
+
+  // ── линейка дат: тики на границах окон ──
+  function renderRuler() {
+    const marks = [];
+    marks.push(T0);
+    dated.forEach(c => marks.push(new Date(c.end).getTime()));
+    let rh = '';
+    marks.forEach(t => {
+      const pct = timeToPct(t) * 100;
+      rh += '<span class="tick" style="left:' + pct + '%">' + fmtDM(new Date(t)) + '</span>';
+    });
+    rulerEl.innerHTML = rh;
+  }
+
+  // ── состояние скраба ──
+  let curT = new Date(D.today).getTime();
+
+  function placeAnchor() {
+    const pct = timeToPct(new Date(D.today).getTime());
+    anchor.style.left = (pct * 100) + '%';
+  }
+
+  function placeScrub() {
+    const pct = Math.max(0, Math.min(1, timeToPct(curT)));
+    scrub.style.left = (pct * 100) + '%';
+    const d = new Date(curT);
+    gripDate.textContent = fmtDM(d);
+    document.getElementById('curDate').textContent = fmtDM(d);
+    recompute();
+  }
+
+  function recompute() {
+    let risk = 0, ahead = 0;
+    const d = new Date(curT);
+    grid.querySelectorAll('.pill').forEach((el, i) => {
+      const it = items[i];
+      const done = it.state === 'done';
+      // под риском: запланировано (не done), окно завершается СТРОГО до курсора
+      const overdue = !done && it.deadline < curT;
+      el.classList.toggle('overdue', overdue);
+      const stEl = el.querySelector('.st');
+      if (done) { stEl.textContent = 'готово'; }
+      else if (overdue) { stEl.textContent = 'просрочено'; risk++; }
+      else { stEl.textContent = 'впереди'; ahead++; }
+    });
+    document.getElementById('riskN').textContent = risk;
+    document.getElementById('aheadN').textContent = ahead;
+    document.getElementById('riskWord').textContent = plural(risk, 'работа', 'работы', 'работ');
+    document.getElementById('riskBlk').classList.toggle('hot', risk > 0);
+    // подпись «к DD.MM» уже отражена счётчиком + заголовком курсора
+    document.getElementById('workSub').textContent = 'дедлайн = конец окна релиза · красным — просрочено к ' + fmtDM(d);
+  }
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // ── список работ ──
+  function renderGrid() {
+    let h = '';
+    items.forEach(it => {
+      const done = it.state === 'done';
+      h += '<div class="pill"' + (done ? ' data-done' : '') + ' style="--wt:' + wtVar(it.wt) + '">' +
+           '<span class="wt">' + it.wt + '</span>' +
+           '<span class="nm">' + it.epic + '</span>' +
+           (it.who ? '<span class="who">' + it.who + '</span>' : '') +
+           '<span class="deadline">' + it.relShort + '</span>' +
+           '<span class="st"></span>' +
+           '</div>';
+    });
+    grid.innerHTML = h;
+  }
+
+  // ── drag (pointer) ──
+  function clientXToT(clientX) {
+    const r = track.getBoundingClientRect();
+    const pct = (clientX - r.left) / r.width;
+    return xToTime(pct);
+  }
+
+  let dragging = false;
+  function onDown(e) {
+    dragging = true;
+    scrub.classList.add('drag');
+    track.setPointerCapture && e.pointerId != null && track.setPointerCapture(e.pointerId);
+    // прыжок к точке клика (если кликнули по треку, а не по ручке)
+    curT = clientXToT(e.clientX);
+    placeScrub();
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    curT = clientXToT(e.clientX);
+    placeScrub();
+  }
+  function onUp() { dragging = false; scrub.classList.remove('drag'); }
+
+  track.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+
+  document.getElementById('resetToday').addEventListener('click', () => {
+    curT = new Date(D.today).getTime();
+    placeScrub();
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // ── инициализация (синхронно + страховки, не только RAF) ──
+  function layout() {
+    renderZones();
+    renderRuler();
+    placeAnchor();
+    placeScrub();
+  }
+  renderGrid();
+  layout();
+  setTimeout(layout, 60);
+  window.addEventListener('resize', layout);
+})();
+</script>
+</body>
+</html>

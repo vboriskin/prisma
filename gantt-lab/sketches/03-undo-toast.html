@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 03 · Отмена в тосте</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 120px; }
+  .head { margin-bottom: 20px; position: relative; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .tt { position: absolute; top: 0; right: 0; }
+
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  kbd { font: 600 10.5px/1 var(--mono); padding: 3px 6px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); background: var(--prizma-bg-elevated); }
+
+  /* ── сетка эпиков ── */
+  .teams { display: flex; flex-direction: column; gap: 18px; }
+  .team .tname { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 10px; }
+  .epic { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 12px 14px; margin-bottom: 10px; }
+  .epic .en { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .epic .en .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .epic .en .meta { margin-left: auto; font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pills { display: flex; flex-wrap: wrap; gap: 7px; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px 6px 12px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); cursor: pointer; user-select: none; border: 1px solid transparent;
+    transition: transform .12s var(--ease-calm), box-shadow .12s, border-color .12s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill:hover { transform: translateY(-1px); box-shadow: 0 2px 10px rgba(0,0,0,.28); border-color: var(--prizma-border-strong); }
+  .pill .col { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill[data-state="done"] { opacity: .68; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .chk { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-on-course); flex: none; }
+  .pill.flash { animation: flash .5s var(--ease-calm); }
+  @keyframes flash { 0% { box-shadow: 0 0 0 0 var(--prizma-information); } 100% { box-shadow: 0 0 0 6px transparent; } }
+
+  /* ── журнал действий ── */
+  .log { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 14px; position: sticky; top: 20px; }
+  .log .lh { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .log .lh .pz-eyebrow { color: var(--prizma-text-secondary); }
+  .log .lh .cnt { margin-left: auto; font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .log .empty { font-size: 12.5px; color: var(--prizma-text-tertiary); padding: 8px 2px; }
+  .log ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .log li { display: flex; align-items: center; gap: 8px; padding: 8px 8px; border-radius: var(--r-sm); font-size: 12px; transition: background .12s; }
+  .log li:hover { background: var(--prizma-bg-tertiary); }
+  .log li.undone { opacity: .45; }
+  .log li.undone .txt { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .log li .ic { width: 22px; height: 22px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--prizma-information); border: 1px solid var(--prizma-border); }
+  .log li .ic svg { width: 12px; height: 12px; }
+  .log li .txt { flex: 1; min-width: 0; }
+  .log li .txt b { font-weight: 600; }
+  .log li .txt .t2 { display: block; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .log li .un { background: none; border: none; color: var(--prizma-information); font: 600 11px/1 var(--font); cursor: pointer; padding: 4px 6px; flex: none; }
+  .log li.undone .un { display: none; }
+
+  /* ── тосты (стек снизу по центру) ── */
+  .toasts { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); display: flex; flex-direction: column-reverse; gap: 10px; z-index: 9000; align-items: center; }
+  .toast { display: flex; align-items: center; gap: 14px; padding: 11px 14px 11px 16px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.45);
+    font-size: 13px; opacity: 0; transform: translateY(16px) scale(.97);
+    transition: opacity .22s var(--ease-calm), transform .22s var(--ease-calm); }
+  .toast.show { opacity: 1; transform: none; }
+  .toast .ring { width: 22px; height: 22px; flex: none; position: relative; }
+  .toast .ring svg { width: 22px; height: 22px; transform: rotate(-90deg); }
+  .toast .ring .track { stroke: var(--prizma-border-strong); }
+  .toast .ring .prog { stroke: var(--prizma-information); stroke-linecap: round; transition: stroke-dashoffset linear; }
+  .toast .txt b { font-weight: 600; }
+  .toast .txt .mono { font-family: var(--mono); }
+  .toast .undo { background: none; border: none; color: var(--prizma-information); font: 600 13px/1 var(--font); cursor: pointer; padding: 4px 6px; display: inline-flex; align-items: center; gap: 5px; }
+  .toast .undo svg { width: 13px; height: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+    <div class="pz-eyebrow">Скетч 03 · Отмена</div>
+    <h1>Отмена в тосте</h1>
+    <p>Любое действие обратимо. Клик по пилюле переносит работу в следующий релиз; повторный клик с <kbd>Alt</kbd> — отмечает «готово». Каждое действие даёт тост с кольцом-обратным-отсчётом и кнопкой «Отменить». <kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd> отменяет последнее. Стопка действий — в журнале справа.</p>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Клик — перенести в след. релиз · <kbd>Alt</kbd>+клик — готово · <kbd>⌘Z</kbd> отмена</span>
+  </div>
+
+  <div class="layout">
+    <div class="teams" id="teams"></div>
+
+    <aside class="log">
+      <div class="lh">
+        <div class="pz-eyebrow">Журнал действий</div>
+        <span class="cnt" id="logCnt">0</span>
+      </div>
+      <div id="logBody"><div class="empty">Пока ничего не менялось. Кликните по пилюле.</div></div>
+    </aside>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const relShort = k => { const c = D.releases.find(c => c.key === k); return c ? c.short : k; };
+  const datedOrder = D.releases.map(r => r.key); // backlog r120 r121 r122 overtime
+
+  // working copy состояния пилюль (мутируем здесь, source неизменен)
+  let model = D.epics.map(e => ({ id: e.id, team: e.team, epic: e.epic, risk: e.risk,
+    pills: e.pills.map(p => Object.assign({}, p)) }));
+
+  // показываем компактный срез: первые 2 команды, чтобы было что листать но не стена
+  const shownTeams = ['Платежи', 'Интеграции'];
+
+  // стек действий: каждое { kind, label, sub, undo(), li, undone }
+  const stack = [];
+
+  const teamsEl = document.getElementById('teams');
+  const logBody = document.getElementById('logBody');
+  const logCnt = document.getElementById('logCnt');
+  const toastsEl = document.getElementById('toasts');
+
+  function render() {
+    let h = '';
+    shownTeams.forEach(team => {
+      const eps = model.filter(e => e.team === team);
+      h += '<div class="team"><div class="tname">' + team + '</div>';
+      eps.forEach(e => {
+        const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-' + (e.risk === 'off-course' ? 'off-course' : 'drift') + ')"></span>' : '';
+        h += '<div class="epic"><div class="en">' + riskDot + e.epic + '<span class="meta">' + e.pills.length + ' работ</span></div><div class="pills">';
+        e.pills.forEach((p, i) => {
+          const done = p.state === 'done';
+          h += '<div class="pill" data-epic="' + e.id + '" data-idx="' + i + '" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + '" tabindex="0">' +
+               (done ? '<span class="chk"></span>' : '') +
+               '<span class="nm">' + p.wt + '</span>' +
+               '<span class="col">' + relShort(p.col) + '</span>' +
+               (p.who ? '<span class="who">' + p.who + '</span>' : '') +
+               '</div>';
+        });
+        h += '</div></div>';
+      });
+      h += '</div>';
+    });
+    teamsEl.innerHTML = h;
+    wire();
+  }
+
+  function wire() {
+    teamsEl.querySelectorAll('.pill').forEach(pill => {
+      const act = (e) => {
+        const ep = model.find(m => m.id === pill.dataset.epic);
+        const idx = +pill.dataset.idx;
+        const p = ep.pills[idx];
+        if (e.altKey) toggleDone(ep, p, idx);
+        else moveNext(ep, p, idx);
+      };
+      pill.addEventListener('click', act);
+      pill.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(e); } });
+    });
+  }
+
+  function nextRel(col) {
+    const i = datedOrder.indexOf(col);
+    if (i < 0 || i >= datedOrder.length - 1) return null;
+    return datedOrder[i + 1];
+  }
+
+  // ── действия (обратимые) ──
+  function moveNext(ep, p, idx) {
+    const to = nextRel(p.col);
+    if (!to) { flashPill(ep.id, idx); return; }
+    const from = p.col;
+    p.col = to;
+    const label = 'Перенесено ' + p.wt + ': ' + relShort(from) + ' → ' + relShort(to);
+    pushAction({
+      kind: 'move', label, sub: ep.epic,
+      undo: () => { p.col = from; }
+    });
+    render();
+  }
+
+  function toggleDone(ep, p, idx) {
+    const was = p.state;
+    const now = was === 'done' ? 'planned' : 'done';
+    p.state = now;
+    const label = (now === 'done' ? 'Готово' : 'Снято «готово»') + ' · ' + p.wt + ' ' + relShort(p.col);
+    pushAction({
+      kind: 'done', label, sub: ep.epic,
+      undo: () => { p.state = was; }
+    });
+    render();
+  }
+
+  function flashPill(epicId, idx) {
+    const el = teamsEl.querySelector('.pill[data-epic="' + epicId + '"][data-idx="' + idx + '"]');
+    if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  }
+
+  // ── стек + журнал ──
+  function pushAction(a) {
+    a.undone = false;
+    a.id = 'a' + Date.now() + Math.random().toString(36).slice(2, 5);
+    stack.push(a);
+    renderLog();
+    showToast(a);
+  }
+
+  function undoAction(a) {
+    if (a.undone) return;
+    a.undo();
+    a.undone = true;
+    render();
+    renderLog();
+    dismissToast(a);
+  }
+
+  function undoLast() {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (!stack[i].undone) { undoAction(stack[i]); return true; }
+    }
+    return false;
+  }
+
+  function renderLog() {
+    const active = stack.filter(a => !a.undone).length;
+    logCnt.textContent = active;
+    if (!stack.length) { logBody.innerHTML = '<div class="empty">Пока ничего не менялось. Кликните по пилюле.</div>'; return; }
+    const icons = {
+      move: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+      done: '<path d="M20 6L9 17l-5-5"/>'
+    };
+    let h = '<ul>';
+    // последние сверху
+    [...stack].reverse().forEach(a => {
+      h += '<li class="' + (a.undone ? 'undone' : '') + '" data-id="' + a.id + '">' +
+           '<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (icons[a.kind] || icons.move) + '</svg></span>' +
+           '<span class="txt"><b>' + a.label + '</b><span class="t2">' + a.sub + '</span></span>' +
+           '<button class="un" data-id="' + a.id + '">Отменить</button></li>';
+    });
+    h += '</ul>';
+    logBody.innerHTML = h;
+    logBody.querySelectorAll('.un').forEach(b => b.addEventListener('click', () => {
+      const a = stack.find(x => x.id === b.dataset.id);
+      if (a) undoAction(a);
+    }));
+  }
+
+  // ── тосты с кольцом обратного отсчёта ──
+  const DUR = 5000;
+  const R = 9, CIRC = 2 * Math.PI * R;
+
+  function showToast(a) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.dataset.id = a.id;
+    el.innerHTML =
+      '<span class="ring"><svg viewBox="0 0 22 22">' +
+        '<circle class="track" cx="11" cy="11" r="' + R + '" fill="none" stroke-width="2"/>' +
+        '<circle class="prog" cx="11" cy="11" r="' + R + '" fill="none" stroke-width="2" ' +
+          'stroke-dasharray="' + CIRC.toFixed(2) + '" stroke-dashoffset="0"/>' +
+      '</svg></span>' +
+      '<span class="txt">' + a.label + '</span>' +
+      '<button class="undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>Отменить</button>';
+    toastsEl.appendChild(el);
+    a._toast = el;
+
+    el.querySelector('.undo').addEventListener('click', () => undoAction(a));
+
+    // появление + запуск кольца. Не полагаемся ТОЛЬКО на RAF (в фоновой вкладке
+    // он может не сработать) — дублируем через setTimeout; флаг не даёт стартовать дважды.
+    const prog = el.querySelector('.prog');
+    let started = false;
+    const start = () => {
+      if (started) return; started = true;
+      el.classList.add('show');
+      prog.style.transition = 'stroke-dashoffset ' + DUR + 'ms linear';
+      prog.style.strokeDashoffset = CIRC.toFixed(2);
+    };
+    requestAnimationFrame(start);
+    setTimeout(start, 30);
+
+    a._timer = setTimeout(() => dismissToast(a), DUR);
+  }
+
+  function dismissToast(a) {
+    clearTimeout(a._timer);
+    const el = a._toast;
+    if (!el) return;
+    el.classList.remove('show');
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 240);
+    a._toast = null;
+  }
+
+  // ── глобальные хоткеи ──
+  window.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+      if (undoLast()) e.preventDefault();
+    }
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    model = D.epics.map(e => ({ id: e.id, team: e.team, epic: e.epic, risk: e.risk, pills: e.pills.map(p => Object.assign({}, p)) }));
+    stack.forEach(a => dismissToast(a));
+    stack.length = 0;
+    render(); renderLog();
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

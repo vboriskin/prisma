@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 06 · Граф во главе</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 14px; height: 2px; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.dot { width: 8px; height: 8px; border-radius: 2px; }
+  .top button { color: var(--prizma-text-secondary); }
+
+  /* ── layout: canvas + side ── */
+  .body { flex: 1; display: flex; min-height: 0; }
+  .eyebrowbar { position: absolute; top: 58px; left: 22px; z-index: 5; pointer-events: none; }
+  .canvaswrap { flex: 1; position: relative; overflow: auto; }
+  svg.graph { display: block; }
+
+  /* release bands */
+  .band { fill: color-mix(in srgb, var(--prizma-text-primary) 2.5%, transparent); }
+  .band.cur { fill: color-mix(in srgb, var(--prizma-text-primary) 5%, transparent); }
+  .bandlabel { fill: var(--prizma-text-tertiary); font: 700 10px var(--mono); letter-spacing: .6px; text-transform: uppercase; }
+  .bandlabel.cur { fill: var(--prizma-text-secondary); }
+  .lanelabel { fill: var(--prizma-text-tertiary); font: 700 10px var(--font); letter-spacing: .6px; text-transform: uppercase; }
+  .laneline { stroke: var(--prizma-border); stroke-width: 1; stroke-dasharray: 2 4; }
+
+  /* edges */
+  .edge { fill: none; stroke: var(--prizma-border-strong); stroke-width: 1.4; transition: stroke .2s, stroke-width .2s, opacity .2s; }
+  .edge.crit { stroke: var(--prizma-information); stroke-width: 2.2; }
+  .edge.risk { stroke: var(--prizma-off-course); stroke-width: 1.8; }
+  .edge.dim { opacity: .12; }
+  .edge.lit { opacity: 1; }
+
+  /* nodes */
+  .node { cursor: pointer; transition: opacity .2s; }
+  .node .box { fill: var(--prizma-bg-elevated); stroke: var(--prizma-border-strong); stroke-width: 1; transition: stroke .2s, stroke-width .2s; }
+  .node.crit .box { stroke: var(--prizma-information); stroke-width: 1.6; }
+  .node.sel .box { stroke: var(--prizma-information); stroke-width: 2; }
+  .node .stripe { transition: opacity .2s; }
+  .node .ttl { fill: var(--prizma-text-primary); font: 600 11.5px var(--font); }
+  .node .mono { fill: var(--prizma-text-tertiary); font: 700 9px var(--mono); letter-spacing: .5px; }
+  .node.dim { opacity: .2; }
+  .node.lit { opacity: 1; }
+  .node:hover .box { stroke: var(--prizma-text-primary); }
+
+  /* side panel */
+  .side { width: 320px; flex: none; border-left: 1px solid var(--prizma-border); background: var(--prizma-bg-elevated); overflow: auto; transform: translateX(100%); transition: transform .25s var(--ease-calm); position: relative; }
+  .side.open { transform: translateX(0); }
+  .side .sh { padding: 16px 18px 12px; border-bottom: 1px solid var(--prizma-border); position: sticky; top: 0; background: var(--prizma-bg-elevated); z-index: 2; }
+  .side .sh .team { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 8px; }
+  .side .sh h3 { font-size: 15px; font-weight: 700; margin: 8px 0 0; }
+  .side .sh .x { position: absolute; top: 12px; right: 14px; }
+  .side .sh .rdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .side .sec { padding: 14px 18px; border-bottom: 1px solid var(--prizma-border); }
+  .side .sec .pz-eyebrow { display: block; margin-bottom: 10px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pl { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 12px; font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .pl::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pl .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pl .col { font: 500 9px/1 var(--mono); color: var(--prizma-text-tertiary); margin-left: 2px; }
+  .pl[data-state="done"] { opacity: .6; }
+  .pl[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pl[data-state="progress"] .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pl[data-state="unplanned"] { border: 1px dashed var(--prizma-drift); background: transparent; }
+  .deplist { display: flex; flex-direction: column; gap: 6px; }
+  .deplist .di { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); font-size: 12px; cursor: pointer; transition: border-color .15s; }
+  .deplist .di:hover { border-color: var(--prizma-information); }
+  .deplist .di .mono { font: 700 9px/1 var(--mono); color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 4px; }
+  .deplist .di .rdot { width: 6px; height: 6px; border-radius: 50%; margin-left: auto; flex: none; }
+  .empty { font-size: 12px; color: var(--prizma-text-tertiary); font-style: italic; }
+  .critnote { font: 600 11px/1.4 var(--font); color: var(--prizma-information); display: flex; align-items: center; gap: 6px; }
+  .critnote svg { width: 13px; height: 13px; flex: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Граф во главе</span>
+    <span class="sub">план как сеть зависимостей</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-information)"></i>критический путь</span>
+      <span><i style="background:var(--prizma-off-course)"></i>блокирующая</span>
+      <span><i class="dot" style="background:var(--prizma-off-course)"></i>риск</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="body">
+    <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 06 · Зависимости</span></div>
+    <div class="canvaswrap" id="wrap"><svg class="graph" id="graph"></svg></div>
+    <aside class="side" id="side" aria-hidden="true"></aside>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const graph = document.getElementById('graph');
+  const wrap = document.getElementById('wrap');
+  const side = document.getElementById('side');
+
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  // x-окна: только датированные релизы + бэклог/овертайм как крайние полосы
+  const cols = D.releases;
+  const teams = D.teams;
+
+  // dominant-release эпика = окно, где больше всего его pills (для x-позиции).
+  function dominantCol(e) {
+    const counts = {};
+    e.pills.forEach(p => { counts[p.col] = (counts[p.col] || 0) + 1; });
+    let best = e.pills[0] ? e.pills[0].col : 'backlog', n = -1;
+    Object.keys(counts).forEach(k => { if (counts[k] > n) { n = counts[k]; best = k; } });
+    return best;
+  }
+
+  // ── критический путь: самая длинная цепочка по deps (edge: epic → dep) ──
+  // deps[] указывают на то, ОТ ЧЕГО эпик зависит → длиннейшая цепочка
+  // предков и есть критический путь.
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+  const memo = {};
+  function chainLen(id, seen) {
+    if (memo[id]) return memo[id];
+    seen = seen || new Set();
+    if (seen.has(id)) return { len: 0, path: [] };
+    seen.add(id);
+    const e = byId[id];
+    let best = { len: 0, path: [] };
+    (e.deps || []).forEach(d => {
+      if (!byId[d]) return;
+      const r = chainLen(d, new Set(seen));
+      if (r.len > best.len) best = r;
+    });
+    const res = { len: best.len + 1, path: [id, ...best.path] };
+    memo[id] = res;
+    return res;
+  }
+  let critPath = { len: 0, path: [] };
+  D.epics.forEach(e => { const r = chainLen(e.id); if (r.len > critPath.len) critPath = r; });
+  const critSet = new Set(critPath.path);
+  const critEdge = new Set();
+  for (let i = 0; i < critPath.path.length - 1; i++) critEdge.add(critPath.path[i] + '>' + critPath.path[i + 1]);
+
+  // blocking map: кто блокирует кого (обратное к deps)
+  const blocks = {}; D.epics.forEach(e => blocks[e.id] = []);
+  D.epics.forEach(e => (e.deps || []).forEach(d => { if (blocks[d]) blocks[d].push(e.id); }));
+
+  // geometry
+  const PAD_L = 150, PAD_T = 70, COL_W = 210, LANE_H = 116, NODE_W = 168, NODE_H = 62;
+  const W = PAD_L + cols.length * COL_W + 40;
+  const HGT = PAD_T + teams.length * LANE_H + 30;
+
+  function colX(key) {
+    const idx = cols.findIndex(c => c.key === key);
+    return PAD_L + idx * COL_W + (COL_W - NODE_W) / 2;
+  }
+  function laneCenterY(team) { return PAD_T + teams.indexOf(team) * LANE_H + LANE_H / 2; }
+
+  // распределяем узлы внутри (team,col) чтобы не накладывались
+  const positions = {};
+  const slot = {}; // key team::col -> count
+  D.epics.forEach(e => {
+    const col = dominantCol(e);
+    const k = e.team + '::' + col;
+    const i = (slot[k] = (slot[k] || 0) + 1) - 1;
+    const baseY = laneCenterY(e.team) - NODE_H / 2;
+    positions[e.id] = { x: colX(col), y: baseY + (i * 8) - 4, col };
+  });
+
+  let selId = null, hoverChain = null;
+
+  function build() {
+    graph.setAttribute('width', W);
+    graph.setAttribute('height', HGT);
+    graph.setAttribute('viewBox', '0 0 ' + W + ' ' + HGT);
+    let s = '';
+
+    // release bands (нейтральные вертикальные полосы фоном)
+    cols.forEach((c, i) => {
+      const x = PAD_L + i * COL_W;
+      s += '<rect class="band' + (c.current ? ' cur' : '') + '" x="' + x + '" y="' + (PAD_T - 28) + '" width="' + COL_W + '" height="' + (HGT - PAD_T + 18) + '" />';
+      s += '<text class="bandlabel' + (c.current ? ' cur' : '') + '" x="' + (x + COL_W / 2) + '" y="' + (PAD_T - 36) + '" text-anchor="middle">' + c.short + '</text>';
+    });
+    // team lanes
+    teams.forEach((t, i) => {
+      const y = PAD_T + i * LANE_H;
+      if (i > 0) s += '<line class="laneline" x1="' + PAD_L + '" y1="' + y + '" x2="' + (W - 20) + '" y2="' + y + '" />';
+      s += '<text class="lanelabel" x="16" y="' + (laneCenterY(t) + 3) + '">' + t + '</text>';
+    });
+
+    // edges: epic -> dep (рисуем под узлами)
+    D.epics.forEach(e => {
+      (e.deps || []).forEach(d => {
+        if (!positions[d]) return;
+        const a = positions[e.id], b = positions[d];
+        const x1 = a.x + NODE_W / 2, y1 = a.y + NODE_H / 2;
+        const x2 = b.x + NODE_W / 2, y2 = b.y + NODE_H / 2;
+        const mx = (x1 + x2) / 2;
+        const isCrit = critEdge.has(e.id + '>' + d) || critEdge.has(d + '>' + e.id);
+        // блокирующая/at-risk: если зависимость или сам эпик рисковый
+        const isRisk = !isCrit && (e.risk === 'off-course' || byId[d].risk === 'off-course');
+        let cls = 'edge';
+        if (isCrit) cls += ' crit'; else if (isRisk) cls += ' risk';
+        s += '<path class="' + cls + '" data-a="' + e.id + '" data-b="' + d + '" d="M' + x1 + ' ' + y1 + ' C ' + mx + ' ' + y1 + ', ' + mx + ' ' + y2 + ', ' + x2 + ' ' + y2 + '" />';
+      });
+    });
+
+    // nodes
+    D.epics.forEach(e => {
+      const pos = positions[e.id];
+      const isCrit = critSet.has(e.id);
+      let cls = 'node';
+      if (isCrit) cls += ' crit';
+      const stripeColor = e.risk ? 'var(--prizma-' + e.risk + ')' : 'var(--prizma-border-strong)';
+      const mono = e.team.slice(0, 2).toUpperCase();
+      const title = e.epic.length > 24 ? e.epic.slice(0, 23) + '…' : e.epic;
+      const rDot = e.risk ? '<circle cx="' + (pos.x + NODE_W - 12) + '" cy="' + (pos.y + 13) + '" r="4" fill="var(--prizma-' + e.risk + ')" />' : '';
+      s += '<g class="' + cls + '" data-id="' + e.id + '">';
+      s += '<rect class="box" x="' + pos.x + '" y="' + pos.y + '" width="' + NODE_W + '" height="' + NODE_H + '" rx="8" />';
+      s += '<rect class="stripe" x="' + pos.x + '" y="' + pos.y + '" width="3" height="' + NODE_H + '" rx="1.5" fill="' + stripeColor + '" />';
+      s += '<text class="ttl" x="' + (pos.x + 14) + '" y="' + (pos.y + 25) + '">' + esc(title) + '</text>';
+      s += '<text class="mono" x="' + (pos.x + 14) + '" y="' + (pos.y + 45) + '">' + mono + ' · ' + e.pills.length + ' работ' + (isCrit ? ' · крит' : '') + '</text>';
+      s += rDot;
+      s += '</g>';
+    });
+
+    graph.innerHTML = s;
+    wireNodes();
+    applyHL();
+  }
+
+  function wireNodes() {
+    graph.querySelectorAll('.node').forEach(g => {
+      const id = g.dataset.id;
+      g.addEventListener('click', () => { selId = id; openSide(id); applyHL(); });
+      g.addEventListener('mouseenter', () => { hoverChain = chainOf(id); applyHL(); });
+      g.addEventListener('mouseleave', () => { hoverChain = null; applyHL(); });
+    });
+  }
+
+  // полная цепочка узла: предки (deps, рекурсивно) + потомки (blocks, рекурсивно)
+  function chainOf(id) {
+    const set = new Set([id]);
+    (function up(x) { (byId[x].deps || []).forEach(d => { if (byId[d] && !set.has(d)) { set.add(d); up(d); } }); })(id);
+    (function down(x) { (blocks[x] || []).forEach(d => { if (!set.has(d)) { set.add(d); down(d); } }); })(id);
+    return set;
+  }
+
+  function applyHL() {
+    const focus = hoverChain || (selId ? chainOf(selId) : null);
+    graph.querySelectorAll('.node').forEach(g => {
+      g.classList.remove('dim', 'lit', 'sel');
+      if (selId === g.dataset.id) g.classList.add('sel');
+      if (focus) g.classList.toggle('lit', focus.has(g.dataset.id)), g.classList.toggle('dim', !focus.has(g.dataset.id));
+    });
+    graph.querySelectorAll('.edge').forEach(p => {
+      p.classList.remove('dim', 'lit');
+      if (focus) {
+        const on = focus.has(p.dataset.a) && focus.has(p.dataset.b);
+        p.classList.toggle('lit', on); p.classList.toggle('dim', !on);
+      }
+    });
+  }
+
+  function openSide(id) {
+    const e = byId[id];
+    const isCrit = critSet.has(id);
+    let h = '<div class="sh">';
+    h += '<div class="team">' + (e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span>' : '') + e.team + '</div>';
+    h += '<h3>' + esc(e.epic) + '</h3>';
+    h += '<button class="pz-btn pz-btn-icon x" id="closeSide" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>';
+
+    if (isCrit) {
+      h += '<div class="sec"><div class="critnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>На критическом пути · длина ' + critPath.len + '</div></div>';
+    }
+
+    h += '<div class="sec"><span class="pz-eyebrow">Работы · ' + e.pills.length + '</span><div class="pills">';
+    e.pills.forEach(p => {
+      const who = p.who ? '<span class="who">' + p.who + '</span>' : '';
+      const dot = p.state === 'progress' ? '<span class="dot"></span>' : '';
+      const colS = relShort(p.col);
+      h += '<span class="pl" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + '">' + dot + '<span class="nm">' + p.wt + '</span><span class="col">' + colS + '</span>' + who + '</span>';
+    });
+    h += '</div></div>';
+
+    h += '<div class="sec"><span class="pz-eyebrow">Зависит от</span>' + depBlock(e.deps) + '</div>';
+    h += '<div class="sec"><span class="pz-eyebrow">Блокирует</span>' + depBlock(blocks[id]) + '</div>';
+
+    side.innerHTML = h;
+    side.classList.add('open');
+    side.setAttribute('aria-hidden', 'false');
+    document.getElementById('closeSide').addEventListener('click', () => { selId = null; side.classList.remove('open'); side.setAttribute('aria-hidden', 'true'); applyHL(); });
+    side.querySelectorAll('.di').forEach(di => di.addEventListener('click', () => { selId = di.dataset.id; openSide(di.dataset.id); applyHL(); }));
+  }
+
+  function depBlock(ids) {
+    if (!ids || !ids.length) return '<div class="empty">нет связей</div>';
+    let h = '<div class="deplist">';
+    ids.forEach(id => {
+      const e = byId[id]; if (!e) return;
+      const rd = e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span>' : '';
+      h += '<div class="di" data-id="' + id + '"><span class="mono">' + e.team.slice(0, 2).toUpperCase() + '</span><span>' + esc(e.epic) + '</span>' + rd + '</div>';
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function relShort(k) { const c = cols.find(c => c.key === k); return c ? c.short : k; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  build();
+  // граф рисуется синхронно по фиксированной геометрии; rAF не нужен,
+  // но дублируем build по таймеру + resize на случай отложенного layout.
+  setTimeout(build, 60);
+  window.addEventListener('resize', () => { /* геометрия фиксированная — перерисовка не обязательна, но держим хук */ });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

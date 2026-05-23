@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 08 · Анатомия пилюли v2</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 72px; }
+  .head { margin-bottom: 22px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .topbar .spacer { flex: 1; }
+
+  section { margin-top: 38px; }
+  .sec-eyebrow { margin-bottom: 14px; }
+
+  /* ── специмен-сцена с SVG-выносками ── */
+  .stage { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 64px 40px 70px; min-height: 320px; }
+  .stage svg.leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .specimen-wrap { display: flex; justify-content: center; align-items: center; min-height: 80px; }
+
+  /* ── эталонная пилюля v2 (крупная) ── */
+  .spec { position: relative; display: inline-flex; align-items: center; gap: 12px; padding: 14px 20px 14px 22px;
+    background: var(--prizma-bg-tertiary); border-radius: var(--r-md); user-select: none; min-width: 260px; }
+  .spec::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--wt-be)); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .spec .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .spec .body { display: flex; flex-direction: column; gap: 4px; }
+  .spec .nm { font: 600 15px/1 var(--font); color: var(--prizma-text-primary); }
+  .spec .meta { font: 500 11.5px/1 var(--mono); color: var(--prizma-text-tertiary); letter-spacing: .2px; }
+
+  /* якоря для выносок */
+  .anchor { position: absolute; width: 1px; height: 1px; }
+
+  .callout { position: absolute; max-width: 188px; }
+  .callout .lab { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-information); }
+  .callout .desc { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--prizma-text-secondary); }
+  .callout.c-stripe { left: 24px; top: 26px; text-align: right; }
+  .callout.c-name   { right: 30px; top: 18px; }
+  .callout.c-meta   { right: 30px; bottom: 18px; }
+  .callout.c-dot    { left: 24px; bottom: 24px; text-align: right; }
+
+  /* ── ряд вариантов ── */
+  .variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .vcard { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 14px; }
+  .vcard .vt { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 11px; }
+  .vcard .vrow { display: flex; align-items: center; min-height: 38px; }
+  .vcard .vn { margin-top: 9px; font-size: 11px; color: var(--prizma-text-tertiary); line-height: 1.4; }
+
+  /* пилюля v2 — рабочий компонент (как в проде) */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px 7px 13px;
+    background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--wt-be)); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill .nm { font: 600 12px/1 var(--font); color: var(--prizma-text-primary); }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill[data-state="done"] { opacity: .5; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="unplanned"]::before { background: repeating-linear-gradient(135deg, var(--wt) 0 3px, transparent 3px 6px); }
+  /* est-weighted: высота stripe ∝ оценке */
+  .pill.weighted::before { top: 50%; transform: translateY(-50%); height: var(--wh, 60%); bottom: auto; border-radius: 2px; }
+
+  /* ── before/after ── */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px){ .ba { grid-template-columns: 1fr; } }
+  .ba .panel { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 20px; transition: opacity .3s var(--ease-calm); }
+  .ba .panel.dim { opacity: .32; }
+  .ba .tag { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; margin-bottom: 16px; display: inline-flex; align-items: center; gap: 6px; }
+  .ba .tag.bad { color: var(--prizma-off-course); }
+  .ba .tag.good { color: var(--prizma-on-course); }
+  .ba .demo { display: flex; align-items: center; justify-content: center; min-height: 70px; }
+  .ba .note { margin-top: 16px; font-size: 11.5px; line-height: 1.5; color: var(--prizma-text-secondary); }
+  .ba .note b { color: var(--prizma-text-primary); font-weight: 600; }
+
+  /* анти-паттерн «было» — намеренно шумный, статичный */
+  .oldpill { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px;
+    background: var(--wt-be); color: #0A0A0F; border-radius: var(--r-sm);
+    box-shadow: 0 0 0 2px var(--prizma-off-course), 0 2px 10px rgba(0,0,0,.5);
+    font: 700 9.5px/1.1 var(--font); letter-spacing: .2px; }
+  .oldpill .g { font-size: 11px; }
+  .oldpill .sub { font-weight: 400; opacity: .85; }
+
+  .principle { margin-top: 26px; text-align: center; }
+  .principle .big { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; }
+  .principle .small { margin-top: 6px; font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .twochan { color: var(--prizma-information); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="head">
+    <div class="pz-eyebrow">Скетч 08 · Спецификация</div>
+    <h1>Анатомия пилюли v2</h1>
+    <p>Пилюля работы несёт <b>ровно два канала</b>: вертикальная полоса слева — тип работы (<span class="pz-mono">--wt-*</span>), и одна мета-строка — исполнитель. Статус не добавляет коробок: его выражают точка 6px, прозрачность или штриховка полосы.</p>
+  </div>
+
+  <!-- ── СПЕЦИМЕН С ВЫНОСКАМИ ── -->
+  <section>
+    <div class="pz-eyebrow sec-eyebrow">Эталон · разбор по частям</div>
+    <div class="stage" id="stage">
+      <svg class="leaders" id="leaders" aria-hidden="true"></svg>
+      <div class="specimen-wrap">
+        <div class="spec" style="--wt:var(--wt-be)" id="spec">
+          <span class="dot" id="a-dot" style="background:var(--prizma-information)"></span>
+          <span class="body">
+            <span class="nm" id="a-name">Новый процессинг СБП</span>
+            <span class="meta" id="a-meta">BE · Сидоров</span>
+          </span>
+        </div>
+      </div>
+
+      <div class="callout c-stripe">
+        <div class="lab">Полоса слева</div>
+        <div class="desc">Тип работы (BE/FE/QA…). Единственная категориальная краска. 3px, без заливки фона.</div>
+      </div>
+      <div class="callout c-name">
+        <div class="lab">Имя</div>
+        <div class="desc">Канал 1 — что это за работа. Основной вес и контраст.</div>
+      </div>
+      <div class="callout c-meta">
+        <div class="lab">Мета-строка</div>
+        <div class="desc">Канал 2 — исполнитель, моноширинный. Ровно одна строка.</div>
+      </div>
+      <div class="callout c-dot">
+        <div class="lab">Индикатор статуса</div>
+        <div class="desc">Точка 6px / прозрачность / штрих — не отдельная плашка.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── ВАРИАНТЫ ── -->
+  <section>
+    <div class="pz-eyebrow sec-eyebrow">Специмены состояний</div>
+    <div class="variants" id="variants"></div>
+  </section>
+
+  <!-- ── BEFORE / AFTER ── -->
+  <section>
+    <div class="topbar">
+      <div class="pz-eyebrow sec-eyebrow" style="margin:0">Было / стало</div>
+      <span class="spacer"></span>
+      <button class="pz-btn" id="baToggle" data-mode="after">Показать «было»</button>
+    </div>
+    <div class="ba">
+      <div class="panel" id="panelBad">
+        <span class="tag bad">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Было · пять каналов
+        </span>
+        <div class="demo">
+          <span class="oldpill">
+            <span class="g">◆</span><span>BE</span><span class="g">●</span><span class="sub">Сидоров</span><span class="g">⚠</span><span class="sub">75%</span><span class="g">↗</span>
+          </span>
+        </div>
+        <div class="note">Заливка, кольцо-тень, <b>три юникод-глифа</b>, процент, текст 9.5px. Цвет фона спорит со статусом. Глаз не знает, куда смотреть.</div>
+      </div>
+      <div class="panel" id="panelGood">
+        <span class="tag good">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+          Стало · два канала
+        </span>
+        <div class="demo">
+          <div class="pill" data-state="progress" style="--wt:var(--wt-be)">
+            <span class="nm">BE</span><span class="who">Сидоров</span>
+          </div>
+        </div>
+        <div class="note">Полоса = тип. Имя + исполнитель. Точка <span style="color:var(--prizma-information)">●</span> = в работе. <b>Ничего лишнего</b> — статус читается периферийным зрением.</div>
+      </div>
+    </div>
+    <div class="principle">
+      <div class="big">«<span class="twochan">два канала</span>, не пять»</div>
+      <div class="small">Каждый дополнительный сигнал на пилюле снижает читаемость остальных. Ограничение — это и есть дизайн.</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const root = document.documentElement;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--wt-be') + ')';
+
+  // ── варианты ──
+  const variants = [
+    { vt:'Запланировано', wt:'QA', nm:'QA', state:'planned', vn:'База: полоса + имя. Точки нет — работа ещё не началась.' },
+    { vt:'В работе', wt:'BE', nm:'BE', state:'progress', vn:'Точка 6px цвета information. Активность без отдельной плашки.' },
+    { vt:'Завершено', wt:'FE', nm:'FE', state:'done', vn:'Приглушено + зачёркнуто. Done «уходит в фон», не кричит.' },
+    { vt:'Не запланировано', wt:'BE', nm:'BE', state:'unplanned', vn:'Штрихованная полоса — попало в релиз вне плана.' },
+    { vt:'С исполнителем', wt:'IMPL', nm:'IMPL', who:'Орлов', state:'planned', vn:'Мета-строка добавляет второй канал — кто делает.' },
+    { vt:'Рисковый', wt:'FE', nm:'FE', who:'Ким', state:'progress', risk:true, vn:'Риск — только на точке (off-course). Полоса остаётся типом работы.' },
+    { vt:'Взвешено оценкой', wt:'BE', nm:'BE', weighted:true, est:28, vn:'Высота полосы ∝ человеко-дням (28 дн). Вес виден без чисел.' },
+  ];
+  const vroot = document.getElementById('variants');
+  vroot.innerHTML = variants.map(v => {
+    let pill = '<div class="pill'+(v.weighted?' weighted':'')+'" data-state="'+v.state+'" style="--wt:'+wtVar(v.wt)+(v.weighted?';--wh:'+Math.round(30+v.est/28*60)+'%':'')+'">';
+    if (v.state==='done') pill += '<span class="dot" style="background:var(--prizma-on-course)"></span>';
+    if (v.risk) pill += '<span class="dot" style="background:var(--prizma-off-course)"></span>';
+    pill += '<span class="nm">'+v.nm+'</span>';
+    if (v.who) pill += '<span class="who">'+v.who+'</span>';
+    pill += '</div>';
+    return '<div class="vcard"><div class="vt">'+v.vt+'</div><div class="vrow">'+pill+'</div><div class="vn">'+v.vn+'</div></div>';
+  }).join('');
+
+  // ── SVG-выноски: соединяем якоря частей пилюли с подписями ──
+  const stage = document.getElementById('stage');
+  const svg = document.getElementById('leaders');
+  function rel(el){ const s = stage.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height, cx: r.left - s.left + r.width/2, cy: r.top - s.top + r.height/2 }; }
+
+  function drawLeaders() {
+    const specEl = document.getElementById('spec');
+    if (!specEl || !specEl.getBoundingClientRect().width) return;
+    const sp = rel(specEl);
+    // точки на самой пилюле
+    const pStripe = { x: sp.x + 2, y: sp.cy };
+    const pName = rel(document.getElementById('a-name'));
+    const pMeta = rel(document.getElementById('a-meta'));
+    const pDot  = rel(document.getElementById('a-dot'));
+    const ends = [
+      { c:'.c-stripe', to:[pStripe.x, pStripe.y - 14], side:'left' },
+      { c:'.c-name',   to:[pName.x + pName.w, pName.cy], side:'right' },
+      { c:'.c-meta',   to:[pMeta.x + pMeta.w, pMeta.cy], side:'right' },
+      { c:'.c-dot',    to:[pDot.cx, pDot.cy], side:'left' },
+    ];
+    let s = '';
+    ends.forEach(e => {
+      const co = rel(stage.querySelector(e.c));
+      const from = e.side==='right' ? [co.x, co.cy] : [co.x + co.w, co.cy];
+      const mx = (from[0] + e.to[0]) / 2;
+      s += '<path d="M'+from[0].toFixed(1)+' '+from[1].toFixed(1)+' C '+mx.toFixed(1)+' '+from[1].toFixed(1)+', '+mx.toFixed(1)+' '+e.to[1].toFixed(1)+', '+e.to[0].toFixed(1)+' '+e.to[1].toFixed(1)+'" fill="none" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+      s += '<circle cx="'+e.to[0].toFixed(1)+'" cy="'+e.to[1].toFixed(1)+'" r="2.4" fill="var(--prizma-information)"/>';
+    });
+    svg.innerHTML = s;
+  }
+  // синхронно + setTimeout + resize (не полагаемся только на rAF)
+  drawLeaders();
+  setTimeout(drawLeaders, 60);
+  window.addEventListener('resize', drawLeaders);
+
+  // ── before/after toggle ──
+  const btn = document.getElementById('baToggle');
+  const panelBad = document.getElementById('panelBad'), panelGood = document.getElementById('panelGood');
+  function applyMode(mode){
+    if (mode === 'before'){ panelGood.classList.add('dim'); panelBad.classList.remove('dim'); btn.textContent = 'Показать «стало»'; }
+    else { panelBad.classList.add('dim'); panelGood.classList.remove('dim'); btn.textContent = 'Показать «было»'; }
+    btn.dataset.mode = mode;
+  }
+  applyMode('after');
+  btn.addEventListener('click', () => applyMode(btn.dataset.mode === 'after' ? 'before' : 'after'));
+
+  // ── тема ──
+  document.getElementById('tt').addEventListener('click', () => {
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    drawLeaders();
+  });
+})();
+</script>
+</body>
+</html>

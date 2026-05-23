@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 06 · Тепловая загрузка</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+
+  /* ── матрица ── */
+  .matrix { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .row { display: grid; grid-template-columns: 200px repeat(5, 1fr); }
+  .row + .row .cell, .row + .row .rhead { border-top: 1px solid var(--prizma-border); }
+
+  /* шапка колонок — НЕЙТРАЛЬНАЯ, без signal-цвета */
+  .corner { padding: 14px 16px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .chead { padding: 13px 14px 11px; border-left: 1px solid var(--prizma-border); }
+  .chead .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .chead .rel.cur { color: var(--prizma-text-primary); }
+  .chead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+  .chead .dt { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  /* строка команды */
+  .rhead { padding: 0 16px; display: flex; flex-direction: column; justify-content: center; gap: 3px; min-height: 60px; }
+  .rhead .nm { font-size: 13px; font-weight: 600; }
+  .rhead .cap { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* ── тепловая ячейка ── единственный read-channel: цвет фона ── */
+  .cell { border-left: 1px solid var(--prizma-border); min-height: 60px; padding: 10px 12px;
+    display: flex; flex-direction: column; justify-content: center; gap: 3px; position: relative; cursor: default;
+    transition: box-shadow .12s; }
+  .cell:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); z-index: 2; }
+  .cell .load { font: 600 17px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.01em; }
+  .cell.empty .load { color: var(--prizma-text-tertiary); font-weight: 400; }
+  .cell .frac { font: 500 11px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .cell.over .frac { color: var(--prizma-text-primary); }
+  .cell .over-tag { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-off-course); }
+
+  /* ── легенда-рамп ── */
+  .legend { display: flex; align-items: center; gap: 14px; margin-top: 20px; }
+  .legend .lbl { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .ramp { flex: 0 0 320px; height: 12px; border-radius: 6px; border: 1px solid var(--prizma-border);
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--prizma-text-primary) 4%, transparent),
+      color-mix(in srgb, var(--prizma-drift) 38%, transparent),
+      color-mix(in srgb, var(--prizma-off-course) 70%, transparent)); }
+  .legend .ticks { display: flex; justify-content: space-between; flex: 0 0 320px; margin-top: 5px; }
+  .legend .ticks span { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .legend-wrap { display: flex; flex-direction: column; }
+
+  .note { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 660px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+
+  /* ── tooltip (anchored) ── */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 210px; max-width: 280px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md);
+    box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 12px 13px; opacity: 0; transform: translateY(4px);
+    transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .th { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .tip .th .t { font-size: 12.5px; font-weight: 700; }
+  .tip .th .n { font: 600 11px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .tip .bar { height: 5px; border-radius: 3px; background: var(--prizma-bg-tertiary); overflow: hidden; margin-bottom: 9px; }
+  .tip .bar i { display: block; height: 100%; border-radius: 3px; }
+  .tip ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tip li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .tip li .pill { position: relative; font: 600 10px/1 var(--mono); padding: 3px 6px 3px 8px; border-radius: var(--r-sm);
+    background: var(--prizma-bg-tertiary); color: var(--prizma-text-secondary); overflow: hidden; flex: none; }
+  .tip li .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .tip li .ep { color: var(--prizma-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tip .empty { font-size: 12px; color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 06 · Тепловая загрузка</div>
+      <h1>Успеваем по нагрузке?</h1>
+      <p>Один взгляд на матрицу команда × релиз. Тон ячейки = загрузка (число работ к ёмкости команды): нейтральный — свободно, амбер — близко к пределу, красный — перегрев. Наведите на ячейку — увидите, какие работы её наполняют.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="matrix" id="matrix"></div>
+
+  <div class="legend">
+    <span class="lbl">Загрузка</span>
+    <div class="legend-wrap">
+      <div class="ramp"></div>
+      <div class="ticks"><span>свободно</span><span>в пределах</span><span>перегрев</span></div>
+    </div>
+  </div>
+
+  <p class="note">Загрузка считается как <code>helpers.loadByTeamRelease(team, релиз)</code> ÷ ёмкость. Ёмкости здесь — синтетические (заданы в файле); в реальном приложении источник — <code>state.employees[].capacity</code>, агрегированная по команде на окно релиза.</p>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+
+  // Синтетическая ёмкость на команду (работ за окно релиза). Значения подобраны
+  // так, чтобы на демо-данных были и свободные, и пограничные, и перегруженные
+  // окна — иначе тепловой канал не читался бы. В реальном приложении источник —
+  // state.employees[].capacity, агрегированная по команде на окно релиза.
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+
+  const cols = D.releases;
+
+  // Цвет ячейки по коэффициенту загрузки.
+  // ratio <=.5 → нейтрально; .5..1 → к амберу (drift); >1 → красный (off-course),
+  // насыщенность растёт с перегрузом. Используем color-mix как в брифе.
+  function cellTint(ratio) {
+    if (ratio <= 0) return 'transparent';
+    if (ratio <= 1) {
+      // 0..1 → подмешиваем drift, 6%..40%
+      const x = Math.round(6 + ratio * 34);
+      return 'color-mix(in srgb, var(--prizma-drift) ' + x + '%, transparent)';
+    }
+    // перегруз: off-course 46%..82% по мере роста сверх 1.0 (кап на 1.8×)
+    const over = Math.min(ratio - 1, 0.8) / 0.8;
+    const x = Math.round(46 + over * 36);
+    return 'color-mix(in srgb, var(--prizma-off-course) ' + x + '%, transparent)';
+  }
+
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  /* ── рендер матрицы ── */
+  const root = document.getElementById('matrix');
+  let html = '';
+
+  // шапка
+  html += '<div class="row"><div class="corner"><span class="pz-eyebrow">Команда / Релиз</span></div>';
+  cols.forEach(c => {
+    const dt = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+    html += '<div class="chead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dt">'+dt+'</span></div>';
+  });
+  html += '</div>';
+
+  // строки команд
+  D.teams.forEach(team => {
+    const cap = CAPACITY[team] || 5;
+    html += '<div class="row"><div class="rhead"><span class="nm">'+team+'</span><span class="cap">ёмкость '+cap+'/окно</span></div>';
+    cols.forEach(c => {
+      const load = D.helpers.loadByTeamRelease(team, c.key);
+      const ratio = load / cap;
+      const empty = load === 0;
+      const over = ratio > 1;
+      const tint = cellTint(ratio);
+      html += '<div class="cell'+(empty?' empty':'')+(over?' over':'')+'" data-team="'+team+'" data-col="'+c.key+'" style="background:'+tint+'">' +
+        '<span class="load">'+load+'</span>' +
+        (empty ? '' : '<span class="frac">/ '+cap+'</span>') +
+        (over ? '<span class="over-tag">ПЕРЕГРУЗ</span>' : '') +
+        '</div>';
+    });
+    html += '</div>';
+  });
+  root.innerHTML = html;
+
+  /* ── anchored tooltip ── */
+  const tip = document.getElementById('tip');
+  let tipCell = null;
+
+  function buildTip(team, colKey) {
+    const cap = CAPACITY[team] || 5;
+    const col = cols.find(c => c.key === colKey);
+    const eps = D.helpers.teamEpics(team);
+    const rows = [];
+    eps.forEach(e => {
+      D.helpers.pillsOf(e, colKey).forEach(p => rows.push({ wt: p.wt, epic: e.epic, state: p.state }));
+    });
+    const load = rows.length;
+    const ratio = load / cap;
+    const pct = Math.min(ratio, 1.4) / 1.4 * 100;
+    const barColor = ratio > 1 ? 'var(--prizma-off-course)' : (ratio > .5 ? 'var(--prizma-drift)' : 'var(--prizma-text-secondary)');
+
+    let h = '<div class="th"><span class="t">'+team+' · '+col.short+'</span><span class="n">'+load+' / '+cap+'</span></div>';
+    h += '<div class="bar"><i style="width:'+pct.toFixed(0)+'%;background:'+barColor+'"></i></div>';
+    if (!rows.length) {
+      h += '<div class="empty">Нет запланированных работ в этом окне.</div>';
+    } else {
+      h += '<ul>';
+      rows.slice(0, 7).forEach(r => {
+        h += '<li><span class="pill" style="--wt:'+wtVar(r.wt)+'">'+r.wt+'</span><span class="ep">'+esc(r.epic)+'</span></li>';
+      });
+      if (rows.length > 7) h += '<li><span class="ep" style="color:var(--prizma-text-tertiary)">+ ещё '+(rows.length-7)+'</span></li>';
+      h += '</ul>';
+    }
+    return h;
+  }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  function positionTip(cellEl) {
+    const r = cellEl.getBoundingClientRect();
+    // показать, измерить, затем спозиционировать (синхронно, без rAF-зависимости)
+    tip.style.visibility = 'hidden';
+    tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    // если не влезает снизу — показать сверху
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px';
+    tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+
+  root.querySelectorAll('.cell').forEach(cell => {
+    cell.addEventListener('mouseenter', () => {
+      tipCell = cell;
+      tip.innerHTML = buildTip(cell.dataset.team, cell.dataset.col);
+      positionTip(cell);
+    });
+    cell.addEventListener('mouseleave', () => {
+      if (tipCell === cell) { tip.classList.remove('show'); tipCell = null; }
+    });
+  });
+  window.addEventListener('scroll', () => { if (tipCell) positionTip(tipCell); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

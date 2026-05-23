@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 09 · Адаптивная плотность</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+
+  /* segmented density control */
+  .seg { display: inline-flex; padding: 2px; background: var(--prizma-bg-tertiary); border-radius: var(--r-md); border: 1px solid var(--prizma-border); }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--prizma-text-secondary); font: 600 11.5px/1 var(--font); padding: 6px 12px; border-radius: var(--r-sm); cursor: pointer; transition: background .15s, color .15s; }
+  .seg button[aria-pressed="true"] { background: var(--prizma-bg-elevated); color: var(--prizma-text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .auto { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--prizma-text-tertiary); cursor: pointer; user-select: none; }
+  .auto input { accent-color: var(--prizma-information); }
+  .scale { display: inline-flex; align-items: center; gap: 7px; font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .scale input[type=range] { width: 120px; accent-color: var(--prizma-information); }
+
+  .legend { display: flex; gap: 13px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+
+  /* ── grid ── */
+  .scroll { flex: 1; overflow: auto; }
+  .grid { display: grid; grid-template-columns: 230px repeat(5, minmax(150px, 1fr)); min-width: 980px; position: relative; }
+  .h { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg); padding: 14px 14px 11px; border-bottom: 1px solid var(--prizma-border); }
+  .h .rel { font: 300 19px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .h .rel.cur { color: var(--prizma-text-primary); }
+  .h .dt { display: block; margin-top: 5px; font-size: 10px; color: var(--prizma-text-tertiary); }
+  .h.first { display: flex; align-items: flex-end; }
+  .h.first .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  /* team block */
+  .tname { position: sticky; left: 0; z-index: 3; background: var(--prizma-bg); padding: 9px 14px 7px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--prizma-border); }
+  .tname .mono { width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font: 700 9.5px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+  .tname b { font-size: 12px; font-weight: 700; }
+  .tname .cnt { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .tname .exp { margin-left: auto; color: var(--prizma-text-tertiary); cursor: pointer; display: inline-flex; transition: transform .2s var(--ease-calm), color .15s; }
+  .tname .exp:hover { color: var(--prizma-text-primary); }
+
+  /* OVERVIEW compact row (one per team) */
+  .ovlbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 0 14px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: center; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .ovcell { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 0 12px; display: flex; align-items: center; }
+  .ovcell.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .density { display: flex; align-items: flex-end; gap: 3px; height: 100%; }
+  .density .mb { width: 6px; border-radius: 2px 2px 0 0; background: var(--prizma-text-secondary); opacity: .65; }
+  .density .mb.drift { background: var(--prizma-drift); opacity: .9; }
+  .density .mb.off { background: var(--prizma-off-course); opacity: .95; }
+  .ovrow .ovcell, .ovrow .ovlbl { transition: height .32s var(--ease-calm), opacity .26s var(--ease-calm), padding .32s var(--ease-calm); overflow: hidden; }
+
+  /* DETAIL epic row */
+  .lbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); }
+  .lbl .nm { font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 7px; }
+  .lbl .nm .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .lbl .est { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; }
+  .c { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .c.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .p { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--prizma-text-secondary); padding-left: 9px; position: relative; }
+  .p::before { content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 2px; background: var(--prizma-border-strong); border-radius: 2px; }
+  .p.done { opacity: .45; } .p.done .nm { text-decoration: line-through; }
+  .p.r-drift::before { background: var(--prizma-drift); } .p.r-off::before { background: var(--prizma-off-course); }
+  .p .nm { font-weight: 500; color: var(--prizma-text-primary); }
+  .p .wt { font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  /* анимация раскрытия detail-строк */
+  .detrow .lbl, .detrow .c { transition: height .32s var(--ease-calm), opacity .26s var(--ease-calm), padding .32s var(--ease-calm); overflow: hidden; }
+
+  .today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-information); opacity: .8; pointer-events: none; z-index: 5; }
+  .today .cap { position: absolute; top: 6px; left: -1px; transform: translateX(-50%); font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); background: var(--prizma-bg); padding: 2px 5px; border-radius: 0 0 3px 3px; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Адаптивная плотность</span>
+    <span class="pz-eyebrow">Редизайн 09 · density</span>
+    <div class="seg" id="seg" role="group" aria-label="Плотность">
+      <button data-d="0" aria-pressed="false">Обзор</button>
+      <button data-d="1" aria-pressed="true">Средняя</button>
+      <button data-d="2" aria-pressed="false">Детально</button>
+    </div>
+    <label class="auto"><input type="checkbox" id="auto"> авто по числу эпиков</label>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-drift)"></i>перегруз</span><span><i style="background:var(--prizma-off-course)"></i>риск</span><span><i style="background:var(--prizma-information)"></i>сегодня</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="scroll"><div class="grid" id="grid"></div></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases, grid = document.getElementById('grid');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  // density: 0 обзор · 1 средняя · 2 детально. Средняя = команды-аккордеоны (свёрнуты в текстуру, раскрытие по клику).
+  let density = 1;
+  const expanded = {}; // team → bool (для средней)
+
+  // перегруз окна команды: >=4 пилюль. risk доминанта по эпикам в окне.
+  function cellMeta(team, col) {
+    const eps = D.helpers.teamEpics(team);
+    let n = 0, drift = false, off = false;
+    eps.forEach(e => {
+      const ps = D.helpers.pillsOf(e, col);
+      n += ps.length;
+      if (ps.length) { if (e.risk === 'off-course') off = true; else if (e.risk === 'drift') drift = true; }
+    });
+    return { n, overload: n >= 4, drift, off };
+  }
+
+  function densityBars(team, col, rowH) {
+    const m = cellMeta(team, col);
+    if (!m.n) return '<span class="density" aria-hidden="true"></span>';
+    // count → высота бара (до rowH-10). >1 микро-бар если перегруз.
+    const segs = m.n <= 3 ? 1 : (m.n <= 5 ? 2 : 3);
+    const per = Math.ceil(m.n / segs);
+    let bars = '';
+    for (let i = 0; i < segs; i++) {
+      const cnt = Math.min(per, m.n - i * per);
+      const h = Math.max(5, Math.min(rowH - 12, 5 + cnt * 6));
+      const cls = m.overload && m.off ? ' off' : (m.overload && m.drift ? ' drift' : '');
+      bars += '<span class="mb' + cls + '" style="height:' + h + 'px"></span>';
+    }
+    return '<span class="density" title="' + m.n + ' работ' + (m.overload ? ' · перегруз' : '') + '">' + bars + '</span>';
+  }
+
+  function render() {
+    const overview = density === 0;
+    const rowH = overview ? 46 : 38;
+    let html = '';
+    html += '<div class="h first"><span class="pz-eyebrow">' + (overview ? 'Команда' : 'Эпик') + '</span></div>';
+    cols.forEach(c => {
+      const dt = c.dated ? new Date(c.start).toLocaleDateString('ru',{day:'2-digit',month:'short'}) + ' – ' + new Date(c.end).toLocaleDateString('ru',{day:'2-digit',month:'short'}) : 'без даты';
+      html += '<div class="h"><span class="rel' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</span><span class="dt">' + dt + '</span></div>';
+    });
+
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      const total = eps.reduce((n, e) => n + e.pills.length, 0);
+      const showDetail = density === 2 || (density === 1 && expanded[team]);
+
+      // в «средней» — заголовок команды кликабельный аккордеон; в «детально» — просто заголовок; в «обзоре» — нет заголовка, одна строка
+      if (!overview) {
+        const open = showDetail;
+        const chev = density === 1
+          ? '<span class="exp" data-team="' + esc(team) + '" style="transform:rotate(' + (open ? 90 : 0) + 'deg)" title="' + (open ? 'свернуть' : 'раскрыть') + '"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span>'
+          : '';
+        html += '<div class="tname" style="grid-column:1/-1"><span class="mono">' + esc(team.slice(0,2)) + '</span><b>' + esc(team) + '</b><span class="cnt">' + eps.length + ' эпик · ' + total + ' работ</span>' + chev + '</div>';
+      }
+
+      if (overview || (density === 1 && !expanded[team])) {
+        // компактная текстура-строка: одна строка на команду
+        const label = overview ? '<span class="mono">' + esc(team.slice(0,2)) + '</span>&nbsp;<b style="color:var(--prizma-text-primary);font-weight:700">' + esc(team) + '</b>' : esc(eps.length) + ' эпик — текстура';
+        html += '<div class="ovrow" style="display:contents">';
+        html += '<div class="ovlbl" style="height:' + rowH + 'px;gap:7px">' + label + '</div>';
+        cols.forEach(c => {
+          html += '<div class="ovcell' + (c.dated ? '' : ' bz') + '" style="height:' + rowH + 'px">' + densityBars(team, c.key, rowH) + '</div>';
+        });
+        html += '</div>';
+      } else {
+        // detail: полноценные строки эпиков
+        eps.forEach(e => {
+          const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-' + (e.risk === 'off-course' ? 'off-course' : 'drift') + ')"></span>' : '';
+          const est = D.helpers.effortOf(e);
+          html += '<div class="detrow" style="display:contents">';
+          html += '<div class="lbl"><span class="nm">' + riskDot + esc(e.epic) + '</span><span class="est">' + est + ' дн · ' + e.pills.length + ' работ</span></div>';
+          cols.forEach(c => {
+            html += '<div class="c' + (c.dated ? '' : ' bz') + '">';
+            D.helpers.pillsOf(e, c.key).forEach(p => {
+              const rc = e.risk === 'off-course' ? ' r-off' : (e.risk === 'drift' ? ' r-drift' : '');
+              const st = p.state === 'done' ? ' done' : '';
+              html += '<div class="p' + st + (st ? '' : rc) + '"><span class="nm">' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '</span><span class="wt">' + esc(p.wt) + '</span></div>';
+            });
+            html += '</div>';
+          });
+          html += '</div>';
+        });
+      }
+    });
+
+    grid.innerHTML = html;
+
+    grid.querySelectorAll('.exp').forEach(x => x.addEventListener('click', () => {
+      const t = x.dataset.team; expanded[t] = !expanded[t]; render();
+    }));
+    placeToday();
+    setTimeout(placeToday, 60);
+  }
+
+  function placeToday() {
+    grid.querySelector('.today')?.remove();
+    const heads = [...grid.querySelectorAll('.h')];
+    const curIdx = cols.findIndex(c => c.current);
+    const cur = heads[curIdx + 1];
+    if (!cur) return;
+    const c = cols[curIdx];
+    const total = new Date(c.end) - new Date(c.start);
+    const pct = total > 0 ? (new Date(D.today) - new Date(c.start)) / total : .5;
+    const gr = grid.getBoundingClientRect(), hr = cur.getBoundingClientRect();
+    const left = (hr.left - gr.left) + hr.width * Math.max(0, Math.min(1, pct));
+    const line = document.createElement('div'); line.className = 'today';
+    line.style.left = left.toFixed(1) + 'px'; line.style.height = grid.scrollHeight + 'px';
+    line.innerHTML = '<span class="cap">СЕГОДНЯ 23.05</span>';
+    grid.appendChild(line);
+  }
+
+  // controls
+  const seg = document.getElementById('seg');
+  function setDensity(d, fromAuto) {
+    density = d;
+    [...seg.children].forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.d === d)));
+    if (!fromAuto) document.getElementById('auto').checked = false;
+    render();
+  }
+  seg.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setDensity(+b.dataset.d); });
+
+  document.getElementById('auto').addEventListener('change', e => {
+    if (e.target.checked) {
+      // авто: <12 эпиков → детально, <24 → средняя, иначе обзор. Демо-датасет = 16 → средняя.
+      const n = D.epics.length;
+      setDensity(n < 12 ? 2 : (n < 24 ? 1 : 0), true);
+      document.getElementById('auto').checked = true;
+    }
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    placeToday();
+  });
+
+  window.addEventListener('resize', placeToday);
+  render();
+  setTimeout(render, 60);
+})();
+</script>
+</body>
+</html>

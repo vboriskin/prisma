@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 05 · Загрузка прежде всего</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top button { color: var(--prizma-text-secondary); }
+
+  /* ── surface ── */
+  .surface { flex: 1; overflow: auto; padding: 20px 22px 60px; }
+  .lede { max-width: 720px; margin: 0 0 18px; }
+  .lede h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 7px 0 5px; }
+  .lede p { margin: 0; font-size: 13px; color: var(--prizma-text-secondary); }
+
+  /* ── matrix ── */
+  .matrix { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); min-width: 760px; }
+  .row { display: grid; grid-template-columns: 190px repeat(var(--ncols), 1fr); }
+  .row.head { position: sticky; top: 0; z-index: 6; }
+  .hc { padding: 14px 14px 12px; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); }
+  .hc.relh { border-left: 1px solid var(--prizma-border); }
+  .hc .rel { font: 300 19px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .hc .rel.cur { color: var(--prizma-text-primary); }
+  .hc .dt { display: block; margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+  .hc.first { display: flex; align-items: flex-end; }
+
+  .tname { padding: 0 14px; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border); display: flex; flex-direction: column; justify-content: center; position: sticky; left: 0; z-index: 3; }
+  .tname b { font-size: 13px; font-weight: 600; }
+  .tname .cap { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+
+  /* большая heat-ячейка: нейтральный фон, тинт по нагрузке через --tint */
+  .hcell { position: relative; min-height: 78px; border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 11px 12px; cursor: default; background: var(--tint, transparent); transition: box-shadow .15s var(--ease-calm); }
+  .hcell.hot { cursor: pointer; }
+  .hcell.hot:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .hcell.sel { box-shadow: inset 0 0 0 1.5px var(--prizma-information); z-index: 2; }
+  .hcell.neutralcol { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .hcell .load { font: 600 18px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.02em; }
+  .hcell .load .cap { color: var(--prizma-text-tertiary); font-weight: 500; }
+  .hcell .ratio { display: block; margin-top: 5px; font: 500 10px/1 var(--font); color: var(--prizma-text-secondary); }
+  .hcell .over { display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; }
+  .hcell .over svg { width: 11px; height: 11px; }
+  .hcell .bar { position: absolute; left: 12px; right: 12px; bottom: 10px; height: 3px; border-radius: 2px; background: var(--prizma-border); overflow: hidden; }
+  .hcell .bar i { display: block; height: 100%; border-radius: 2px; background: var(--barcol, var(--prizma-text-secondary)); }
+  .hcell.empty .load { color: var(--prizma-text-tertiary); }
+
+  /* expand-панель — встраивается строкой под матрицей */
+  .panel { grid-column: 1 / -1; border-bottom: 1px solid var(--prizma-border-strong); background: var(--prizma-bg); padding: 0; overflow: hidden; }
+  .panel .inner { padding: 16px 18px 18px; }
+  .panel .ph { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .panel .ph h3 { font-size: 14px; font-weight: 700; margin: 0; }
+  .panel .ph .meta { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .panel .ph .x { margin-left: auto; }
+  .ep { padding: 10px 0; border-top: 1px solid var(--prizma-border); }
+  .ep:first-of-type { border-top: none; }
+  .ep .et { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; margin-bottom: 8px; }
+  .ep .et .rd { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pl { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px 5px 12px; font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .pl::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pl .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pl[data-state="done"] { opacity: .6; }
+  .pl[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pl[data-state="progress"] .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pl[data-state="unplanned"] { border: 1px dashed var(--prizma-drift); background: transparent; }
+
+  /* legend ramp */
+  .legend { display: flex; align-items: center; gap: 14px; margin: 16px 0 0; flex-wrap: wrap; }
+  .legend .ramp { display: flex; align-items: center; gap: 0; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--prizma-border); }
+  .legend .ramp i { width: 34px; height: 14px; }
+  .legend .lab { font: 500 11px/1 var(--font); color: var(--prizma-text-tertiary); }
+  .legend .grp { display: flex; align-items: center; gap: 7px; }
+  .legend .grp .swatch { width: 11px; height: 11px; border-radius: 3px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Загрузка прежде всего</span>
+    <span class="sub">тепловая матрица команд × релизов</span>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="surface">
+    <div class="lede">
+      <div class="pz-eyebrow">Редизайн 05 · Загрузка</div>
+      <h1>Где мы перегружены?</h1>
+      <p>Первичный слой — не полоски, а ёмкость. Каждая клетка тиниту­ется нагрузкой команды в окне релиза по рампе нейтральный → дрейф → срыв. Кликните горячую клетку, чтобы развернуть её эпики и работы.</p>
+    </div>
+    <div class="matrix" id="matrix"></div>
+    <div class="legend">
+      <span class="pz-eyebrow">Нагрузка</span>
+      <div class="ramp" id="ramp"></div>
+      <span class="lab">мало → в норме → перегрузка</span>
+      <span class="grp"><span class="swatch" style="background:var(--prizma-drift)"></span><span class="lab">≥ ёмкости</span></span>
+      <span class="grp"><span class="swatch" style="background:var(--prizma-off-course)"></span><span class="lab">срыв</span></span>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const cols = D.releases;
+  const datedCols = cols; // показываем все окна, бэклог/овертайм нейтральны
+  const matrix = document.getElementById('matrix');
+
+  // Синтетическая ёмкость на команду (чел.-слотов в окно релиза).
+  // В реальном приложении берётся из employees[].capacity по команде —
+  // здесь PZ_DATA её не несёт, поэтому задаём правдоподобную константу.
+  const CAPACITY = { 'Платежи': 8, 'Безопасность': 5, 'Интеграции': 6, 'Аналитика': 5, 'Мобайл': 7 };
+
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const relShort = k => { const c = cols.find(c => c.key === k); return c ? c.short : k; };
+
+  // load → коэффициент 0..1+ относительно ёмкости; цвет на рампе.
+  function tintFor(load, cap) {
+    if (load === 0) return 'transparent';
+    const ratio = load / cap;
+    // нейтральный серый → амбер(дрейф) на ratio→1 → красный(срыв) выше 1
+    if (ratio <= 1) {
+      const t = Math.min(1, ratio); // 0..1 серый→амбер
+      return 'color-mix(in srgb, var(--prizma-drift) ' + Math.round(t * 26) + '%, color-mix(in srgb, var(--prizma-text-primary) 5%, transparent))';
+    }
+    const t = Math.min(1, (ratio - 1) / 0.8); // перегруз → красный
+    return 'color-mix(in srgb, var(--prizma-off-course) ' + Math.round(20 + t * 30) + '%, var(--prizma-drift-bg))';
+  }
+  function barColor(load, cap) {
+    const ratio = load / cap;
+    if (ratio > 1) return 'var(--prizma-off-course)';
+    if (ratio >= 0.85) return 'var(--prizma-drift)';
+    return 'var(--prizma-text-secondary)';
+  }
+
+  let selKey = null; // "team::col"
+
+  function render() {
+    matrix.style.setProperty('--ncols', datedCols.length);
+    let html = '';
+    // header row
+    html += '<div class="row head">';
+    html += '<div class="hc first"><span class="pz-eyebrow">Команда · ёмкость</span></div>';
+    datedCols.forEach(c => {
+      const dt = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без даты';
+      html += '<div class="hc relh"><span class="rel' + (c.current ? ' cur' : '') + '">' + c.short + '</span><span class="dt">' + dt + '</span></div>';
+    });
+    html += '</div>';
+
+    D.teams.forEach(team => {
+      const cap = CAPACITY[team];
+      html += '<div class="row">';
+      html += '<div class="tname"><b>' + team + '</b><span class="cap">ёмкость ' + cap + ' / окно</span></div>';
+      datedCols.forEach(c => {
+        const load = H.loadByTeamRelease(team, c.key);
+        const neutralCol = (c.key === 'backlog' || c.key === 'overtime');
+        const key = team + '::' + c.key;
+        const hot = load > 0;
+        const cls = ['hcell'];
+        if (hot) cls.push('hot'); else cls.push('empty');
+        if (neutralCol) cls.push('neutralcol');
+        if (selKey === key) cls.push('sel');
+        const tint = neutralCol ? '' : tintFor(load, cap);
+        const ratioPct = Math.min(100, Math.round((load / cap) * 100));
+        const over = (!neutralCol && load > cap)
+          ? '<span class="over" style="color:var(--prizma-off-course)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>перегруз</span>'
+          : (!neutralCol && load >= cap * 0.85 && load > 0)
+            ? '<span class="over" style="color:var(--prizma-drift)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>под завязку</span>'
+            : '';
+        html += '<div class="' + cls.join(' ') + '" data-key="' + key + '" data-team="' + team + '" data-col="' + c.key + '"'
+          + (tint ? ' style="--tint:' + tint + '"' : '') + '>';
+        html += '<span class="load">' + load + '<span class="cap"> / ' + (neutralCol ? '∞' : cap) + '</span></span>';
+        html += '<span class="ratio">' + (neutralCol ? (load ? load + ' работ вне окна' : 'пусто') : (load ? ratioPct + '% ёмкости' : 'свободно')) + '</span>';
+        html += over;
+        if (hot && !neutralCol) html += '<span class="bar"><i style="width:' + ratioPct + '%;--barcol:' + barColor(load, cap) + '"></i></span>';
+        html += '</div>';
+      });
+      html += '</div>';
+
+      // inline-панель раскрывается сразу под строкой выбранной команды
+      if (selKey && selKey.split('::')[0] === team) {
+        html += panelHtml(selKey);
+      }
+    });
+    matrix.innerHTML = html;
+    wire();
+    renderRamp();
+  }
+
+  function panelHtml(key) {
+    const [team, col] = key.split('::');
+    const eps = H.teamEpics(team).filter(e => H.pillsOf(e, col).length > 0);
+    const cap = CAPACITY[team];
+    const load = H.loadByTeamRelease(team, col);
+    let h = '<div class="panel"><div class="inner">';
+    h += '<div class="ph"><h3>' + team + ' · ' + relShort(col) + '</h3>';
+    h += '<span class="meta">' + load + ' / ' + ((col === 'backlog' || col === 'overtime') ? '∞' : cap) + ' · ' + eps.length + ' эпик(ов)</span>';
+    h += '<button class="pz-btn pz-btn-icon x" id="closePanel" aria-label="Свернуть"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>';
+    eps.forEach(e => {
+      const rd = e.risk ? '<span class="rd" style="background:var(--prizma-' + e.risk + ')"></span>' : '';
+      h += '<div class="ep"><div class="et">' + rd + e.epic + '</div><div class="pills">';
+      H.pillsOf(e, col).forEach(p => {
+        const who = p.who ? '<span class="who">' + p.who + '</span>' : '';
+        const dot = p.state === 'progress' ? '<span class="dot"></span>' : '';
+        h += '<span class="pl" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + '">' + dot + '<span class="nm">' + (D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '</span>' + who + '</span>';
+      });
+      h += '</div></div>';
+    });
+    h += '</div></div>';
+    return h;
+  }
+
+  function renderRamp() {
+    const ramp = document.getElementById('ramp');
+    if (!ramp) return;
+    const steps = [0.2, 0.5, 0.8, 1.0, 1.3];
+    ramp.innerHTML = steps.map(r => '<i style="background:' + tintFor(Math.round(r * 6), 6) + '"></i>').join('');
+  }
+
+  function wire() {
+    matrix.querySelectorAll('.hcell.hot').forEach(cell => {
+      cell.addEventListener('click', () => {
+        const k = cell.dataset.key;
+        selKey = (selKey === k) ? null : k;
+        render();
+      });
+    });
+    const cp = document.getElementById('closePanel');
+    if (cp) cp.addEventListener('click', e => { e.stopPropagation(); selKey = null; render(); });
+  }
+
+  function fmt(d) { return new Date(d).toLocaleDateString('ru', { day: '2-digit', month: 'short' }); }
+
+  render();
+  // не полагаемся только на rAF — пересчёта layout тут нет, но ramp перерисуем при resize темы
+  setTimeout(renderRamp, 60);
+  window.addEventListener('resize', renderRamp);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    renderRamp();
+  });
+})();
+</script>
+</body>
+</html>

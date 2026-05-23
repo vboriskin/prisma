@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Призма · Лаборатория редизайна Ганта</title>
+<link rel="stylesheet" href="shared/tokens.css">
+<style>
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+
+  /* ── HERO ── */
+  .hero { padding: 72px 0 40px; border-bottom: 1px solid var(--prizma-border); }
+  .hero-mark { width: 44px; height: 44px; color: var(--prizma-text-primary); margin-bottom: 22px; }
+  .hero h1 { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 10px; }
+  .hero p { font-size: 16px; color: var(--prizma-text-secondary); max-width: 640px; margin: 0; line-height: 1.6; }
+  .hero-goal { margin-top: 22px; padding: 14px 16px; border-left: 3px solid var(--prizma-information);
+    background: var(--prizma-information-bg); border-radius: 0 var(--r-md) var(--r-md) 0; max-width: 680px; }
+  .hero-goal .pz-eyebrow { color: var(--prizma-information); }
+  .hero-goal div:last-child { margin-top: 4px; color: var(--prizma-text-primary); font-size: 14px; }
+
+  /* ── top nav ── */
+  .topbar { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--prizma-bg) 88%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--prizma-border); }
+  .topbar-inner { max-width: 1180px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 18px; }
+  .topbar-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 14px; }
+  .topbar-brand svg { width: 18px; height: 18px; }
+  .topbar nav { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+  .topbar nav a { font-size: 13px; color: var(--prizma-text-secondary); padding: 6px 10px; border-radius: var(--r-md); text-decoration: none; }
+  .topbar nav a:hover { color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); }
+  .theme-toggle { margin-left: 8px; }
+
+  /* ── sections ── */
+  section { padding-top: 56px; scroll-margin-top: 64px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .sec-head h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
+  .sec-head .count { font-family: var(--mono); font-size: 13px; color: var(--prizma-text-tertiary); }
+  .sec-sub { color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; margin: 0 0 24px; line-height: 1.6; }
+
+  /* ── analysis cards ── */
+  .lens-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; }
+  .lens { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 20px; }
+  .lens h3 { font-size: 15px; margin: 8px 0 12px; font-weight: 700; }
+  .lens .pz-eyebrow { color: var(--prizma-information); }
+  .lens ul { margin: 0; padding-left: 0; list-style: none; }
+  .lens li { font-size: 13px; color: var(--prizma-text-secondary); padding: 7px 0; border-top: 1px solid var(--prizma-border); line-height: 1.5; }
+  .lens li:first-child { border-top: none; }
+  .lens li b { color: var(--prizma-text-primary); font-weight: 600; }
+
+  .variants { columns: 2; column-gap: 24px; }
+  @media (max-width: 720px) { .variants { columns: 1; } }
+  .variants .v { break-inside: avoid; display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--prizma-border); font-size: 13px; color: var(--prizma-text-secondary); }
+  .variants .v:first-child { border-top: none; }
+  .variants .v b { color: var(--prizma-text-primary); font-weight: 600; }
+  .variants .v .n { font-family: var(--mono); color: var(--prizma-text-tertiary); flex: none; }
+
+  /* ── prototype tiles ── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 16px; }
+  .tile { display: flex; flex-direction: column; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border);
+    border-radius: var(--r-lg); overflow: hidden; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
+  .tile:hover { border-color: var(--prizma-border-strong); transform: translateY(-2px); }
+  .tile .thumb { aspect-ratio: 16/10; background: var(--prizma-bg); border-bottom: 1px solid var(--prizma-border);
+    position: relative; overflow: hidden; }
+  .tile .thumb iframe { position: absolute; top: 0; left: 0; width: 200%; height: 200%; transform: scale(.5); transform-origin: top left; border: 0; pointer-events: none; }
+  .tile .body { padding: 13px 15px 16px; }
+  .tile .num { font-family: var(--mono); font-size: 11px; color: var(--prizma-information); }
+  .tile h4 { font-size: 14px; font-weight: 700; margin: 3px 0 5px; }
+  .tile p { font-size: 12.5px; color: var(--prizma-text-secondary); margin: 0; line-height: 1.45; }
+  .tile .tag { display: inline-block; margin-top: 10px; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .empty-note { color: var(--prizma-text-tertiary); font-size: 13px; font-style: italic; padding: 20px 0; }
+
+  footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--prizma-border); color: var(--prizma-text-tertiary); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+      Призма · Лаборатория
+    </span>
+    <nav>
+      <a href="#analysis">Аудит</a>
+      <a href="#variants">Варианты развития</a>
+      <a href="#apple">Apple-цель</a>
+      <a href="#sketches">Скетчи · 10</a>
+      <a href="#redesigns">Редизайны · 10</a>
+    </nav>
+    <button class="pz-btn pz-btn-icon theme-toggle" id="themeToggle" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="hero">
+    <svg class="hero-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 1.5L3 20h18L12 1.5z"/><path d="M12 1.5V20" opacity=".35"/><path d="M3 20l9-6 9 6" opacity=".5"/>
+    </svg>
+    <h1>Лаборатория редизайна Ганта</h1>
+    <p>Свежий взгляд на доску Ганта «Призмы»: дотошный аудит каждой детали, все варианты развития инструмента и 20 живых кликабельных прототипов — 10 интерактивных скетчей и 10 полных редизайнов. Всё в рамках брендбука.</p>
+    <div class="hero-goal">
+      <div class="pz-eyebrow">Северная звезда</div>
+      <div>Простой, считываемый с первого взгляда путь — но с «вау» уровня Apple: ясность, полировка, ощущение продуманности, ничего лишнего.</div>
+    </div>
+  </header>
+
+  <!-- ANALYSIS -->
+  <section id="analysis">
+    <div class="sec-head"><h2>Аудит «по пылинкам»</h2><span class="count">3 линзы</span></div>
+    <p class="sec-sub">Три эксперта, впервые открывшие проект, прошли по Ганту вхолодную — каждый со своей оптикой. Ниже — сжатая выжимка находок (полные — в кодовых комментариях прототипов).</p>
+    <div class="lens-grid" id="lensGrid">
+      <div class="empty-note">Синтез аудита заполняется…</div>
+    </div>
+  </section>
+
+  <!-- VARIANTS -->
+  <section id="variants">
+    <div class="sec-head"><h2>Все варианты развития</h2><span class="count" id="variantsCount"></span></div>
+    <p class="sec-sub">Полный список направлений, куда инструмент может расти — без фильтра на «реалистичность». Каждое отмечено линзой-источником.</p>
+    <div class="variants" id="variantsList"><div class="empty-note">Заполняется…</div></div>
+  </section>
+
+  <!-- APPLE -->
+  <section id="apple">
+    <div class="sec-head"><h2>Цель уровня Apple</h2></div>
+    <p class="sec-sub">Главные разрывы между «сегодня» и ощущением продуманного инструмента, и принципы, которыми руководствовались прототипы.</p>
+    <div class="lens-grid" id="appleGrid"><div class="empty-note">Заполняется…</div></div>
+  </section>
+
+  <!-- SKETCHES -->
+  <section id="sketches">
+    <div class="sec-head"><h2>Интерактивные скетчи</h2><span class="count" id="sketchCount"></span></div>
+    <p class="sec-sub">Сфокусированные кликабельные микро-прототипы отдельных взаимодействий. Каждый решает одну «пылинку» из аудита.</p>
+    <div class="grid" id="sketchGrid"></div>
+  </section>
+
+  <!-- REDESIGNS -->
+  <section id="redesigns">
+    <div class="sec-head"><h2>Полные редизайны Ганта</h2><span class="count" id="redesignCount"></span></div>
+    <p class="sec-sub">Десять принципиально разных концепций целой страницы Ганта. Все живут внутри брендбука, но по-разному отвечают на вопрос «что главное увидеть с первого взгляда?».</p>
+    <div class="grid" id="redesignGrid"></div>
+  </section>
+
+  <footer>Призма · внутренний инструмент квартального планирования · лаборатория прототипов. Прототипы — синтетические данные, не продакшн.</footer>
+</div>
+
+<script src="shared/gallery-data.js"></script>
+<script>
+(function () {
+  const D = window.PZ_GALLERY || { lenses: [], variants: [], apple: [], sketches: [], redesigns: [] };
+
+  function tile(p, base) {
+    const a = document.createElement('a');
+    a.className = 'tile'; a.href = base + '/' + p.file; a.target = '_blank'; a.rel = 'noopener';
+    a.innerHTML =
+      '<div class="thumb"><iframe loading="eager" src="' + base + '/' + p.file + '" tabindex="-1" aria-hidden="true" scrolling="no"></iframe></div>' +
+      '<div class="body"><span class="num">' + p.num + '</span>' +
+      '<h4>' + p.title + '</h4><p>' + p.desc + '</p>' +
+      (p.tag ? '<span class="tag">' + p.tag + '</span>' : '') + '</div>';
+    return a;
+  }
+  function fillGrid(id, arr, base) {
+    const el = document.getElementById(id); if (!el) return;
+    el.innerHTML = '';
+    arr.forEach(p => el.appendChild(tile(p, base)));
+  }
+  function fillLenses() {
+    const g = document.getElementById('lensGrid'); if (!g || !D.lenses.length) return;
+    g.innerHTML = D.lenses.map(l =>
+      '<div class="lens"><div class="pz-eyebrow">' + l.eyebrow + '</div><h3>' + l.title + '</h3><ul>' +
+      l.items.map(i => '<li>' + i + '</li>').join('') + '</ul></div>').join('');
+  }
+  function fillVariants() {
+    const g = document.getElementById('variantsList'); if (!g || !D.variants.length) return;
+    g.innerHTML = D.variants.map((v, i) =>
+      '<div class="v"><span class="n">' + String(i + 1).padStart(2, '0') + '</span><span>' + v + '</span></div>').join('');
+    document.getElementById('variantsCount').textContent = D.variants.length + ' направлений';
+  }
+  function fillApple() {
+    const g = document.getElementById('appleGrid'); if (!g || !D.apple.length) return;
+    g.innerHTML = D.apple.map(a =>
+      '<div class="lens"><div class="pz-eyebrow">' + a.eyebrow + '</div><h3>' + a.title + '</h3><ul>' +
+      a.items.map(i => '<li>' + i + '</li>').join('') + '</ul></div>').join('');
+  }
+
+  fillLenses(); fillVariants(); fillApple();
+  fillGrid('sketchGrid', D.sketches, 'sketches');
+  fillGrid('redesignGrid', D.redesigns, 'redesigns');
+  const sc = document.getElementById('sketchCount'); if (sc) sc.textContent = D.sketches.length + ' / 10';
+  const rc = document.getElementById('redesignCount'); if (rc) rc.textContent = D.redesigns.length + ' / 10';
+
+  // theme toggle
+  document.getElementById('themeToggle').addEventListener('click', function () {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

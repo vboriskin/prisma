@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 05 · Палитра команд ⌘K</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { height: 100vh; overflow: hidden; }
+
+  /* ── затемнённый faux-гант на фоне ── */
+  .backdrop { position: absolute; inset: 0; overflow: hidden; filter: blur(1.5px); opacity: .5; pointer-events: none; user-select: none; }
+  .bd-top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); }
+  .bd-top .mark { width: 18px; height: 18px; color: var(--prizma-text-secondary); }
+  .bd-top .title { font-weight: 700; font-size: 14px; }
+  .bd-top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .bd-grid { display: grid; grid-template-columns: 240px repeat(5, minmax(140px,1fr)); }
+  .bd-h { padding: 14px 12px 10px; border-bottom: 1px solid var(--prizma-border); }
+  .bd-h .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .bd-h .rel.cur { color: var(--prizma-text-primary); }
+  .bd-team { grid-column: 1 / -1; padding: 9px 16px 5px; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); background: var(--prizma-bg-tertiary); }
+  .bd-lbl { padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); font-size: 12.5px; }
+  .bd-c { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 9px; display: flex; flex-wrap: wrap; gap: 5px; }
+  .bd-p { position: relative; padding: 4px 8px 4px 10px; font: 600 11px/1 var(--font); color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .bd-p::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+
+  /* ── оверлей-затемнение ── */
+  .scrim { position: fixed; inset: 0; background: color-mix(in srgb, var(--prizma-bg) 72%, transparent); backdrop-filter: blur(2px); z-index: var(--z-overlay); opacity: 0; transition: opacity .18s var(--ease-calm); }
+  .scrim.show { opacity: 1; }
+
+  /* ── палитра ── */
+  .palette { position: fixed; top: 14vh; left: 50%; transform: translateX(-50%) translateY(-8px) scale(.98); width: min(640px, 92vw);
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-xl);
+    box-shadow: 0 24px 70px rgba(0,0,0,.55); z-index: var(--z-modal); overflow: hidden;
+    opacity: 0; transition: opacity .2s var(--ease-calm), transform .24s var(--ease-spring); }
+  .palette.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+
+  .pal-cap { padding: 16px 18px 12px; border-bottom: 1px solid var(--prizma-border); }
+  .pal-cap h1 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; margin: 7px 0 4px; }
+  .pal-cap p { margin: 0; font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .pal-cap p .pz-mono { color: var(--prizma-text-secondary); }
+
+  .pal-search { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--prizma-border); }
+  .pal-search svg { width: 18px; height: 18px; color: var(--prizma-text-tertiary); flex: none; }
+  .pal-search input { flex: 1; background: none; border: none; outline: none; color: var(--prizma-text-primary); font: 400 16px/1.2 var(--font); }
+  .pal-search input::placeholder { color: var(--prizma-text-tertiary); }
+  .pal-search .esc { font: 600 10px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 4px 6px; }
+
+  .pal-results { max-height: 52vh; overflow-y: auto; padding: 6px 0 8px; }
+  .pal-sec { padding: 12px 18px 5px; }
+  .pal-sec .pz-eyebrow { display: flex; align-items: center; gap: 7px; }
+  .pal-sec .cnt { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .pal-item { display: flex; align-items: center; gap: 12px; padding: 9px 18px; cursor: pointer; position: relative; }
+  .pal-item .ic { width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--prizma-border); border-radius: var(--r-md); color: var(--prizma-text-secondary); }
+  .pal-item .ic svg { width: 15px; height: 15px; }
+  .pal-item .ic.wt { position: relative; overflow: hidden; }
+  .pal-item .ic.wt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pal-item .ic.wt b { font: 700 10px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .pal-item .body { flex: 1; min-width: 0; }
+  .pal-item .nm { font-size: 14px; color: var(--prizma-text-primary); display: flex; align-items: center; gap: 8px; }
+  .pal-item .nm em { font-style: normal; color: var(--prizma-information); }
+  .pal-item .desc { font-size: 11.5px; color: var(--prizma-text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pal-item .tag { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); border-radius: var(--r-sm); padding: 4px 6px; flex: none; }
+  .pal-item .riskdot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .pal-item.active { background: var(--prizma-bg-tertiary); }
+  .pal-item.active::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; background: var(--prizma-information); border-radius: 0 2px 2px 0; }
+  .pal-item.active .ic { border-color: var(--prizma-border-strong); color: var(--prizma-text-primary); }
+  .pal-item .ret { font: 600 10px/1 var(--mono); color: var(--prizma-information); opacity: 0; }
+  .pal-item.active .ret { opacity: 1; }
+
+  .pal-empty { padding: 34px 18px; text-align: center; color: var(--prizma-text-tertiary); font-size: 13px; }
+  .pal-empty .pz-mono { color: var(--prizma-text-secondary); }
+
+  .pal-foot { display: flex; align-items: center; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--prizma-border); font-size: 11px; color: var(--prizma-text-tertiary); }
+  .pal-foot kbd { font: 600 10px/1 var(--mono); color: var(--prizma-text-secondary); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 3px 5px; margin-right: 4px; }
+  .pal-foot .spacer { flex: 1; }
+  .pal-foot .pref { font-family: var(--mono); }
+
+  /* подсказка вызова, когда палитра закрыта */
+  .reopen { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: var(--z-fab); display: none; }
+  .reopen.show { display: inline-flex; }
+  .reopen kbd { font: 700 11px/1 var(--mono); padding: 2px 5px; border: 1px solid currentColor; border-radius: var(--r-sm); margin-left: 2px; }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    display: flex; align-items: center; gap: 10px; padding: 11px 16px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transition: opacity .2s, transform .22s var(--ease-calm); z-index: var(--z-modal); font-size: 13.5px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .arr { color: var(--prizma-information); font-family: var(--mono); font-weight: 700; }
+
+  .tt { position: fixed; top: 14px; right: 18px; z-index: var(--z-modal); }
+</style>
+</head>
+<body>
+  <!-- статичный затемнённый гант под палитрой -->
+  <div class="backdrop" id="backdrop" aria-hidden="true"></div>
+
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="scrim" id="scrim"></div>
+
+  <div class="palette" id="palette" role="dialog" aria-modal="true" aria-label="Палитра команд">
+    <div class="pal-cap">
+      <div class="pz-eyebrow">Скетч 05 · Палитра команд</div>
+      <h1>Один вход вместо панели из 14 кнопок</h1>
+      <p>Действия, эпики, команды и типы работ — в одном поиске. Префиксы <span class="pz-mono">qa:</span> <span class="pz-mono">release:</span> <span class="pz-mono">team:</span> <span class="pz-mono">risk:</span> сужают выдачу.</p>
+    </div>
+    <div class="pal-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="text" placeholder="Команда, эпик или действие…  попробуйте qa: · release:1.21 · team:Платежи · risk:" autocomplete="off" spellcheck="false" aria-label="Поиск команды">
+      <span class="esc">ESC</span>
+    </div>
+    <div class="pal-results" id="results"></div>
+    <div class="pal-foot">
+      <span><kbd>↑↓</kbd>навигация</span>
+      <span><kbd>↵</kbd>выбрать</span>
+      <span class="spacer"></span>
+      <span class="pref">префиксы: qa: fe: release: team: risk:</span>
+    </div>
+  </div>
+
+  <button class="pz-btn reopen" id="reopen">Открыть палитру <kbd>⌘K</kbd></button>
+
+  <div class="toast" id="toast"><span class="arr">→</span><span id="toastText"></span></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+
+  /* ── 1. статичный фон-гант из PZ_DATA ── */
+  (function renderBackdrop(){
+    const cols = D.releases;
+    let h = '<div class="bd-top">' +
+      '<svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M12 2L4 19h16L12 2z"/></svg>' +
+      '<span class="title">Гант квартала</span><span class="sub">Q2 · 16 эпиков · 5 команд</span></div>';
+    h += '<div class="bd-grid"><div class="bd-h"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => { h += '<div class="bd-h"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span></div>'; });
+    D.teams.forEach(team => {
+      h += '<div class="bd-team">'+team+'</div>';
+      D.helpers.teamEpics(team).forEach(e => {
+        h += '<div class="bd-lbl">'+e.epic+'</div>';
+        cols.forEach(c => {
+          h += '<div class="bd-c">';
+          D.helpers.pillsOf(e, c.key).forEach(p => { h += '<span class="bd-p" style="--wt:'+wtVar(p.wt)+'">'+p.wt+'</span>'; });
+          h += '</div>';
+        });
+      });
+    });
+    h += '</div>';
+    document.getElementById('backdrop').innerHTML = h;
+  })();
+
+  /* ── 2. индекс искомого ── SVG-иконки stroke currentColor */
+  const SVG = {
+    pin:   '<path d="M9 4h6l-1 7 3 3v2H7v-2l3-3-1-7z"/><path d="M12 16v4"/>',
+    risk:  '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    today: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M12 13v4"/>',
+    eye:   '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+    lock:  '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    epic:  '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16"/>',
+    team:  '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 6a3 3 0 0 1 0 6"/><path d="M21 20a5 5 0 0 0-4-4.9"/>',
+  };
+  const ACTIONS = [
+    { id:'a-pin',   nm:'Зафиксировать план',  desc:'Закрепить текущее распределение работ как план квартала', icon:SVG.pin },
+    { id:'a-risk',  nm:'Показать риски',       desc:'Подсветить эпики со статусом дрейф / срыв', icon:SVG.risk },
+    { id:'a-today', nm:'Сегодня',              desc:'Прокрутить к линии «сегодня» (23.05, окно 1.21)', icon:SVG.today },
+    { id:'a-deps',  nm:'Показать зависимости', desc:'Отрисовать связи между эпиками', icon:SVG.eye },
+    { id:'a-lock',  nm:'Заморозить релиз 1.20', desc:'Запретить переносы из закрытого окна', icon:SVG.lock },
+  ];
+
+  // нормализация для нечувствительного к регистру поиска
+  const norm = s => (s||'').toLowerCase().replace('ё','е');
+  function highlight(text, term) {
+    if (!term) return esc(text);
+    const i = norm(text).indexOf(norm(term));
+    if (i < 0) return esc(text);
+    return esc(text.slice(0,i)) + '<em>' + esc(text.slice(i, i+term.length)) + '</em>' + esc(text.slice(i+term.length));
+  }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : 'var(--prizma-drift)';
+  const riskLabel = r => r === 'off-course' ? 'срыв' : 'дрейф';
+
+  /* ── 3. построение результатов с поддержкой префиксов ── */
+  function build(raw) {
+    const groups = [];
+    let m, term = raw.trim();
+
+    // префикс-синтаксис
+    let prefix = null, arg = '';
+    if ((m = term.match(/^(qa|be|fe|an|ba|impl|mig|stab|hf)\s*:\s*(.*)$/i))) { prefix = 'wt'; arg = m[1].toUpperCase(); }
+    else if ((m = term.match(/^release\s*:\s*(.*)$/i))) { prefix = 'release'; arg = m[1]; }
+    else if ((m = term.match(/^team\s*:\s*(.*)$/i)))    { prefix = 'team'; arg = m[1]; }
+    else if ((m = term.match(/^risk\s*:?\s*(.*)$/i)) && /^risk\b/i.test(term)) { prefix = 'risk'; arg = m[1]; }
+
+    if (prefix === 'wt') {
+      const pills = [];
+      D.epics.forEach(e => e.pills.forEach(p => { if (p.wt === arg) pills.push({ e, p }); }));
+      groups.push({ key:'wt', label:'Работы · '+arg+(arg && D.WT[arg]?' · '+D.WT[arg].label:''), items:
+        pills.map(({e,p}) => ({
+          id:'wt-'+e.id+'-'+p.col+'-'+p.wt, kind:'wt', wt:p.wt,
+          nm: arg+' — '+e.epic,
+          desc: e.team+' · '+relShort(p.col)+' · '+stateLabel(p.state)+(p.who?' · '+p.who:''),
+          tag: p.col === 'r121' ? 'тек.' : null,
+          toast: arg+' в «'+e.epic+'» ('+relShort(p.col)+')'
+        })) });
+      return { groups, prefix };
+    }
+    if (prefix === 'release') {
+      const want = norm(arg);
+      const rels = D.releases.filter(r => !want || norm(r.short).includes(want) || norm(r.key).includes(want.replace('.','')));
+      groups.push({ key:'release', label:'Релизы', items:
+        rels.map(r => ({
+          id:'rel-'+r.key, kind:'release',
+          nm: 'Релиз '+r.short, icon: SVG.today,
+          desc: r.dated ? fmt(r.start)+' – '+fmt(r.end) : 'окно без дат',
+          tag: r.current ? 'тек.' : null,
+          toast: 'Фокус на релизе '+r.short
+        })) });
+      return { groups, prefix };
+    }
+    if (prefix === 'team') {
+      const want = norm(arg);
+      const ts = D.teams.filter(t => !want || norm(t).includes(want));
+      groups.push({ key:'team', label:'Команды', items:
+        ts.map(t => {
+          const eps = D.helpers.teamEpics(t);
+          const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+          return { id:'team-'+t, kind:'team', nm: t, icon: SVG.team,
+            desc: eps.length+' эпиков · '+cnt+' работ', tag: String(cnt),
+            toast: 'Команда «'+t+'»' };
+        }) });
+      return { groups, prefix };
+    }
+    if (prefix === 'risk') {
+      const want = norm(arg);
+      const risky = D.epics.filter(e => e.risk && (!want || norm(riskLabel(e.risk)).includes(want) || norm(e.epic).includes(want)));
+      groups.push({ key:'risk', label:'Рисковые эпики', items:
+        risky.map(e => ({ id:'risk-'+e.id, kind:'epic', risk:e.risk,
+          nm: e.epic, desc: e.team+' · '+e.moves+' переносов · '+riskLabel(e.risk),
+          toast: e.epic+' — '+riskLabel(e.risk) })) });
+      return { groups, prefix };
+    }
+
+    // обычный многосекционный поиск
+    const t = norm(term);
+    const act = ACTIONS.filter(a => !t || norm(a.nm).includes(t) || norm(a.desc).includes(t));
+    if (act.length) groups.push({ key:'act', label:'Действия', items:
+      act.map(a => ({ id:a.id, kind:'action', nm:a.nm, desc:a.desc, icon:a.icon, toast:a.nm })) });
+
+    const eps = D.epics.filter(e => !t || norm(e.epic).includes(t) || norm(e.team).includes(t));
+    if (eps.length) groups.push({ key:'epic', label:'Эпики', items:
+      eps.slice(0, t?12:6).map(e => ({ id:'e-'+e.id, kind:'epic', risk:e.risk,
+        nm:e.epic, desc:e.team+' · '+D.helpers.effortOf(e)+' дн · '+e.pills.length+' работ',
+        tag: e.risk ? riskLabel(e.risk) : null, toast:e.epic })) });
+
+    const tms = D.teams.filter(x => !t || norm(x).includes(t));
+    if (tms.length) groups.push({ key:'team', label:'Команды', items:
+      tms.map(x => { const c = D.helpers.teamEpics(x).reduce((n,e)=>n+e.pills.length,0);
+        return { id:'t-'+x, kind:'team', nm:x, icon:SVG.team, desc:D.helpers.teamEpics(x).length+' эпиков · '+c+' работ', tag:String(c), toast:'Команда «'+x+'»' }; }) });
+
+    const wts = Object.keys(D.WT).filter(k => !t || norm(k).includes(t) || norm(D.WT[k].label).includes(t));
+    if (wts.length) groups.push({ key:'wt', label:'Работы', items:
+      wts.map(k => { const n = D.epics.reduce((s,e)=>s+e.pills.filter(p=>p.wt===k).length,0);
+        return { id:'w-'+k, kind:'wt', wt:k, nm:k+' — '+D.WT[k].label, desc:n+' работ в квартале', tag:String(n), toast:'Фильтр: '+k }; }) });
+
+    return { groups, prefix:null };
+  }
+
+  function relShort(k){ const c = D.releases.find(c=>c.key===k); return c?c.short:k; }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  function stateLabel(s){ return { planned:'план', progress:'в работе', done:'готово', unplanned:'вне плана' }[s] || s; }
+
+  /* ── 4. рендер + клавиатурная навигация ── */
+  const resultsEl = document.getElementById('results');
+  const qEl = document.getElementById('q');
+  let flat = [], active = 0, lastPrefix = null;
+
+  function render() {
+    const { groups, prefix } = build(qEl.value);
+    lastPrefix = prefix;
+    flat = [];
+    if (!groups.length || groups.every(g => !g.items.length)) {
+      resultsEl.innerHTML = '<div class="pal-empty">Ничего не найдено по запросу «<span class="pz-mono">'+esc(qEl.value)+'</span>».<br>Сбросьте префикс или уточните формулировку.</div>';
+      return;
+    }
+    // термин для подсветки = аргумент после префикса либо весь запрос
+    const term = prefix ? '' : qEl.value.trim();
+    let html = '';
+    groups.forEach(g => {
+      if (!g.items.length) return;
+      html += '<div class="pal-sec"><div class="pz-eyebrow"><span>'+esc(g.label)+'</span><span class="cnt pz-mono">'+g.items.length+'</span></div></div>';
+      g.items.forEach(it => {
+        const fi = flat.length; flat.push(it);
+        const ic = it.kind === 'wt'
+          ? '<span class="ic wt" style="--wt:'+wtVar(it.wt)+'"><b>'+it.wt+'</b></span>'
+          : '<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+(it.icon||SVG.epic)+'</svg></span>';
+        const riskDot = it.risk ? '<span class="riskdot" style="background:'+riskColor(it.risk)+'"></span>' : '';
+        const tag = it.tag ? '<span class="tag">'+esc(it.tag)+'</span>' : '';
+        html += '<div class="pal-item" data-i="'+fi+'" role="option">'+ic+
+          '<div class="body"><div class="nm">'+riskDot+highlight(it.nm, term)+'</div><div class="desc">'+esc(it.desc)+'</div></div>'+
+          tag+'<span class="ret">↵</span></div>';
+      });
+    });
+    resultsEl.innerHTML = html;
+    if (active >= flat.length) active = flat.length - 1;
+    if (active < 0) active = 0;
+    paint();
+    resultsEl.querySelectorAll('.pal-item').forEach(el => {
+      el.addEventListener('mousemove', () => { active = +el.dataset.i; paint(); });
+      el.addEventListener('click', () => { active = +el.dataset.i; choose(); });
+    });
+  }
+
+  function paint() {
+    resultsEl.querySelectorAll('.pal-item').forEach(el => {
+      const on = +el.dataset.i === active;
+      el.classList.toggle('active', on);
+      if (on) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function move(dir) {
+    if (!flat.length) return;
+    active = (active + dir + flat.length) % flat.length;
+    paint();
+  }
+
+  function choose() {
+    const it = flat[active];
+    if (!it) return;
+    showToast(it.toast);
+    close();
+  }
+
+  /* ── 5. открытие/закрытие ── */
+  const scrim = document.getElementById('scrim'), pal = document.getElementById('palette'), reopen = document.getElementById('reopen');
+  let open = false;
+  function openPal() {
+    open = true; scrim.classList.add('show'); pal.classList.add('show'); reopen.classList.remove('show');
+    qEl.focus(); qEl.select();
+  }
+  function close() {
+    open = false; scrim.classList.remove('show'); pal.classList.remove('show'); reopen.classList.add('show');
+  }
+  scrim.addEventListener('click', close);
+  reopen.addEventListener('click', openPal);
+
+  qEl.addEventListener('input', () => { active = 0; render(); });
+  document.addEventListener('keydown', e => {
+    // ⌘K / Ctrl+K — открыть
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open ? close() : openPal(); return; }
+    if (!open) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(); }
+  });
+
+  /* ── toast ── */
+  const toast = document.getElementById('toast'), tText = document.getElementById('toastText');
+  let tTimer;
+  function showToast(text) {
+    tText.textContent = text;
+    toast.classList.add('show');
+    clearTimeout(tTimer);
+    tTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // открыта по умолчанию
+  render();
+  openPal();
+})();
+</script>
+</body>
+</html>

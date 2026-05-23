@@ -1,0 +1,174 @@
+/* ============================================================
+   ПРИЗМА · GANTT LAB — общий брендбук-фундамент для прототипов
+   Извлечено из theme.css (canonical). Dark-first; light через
+   [data-theme="light"]. Никаких эмодзи/градиентов; 3px stripe-left;
+   mono-tabular numerals; CAPS-eyebrow; semantic-color only; SVG-иконки.
+   Все 20 прототипов линкуют этот файл → единый визуальный язык.
+   ============================================================ */
+
+/* ---------- DARK (по умолчанию) ---------- */
+:root {
+  --prizma-bg: #0A0A0F;
+  --prizma-bg-elevated: #1A1A22;
+  --prizma-bg-tertiary: #2A2A30;
+
+  --prizma-mark: #FFFFFF;
+  --prizma-text-primary: #FFFFFF;
+  --prizma-text-secondary: #8E8E96;
+  --prizma-text-tertiary: #8A8A92;
+
+  --prizma-border: rgba(255, 255, 255, 0.08);
+  --prizma-border-strong: rgba(255, 255, 255, 0.15);
+
+  --prizma-on-course: #7FE8B5;   /* зелёный — по курсу / done */
+  --prizma-drift: #FFB347;       /* амбер — внимание / дрейф */
+  --prizma-off-course: #FF6B6B;  /* красный — риск / срыв */
+  --prizma-information: #6EC1E4;  /* голубой — нейтральная инфо / сегодня */
+  --prizma-insight: #B084CC;     /* фиолет — инсайт / AI */
+  --prizma-approve: #8b5cf6;
+
+  --prizma-on-course-bg: rgba(127, 232, 181, 0.12);
+  --prizma-drift-bg: rgba(255, 179, 71, 0.12);
+  --prizma-off-course-bg: rgba(255, 107, 107, 0.12);
+  --prizma-information-bg: rgba(110, 193, 228, 0.12);
+  --prizma-insight-bg: rgba(176, 132, 204, 0.12);
+
+  /* типы работ — приглушённые, идентичность не «свет от ёлки» */
+  --wt-be:   #5A8FB8;
+  --wt-fe:   #6FB89A;
+  --wt-qa:   #C49A5C;
+  --wt-an:   #8A8AA0;
+  --wt-ba:   #9C8FA8;
+  --wt-impl: #A89070;
+  --wt-mig:  #7A98A8;
+  --wt-stab: #7AA890;
+  --wt-hf:   #C47A5C;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "SF Pro Text", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --r-sm: 4px; --r-md: 6px; --r-lg: 10px; --r-xl: 14px; --r-2xl: 20px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  --ease-calm: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: ease-in-out;
+  --ease-decel: ease-out;
+
+  --z-sticky: 10; --z-fab: 100; --z-dropdown: 1000; --z-overlay: 9000; --z-modal: 10000;
+
+  color-scheme: dark;
+}
+
+/* ---------- LIGHT ---------- */
+[data-theme="light"] {
+  --prizma-bg: #FAFAF8;
+  --prizma-bg-elevated: #FFFFFF;
+  --prizma-bg-tertiary: #F0EDE5;
+  --prizma-mark: #1A1A22;
+  --prizma-text-primary: #1A1A22;
+  --prizma-text-secondary: #7A7A82;
+  --prizma-text-tertiary: #5A5A64;
+  --prizma-border: rgba(26, 26, 34, 0.08);
+  --prizma-border-strong: rgba(26, 26, 34, 0.15);
+  --prizma-on-course: #0F8A5F;
+  --prizma-drift: #B5670A;
+  --prizma-off-course: #C13838;
+  --prizma-information: #1F6B96;
+  --prizma-insight: #6B4488;
+  --prizma-on-course-bg: rgba(15, 138, 95, 0.1);
+  --prizma-drift-bg: rgba(181, 103, 10, 0.1);
+  --prizma-off-course-bg: rgba(193, 56, 56, 0.1);
+  --prizma-information-bg: rgba(31, 107, 150, 0.1);
+  --prizma-insight-bg: rgba(107, 68, 136, 0.1);
+  --wt-be: #2C5F88; --wt-fe: #3A8060; --wt-qa: #8A6428; --wt-an: #5A5A6E;
+  --wt-ba: #6A5E78; --wt-impl: #705A40; --wt-mig: #456878; --wt-stab: #3A6850; --wt-hf: #8A4828;
+  color-scheme: light;
+}
+
+/* ---------- база ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--prizma-bg);
+  color: var(--prizma-text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* числа — табличный моноширинный */
+.pz-num, .pz-mono { font-family: var(--mono); font-feature-settings: "tnum" 1, "lnum" 1; }
+
+/* CAPS-eyebrow 10px/700 */
+.pz-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--prizma-text-secondary);
+}
+
+/* поверхности */
+.pz-surface { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); }
+
+/* кнопки */
+.pz-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px;
+  font: 500 13px/1 var(--font);
+  color: var(--prizma-text-primary);
+  background: transparent;
+  border: 1px solid var(--prizma-border-strong);
+  border-radius: var(--r-md); cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.pz-btn:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+.pz-btn-primary { background: var(--prizma-information); border-color: var(--prizma-information); color: #0A0A0F; font-weight: 600; }
+.pz-btn-primary:hover { filter: brightness(1.08); color: #0A0A0F; }
+.pz-btn-icon { width: 30px; padding: 0; justify-content: center; }
+
+/* чип */
+.pz-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px;
+  font: 600 11px/1 var(--mono); letter-spacing: .2px;
+  border: 1px solid var(--prizma-border); border-radius: var(--r-sm);
+  color: var(--prizma-text-secondary); background: transparent;
+}
+
+/* pill (work-type) — 3px stripe-left, без заливки */
+.pz-pill {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 9px 5px 11px;
+  font: 600 11.5px/1 var(--font);
+  color: var(--prizma-text-primary);
+  background: var(--prizma-bg-tertiary);
+  border-radius: var(--r-sm);
+  overflow: hidden; cursor: grab; user-select: none;
+}
+.pz-pill::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--wt, var(--prizma-information));
+}
+.pz-pill[data-done] { opacity: .82; }
+.pz-pill[data-done] .pz-pill-name { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+/* SVG-иконки наследуют currentColor */
+svg { display: block; }
+
+/* скроллбар — тонкий, неинвазивный */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--prizma-border-strong); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* фокус-кольцо (доступность) */
+:focus-visible { outline: 2px solid var(--prizma-information); outline-offset: 2px; }
+
+/* today-line / milestone — общие */
+.pz-todayline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--prizma-information); pointer-events: none; z-index: 4; }
+.pz-milestone { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dotted var(--prizma-text-secondary); pointer-events: none; z-index: 3; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

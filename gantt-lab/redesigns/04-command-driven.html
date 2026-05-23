@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 04 · Командный режим</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── минимальный topbar ── */
+  .top { display: flex; align-items: center; gap: 12px; padding: 11px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 17px; height: 17px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 13.5px; }
+  .top .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .hintk { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 6px; }
+  .top .hintk kbd { font: 600 10px/1 var(--mono); padding: 3px 6px; border: 1px solid var(--prizma-border-strong); border-radius: 4px; color: var(--prizma-text-secondary); }
+
+  /* ── командная строка: top-center, всегда видима, крупная и спокойная ── */
+  .cmdwrap { flex: none; padding: 20px 22px 14px; display: flex; flex-direction: column; align-items: center; }
+  .cmdbox { width: 100%; max-width: 720px; position: relative; }
+  .cmd { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 18px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); transition: border-color .18s var(--ease-calm), box-shadow .18s; }
+  .cmd.focus { border-color: var(--prizma-information); box-shadow: 0 0 0 3px var(--prizma-information-bg); }
+  .cmd .ic { color: var(--prizma-text-tertiary); flex: none; }
+  .cmd input { flex: 1; background: none; border: none; outline: none; color: var(--prizma-text-primary); font: 400 17px/1 var(--font); letter-spacing: -.01em; }
+  .cmd input::placeholder { color: var(--prizma-text-tertiary); }
+  .cmd .clear { display: none; background: none; border: none; cursor: pointer; color: var(--prizma-text-tertiary); padding: 4px; border-radius: 4px; }
+  .cmd .clear:hover { color: var(--prizma-text-primary); }
+  .cmd .clear.on { display: inline-flex; }
+  .cmd .ret { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); border-radius: 4px; padding: 4px 7px; flex: none; }
+
+  /* префикс-подсказка под строкой */
+  .prefixes { display: flex; gap: 7px; margin-top: 11px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .prefixes .pz-chip { cursor: pointer; transition: border-color .15s, color .15s; }
+  .prefixes .pz-chip:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+
+  /* dropdown подсказок */
+  .menu { position: absolute; top: 64px; left: 0; right: 0; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); box-shadow: 0 16px 48px rgba(0,0,0,.5); z-index: 1000; max-height: 52vh; overflow-y: auto; padding: 6px; display: none; }
+  .menu.open { display: block; }
+  .menu .grp { padding: 9px 12px 5px; }
+  .menu .grp .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .opt { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: var(--r-md); cursor: pointer; }
+  .opt.sel { background: var(--prizma-bg-tertiary); }
+  .opt .oic { width: 26px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm); border: 1px solid var(--prizma-border); color: var(--prizma-text-secondary); }
+  .opt .oic.wt { border: none; position: relative; }
+  .opt .oic.wt::before { content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 3px; border-radius: 2px; background: var(--wt); }
+  .opt .oic.wt span { font: 700 9px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .opt .otext { flex: 1; min-width: 0; }
+  .opt .ot { font-size: 13px; font-weight: 500; color: var(--prizma-text-primary); display: flex; align-items: center; gap: 7px; }
+  .opt .ot .rdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .opt .os { font: 500 10.5px/1.3 var(--mono); color: var(--prizma-text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .opt .okind { font: 600 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); border-radius: 4px; padding: 3px 6px; flex: none; }
+  .menu .empty { padding: 18px 12px; text-align: center; font-size: 12.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── контекст: недавние + подсказки следующих действий ── */
+  .context { width: 100%; max-width: 720px; margin-top: 12px; display: flex; gap: 22px; }
+  .context .col { flex: 1; min-width: 0; }
+  .context .col > .pz-eyebrow { display: block; margin-bottom: 7px; }
+  .recent { display: flex; flex-direction: column; gap: 4px; }
+  .recent button, .next button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 6px 9px; border-radius: var(--r-md); color: var(--prizma-text-secondary); font: 500 12px/1.3 var(--font); transition: background .14s, color .14s; }
+  .recent button:hover, .next button:hover { background: var(--prizma-bg-elevated); color: var(--prizma-text-primary); }
+  .recent button .rc { font: 600 11.5px/1 var(--mono); }
+  .recent button svg, .next button svg { color: var(--prizma-text-tertiary); flex: none; }
+  .recent .empty { font-size: 11.5px; color: var(--prizma-text-tertiary); padding: 6px 9px; }
+
+  /* ── backdrop: тихий нейтральный мини-гант ── */
+  .backdrop { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--prizma-border); margin-top: 6px; }
+  .bdhead { display: flex; align-items: center; gap: 10px; padding: 9px 22px; flex: none; }
+  .bdhead .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .bdhead .filt { display: none; align-items: center; gap: 7px; font: 500 11px/1 var(--mono); color: var(--prizma-information); }
+  .bdhead .filt.on { display: inline-flex; }
+  .bdhead .filt button { background: none; border: none; color: var(--prizma-text-tertiary); cursor: pointer; padding: 2px; display: inline-flex; }
+  .bdhead .filt button:hover { color: var(--prizma-text-primary); }
+  .bdhead .spacer { flex: 1; }
+  .bdhead .stat { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .scroll { flex: 1; overflow: auto; min-height: 0; opacity: .92; }
+  .grid { display: grid; grid-template-columns: 220px repeat(5, minmax(120px, 1fr)); min-width: 880px; position: relative; }
+  .h { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg); padding: 11px 12px 9px; border-bottom: 1px solid var(--prizma-border); }
+  .h .rel { font: 300 15px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .h .rel.cur { color: var(--prizma-text-secondary); }
+  .h.first { display: flex; align-items: flex-end; }
+  .team { grid-column: 1 / -1; position: sticky; left: 0; padding: 8px 14px 5px; font: 700 9.5px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); background: var(--prizma-bg); }
+  .lbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 9px 12px; border-bottom: 1px solid var(--prizma-border); }
+  .lbl .nm { font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 6px; color: var(--prizma-text-secondary); }
+  .lbl .nm .risk { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .c { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 9px; display: flex; flex-direction: column; gap: 4px; }
+  .c.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  /* пилюли backdrop — приглушённые, work-type stripe тонко */
+  .p { position: relative; display: flex; align-items: center; gap: 6px; padding-left: 9px; font-size: 11px; color: var(--prizma-text-secondary); }
+  .p::before { content: ""; position: absolute; left: 0; top: 1px; bottom: 1px; width: 2px; border-radius: 2px; background: var(--wt); opacity: .7; }
+  .p .who { font: 500 9px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .p[data-state="done"] { opacity: .5; }
+  .p[data-state="done"] .nm { text-decoration: line-through; }
+  /* затемнение нерелевантных строк при фильтре (на .lbl/.c с data-erow) */
+  .lbl, .c { transition: opacity .25s var(--ease-calm), background .2s; }
+  .lbl.dim, .c.dim { opacity: .16; }
+  .lbl.hit .nm { color: var(--prizma-text-primary); }
+  .c.hl { background: var(--prizma-information-bg); }
+
+  /* today-axis */
+  .today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-information); opacity: .7; pointer-events: none; z-index: 5; }
+  .today .cap { position: absolute; top: 5px; left: -1px; transform: translateX(-50%); font: 700 8.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); background: var(--prizma-bg); padding: 2px 5px; border-radius: 0 0 3px 3px; white-space: nowrap; }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0; display: flex; align-items: center; gap: 10px; padding: 11px 14px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.4); transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; font-size: 13px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast svg { color: var(--prizma-on-course); flex: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Командный режим</span>
+    <span class="pz-eyebrow">Редизайн 04 · Command-first</span>
+    <span class="spacer"></span>
+    <span class="hintk"><kbd>/</kbd> фокус<kbd>↑↓</kbd> выбор<kbd>↵</kbd> применить<kbd>esc</kbd> сброс</span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="cmdwrap">
+    <div class="cmdbox">
+      <div class="cmd" id="cmd">
+        <svg class="ic" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="input" type="text" placeholder="Команда или фильтр — qa:, release:1.21, team:Платежи, risk:…" autocomplete="off" spellcheck="false" aria-label="Командная строка">
+        <button class="clear" id="clear" aria-label="Очистить"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <span class="ret" id="ret" style="display:none">↵</span>
+      </div>
+      <div class="menu" id="menu"></div>
+    </div>
+
+    <div class="prefixes" id="prefixes"></div>
+
+    <div class="context">
+      <div class="col">
+        <span class="pz-eyebrow">Недавние команды</span>
+        <div class="recent" id="recent"><span class="empty">Пока пусто — выполните команду</span></div>
+      </div>
+      <div class="col">
+        <span class="pz-eyebrow">Подсказки · следующие действия</span>
+        <div class="next" id="next"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="backdrop">
+    <div class="bdhead">
+      <span class="pz-eyebrow">Гант квартала · фон</span>
+      <span class="filt" id="filt"><span id="filtLabel"></span><button id="filtClear" aria-label="Снять фильтр"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>
+      <span class="spacer"></span>
+      <span class="stat" id="stat"></span>
+    </div>
+    <div class="scroll"><div class="grid" id="grid"></div></div>
+  </div>
+
+  <div class="toast" id="toast"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span id="toastText"></span></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const grid = document.getElementById('grid');
+  const input = document.getElementById('input');
+  const cmd = document.getElementById('cmd');
+  const menu = document.getElementById('menu');
+
+  const wtVar = wt => ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information');
+  const riskVar = r => r === 'off-course' ? 'var(--prizma-off-course)' : r === 'drift' ? 'var(--prizma-drift)' : '';
+  const riskLabel = r => r === 'off-course' ? 'риск срыва' : r === 'drift' ? 'дрейф' : '';
+  const fmtSpan = c => c.dated ? new Date(c.start).toLocaleDateString('ru', { day: '2-digit', month: 'short' }) + ' – ' + new Date(c.end).toLocaleDateString('ru', { day: '2-digit', month: 'short' }) : 'без даты';
+
+  // ── состояние фильтра ──
+  let filter = null; // { kind, value, test(epic,pill)->bool, label }
+  let sel = 0;       // выбранный пункт меню
+  let opts = [];     // текущие опции меню
+  const recents = [];
+
+  // ── backdrop grid ──
+  function renderGrid() {
+    let h = '<div class="h first"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => { h += '<div class="h"><span class="rel' + (c.current ? ' cur' : '') + '">' + c.short + '</span></div>'; });
+    D.teams.forEach(team => {
+      h += '<div class="team">' + team + '</div>';
+      D.helpers.teamEpics(team).forEach(e => {
+        const riskDot = e.risk ? '<span class="risk" style="background:' + riskVar(e.risk) + '"></span>' : '';
+        // строки эпика — прямые grid-дети; data-erow помечает все ячейки строки для фильтра
+        h += '<div class="lbl" data-erow="' + e.id + '"><span class="nm">' + riskDot + e.epic + '</span></div>';
+        cols.forEach(c => {
+          const bz = c.key === 'backlog' || c.key === 'overtime';
+          h += '<div class="c' + (bz ? ' bz' : '') + '" data-erow="' + e.id + '" data-col="' + c.key + '">';
+          D.helpers.pillsOf(e, c.key).forEach(p => {
+            const who = p.who ? '<span class="who">' + p.who + '</span>' : '';
+            h += '<div class="p" data-state="' + p.state + '" data-wt="' + p.wt + '" style="--wt:var(' + wtVar(p.wt) + ')"><span class="nm">' + p.wt + '</span>' + who + '</div>';
+          });
+          h += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = h;
+    applyFilter();
+    placeToday();
+    setTimeout(placeToday, 60);
+  }
+
+  // ── каталог действий/сущностей для подсказок ──
+  function buildCatalog() {
+    const actions = [
+      { kind: 'действие', icon: 'plus', label: 'Новый эпик', sub: 'создать эпик в выбранной команде', toast: 'Открыта форма нового эпика' },
+      { kind: 'действие', icon: 'flag', label: 'Отметить веху', sub: 'добавить milestone на ось', toast: 'Веха добавлена' },
+      { kind: 'действие', icon: 'risk', label: 'Показать только риски', sub: 'фильтр risk:off-course + risk:drift', apply: () => setFilter({ kind: 'risk', value: 'any', label: 'риски', test: (e) => !!e.risk }) },
+      { kind: 'действие', icon: 'reset', label: 'Сбросить фильтры', sub: 'показать весь квартал', apply: () => setFilter(null) },
+    ];
+    const epicsC = D.epics.map(e => ({
+      kind: 'эпик', icon: 'epic', label: e.epic, sub: e.team + ' · ' + D.helpers.effortOf(e) + ' дн' + (e.risk ? ' · ' + riskLabel(e.risk) : ''), risk: e.risk,
+      apply: () => setFilter({ kind: 'epic', value: e.id, label: e.epic, test: (x) => x.id === e.id })
+    }));
+    const teamsC = D.teams.map(t => ({
+      kind: 'команда', icon: 'team', label: t, sub: D.helpers.teamEpics(t).length + ' эпиков',
+      apply: () => setFilter({ kind: 'team', value: t, label: 'team:' + t, test: (e) => e.team === t })
+    }));
+    const wtsC = Object.keys(D.WT).map(wt => ({
+      kind: 'работа', icon: 'wt', wt, label: wt + ' · ' + D.WT[wt].label, sub: 'все пилюли типа ' + wt,
+      apply: () => setFilter({ kind: 'wt', value: wt, label: wt + ':', test: (e, p) => p && p.wt === wt, pillLevel: true })
+    }));
+    const relsC = cols.filter(c => c.dated).map(c => ({
+      kind: 'релиз', icon: 'rel', label: 'release:' + c.short, sub: fmtSpan(c),
+      apply: () => setFilter({ kind: 'release', value: c.key, label: 'release:' + c.short, test: (e, p) => p && p.col === c.key, pillLevel: true })
+    }));
+    return { actions, epics: epicsC, teams: teamsC, wts: wtsC, rels: relsC };
+  }
+  const CAT = buildCatalog();
+
+  const ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>', flag: '<path d="M4 22V4h11l-2 4 2 4H4"/>',
+    risk: '<path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+    reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
+    epic: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
+    team: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9"/>',
+    rel: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+    cmd: '<path d="M4 17l6-6-6-6M12 19h8"/>'
+  };
+  function oicSvg(name) { return '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || ICONS.cmd) + '</svg>'; }
+
+  // ── разбор запроса в группы подсказок ──
+  function computeOpts(q) {
+    q = q.trim();
+    const low = q.toLowerCase();
+    // префикс-режимы
+    const m = low.match(/^(qa|be|fe|an|ba|impl|mig|stab|hf|release|team|risk):\s*(.*)$/);
+    let groups = [];
+    if (m) {
+      const pre = m[1], rest = m[2];
+      if (['qa','be','fe','an','ba','impl','mig','stab','hf'].includes(pre)) {
+        groups.push(['Работы', CAT.wts.filter(o => o.wt.toLowerCase() === pre)]);
+      } else if (pre === 'release') {
+        groups.push(['Релизы', CAT.rels.filter(o => o.label.toLowerCase().includes(rest))]);
+      } else if (pre === 'team') {
+        groups.push(['Команды', CAT.teams.filter(o => o.label.toLowerCase().includes(rest))]);
+      } else if (pre === 'risk') {
+        const rs = [
+          { kind: 'риск', icon: 'risk', label: 'risk:off-course', sub: 'эпики с риском срыва', risk: 'off-course', apply: () => setFilter({ kind: 'risk', value: 'off-course', label: 'risk:off-course', test: e => e.risk === 'off-course' }) },
+          { kind: 'риск', icon: 'risk', label: 'risk:drift', sub: 'дрейфующие эпики', risk: 'drift', apply: () => setFilter({ kind: 'risk', value: 'drift', label: 'risk:drift', test: e => e.risk === 'drift' }) },
+          { kind: 'риск', icon: 'risk', label: 'risk:any', sub: 'любой риск', apply: () => setFilter({ kind: 'risk', value: 'any', label: 'риски', test: e => !!e.risk }) },
+        ];
+        groups.push(['Риск', rs.filter(o => o.label.toLowerCase().includes(rest) || !rest)]);
+      }
+    } else if (!q) {
+      // пустой — стартовые группы
+      groups = [
+        ['Действия', CAT.actions],
+        ['Команды', CAT.teams],
+        ['Работы', CAT.wts.slice(0, 4)],
+      ];
+    } else {
+      // свободный текст — фильтруем по всем
+      const f = arr => arr.filter(o => o.label.toLowerCase().includes(low) || (o.sub && o.sub.toLowerCase().includes(low)));
+      groups = [
+        ['Действия', f(CAT.actions)],
+        ['Эпики', f(CAT.epics)],
+        ['Команды', f(CAT.teams)],
+        ['Работы', f(CAT.wts)],
+        ['Релизы', f(CAT.rels)],
+      ];
+    }
+    // плоский список для навигации + сохранить заголовки
+    groups = groups.filter(g => g[1].length);
+    const flat = [];
+    groups.forEach(g => g[1].forEach(o => flat.push(o)));
+    return { groups, flat };
+  }
+
+  function renderMenu() {
+    const q = input.value;
+    const r = computeOpts(q);
+    opts = r.flat;
+    if (sel >= opts.length) sel = Math.max(0, opts.length - 1);
+    if (!opts.length) {
+      menu.innerHTML = '<div class="empty">Ничего не найдено для «' + escapeHtml(q.trim()) + '»</div>';
+      return;
+    }
+    let h = '', idx = 0;
+    r.groups.forEach(([title, arr]) => {
+      h += '<div class="grp"><span class="pz-eyebrow">' + title + '</span></div>';
+      arr.forEach(o => {
+        const isWt = o.icon === 'wt';
+        const oic = isWt
+          ? '<span class="oic wt" style="--wt:var(' + wtVar(o.wt) + ')"><span>' + o.wt + '</span></span>'
+          : '<span class="oic">' + oicSvg(o.icon) + '</span>';
+        const rdot = o.risk ? '<span class="rdot" style="background:' + riskVar(o.risk) + '"></span>' : '';
+        h += '<div class="opt' + (idx === sel ? ' sel' : '') + '" data-idx="' + idx + '">' + oic +
+          '<span class="otext"><span class="ot">' + escapeHtml(o.label) + rdot + '</span><span class="os">' + escapeHtml(o.sub || '') + '</span></span>' +
+          '<span class="okind">' + o.kind + '</span></div>';
+        idx++;
+      });
+    });
+    menu.innerHTML = h;
+    menu.querySelectorAll('.opt').forEach(el => {
+      el.addEventListener('mouseenter', () => { sel = +el.dataset.idx; markSel(); });
+      el.addEventListener('mousedown', ev => { ev.preventDefault(); applyOpt(opts[+el.dataset.idx]); });
+    });
+  }
+  function markSel() {
+    menu.querySelectorAll('.opt').forEach(el => el.classList.toggle('sel', +el.dataset.idx === sel));
+    const cur = menu.querySelector('.opt.sel');
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
+
+  function applyOpt(o) {
+    if (!o) return;
+    if (o.apply) o.apply();
+    else toast(o.toast || 'Выполнено');
+    pushRecent(o);
+    closeMenu();
+    input.value = '';
+    syncClear();
+  }
+
+  // ── фильтр backdrop ──
+  function setFilter(f) {
+    filter = f;
+    const fEl = document.getElementById('filt');
+    if (f) {
+      fEl.classList.add('on');
+      document.getElementById('filtLabel').textContent = 'фильтр: ' + f.label;
+    } else {
+      fEl.classList.remove('on');
+    }
+    applyFilter();
+    if (f) toast('Фильтр применён: ' + f.label);
+  }
+  function applyFilter() {
+    const stat = document.getElementById('stat');
+    let shown = 0;
+    D.epics.forEach(e => {
+      let hit;
+      if (!filter) hit = true;
+      else if (filter.pillLevel) hit = e.pills.some(p => filter.test(e, p));
+      else hit = filter.test(e);
+      if (hit) shown++;
+      grid.querySelectorAll('[data-erow="' + e.id + '"]').forEach(el => {
+        el.classList.toggle('dim', !!filter && !hit);
+        el.classList.toggle('hit', !!filter && hit);
+      });
+      // подсветка конкретных ячеек для pill-level
+      if (filter && filter.pillLevel && hit) {
+        cols.forEach(c => {
+          const cell = grid.querySelector('.c[data-erow="' + e.id + '"][data-col="' + c.key + '"]');
+          if (cell) cell.classList.toggle('hl', e.pills.some(p => p.col === c.key && filter.test(e, p)));
+        });
+      } else {
+        grid.querySelectorAll('.c[data-erow="' + e.id + '"]').forEach(c => c.classList.remove('hl'));
+      }
+    });
+    stat.textContent = filter ? shown + ' из ' + D.epics.length + ' эпиков' : D.epics.length + ' эпиков · 5 команд';
+  }
+
+  document.getElementById('filtClear').addEventListener('click', () => setFilter(null));
+
+  // ── недавние + next-подсказки ──
+  function pushRecent(o) {
+    recents.unshift({ label: o.label, kind: o.kind, opt: o });
+    if (recents.length > 5) recents.pop();
+    renderRecent();
+  }
+  function renderRecent() {
+    const box = document.getElementById('recent');
+    if (!recents.length) { box.innerHTML = '<span class="empty">Пока пусто — выполните команду</span>'; return; }
+    box.innerHTML = recents.map((r, i) =>
+      '<button data-r="' + i + '"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span class="rc">' + escapeHtml(r.label) + '</span></button>'
+    ).join('');
+    box.querySelectorAll('button').forEach(b => b.addEventListener('click', () => applyOpt(recents[+b.dataset.r].opt)));
+  }
+  function renderNext() {
+    // контекстные подсказки следующих действий
+    const offCourse = D.epics.filter(e => e.risk === 'off-course').length;
+    const items = [
+      { label: 'Показать ' + offCourse + ' эпика с риском срыва', run: () => applyOpt(CAT.actions.find(a => a.label === 'Показать только риски')) },
+      { label: 'Фокус на команде Платежи', run: () => applyOpt(CAT.teams.find(t => t.label === 'Платежи')) },
+      { label: 'Все работы тестирования (qa:)', run: () => applyOpt(CAT.wts.find(w => w.wt === 'QA')) },
+      { label: 'Перейти к релизу 1.21', run: () => applyOpt(CAT.rels.find(r => r.label === 'release:1.21')) },
+    ];
+    document.getElementById('next').innerHTML = items.map((it, i) =>
+      '<button data-n="' + i + '"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' + escapeHtml(it.label) + '</button>'
+    ).join('');
+    document.getElementById('next').querySelectorAll('button').forEach(b => b.addEventListener('click', () => items[+b.dataset.n].run()));
+  }
+
+  // ── префикс-чипы ──
+  function renderPrefixes() {
+    const pre = ['qa:', 'be:', 'fe:', 'release:1.21', 'team:Платежи', 'risk:off-course'];
+    document.getElementById('prefixes').innerHTML = pre.map(p => '<span class="pz-chip" data-p="' + p + '">' + p + '</span>').join('');
+    document.getElementById('prefixes').querySelectorAll('.pz-chip').forEach(c => c.addEventListener('click', () => {
+      input.value = c.dataset.p; input.focus(); openMenu(); renderMenu(); syncClear();
+    }));
+  }
+
+  // ── меню open/close ──
+  function openMenu() { menu.classList.add('open'); }
+  function closeMenu() { menu.classList.remove('open'); }
+
+  // ── input wiring ──
+  input.addEventListener('focus', () => { cmd.classList.add('focus'); openMenu(); renderMenu(); });
+  input.addEventListener('blur', () => { cmd.classList.remove('focus'); setTimeout(closeMenu, 120); });
+  input.addEventListener('input', () => { sel = 0; openMenu(); renderMenu(); syncClear(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (opts.length) { sel = (sel + 1) % opts.length; markSel(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (opts.length) { sel = (sel - 1 + opts.length) % opts.length; markSel(); } }
+    else if (e.key === 'Enter') { e.preventDefault(); applyOpt(opts[sel]); }
+    else if (e.key === 'Escape') { e.preventDefault(); if (input.value) { input.value = ''; renderMenu(); syncClear(); } else { setFilter(null); input.blur(); } }
+  });
+  function syncClear() {
+    document.getElementById('clear').classList.toggle('on', !!input.value);
+    document.getElementById('ret').style.display = input.value ? '' : 'none';
+  }
+  document.getElementById('clear').addEventListener('click', () => { input.value = ''; input.focus(); renderMenu(); syncClear(); });
+
+  // глобальный «/» — фокус строки
+  window.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== input) { e.preventDefault(); input.focus(); }
+  });
+
+  // ── toast ──
+  const toastEl = document.getElementById('toast');
+  let toastTimer;
+  function toast(text) {
+    document.getElementById('toastText').textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  }
+
+  // ── today-axis ──
+  function placeToday() {
+    grid.querySelector('.today')?.remove();
+    const heads = [...grid.querySelectorAll('.h')];
+    const curIdx = cols.findIndex(c => c.current);
+    const cur = heads[curIdx + 1];
+    if (!cur) return;
+    const c = cols[curIdx];
+    const total = new Date(c.end) - new Date(c.start);
+    const pct = total > 0 ? (new Date(D.today) - new Date(c.start)) / total : .5;
+    const gr = grid.getBoundingClientRect(), hr = cur.getBoundingClientRect();
+    const left = (hr.left - gr.left) + hr.width * Math.max(0, Math.min(1, pct));
+    const line = document.createElement('div'); line.className = 'today';
+    line.style.left = left.toFixed(1) + 'px'; line.style.height = grid.scrollHeight + 'px';
+    line.innerHTML = '<span class="cap">СЕГОДНЯ 23.05</span>';
+    grid.appendChild(line);
+  }
+  window.addEventListener('resize', placeToday);
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
+
+  // init
+  renderGrid();
+  renderPrefixes();
+  renderNext();
+  renderRecent();
+  syncClear();
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

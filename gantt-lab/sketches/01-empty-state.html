@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 01 · Пустой экран с характером</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+
+  .tt { position: fixed; top: 16px; right: 18px; z-index: 50; }
+
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 24px 64px; position: relative; }
+
+  /* ── пустое состояние ── */
+  .empty { max-width: 460px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0;
+    transition: opacity .5s var(--ease-calm), transform .5s var(--ease-calm); }
+  .empty.gone { opacity: 0; transform: translateY(-10px) scale(.98); pointer-events: none; position: absolute; }
+
+  /* знак-призма/компас + спокойный ray-pulse */
+  .mark { position: relative; width: 96px; height: 96px; margin-bottom: 26px; }
+  .mark svg { width: 96px; height: 96px; color: var(--prizma-text-primary); position: relative; z-index: 2; }
+  .mark .ray { position: absolute; inset: -22px; border-radius: 50%; z-index: 1;
+    background: radial-gradient(circle at center, var(--prizma-information-bg) 0%, transparent 62%);
+    animation: ray 3.6s var(--ease-calm) infinite; }
+  @keyframes ray {
+    0%, 100% { opacity: .35; transform: scale(.92); }
+    50%      { opacity: .9;  transform: scale(1.04); }
+  }
+  @media (prefers-reduced-motion: reduce) { .mark .ray { animation: none; opacity: .5; } }
+
+  .empty .pz-eyebrow { color: var(--prizma-information); margin-bottom: 12px; }
+  .empty h1 { font-size: 27px; font-weight: 800; letter-spacing: -.02em; margin: 0 0 12px; line-height: 1.15; }
+  .empty .sub { margin: 0 0 28px; color: var(--prizma-text-secondary); font-size: 14.5px; line-height: 1.55; max-width: 380px; }
+
+  .cta { display: flex; gap: 10px; align-items: center; }
+  .pz-btn.lg, .pz-btn-primary.lg { height: 38px; padding: 0 18px; font-size: 13.5px; }
+  .pz-btn svg, .pz-btn-primary svg { width: 15px; height: 15px; }
+
+  /* faux drop-zone hint под загрузкой XLSX */
+  .drop { overflow: hidden; max-height: 0; opacity: 0; width: 100%;
+    transition: max-height .4s var(--ease-calm), opacity .3s, margin .4s var(--ease-calm); margin-top: 0; }
+  .drop.show { max-height: 140px; opacity: 1; margin-top: 22px; }
+  .drop-inner { display: flex; flex-direction: column; align-items: center; gap: 8px;
+    border: 1.5px dashed var(--prizma-border-strong); border-radius: var(--r-lg);
+    padding: 22px 18px; background: var(--prizma-bg-elevated); }
+  .drop-inner svg { width: 26px; height: 26px; color: var(--prizma-text-tertiary); }
+  .drop-inner .t { font-size: 13px; color: var(--prizma-text-secondary); }
+  .drop-inner .t b { color: var(--prizma-text-primary); font-weight: 600; }
+  .drop-inner .h { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* ── мини-гант превью (появляется из демо) ── */
+  .preview { width: 100%; max-width: 760px; opacity: 0; transform: translateY(12px) scale(.985);
+    transition: opacity .55s var(--ease-calm) .15s, transform .55s var(--ease-calm) .15s; pointer-events: none; position: absolute; }
+  .preview.show { opacity: 1; transform: none; pointer-events: auto; position: static; }
+  .preview .phead { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .preview .phead .pz-eyebrow { color: var(--prizma-information); }
+  .preview .phead .ttl { font-size: 15px; font-weight: 700; }
+  .preview .phead .spacer { flex: 1; }
+
+  .mini { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .mgrid { display: grid; grid-template-columns: 150px repeat(4, 1fr); }
+  .mh { padding: 10px 12px 9px; border-bottom: 1px solid var(--prizma-border-strong); border-left: 1px solid var(--prizma-border); background: var(--prizma-bg-elevated); }
+  .mh:first-child { border-left: none; }
+  .mh .rel { font: 300 17px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .mh .rel.cur { color: var(--prizma-text-primary); }
+  .mh.cur { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .mh .dt { display: block; margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .mh.lbl0 { display: flex; align-items: flex-end; }
+
+  .ml { padding: 10px 12px; border-bottom: 1px solid var(--prizma-border); border-left: none; font-size: 12.5px; font-weight: 500;
+    display: flex; flex-direction: column; gap: 2px; }
+  .ml .tm { font: 700 9px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .mc { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 9px 10px;
+    display: flex; flex-direction: column; gap: 5px; min-height: 44px; }
+  .row:last-child .mc, .row:last-child .ml { border-bottom: none; }
+
+  .pp { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); width: fit-content; }
+  .pp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pp .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pp[data-state="done"] { opacity: .7; }
+  .pp[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+  /* появление пилюль каскадом */
+  .preview.show .pp { animation: pop .4s var(--ease-spring) backwards; }
+</style>
+</head>
+<body>
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="stage">
+    <!-- пустое состояние -->
+    <div class="empty" id="empty">
+      <div class="mark">
+        <span class="ray" aria-hidden="true"></span>
+        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
+          <path d="M24 4 L40 38 H8 Z"/>
+          <path d="M24 4 V38" opacity=".35"/>
+          <path d="M24 4 L17 24 H31 Z" opacity=".7"/>
+          <circle cx="24" cy="44" r="1.4" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <div class="pz-eyebrow">План пуст</div>
+      <h1>С чего начнём квартал?</h1>
+      <p class="sub">Здесь появятся эпики, релизы и линия сегодня. Загрузите план из XLSX — или посмотрите, как это выглядит на демо-данных.</p>
+      <div class="cta">
+        <button class="pz-btn-primary lg" id="demo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg>
+          Посмотреть демо
+        </button>
+        <button class="pz-btn lg" id="xlsx">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          Загрузить XLSX
+        </button>
+      </div>
+      <div class="drop" id="drop">
+        <div class="drop-inner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/></svg>
+          <div class="t">Перетащите <b>план.xlsx</b> сюда или нажмите для выбора</div>
+          <div class="h">XLSX · до 5 МБ · столбцы Эпик / Команда / Релиз</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- мини-гант превью -->
+    <div class="preview" id="preview">
+      <div class="phead">
+        <span class="pz-eyebrow">Демо-план</span>
+        <span class="ttl">Гант квартала Q2</span>
+        <span class="spacer"></span>
+        <button class="pz-btn" id="back">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Назад к пустому
+        </button>
+      </div>
+      <div class="mini" id="mini"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const fmt = iso => new Date(iso).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+
+  const empty = document.getElementById('empty');
+  const preview = document.getElementById('preview');
+  const mini = document.getElementById('mini');
+
+  // ── мини-гант: несколько команд/эпиков на нейтральных окнах релизов ──
+  const cols = D.releases.filter(c => c.dated); // r120 r121 r122 — без бэклога/овертайма для компактности
+  const pickTeams = ['Платежи', 'Интеграции', 'Мобайл'];
+
+  function buildMini() {
+    let h = '<div class="mgrid">';
+    h += '<div class="mh lbl0"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      h += '<div class="mh' + (c.current ? ' cur' : '') + '"><span class="rel' + (c.current ? ' cur' : '') + '">' + c.short + '</span><span class="dt">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></div>';
+    });
+    let delay = 0;
+    pickTeams.forEach(team => {
+      // берём первый эпик команды для компактного, но живого превью
+      const ep = D.epics.find(e => e.team === team);
+      h += '<div class="row" style="display:contents">';
+      h += '<div class="ml"><span class="tm">' + team + '</span>' + ep.epic + '</div>';
+      cols.forEach(c => {
+        h += '<div class="mc">';
+        D.helpers.pillsOf(ep, c.key).forEach(p => {
+          delay += 60;
+          const done = p.state === 'done';
+          h += '<div class="pp" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + ';animation-delay:' + delay + 'ms">' +
+               (done ? '<span class="dot" style="background:var(--prizma-on-course)"></span>' : '') +
+               '<span class="nm">' + p.wt + '</span></div>';
+        });
+        h += '</div>';
+      });
+      h += '</div>';
+    });
+    h += '</div>';
+    mini.innerHTML = h;
+  }
+  buildMini();
+
+  // ── переходы ──
+  document.getElementById('demo').addEventListener('click', () => {
+    empty.classList.add('gone');
+    setTimeout(() => preview.classList.add('show'), 260);
+  });
+  document.getElementById('back').addEventListener('click', () => {
+    preview.classList.remove('show');
+    empty.classList.remove('gone');
+  });
+  document.getElementById('xlsx').addEventListener('click', () => {
+    document.getElementById('drop').classList.toggle('show');
+  });
+
+  // тема
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+<style>
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.9); } to { opacity: 1; transform: none; } }
+</style>
+</body>
+</html>
