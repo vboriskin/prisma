@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 37 · Перенос с подсказкой нагрузки</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── мини-гант: команда × релиз с пилюлями ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 580px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 232px repeat(5, 1fr); min-width: 900px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px; min-height: 48px; }
+
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  /* строка команды */
+  .teamhead { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .teamhead .nm { font-size: 13px; font-weight: 600; }
+  .teamhead .cap { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+    transition: background .14s var(--ease-calm), box-shadow .14s var(--ease-calm); }
+  /* во время перетаскивания: dropzone-состояния */
+  .cell.cand { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .cell.cand.free { background: var(--prizma-on-course-bg); box-shadow: inset 0 0 0 1px var(--prizma-on-course); }
+  .cell.cand.over { background: var(--prizma-off-course-bg); box-shadow: inset 0 0 0 1px var(--prizma-off-course); }
+  .cell.cand.over.hot { background: color-mix(in srgb, var(--prizma-off-course) 22%, transparent); }
+  .cell.cand.free.hot { background: color-mix(in srgb, var(--prizma-on-course) 22%, transparent); }
+  .cell.source { opacity: .55; }
+
+  /* живой бейдж проекции нагрузки */
+  .proj { position: absolute; top: 5px; right: 6px; display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 7px; border-radius: var(--r-sm); background: var(--prizma-bg); border: 1px solid var(--prizma-border-strong);
+    font: 700 10px/1 var(--mono); letter-spacing: .2px; white-space: nowrap; pointer-events: none; z-index: 5;
+    opacity: 0; transform: translateY(-3px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); }
+  .proj.show { opacity: 1; transform: translateY(0); }
+  .proj .frac { color: var(--prizma-text-primary); }
+  .proj .tag { font-size: 9px; }
+  .proj.free { border-color: var(--prizma-on-course); }
+  .proj.free .tag { color: var(--prizma-on-course); }
+  .proj.over { border-color: var(--prizma-off-course); }
+  .proj.over .frac, .proj.over .tag { color: var(--prizma-off-course); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); cursor: grab; user-select: none; overflow: hidden;
+    transition: transform .12s var(--ease-calm), box-shadow .12s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .pill.dragging { opacity: .35; cursor: grabbing; }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill .done-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-on-course); flex: none; }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 12px; height: 12px; border-radius: 3px; }
+  .legend i.free { background: var(--prizma-on-course-bg); box-shadow: inset 0 0 0 1px var(--prizma-on-course); }
+  .legend i.over { background: var(--prizma-off-course-bg); box-shadow: inset 0 0 0 1px var(--prizma-off-course); }
+  .note { margin-top: 13px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 680px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(16px); opacity: 0;
+    display: flex; align-items: center; gap: 12px; padding: 11px 14px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; font-size: 13px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .undo { background: none; border: none; color: var(--prizma-information); font: 600 13px/1 var(--font); cursor: pointer; padding: 4px 6px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 37 · Перенос с подсказкой нагрузки</div>
+      <h1>Перенос с подсказкой нагрузки</h1>
+      <p>Пока вы тащите работу, каждое окно команды показывает живую проекцию: «станет 4/3 · перегруз». Цель краснеет до того, как вы отпустите, свободные окна — зелёные. Решение принимается до дропа, а не после.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Тащите пилюлю в другое окно той же команды — бейджи покажут будущую нагрузку.</span>
+  </div>
+  <div class="gantt" id="gantt"></div>
+
+  <div class="legend">
+    <span><i class="free"></i>уложимся в ёмкость</span>
+    <span><i class="over"></i>перегруз после переноса</span>
+  </div>
+  <p class="note">Ёмкость окна на команду — синтетическая (см. <code>CAPACITY</code> в коде). В реальном приложении источник — <code>state.employees[].capacity</code>, агрегированная по команде на окно релиза. Проекция = текущая нагрузка цели + переносимая работа.</p>
+</div>
+
+<div class="toast" id="toast"><span id="toastText"></span><button class="undo" id="toastUndo">Отменить</button></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases; // backlog, r120, r121, r122, overtime — нейтральные грид-колонки
+  const root = document.getElementById('gantt');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // Синтетическая ёмкость окна на команду (работ за релиз). Источник в реальном
+  // приложении — employees.capacity, агрегированная по команде на окно релиза.
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+
+  // снимок состояния для reset/undo; работаем по командам (строка = команда)
+  let snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, team: e.team, pills: e.pills })));
+  let lastMove = null;
+
+  // нагрузка команды в окне по текущему снимку
+  function teamLoad(data, team, col) {
+    return data.reduce((n, e) => e.team === team ? n + e.pills.filter(p => p.col === col).length : n, 0);
+  }
+
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  function render() {
+    const data = JSON.parse(snapshot);
+    let html = '<div class="grid">';
+    // шапка
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Команда / Релиз</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    // строки команд
+    D.teams.forEach(team => {
+      const cap = CAPACITY[team] || 5;
+      const eps = data.filter(e => e.team === team);
+      html += '<div class="gcell teamhead"><span class="nm">'+esc(team)+'</span><span class="cap">ёмкость '+cap+'/окно</span></div>';
+      cols.forEach(c => {
+        const load = teamLoad(data, team, c.key);
+        html += '<div class="gcell cell" data-team="'+esc(team)+'" data-col="'+c.key+'" data-load="'+load+'" data-cap="'+cap+'">';
+        // пилюли команды в этом окне (по всем эпикам команды)
+        eps.forEach(e => {
+          e.pills.forEach((p, idx) => {
+            if (p.col !== c.key) return;
+            html += pillHtml(e.id, p, c.key, idx, e.epic);
+          });
+        });
+        html += '</div>';
+      });
+    });
+    html += '</div>';
+    root.innerHTML = html;
+    wireDnD();
+  }
+
+  function pillHtml(epicId, p, col, idx, epicName) {
+    const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+    const dot = p.state === 'progress' ? '<span class="dot"></span>' : (p.state === 'done' ? '<span class="done-dot"></span>' : '');
+    return '<div class="pill" draggable="true" data-epic="'+epicId+'" data-col="'+col+'" data-idx="'+idx+'" data-state="'+p.state+'" '+
+      'title="'+esc(epicName)+'" style="--wt:'+wtVar(p.wt)+'">'+dot+'<span class="nm">'+p.wt+'</span>'+who+'</div>';
+  }
+
+  let drag = null;
+  function wireDnD() {
+    root.querySelectorAll('.pill').forEach(pill => {
+      pill.addEventListener('dragstart', e => {
+        drag = { epic: pill.dataset.epic, col: pill.dataset.col, idx: +pill.dataset.idx, team: cellTeam(pill) };
+        pill.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', pill.querySelector('.nm').textContent); } catch(_){}
+        markCandidates();
+      });
+      pill.addEventListener('dragend', clearCandidates);
+    });
+    root.querySelectorAll('.cell').forEach(cell => {
+      cell.addEventListener('dragover', e => {
+        if (!drag || !cell.classList.contains('cand')) return;
+        e.preventDefault();
+        root.querySelectorAll('.cell.hot').forEach(c => c.classList.remove('hot'));
+        cell.classList.add('hot');
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('hot'));
+      cell.addEventListener('drop', e => {
+        if (!drag || !cell.classList.contains('cand')) return;
+        e.preventDefault();
+        moveP(drag.epic, drag.col, drag.idx, cell.dataset.col);
+      });
+    });
+    // edge-autoscroll
+    root.addEventListener('dragover', e => {
+      const r = root.getBoundingClientRect();
+      if (e.clientX > r.right - 60) root.scrollLeft += 12;
+      else if (e.clientX < r.left + 220) root.scrollLeft -= 12;
+    });
+  }
+  function cellTeam(el){ const c = el.closest('.cell'); return c ? c.dataset.team : null; }
+
+  // на dragstart: подсветить окна той же команды + повесить живой бейдж проекции
+  function markCandidates() {
+    const data = JSON.parse(snapshot);
+    root.querySelectorAll('.cell').forEach(cell => {
+      if (cell.dataset.team !== drag.team) return;
+      if (cell.dataset.col === drag.col) { cell.classList.add('source'); return; }
+      cell.classList.add('cand');
+      const cap = +cell.dataset.cap;
+      const cur = teamLoad(data, cell.dataset.team, cell.dataset.col);
+      const projected = cur + 1;            // переносимая работа добавится сюда
+      const over = projected > cap;
+      cell.classList.add(over ? 'over' : 'free');
+      const badge = document.createElement('div');
+      badge.className = 'proj ' + (over ? 'over' : 'free');
+      badge.innerHTML = '<span class="frac">станет '+projected+'/'+cap+'</span><span class="tag">'+(over?'перегруз':'ок')+'</span>';
+      cell.appendChild(badge);
+      // показать на следующем кадре + страховочный таймаут (gotcha a)
+      requestAnimationFrame(() => badge.classList.add('show'));
+      setTimeout(() => badge.classList.add('show'), 60);
+    });
+  }
+  function clearCandidates() {
+    root.querySelectorAll('.pill.dragging').forEach(p => p.classList.remove('dragging'));
+    root.querySelectorAll('.cell').forEach(c => c.classList.remove('cand','free','over','hot','source'));
+    root.querySelectorAll('.proj').forEach(b => b.remove());
+    drag = null;
+  }
+
+  function moveP(epicId, fromCol, idx, toCol) {
+    const data = JSON.parse(snapshot);
+    const ep = data.find(d => d.id === epicId);
+    if (!ep || !ep.pills[idx]) return;
+    const target = ep.pills[idx];
+    const cap = CAPACITY[ep.team] || 5;
+    const projected = teamLoad(data, ep.team, toCol) + 1;
+    lastMove = { snapshot, label: target.wt + ' · ' + relShort(fromCol) + ' → ' + relShort(toCol) };
+    ep.pills[idx] = Object.assign({}, target, { col: toCol });
+    snapshot = JSON.stringify(data);
+    render();
+    const over = projected > cap;
+    showToast('Перенесено ' + lastMove.label + ' · нагрузка ' + projected + '/' + cap + (over ? ' · перегруз' : ''), true);
+  }
+  function relShort(k){ const c = cols.find(c=>c.key===k); return c?c.short:k; }
+
+  // toast + undo
+  const toast = document.getElementById('toast'), tText = document.getElementById('toastText');
+  let toastTimer;
+  function showToast(text, withUndo) {
+    tText.textContent = text;
+    document.getElementById('toastUndo').style.display = withUndo ? '' : 'none';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>toast.classList.remove('show'), 4400);
+  }
+  document.getElementById('toastUndo').addEventListener('click', () => {
+    if (lastMove) { snapshot = lastMove.snapshot; lastMove = null; render(); showToast('Действие отменено', false); }
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, team: e.team, pills: e.pills })));
+    lastMove = null;
+    render(); showToast('Состояние сброшено', false);
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

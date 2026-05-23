@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 38 · Мобильный вид</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar (desktop chrome around the phone) ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+
+  .eyebrowbar { padding: 10px 22px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* ── backdrop + device frame ── */
+  .backdrop { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 18px; position: relative; }
+  /* faint ground glow — radial via box-shadow on a pseudo, no surface gradient on data */
+  .device { position: relative; width: 390px; height: 800px; max-height: calc(100vh - 130px); border-radius: 44px; background: #000; padding: 12px; box-shadow: 0 0 0 1px var(--prizma-border-strong), 0 40px 90px rgba(0,0,0,.6), inset 0 0 0 2px rgba(255,255,255,.04); flex: none; }
+  .screen { position: relative; width: 100%; height: 100%; border-radius: 33px; background: var(--prizma-bg); overflow: hidden; display: flex; flex-direction: column; }
+  /* notch */
+  .notch { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 130px; height: 26px; background: #000; border-radius: 0 0 16px 16px; z-index: 30; }
+
+  /* status row (simulated) */
+  .stat { display: flex; align-items: center; justify-content: space-between; padding: 9px 22px 4px; font: 600 11px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; }
+  .stat .icons { display: flex; gap: 5px; align-items: center; }
+  .stat .icons svg { width: 14px; height: 14px; }
+
+  /* mobile app bar */
+  .mbar { display: flex; align-items: center; gap: 10px; padding: 8px 16px 10px; flex: none; border-bottom: 1px solid var(--prizma-border); }
+  .mbar .mk { width: 16px; height: 16px; color: var(--prizma-mark); flex: none; }
+  .mbar h1 { font-size: 16px; font-weight: 800; letter-spacing: -.01em; margin: 0; flex: 1; }
+  .mbar .q { font: 700 11px/1 var(--mono); color: var(--prizma-information); border: 1px solid var(--prizma-information); border-radius: var(--r-sm); padding: 4px 7px; }
+
+  /* mini-KPI rail */
+  .krail { display: flex; gap: 8px; padding: 11px 14px; flex: none; overflow-x: auto; }
+  .kc { flex: 1 0 auto; min-width: 86px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 9px 11px; position: relative; }
+  .kc::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--prizma-border-strong); }
+  .kc.ok::before { background: var(--prizma-on-course); }
+  .kc.warn::before { background: var(--prizma-off-course); }
+  .kc.info::before { background: var(--prizma-information); }
+  .kc .kv { font: 800 19px/1 var(--mono); letter-spacing: -.01em; }
+  .kc.warn .kv { color: var(--prizma-off-course); }
+  .kc .kl { font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 5px; }
+
+  /* scroll body */
+  .mscroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 12px 86px; }
+  .sect-eyebrow { padding: 12px 4px 6px; }
+
+  /* team accordion */
+  .team { border: 1px solid var(--prizma-border); border-radius: var(--r-md); margin-bottom: 9px; overflow: hidden; background: var(--prizma-bg-elevated); }
+  .team-h { display: flex; align-items: center; gap: 10px; padding: 12px 13px; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+  .team-h .tn { font-size: 13.5px; font-weight: 700; flex: 1; }
+  .team-h .tm { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .team-h .rd { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .team-h .rd.off { background: var(--prizma-off-course); }
+  .team-h .rd.drift { background: var(--prizma-drift); }
+  .team-h .rd.ok { background: var(--prizma-on-course); opacity: .6; }
+  .team-h .chev { width: 16px; height: 16px; color: var(--prizma-text-tertiary); flex: none; transition: transform .26s var(--ease-calm); }
+  .team.open .team-h .chev { transform: rotate(180deg); }
+
+  /* collapsible inner — grid-rows trick for smooth swipe-feel */
+  .team-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease-calm); }
+  .team.open .team-body { grid-template-rows: 1fr; }
+  .team-body > div { overflow: hidden; }
+  .team-inner { padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  /* epic card */
+  .ec { position: relative; background: var(--prizma-bg); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 10px 11px 10px 13px; }
+  .ec::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--prizma-border-strong); }
+  .ec.r-drift::before { background: var(--prizma-drift); width: 3px; }
+  .ec.r-off::before { background: var(--prizma-off-course); width: 3px; }
+  .ec .ecn { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: flex; align-items: flex-start; gap: 7px; }
+  .ec .ecn .rk { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: none; }
+  .ec .ecn .rk.off { background: var(--prizma-off-course); } .ec .ecn .rk.drift { background: var(--prizma-drift); }
+  .ec .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .wtchip { position: relative; display: inline-flex; align-items: center; padding: 3px 7px 3px 9px; font: 600 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .wtchip.done { opacity: .5; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .wtchip.prog::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); margin-left: 4px; }
+  .ec .ecf { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .ec .ecf .who { font-size: 10px; color: var(--prizma-text-tertiary); }
+  .ec .ecf .eff { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* risks/today/me tab content */
+  .risk-card { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 11px 12px 11px 14px; margin-bottom: 8px; }
+  .risk-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--prizma-drift); }
+  .risk-card.off::before { background: var(--prizma-off-course); }
+  .risk-card .rcn { font-size: 13px; font-weight: 600; }
+  .risk-card .rct { font: 600 10px/1 var(--mono); color: var(--prizma-text-secondary); margin-top: 3px; }
+  .risk-card .rcs { font-size: 11px; color: var(--prizma-text-tertiary); margin-top: 6px; }
+
+  .empty-state { text-align: center; color: var(--prizma-text-tertiary); padding: 50px 20px; font-size: 13px; }
+  .empty-state svg { width: 30px; height: 30px; margin-bottom: 12px; opacity: .5; }
+
+  /* tab views */
+  .view { display: none; }
+  .view.on { display: block; }
+
+  /* bottom tab bar */
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; padding-bottom: 12px; display: flex; background: color-mix(in srgb, var(--prizma-bg) 88%, transparent); backdrop-filter: blur(14px); border-top: 1px solid var(--prizma-border); z-index: 20; }
+  .tab { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; color: var(--prizma-text-tertiary); -webkit-tap-highlight-color: transparent; transition: color .15s; }
+  .tab svg { width: 21px; height: 21px; }
+  .tab .tl { font-size: 9.5px; font-weight: 600; }
+  .tab.on { color: var(--prizma-information); }
+  .tab .badge { position: absolute; transform: translate(11px, -11px); min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: var(--prizma-off-course); color: #fff; font: 700 9px/15px var(--mono); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Мобильный вид</span>
+    <span class="sub">Призма в кармане</span>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 38 · Mobile</span>
+    <span class="hint">тот же брендбук на ширине телефона — тапните команду, чтобы раскрыть эпики.</span>
+  </div>
+
+  <div class="backdrop">
+    <div class="device">
+      <div class="notch"></div>
+      <div class="screen">
+        <div class="stat">
+          <span id="clock">9:41</span>
+          <span class="icons">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 4v16"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0M8.5 16.4a6 6 0 0 1 7 0M2 8.82a15 15 0 0 1 20 0M12 20h.01"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/><rect x="4" y="9" width="13" height="6" rx="1" fill="currentColor" stroke="none"/></svg>
+          </span>
+        </div>
+
+        <div class="mbar">
+          <svg class="mk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+          <h1>Призма</h1>
+          <span class="q" id="qtag">1.21</span>
+        </div>
+
+        <div class="krail" id="krail"></div>
+
+        <div class="mscroll" id="mscroll">
+          <div class="view on" id="v-plan"></div>
+          <div class="view" id="v-risk"></div>
+          <div class="view" id="v-today"></div>
+          <div class="view" id="v-me"></div>
+        </div>
+
+        <div class="tabbar" id="tabbar">
+          <div class="tab on" data-v="plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg><span class="tl">План</span></div>
+          <div class="tab" data-v="risk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><span class="tl">Риски</span></div>
+          <div class="tab" data-v="today"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="tl">Сегодня</span></div>
+          <div class="tab" data-v="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span class="tl">Я</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const now = new Date(D.today);
+  const ME = 'Морозова';   // «Я» — демо-исполнитель
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // ── clock = realtime HH:MM ──
+  function tick() {
+    const d = new Date();
+    document.getElementById('clock').textContent = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  tick(); setInterval(tick, 15000);
+
+  // ── KPI rail ──
+  const allPills = D.epics.reduce((n, e) => n + e.pills.length, 0);
+  const donePills = D.epics.reduce((n, e) => n + e.pills.filter(p => p.state === 'done').length, 0);
+  const donePct = Math.round(donePills / allPills * 100);
+  const onCourse = D.epics.filter(e => !e.risk).length;
+  const atRisk = D.epics.filter(e => e.risk).length;
+  document.getElementById('krail').innerHTML =
+    '<div class="kc ok"><div class="kv">' + onCourse + '<span style="font-size:12px;color:var(--prizma-text-tertiary)">/' + D.epics.length + '</span></div><div class="kl">по курсу</div></div>' +
+    '<div class="kc warn"><div class="kv">' + atRisk + '</div><div class="kl">под риском</div></div>' +
+    '<div class="kc info"><div class="kv">' + donePct + '<span style="font-size:12px;color:var(--prizma-text-tertiary)">%</span></div><div class="kl">готово</div></div>';
+
+  // ── risk indicator for a team ──
+  function teamRisk(team) {
+    const eps = H.teamEpics(team);
+    if (eps.some(e => e.risk === 'off-course')) return 'off';
+    if (eps.some(e => e.risk === 'drift')) return 'drift';
+    return 'ok';
+  }
+
+  // ── epic card ──
+  function ecHtml(e) {
+    const riskCls = e.risk === 'off-course' ? 'r-off' : (e.risk === 'drift' ? 'r-drift' : '');
+    const rk = e.risk === 'off-course' ? '<span class="rk off"></span>' : e.risk === 'drift' ? '<span class="rk drift"></span>' : '';
+    const chips = e.pills.map(p => {
+      const cls = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : '');
+      return '<span class="wtchip' + cls + '" style="--wt:' + wtVar(p.wt) + '">' + esc(p.wt) + '</span>';
+    }).join('');
+    const who = (e.pills.find(p => p.who) || {}).who;
+    return '<div class="ec ' + riskCls + '">' +
+      '<div class="ecn">' + rk + '<span>' + esc(e.epic) + '</span></div>' +
+      '<div class="chips">' + chips + '</div>' +
+      '<div class="ecf"><span class="who">' + (who ? esc(who) : esc(e.team)) + '</span><span class="eff">' + H.effortOf(e) + ' дн</span></div>' +
+      '</div>';
+  }
+
+  // ── PLAN view: collapsible team accordion ──
+  function renderPlan() {
+    let s = '<div class="sect-eyebrow"><span class="pz-eyebrow">Команды · ' + D.teams.length + '</span></div>';
+    D.teams.forEach((team, i) => {
+      const eps = H.teamEpics(team);
+      const works = eps.reduce((n, e) => n + e.pills.length, 0);
+      const r = teamRisk(team);
+      const open = i === 0 ? ' open' : '';   // первая раскрыта
+      s += '<div class="team' + open + '" data-team="' + esc(team) + '">' +
+        '<div class="team-h"><span class="rd ' + r + '"></span><span class="tn">' + esc(team) + '</span>' +
+        '<span class="tm">' + eps.length + ' эп · ' + works + ' раб</span>' +
+        '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></div>' +
+        '<div class="team-body"><div><div class="team-inner">' + eps.map(ecHtml).join('') + '</div></div></div>' +
+        '</div>';
+    });
+    const el = document.getElementById('v-plan');
+    el.innerHTML = s;
+    el.querySelectorAll('.team-h').forEach(h => {
+      h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
+    });
+  }
+
+  // ── RISK view ──
+  function renderRisk() {
+    const risky = D.epics.filter(e => e.risk).sort((a, b) => {
+      const r = (b.risk === 'off-course' ? 1 : 0) - (a.risk === 'off-course' ? 1 : 0);
+      return r !== 0 ? r : (b.moves || 0) - (a.moves || 0);
+    });
+    let s = '<div class="sect-eyebrow"><span class="pz-eyebrow">Требуют внимания · ' + risky.length + '</span></div>';
+    s += risky.map(e => {
+      const off = e.risk === 'off-course';
+      const ratio = Math.round(H.doneRatio(e) * 100);
+      return '<div class="risk-card ' + (off ? 'off' : '') + '">' +
+        '<div class="rcn">' + esc(e.epic) + '</div>' +
+        '<div class="rct">' + esc(e.team) + ' · ' + (off ? 'срыв' : 'дрейф') + '</div>' +
+        '<div class="rcs">' + e.moves + ' ' + plural(e.moves, 'перенос', 'переноса', 'переносов') + ' · готовность ' + ratio + '%</div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('v-risk').innerHTML = s;
+  }
+
+  // ── TODAY view: pills in current dated window 1.21 ──
+  function renderToday() {
+    const cur = D.releases.find(r => r.current);
+    const items = [];
+    D.epics.forEach(e => {
+      H.pillsOf(e, cur.key).forEach(p => items.push({ e, p }));
+    });
+    items.sort((a, b) => (a.p.state === 'progress' ? -1 : 0) - (b.p.state === 'progress' ? -1 : 0));
+    let s = '<div class="sect-eyebrow"><span class="pz-eyebrow">Окно ' + esc(cur.short) + ' · ' + now.toLocaleDateString('ru', { day: '2-digit', month: 'long' }) + '</span></div>';
+    if (!items.length) { document.getElementById('v-today').innerHTML = s + '<div class="empty-state">Нет работ в текущем окне.</div>'; return; }
+    s += items.map(({ e, p }) => {
+      const prog = p.state === 'progress';
+      // .today → нейтрально-голубая полоса (это не риск)
+      return '<div class="risk-card today">' +
+        '<div class="rcn"><span class="wtchip' + (prog ? ' prog' : '') + '" style="--wt:' + wtVar(p.wt) + '">' + esc(p.wt) + '</span> ' + esc(e.epic) + '</div>' +
+        '<div class="rct">' + esc(e.team) + (p.who ? ' · ' + esc(p.who) : '') + (prog ? ' · в работе' : ' · план') + '</div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('v-today').innerHTML = s;
+  }
+
+  // ── ME view: pills assigned to ME across all epics ──
+  function renderMe() {
+    const mine = [];
+    D.epics.forEach(e => e.pills.forEach(p => { if (p.who === ME) mine.push({ e, p }); }));
+    let s = '<div class="sect-eyebrow"><span class="pz-eyebrow">Мои работы · ' + ME + '</span></div>';
+    if (!mine.length) { document.getElementById('v-me').innerHTML = s + '<div class="empty-state">Ничего не назначено.</div>'; return; }
+    const relName = k => (D.releases.find(r => r.key === k) || {}).short || k;
+    s += mine.map(({ e, p }) => {
+      const st = p.state === 'done' ? 'готово' : p.state === 'progress' ? 'в работе' : 'план';
+      return '<div class="risk-card today">' +
+        '<div class="rcn"><span class="wtchip' + (p.state === 'done' ? ' done' : p.state === 'progress' ? ' prog' : '') + '" style="--wt:' + wtVar(p.wt) + '">' + esc(p.wt) + '</span> ' + esc(e.epic) + '</div>' +
+        '<div class="rct">' + esc(e.team) + ' · ' + esc(relName(p.col)) + ' · ' + st + '</div>' +
+        '</div>';
+    }).join('');
+    document.getElementById('v-me').innerHTML = s;
+  }
+
+  // today/me cards use neutral/info left-stripe, not risk-red
+  const styleFix = document.createElement('style');
+  styleFix.textContent = '.risk-card.today::before{background:var(--prizma-information)!important}';
+  document.head.appendChild(styleFix);
+
+  renderPlan(); renderRisk(); renderToday(); renderMe();
+
+  // ── tab switching + risk badge ──
+  const tabbar = document.getElementById('tabbar');
+  // badge on Риски
+  const riskTab = tabbar.querySelector('[data-v="risk"]');
+  const atRiskN = D.epics.filter(e => e.risk).length;
+  if (atRiskN) riskTab.insertAdjacentHTML('beforeend', '<span class="badge">' + atRiskN + '</span>');
+
+  const scroll = document.getElementById('mscroll');
+  tabbar.addEventListener('click', ev => {
+    const tab = ev.target.closest('.tab'); if (!tab) return;
+    const v = tab.dataset.v;
+    tabbar.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === tab));
+    document.querySelectorAll('.view').forEach(view => view.classList.toggle('on', view.id === 'v-' + v));
+    scroll.scrollTop = 0;
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

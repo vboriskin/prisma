@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 31 · Каскад переноса</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 96px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 600px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 250px repeat(5, 1fr); min-width: 920px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px; min-height: 46px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 22px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 15px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .ghead.today { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow .mono { width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 var(--mono); letter-spacing: .6px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: 4px; color: var(--prizma-text-secondary); }
+  .teamrow b { font-size: 13px; }
+  .teamrow .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 13px; font-weight: 600; }
+  .elabel .meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .elabel .dep { display: inline-flex; align-items: center; gap: 3px; font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .elabel .dep svg { width: 11px; height: 11px; }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; transition: background .14s, box-shadow .14s; }
+  .cell.ok { background: var(--prizma-information-bg); box-shadow: inset 0 0 0 1px var(--prizma-information); cursor: copy; }
+  .cell.over { background: color-mix(in srgb, var(--prizma-information) 22%, transparent); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); cursor: grab; user-select: none; transition: transform .12s var(--ease-calm), box-shadow .12s, opacity .2s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .pill.dragging { opacity: .4; cursor: grabbing; }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill[data-state="done"] { opacity: .7; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* эпик в каскаде — пульсация рамки строки-метки + амбер stripe */
+  .elabel.cascade { box-shadow: inset 3px 0 0 var(--prizma-drift); }
+  .elabel.cascade .nm { color: var(--prizma-drift); }
+  .cell.cascade-ghost { box-shadow: inset 0 0 0 1px var(--prizma-drift); background: var(--prizma-drift-bg); }
+  @keyframes pz-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  .ghost { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px dashed var(--prizma-drift);
+    border-radius: var(--r-sm); font: 600 10px/1 var(--mono); color: var(--prizma-drift); animation: pz-pulse 1.1s var(--ease-calm) infinite; }
+  .ghost svg { width: 11px; height: 11px; }
+
+  /* toast — каскад */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    width: min(560px, calc(100vw - 40px)); padding: 14px 16px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.warn { border-left: 3px solid var(--prizma-drift); }
+  .toast .tt { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; margin-bottom: 6px; }
+  .toast .tt svg { width: 16px; height: 16px; color: var(--prizma-drift); flex: none; }
+  .toast .body { font-size: 12.5px; color: var(--prizma-text-secondary); line-height: 1.45; }
+  .toast .body b { color: var(--prizma-text-primary); font-weight: 600; }
+  .toast .chain { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 12px; }
+  .toast .chip2 { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+    font: 600 11px/1 var(--mono); border: 1px solid var(--prizma-border); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+  .toast .chip2 .arr { color: var(--prizma-drift); }
+  .toast .acts { display: flex; gap: 8px; }
+  .toast .acts .pz-btn { height: 28px; }
+  .toast.plain { border-left-color: var(--prizma-on-course); }
+  .toast.plain .tt svg { color: var(--prizma-on-course); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 31 · Drag</div>
+      <h1>Каскад переноса</h1>
+      <p>Тащите пилюлю эпика в более <b>поздний</b> релиз — и сразу видна рябь: эпики, зависящие от него (транзитивно), подсвечиваются как кандидаты на сдвиг. До коммита решаете: перенести всю цепочку, только этот эпик или отменить.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Подсвечиваются релизы правее текущего. Зависимые эпики мигают ghost-следом ещё до дропа.</span>
+  </div>
+  <div class="gantt" id="gantt"></div>
+</div>
+
+<div class="toast" id="toast">
+  <div class="tt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span id="toastTitle"></span></div>
+  <div class="body" id="toastBody"></div>
+  <div class="chain" id="toastChain"></div>
+  <div class="acts" id="toastActs"></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases; // нейтральные грей-колонки
+  const datedIdx = cols.map((c,i)=>({c,i})); // позиция релиза для «позже/раньше»
+  const orderOf = {}; cols.forEach((c,i)=>orderOf[c.key]=i);
+  const root = document.getElementById('gantt');
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c ? c.short : k; };
+
+  // ── граф потомков: кто (транзитивно) зависит от данного эпика ──
+  const directChildren = {}; D.epics.forEach(e => directChildren[e.id] = []);
+  D.epics.forEach(e => (e.deps||[]).forEach(d => { if (directChildren[d]) directChildren[d].push(e.id); }));
+  function descendants(id){ const acc = new Set(); (function go(x){ (directChildren[x]||[]).forEach(c => { if (!acc.has(c)){ acc.add(c); go(c); } }); })(id); return [...acc]; }
+
+  // «ведущий» релиз эпика — самый ранний dated-релиз среди его пилюль (точка отсчёта для каскада)
+  function leadCol(epicPills){
+    let best = null, bestO = 99;
+    epicPills.forEach(p => { const o = orderOf[p.col]; if (cols[o].dated && o < bestO){ bestO = o; best = p.col; } });
+    return best;
+  }
+
+  let snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, pills: e.pills })));
+  let history = null; // для undo последнего коммита
+
+  function render(highlight) {
+    const data = JSON.parse(snapshot);
+    const pillsById = {}; data.forEach(d => pillsById[d.id] = d.pills);
+    const casc = (highlight && highlight.cascadeIds) || [];
+    const cascSet = new Set(casc);
+    let html = '<div class="grid">';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const today = c.current;
+      const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : '';
+      html += '<div class="gcell ghead' + (today?' today':'') + '"><span class="rel' + (c.dated?(c.current?' cur':''):' muted') + '">' + c.short + '</span>' + (today?'<span class="cur-tag">ТЕК.</span>':'') + (dates?'<span class="dates">'+dates+'</span>':'') + '</div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.epics.filter(e => e.team === team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      html += '<div class="teamrow"><span class="mono">'+team.slice(0,2)+'</span><b>'+team+'</b><span class="cnt">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        const pills = pillsById[e.id] || e.pills;
+        const isCasc = cascSet.has(e.id);
+        const depN = (e.deps||[]).length, blkN = directChildren[e.id].length;
+        const flag = (depN||blkN) ? '<span class="dep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>'+(depN+blkN)+'</span>' : '';
+        html += '<div class="gcell elabel'+(isCasc?' cascade':'')+'" data-epic="'+e.id+'"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+team+flag+'</span></div>';
+        const lead = isCasc ? leadCol(pills) : null;
+        cols.forEach(c => {
+          // в каскаде показываем ghost в релизе СПРАВА от ведущего (куда эпик уедет)
+          const ghostHere = isCasc && lead && orderOf[c.key] === Math.min(orderOf[lead]+1, cols.length-1) && c.dated;
+          html += '<div class="gcell cell'+(ghostHere?' cascade-ghost':'')+'" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          pills.filter(p=>p.col===c.key).forEach((p,i) => { html += pillHtml(e.id, p, c.key, i); });
+          if (ghostHere) html += '<span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>сдвиг</span>';
+          html += '</div>';
+        });
+      });
+    });
+    html += '</div>';
+    root.innerHTML = html;
+    wireDnD();
+  }
+
+  function pillHtml(epicId, p, col, idx) {
+    const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+    return '<div class="pill" draggable="true" data-epic="'+epicId+'" data-col="'+col+'" data-idx="'+idx+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+      (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+      '<span class="nm">'+p.wt+'</span>'+who+'</div>';
+  }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  let drag = null;
+  function wireDnD() {
+    root.querySelectorAll('.pill').forEach(pill => {
+      pill.addEventListener('dragstart', e => {
+        drag = { epic: pill.dataset.epic, col: pill.dataset.col, idx: +pill.dataset.idx, wt: pill.querySelector('.nm').textContent };
+        pill.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', drag.wt); } catch(_){}
+        // подсветка валидных дропзон — тот же эпик, релиз ПОЗЖЕ текущего, dated
+        root.querySelectorAll('.cell').forEach(c => {
+          if (c.dataset.epic === drag.epic && orderOf[c.dataset.col] > orderOf[drag.col]) c.classList.add('ok');
+        });
+      });
+      pill.addEventListener('dragend', () => {
+        pill.classList.remove('dragging');
+        root.querySelectorAll('.cell').forEach(c => c.classList.remove('ok','over'));
+        drag = null;
+      });
+    });
+    root.querySelectorAll('.cell').forEach(cell => {
+      cell.addEventListener('dragover', e => {
+        if (!drag || !cell.classList.contains('ok')) return;
+        e.preventDefault(); cell.classList.add('over');
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('over'));
+      cell.addEventListener('drop', e => {
+        if (!drag || !cell.classList.contains('ok')) return;
+        e.preventDefault();
+        proposeMove(drag.epic, drag.col, drag.idx, cell.dataset.col);
+      });
+    });
+    root.addEventListener('dragover', e => {
+      const r = root.getBoundingClientRect();
+      if (e.clientX > r.right - 60) root.scrollLeft += 12;
+      else if (e.clientX < r.left + 220) root.scrollLeft -= 12;
+    });
+  }
+
+  let pending = null;
+  function proposeMove(epicId, fromCol, idx, toCol) {
+    const cascadeIds = descendants(epicId); // транзитивные потомки
+    pending = { epicId, fromCol, idx, toCol, cascadeIds };
+    // прероллим подсветку каскада на текущем снапшоте
+    render({ cascadeIds });
+    if (cascadeIds.length) showCascadeToast(epicId, toCol, cascadeIds);
+    else { applyMove([epicId], { [epicId]: toCol }); showPlainToast(byId[epicId].epic, fromCol, toCol); pending = null; }
+  }
+
+  function applyMove(epicIds, targetByEpic) {
+    history = snapshot;
+    const data = JSON.parse(snapshot);
+    epicIds.forEach(eid => {
+      const ep = data.find(d => d.id === eid);
+      if (eid === pending.epicId) {
+        // двигаем конкретную перетащенную пилюлю
+        const arr = ep.pills.filter(p => p.col === pending.fromCol);
+        const target = arr[pending.idx]; if (!target) return;
+        const realIdx = ep.pills.indexOf(target);
+        ep.pills[realIdx] = Object.assign({}, target, { col: targetByEpic[eid] });
+      } else {
+        // зависимый эпик: сдвигаем его ведущую пилюлю на один релиз вправо
+        const lead = leadCol(ep.pills); if (!lead) return;
+        const nextO = Math.min(orderOf[lead]+1, cols.length-1);
+        const nextKey = cols[nextO].key;
+        const arr = ep.pills.filter(p => p.col === lead);
+        const t = arr[0]; if (!t) return;
+        const realIdx = ep.pills.indexOf(t);
+        ep.pills[realIdx] = Object.assign({}, t, { col: nextKey });
+      }
+    });
+    snapshot = JSON.stringify(data);
+    render();
+  }
+
+  // ── toast: каскад ──
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showCascadeToast(epicId, toCol, cascadeIds) {
+    clearTimeout(toastTimer);
+    toast.className = 'toast warn show';
+    document.getElementById('toastTitle').textContent = 'Перенос затронет ' + cascadeIds.length + ' зависим' + plural(cascadeIds.length, 'ый эпик','ых эпика','ых эпиков');
+    document.getElementById('toastBody').innerHTML = '<b>' + esc(byId[epicId].epic) + '</b> → ' + relShort(toCol) + '. От него зависят:';
+    document.getElementById('toastChain').innerHTML = cascadeIds.map(id => {
+      const ep = byId[id]; const lead = leadCol(JSON.parse(snapshot).find(d=>d.id===id).pills);
+      const nextKey = lead ? cols[Math.min(orderOf[lead]+1, cols.length-1)].key : '?';
+      return '<span class="chip2">'+esc(shortName(ep.epic))+' <span class="arr">→</span> '+relShort(nextKey)+'</span>';
+    }).join('');
+    document.getElementById('toastActs').innerHTML = '';
+    addBtn('Перенести всё', 'pz-btn pz-btn-primary', () => { applyMove([epicId].concat(cascadeIds), { [epicId]: toCol }); hide(); pending = null; });
+    addBtn('Только этот', 'pz-btn', () => { applyMove([epicId], { [epicId]: toCol }); hide(); pending = null; });
+    addBtn('Отмена', 'pz-btn', () => { render(); hide(); pending = null; });
+  }
+  function showPlainToast(name, fromCol, toCol) {
+    clearTimeout(toastTimer);
+    toast.className = 'toast plain show';
+    document.querySelector('#toast .tt svg').innerHTML = '<path d="M20 6 9 17l-5-5"/>';
+    document.getElementById('toastTitle').textContent = 'Перенесено';
+    document.getElementById('toastBody').innerHTML = '<b>'+esc(name)+'</b>: '+relShort(fromCol)+' → '+relShort(toCol)+'. Зависимых эпиков нет.';
+    document.getElementById('toastChain').innerHTML = '';
+    document.getElementById('toastActs').innerHTML = '';
+    addBtn('Отменить', 'pz-btn', () => { if (history){ snapshot = history; history = null; render(); } hide(); });
+    toastTimer = setTimeout(hide, 4600);
+  }
+  function addBtn(label, cls, fn){ const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; document.getElementById('toastActs').appendChild(b); }
+  function hide(){ toast.classList.remove('show'); }
+  function plural(n, one, few, many){ const m = n%100, d = n%10; if (m>=11&&m<=14) return many; if (d===1) return one; if (d>=2&&d<=4) return few; return many; }
+  function shortName(s){ return s.split(' ').slice(0,2).join(' '); }
+
+  document.getElementById('reset').addEventListener('click', () => {
+    snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, pills: e.pills })));
+    history = null; pending = null; render(); hide();
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 37 · Поток работ</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .top .seg button { height: 28px; padding: 0 12px; font: 600 11px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: 0; border-right: 1px solid var(--prizma-border-strong); cursor: pointer; transition: background .14s, color .14s; }
+  .top .seg button:last-child { border-right: 0; }
+  .top .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  /* ── layout ── */
+  .eyebrowbar { padding: 10px 22px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .stage { flex: 1; min-height: 0; position: relative; padding: 6px 22px 16px; }
+  .stage svg { width: 100%; height: 100%; display: block; }
+
+  .band { cursor: default; transition: opacity .16s var(--ease-calm); }
+  .stage.hovering .band { opacity: .32; }
+  .stage.hovering .band.active { opacity: 1; }
+
+  /* ── readout ── */
+  .readout { position: absolute; left: 22px; top: 8px; display: flex; align-items: center; gap: 18px; pointer-events: none; opacity: 0; transition: opacity .14s var(--ease-calm); }
+  .readout.show { opacity: 1; }
+  .readout .ro-date { font: 700 13px/1 var(--mono); color: var(--prizma-information); letter-spacing: .3px; }
+  .readout .ro-total { font: 500 11.5px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .readout .ro-total b { color: var(--prizma-text-primary); font-weight: 700; }
+
+  /* legend */
+  .legendbar { flex: none; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 4px 22px 14px; }
+  .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--prizma-text-secondary); cursor: pointer; padding: 3px 4px; border-radius: var(--r-sm); transition: color .14s; }
+  .lg:hover { color: var(--prizma-text-primary); }
+  .lg i { width: 13px; height: 9px; border-radius: 2px; flex: none; }
+  .lg .v { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* hover guide line + dots */
+  .guide { stroke: var(--prizma-text-primary); stroke-width: 1; opacity: .35; pointer-events: none; }
+  .dot { pointer-events: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Поток работ</span>
+    <span class="sub">стримграф · объём по времени</span>
+    <span class="spacer"></span>
+    <span class="seg" id="seg">
+      <button data-mode="rel" class="on">По релизам</button>
+      <button data-mode="team">По командам</button>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 37 · Поток</span>
+    <span class="hint">русло работ за квартал — где объём вздувается, там пик нагрузки. Наведите на поток.</span>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="readout" id="readout"><span class="ro-date" id="roDate"></span><span class="ro-total" id="roTotal"></span></div>
+    <svg id="svg" preserveAspectRatio="none" aria-label="Стримграф потока работ"></svg>
+  </div>
+  <div class="legendbar" id="legend"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ── ось времени: датированные релизы → окно квартала (Date-объекты, gotcha b) ──
+  const dated = D.releases.filter(r => r.dated);
+  const t0 = parse(dated[0].start);
+  const t1 = new Date(parse(dated[dated.length - 1].end).getTime() + DAY);
+  const spanMs = t1 - t0;
+
+  // ── дискретизация: одна выборка в день; «объём» эпика течёт внутри его датированного окна ──
+  const STEP = DAY;                          // шаг сэмпла
+  const samples = [];
+  for (let t = t0.getTime(); t <= t1.getTime(); t += STEP) samples.push(new Date(t));
+
+  // окно эпика по его пилюлям в датированных релизах
+  function epicWindow(e) {
+    let lo = null, hi = null;
+    e.pills.forEach(p => {
+      const r = D.releases.find(x => x.key === p.col);
+      if (!r || !r.dated) return;
+      const s = parse(r.start), en = new Date(parse(r.end).getTime() + DAY);
+      if (lo === null || s < lo) lo = s;
+      if (hi === null || en > hi) hi = en;
+    });
+    return lo === null ? null : { start: lo, end: hi };
+  }
+
+  // плотность вклада эпика в момент t: колокол (нарастает к середине окна, спадает к краям) ×
+  // масштаб по effort. river-like: суммирование колоколов даёт плавно «дышащий» силуэт.
+  function epicDensity(e, win, t) {
+    if (!win || t < win.start || t > win.end) return 0;
+    const L = win.end - win.start || 1;
+    const x = (t - win.start) / L;             // 0..1 по окну
+    const bell = Math.sin(Math.PI * x);        // 0→1→0
+    const eased = 0.35 + 0.65 * bell;          // не до нуля на краях — мягкое русло
+    return eased * (H.effortOf(e) / 10);
+  }
+
+  // ── группировка: серии = релизы или команды ──
+  const palette = {
+    // НЕЙТРАЛЬНЫЕ оттенки серого — данные кодируем силуэтом, не семантикой (брендбук)
+    rel: [
+      { key: 'r120', label: '1.20', tone: 18 },
+      { key: 'r121', label: '1.21 · тек.', tone: 34, cur: true },
+      { key: 'r122', label: '1.22', tone: 26 },
+      { key: 'overtime', label: 'овертайм', tone: 12 },
+      { key: 'backlog', label: 'бэклог', tone: 8 },
+    ],
+    team: D.teams.map((tm, i) => ({ key: tm, label: tm, tone: 12 + i * 6 })),
+  };
+
+  let MODE = 'rel';
+
+  // строим матрицу значений: series × samples
+  function buildSeries() {
+    const defs = palette[MODE];
+    return defs.map(def => {
+      let members;
+      if (MODE === 'rel') {
+        // эпики, у которых есть пилюля в этом релизе → вклад в полосу релиза
+        members = D.epics.filter(e => e.pills.some(p => p.col === def.key));
+      } else {
+        members = H.teamEpics(def.key);
+      }
+      const wins = members.map(e => ({ e, win: epicWindow(e) }));
+      const values = samples.map(t =>
+        wins.reduce((acc, m) => acc + epicDensity(m.e, m.win, t), 0)
+      );
+      return { def, values };
+    });
+  }
+
+  // ── стек со «силуэтным» (wiggle) baseline — центрируем стопку по массе ──
+  function stackAreas(series) {
+    const n = samples.length;
+    const totals = new Array(n).fill(0);
+    series.forEach(s => s.values.forEach((v, i) => totals[i] += v));
+    let maxTot = 0; totals.forEach(v => { if (v > maxTot) maxTot = v; });
+    maxTot = maxTot || 1;
+    // baseline: центрируем → поток «плавает» (streamgraph silhouette)
+    const baseline = totals.map(tt => -tt / 2);
+    const stacked = series.map(() => ({ lo: new Array(n), hi: new Array(n) }));
+    for (let i = 0; i < n; i++) {
+      let y = baseline[i];
+      series.forEach((s, k) => {
+        stacked[k].lo[i] = y;
+        y += s.values[i];
+        stacked[k].hi[i] = y;
+      });
+    }
+    return { stacked, totals, maxTot };
+  }
+
+  const svg = document.getElementById('svg');
+  const stage = document.getElementById('stage');
+  const VB_W = 1000, VB_H = 480, PAD_T = 26, PAD_B = 30;
+
+  let geom = null;   // {series, stacked, totals, maxTot, xOf, yOf}
+
+  function xOf(i) { return i / (samples.length - 1) * VB_W; }
+
+  function render() {
+    const series = buildSeries();
+    const { stacked, totals, maxTot } = stackAreas(series);
+    const plotH = VB_H - PAD_T - PAD_B;
+    const half = maxTot / 2 || 1;
+    const yOf = v => PAD_T + plotH / 2 - (v / half) * (plotH / 2);
+    geom = { series, stacked, totals, maxTot, yOf };
+
+    svg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+
+    // плавный путь (Catmull-Rom → кубический Безье), сверху по hi → обратно по lo
+    function smoothPath(loArr, hiArr) {
+      const top = hiArr.map((v, i) => [xOf(i), yOf(v)]);
+      const bot = loArr.map((v, i) => [xOf(i), yOf(v)]).reverse();
+      return spline(top) + ' L ' + spline(bot).slice(2) + ' Z';
+    }
+    function spline(pts) {
+      if (!pts.length) return '';
+      let d = 'M ' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        d += ' C ' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+      }
+      return d;
+    }
+
+    let s = '';
+
+    // фоновые границы релизов (нейтральные вертикали) + подписи
+    dated.forEach(r => {
+      const xi = (parse(r.start) - t0) / spanMs * VB_W;
+      s += '<line x1="' + xi.toFixed(1) + '" y1="' + PAD_T + '" x2="' + xi.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+      const xc = ((parse(r.start) - t0) / spanMs * VB_W + (new Date(parse(r.end).getTime() + DAY) - t0) / spanMs * VB_W) / 2;
+      s += '<text x="' + xc.toFixed(1) + '" y="' + (VB_H - 11) + '" text-anchor="middle" fill="' + (r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)') + '" font-family="var(--mono)" font-size="11" font-weight="700">' + esc(r.short) + (r.current ? ' · ТЕК.' : '') + '</text>';
+    });
+
+    // области (нейтральный серый, тон по индексу; текущий релиз — чуть ярче)
+    stacked.forEach((st, k) => {
+      const def = series[k].def;
+      const fill = def.cur
+        ? 'color-mix(in srgb, var(--prizma-information) 16%, var(--prizma-bg-tertiary))'
+        : 'color-mix(in srgb, var(--prizma-text-primary) ' + def.tone + '%, transparent)';
+      const stroke = def.cur ? 'var(--prizma-information)' : 'color-mix(in srgb, var(--prizma-text-primary) ' + (def.tone + 14) + '%, transparent)';
+      s += '<path class="band" data-k="' + k + '" d="' + smoothPath(st.lo, st.hi) + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (def.cur ? 1.2 : 0.8) + '" stroke-linejoin="round"/>';
+    });
+
+    // вехи (нейтральные пунктиры + ромб)
+    D.milestones.forEach(m => {
+      const xi = (parse(m.date) - t0) / spanMs * VB_W;
+      if (xi < 0 || xi > VB_W) return;
+      s += '<line x1="' + xi.toFixed(1) + '" y1="' + PAD_T + '" x2="' + xi.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-text-secondary)" stroke-width="1" stroke-dasharray="1.5 3" opacity=".6"/>';
+      s += '<path d="M' + xi.toFixed(1) + ' ' + (PAD_T - 7) + ' l4 4 l-4 4 l-4 -4 z" fill="var(--prizma-bg-tertiary)" stroke="var(--prizma-text-secondary)" stroke-width="1"/>';
+      s += '<title>' + esc(m.label) + '</title>';
+    });
+
+    // today-line (семантический голубой)
+    const tx = (parse(D.today) - t0) / spanMs * VB_W;
+    s += '<line x1="' + tx.toFixed(1) + '" y1="' + (PAD_T - 10) + '" x2="' + tx.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-information)" stroke-width="1.4" stroke-dasharray="4 3"/>';
+    s += '<rect x="' + (tx - 24).toFixed(1) + '" y="' + (PAD_T - 22) + '" width="48" height="14" rx="3" fill="var(--prizma-information-bg)"/>';
+    s += '<text x="' + tx.toFixed(1) + '" y="' + (PAD_T - 12) + '" text-anchor="middle" fill="var(--prizma-information)" font-family="var(--mono)" font-size="8.5" font-weight="700">СЕГОДНЯ</text>';
+
+    // hover-слой
+    s += '<line class="guide" id="guide" x1="0" y1="' + PAD_T + '" x2="0" y2="' + (VB_H - PAD_B) + '" style="display:none"/>';
+    s += '<g id="dots"></g>';
+    s += '<rect id="hit" x="0" y="0" width="' + VB_W + '" height="' + VB_H + '" fill="transparent"/>';
+
+    svg.innerHTML = s;
+    wireHover();
+    renderLegend(series, totals);
+  }
+
+  // ── legend ──
+  function renderLegend(series, totals) {
+    const lg = document.getElementById('legend');
+    lg.innerHTML = series.map((sObj, k) => {
+      const def = sObj.def;
+      const sum = sObj.values.reduce((a, b) => a + b, 0);
+      const share = totals.reduce((a, b) => a + b, 0);
+      const pct = share ? Math.round(sum / share * 100) : 0;
+      const col = def.cur ? 'var(--prizma-information)' : 'color-mix(in srgb, var(--prizma-text-primary) ' + (def.tone + 14) + '%, transparent)';
+      return '<span class="lg" data-k="' + k + '"><i style="background:' + col + '"></i>' + esc(def.label) + ' <span class="v">' + pct + '%</span></span>';
+    }).join('');
+    lg.querySelectorAll('.lg').forEach(el => {
+      const k = +el.dataset.k;
+      el.addEventListener('mouseenter', () => activate(k));
+      el.addEventListener('mouseleave', () => deactivate());
+    });
+  }
+
+  function activate(k) {
+    stage.classList.add('hovering');
+    svg.querySelectorAll('.band').forEach(b => b.classList.toggle('active', +b.dataset.k === k));
+  }
+  function deactivate() {
+    stage.classList.remove('hovering');
+    svg.querySelectorAll('.band').forEach(b => b.classList.remove('active'));
+  }
+
+  // ── hover-readout: вертикальная направляющая + точки на границах + дата/объём ──
+  const readout = document.getElementById('readout');
+  const roDate = document.getElementById('roDate');
+  const roTotal = document.getElementById('roTotal');
+
+  function wireHover() {
+    const hit = svg.getElementById('hit');
+    const guide = svg.getElementById('guide');
+    const dots = svg.getElementById('dots');
+    hit.addEventListener('mousemove', ev => {
+      const pt = svgX(ev);
+      const i = Math.max(0, Math.min(samples.length - 1, Math.round(pt / VB_W * (samples.length - 1))));
+      const x = xOf(i);
+      guide.style.display = '';
+      guide.setAttribute('x1', x.toFixed(1)); guide.setAttribute('x2', x.toFixed(1));
+      let dh = '';
+      geom.series.forEach((sObj, k) => {
+        const st = geom.stacked[k];
+        const yMid = (st.lo[i] + st.hi[i]) / 2;
+        const v = sObj.values[i];
+        if (v < 0.3) return;
+        const col = sObj.def.cur ? 'var(--prizma-information)' : 'var(--prizma-text-secondary)';
+        dh += '<circle class="dot" cx="' + x.toFixed(1) + '" cy="' + geom.yOf(yMid).toFixed(1) + '" r="2.6" fill="var(--prizma-bg)" stroke="' + col + '" stroke-width="1.4"/>';
+      });
+      dots.innerHTML = dh;
+      readout.classList.add('show');
+      roDate.textContent = samples[i].toLocaleDateString('ru', { day: '2-digit', month: 'long' });
+      roTotal.textContent = '';
+      // суммарный «объём» в этот день → читаем как условные человеко-дни в работе
+      const tot = geom.totals[i];
+      roTotal.innerHTML = 'в работе ≈ <b>' + Math.round(tot * 10) + '</b> чел-дн';
+    });
+    hit.addEventListener('mouseleave', () => {
+      guide.style.display = 'none';
+      dots.innerHTML = '';
+      readout.classList.remove('show');
+    });
+  }
+
+  function svgX(ev) {
+    const r = svg.getBoundingClientRect();
+    return (ev.clientX - r.left) / r.width * VB_W;
+  }
+
+  // ── mode switch ──
+  document.getElementById('seg').addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    MODE = b.dataset.mode;
+    document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+
+  // ── init: sync + setTimeout + resize (gotcha a) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

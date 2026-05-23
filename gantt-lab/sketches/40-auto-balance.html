@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 40 · Выровнять нагрузку</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 690px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 14px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .spacer { flex: 1; }
+
+  /* ── мини-гант: команда × релиз, тепло-фон по нагрузке ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 600px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 232px repeat(5, 1fr); min-width: 920px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px; min-height: 56px; }
+
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamhead { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+  .teamhead .nm { font-size: 13px; font-weight: 600; }
+  .teamhead .cap { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* тепло-ячейка: фон по нагрузке (плавно расслабляется при балансировке) */
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+    transition: background .55s var(--ease-calm), box-shadow .55s var(--ease-calm); }
+  .cell .frac { position: absolute; top: 5px; right: 7px; font: 700 10px/1 var(--mono); color: var(--prizma-text-tertiary); pointer-events: none; transition: color .4s; }
+  .cell.over { box-shadow: inset 0 0 0 1px var(--prizma-off-course); }
+  .cell.over .frac { color: var(--prizma-off-course); }
+  .cell.target-free { box-shadow: inset 0 0 0 1px var(--prizma-on-course); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; overflow: hidden; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill.moving { z-index: 50; box-shadow: 0 6px 22px rgba(0,0,0,.45); }
+  .pill.excess { box-shadow: inset 0 0 0 1px var(--prizma-drift); }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .ramp { flex: 0 0 240px; height: 12px; border-radius: 6px; border: 1px solid var(--prizma-border);
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--prizma-text-primary) 4%, transparent),
+      color-mix(in srgb, var(--prizma-drift) 38%, transparent),
+      color-mix(in srgb, var(--prizma-off-course) 70%, transparent)); }
+  .legend .ticks { display: flex; justify-content: space-between; flex: 0 0 240px; margin-top: 4px; }
+  .legend .ticks span { font: 500 10px/1 var(--mono); }
+  .legend-wrap { display: flex; flex-direction: column; }
+
+  .summary { margin-top: 14px; min-height: 22px; display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--prizma-text-secondary); }
+  .summary .n { font: 700 12.5px/1 var(--mono); }
+  .summary .n.warn { color: var(--prizma-off-course); }
+  .summary .n.ok { color: var(--prizma-on-course); }
+  .summary svg { width: 14px; height: 14px; }
+  .note { margin-top: 10px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 690px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 40 · Выровнять нагрузку</div>
+      <h1>Выровнять нагрузку</h1>
+      <p>Несколько окон перегружены. Жмёте «Выровнять нагрузку» — лишние работы плавно переезжают в соседние свободные окна, а красная подсветка перегруза расслабляется до нейтральной. Один клик, ясное «до / после», и «вернуть как было».</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn pz-btn-primary" id="balance">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 8h18M5 8l-2 5a3 3 0 0 0 6 0L7 8M19 8l-2 5a3 3 0 0 0 6 0l-2-5"/></svg>
+      Выровнять нагрузку
+    </button>
+    <button class="pz-btn" id="revert" disabled>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Вернуть как было
+    </button>
+    <span class="spacer"></span>
+    <span class="hint">Перегруз тинтован красным; цель переезда подсвечена зелёным.</span>
+  </div>
+
+  <div class="gantt" id="gantt"></div>
+
+  <div class="legend">
+    <span>Нагрузка</span>
+    <div class="legend-wrap">
+      <div class="ramp"></div>
+      <div class="ticks"><span>свободно</span><span>предел</span><span>перегруз</span></div>
+    </div>
+  </div>
+  <div class="summary" id="summary"></div>
+  <p class="note">Ёмкость окна на команду — синтетическая (<code>CAPACITY</code>). Алгоритм берёт «лишние» работы перегруженного окна (сверх ёмкости) и переносит в ближайшее окно той же команды, где есть запас. Анимация — FLIP-переход через <code>transform</code>, <code>var(--ease-calm)</code>.</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;          // нейтральные грид-колонки
+  const root = document.getElementById('gantt');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // синтетическая ёмкость окна на команду; источник в реальном приложении —
+  // state.employees[].capacity, агрегированная по команде на окно релиза.
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+
+  // стабильный id для каждой работы (для FLIP + надёжного переноса)
+  let uid = 0;
+  const baseEpics = D.epics.map(e => ({
+    id: e.id, team: e.team,
+    pills: e.pills.map(p => Object.assign({}, p, { uid: 'w' + (uid++) }))
+  }));
+  const initialSnapshot = JSON.stringify(baseEpics);
+  let snapshot = initialSnapshot;
+
+  function load(data, team, col) {
+    return data.reduce((n, e) => e.team === team ? n + e.pills.filter(p => p.col === col).length : n, 0);
+  }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  function tint(load, cap) {
+    const ratio = cap ? load / cap : 0;
+    if (load === 0) return 'transparent';
+    if (ratio <= 1) return 'color-mix(in srgb, var(--prizma-drift) ' + Math.round(6 + ratio * 30) + '%, transparent)';
+    const over = Math.min(ratio - 1, 0.8) / 0.8;
+    return 'color-mix(in srgb, var(--prizma-off-course) ' + Math.round(46 + over * 36) + '%, transparent)';
+  }
+
+  function render(opts) {
+    opts = opts || {};
+    const data = JSON.parse(snapshot);
+    let html = '<div class="grid">';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Команда / Релиз</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const cap = CAPACITY[team] || 5;
+      const eps = data.filter(e => e.team === team);
+      html += '<div class="gcell teamhead"><span class="nm">'+esc(team)+'</span><span class="cap">ёмкость '+cap+'/окно</span></div>';
+      cols.forEach(c => {
+        const ld = load(data, team, c.key);
+        const over = ld > cap;
+        const showFrac = ld > 0 && c.dated;
+        html += '<div class="gcell cell'+(over?' over':'')+'" data-team="'+esc(team)+'" data-col="'+c.key+'" style="background:'+tint(ld, cap)+'">';
+        if (showFrac) html += '<span class="frac">'+ld+'/'+cap+'</span>';
+        eps.forEach(e => {
+          e.pills.forEach(p => {
+            if (p.col !== c.key) return;
+            html += pillHtml(e.id, p);
+          });
+        });
+        html += '</div>';
+      });
+    });
+    html += '</div>';
+    root.innerHTML = html;
+    if (!opts.silent) updateSummary(data);
+  }
+
+  function pillHtml(epicId, p) {
+    const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+    const dot = p.state === 'progress' ? '<span class="dot"></span>' : '';
+    return '<div class="pill" data-uid="'+p.uid+'" data-epic="'+epicId+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">'+dot+'<span class="nm">'+p.wt+'</span>'+who+'</div>';
+  }
+
+  // ── план балансировки: для каждого перегруженного окна вынести «лишние» работы
+  //    (сверх ёмкости) в ближайшее окно той же команды, где есть запас ──
+  function planMoves() {
+    const data = JSON.parse(snapshot);
+    const moves = [];                    // { uid, epicId, fromCol, toCol }
+    // рабочая модель занятости по (team,col)
+    const occ = {};
+    D.teams.forEach(t => cols.forEach(c => occ[t+'|'+c.key] = load(data, t, c.key)));
+    const colIdx = {}; cols.forEach((c,i) => colIdx[c.key] = i);
+
+    D.teams.forEach(team => {
+      const cap = CAPACITY[team] || 5;
+      // окна команды слева-направо
+      cols.forEach(c => {
+        let over = occ[team+'|'+c.key] - cap;
+        if (over <= 0) return;
+        // кандидаты-приёмники: ближайшие датированные окна с запасом (сначала соседи)
+        const candidates = cols
+          .filter(t => t.dated && t.key !== c.key)
+          .map(t => ({ key: t.key, dist: Math.abs(colIdx[t.key] - colIdx[c.key]) }))
+          .sort((a,b) => a.dist - b.dist);
+        // лишние работы этого окна — берём с конца (последние добавленные), не трогаем done
+        const epsHere = [];
+        data.filter(e => e.team === team).forEach(e => {
+          e.pills.forEach(p => { if (p.col === c.key) epsHere.push({ epicId: e.id, p }); });
+        });
+        // приоритет к переносу: planned/unplanned раньше progress; done не двигаем
+        epsHere.sort((a,b) => rank(a.p.state) - rank(b.p.state));
+        for (const cand of candidates) {
+          while (over > 0 && occ[team+'|'+cand.key] < cap && epsHere.length) {
+            const item = epsHere.shift();
+            if (item.p.state === 'done') { continue; }
+            moves.push({ uid: item.p.uid, epicId: item.epicId, fromCol: c.key, toCol: cand.key });
+            occ[team+'|'+c.key]--; occ[team+'|'+cand.key]++; over--;
+          }
+          if (over <= 0) break;
+        }
+      });
+    });
+    return moves;
+  }
+  function rank(state){ return state==='done'?3 : state==='progress'?2 : 1; }
+
+  let animating = false;
+  const balanceBtn = document.getElementById('balance');
+  const revertBtn = document.getElementById('revert');
+
+  function applyBalance() {
+    if (animating) return;
+    const moves = planMoves();
+    if (!moves.length) { flashSummary('Нагрузка уже сбалансирована — переносить нечего.'); return; }
+    animating = true; balanceBtn.disabled = true;
+
+    // 1) FIRST: запомнить позиции всех пилюль
+    const first = capturePositions();
+    // подсветить лишние/цели до переноса
+    moves.forEach(m => {
+      const el = root.querySelector('.pill[data-uid="'+m.uid+'"]');
+      if (el) el.classList.add('excess');
+      const tgt = root.querySelector('.cell[data-team="'+CSS.escape(epicTeam(m.epicId))+'"][data-col="'+m.toCol+'"]');
+      if (tgt) tgt.classList.add('target-free');
+    });
+
+    // 2) применить переносы к данным
+    const data = JSON.parse(snapshot);
+    moves.forEach(m => {
+      const ep = data.find(e => e.id === m.epicId);
+      const p = ep && ep.pills.find(x => x.uid === m.uid);
+      if (p) p.col = m.toCol;
+    });
+    snapshot = JSON.stringify(data);
+
+    // 3) LAST: перерисовать (silent — summary обновим в конце), измерить, инвертировать, проиграть
+    render({ silent: true });
+    const moveUids = new Set(moves.map(m => m.uid));
+    flipPlay(first, moveUids, () => {
+      animating = false;
+      revertBtn.disabled = false;
+      updateSummary(JSON.parse(snapshot));
+    });
+  }
+
+  // FLIP helpers ----------------------------------------------------------
+  function capturePositions() {
+    const map = {};
+    root.querySelectorAll('.pill').forEach(el => {
+      const r = el.getBoundingClientRect();
+      map[el.dataset.uid] = { x: r.left, y: r.top };
+    });
+    return map;
+  }
+  function flipPlay(first, moveUids, done) {
+    const movers = [];
+    root.querySelectorAll('.pill').forEach(el => {
+      const f = first[el.dataset.uid];
+      if (!f) return;
+      const r = el.getBoundingClientRect();
+      const dx = f.x - r.left, dy = f.y - r.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px)';
+      if (moveUids.has(el.dataset.uid)) el.classList.add('moving', 'excess');
+      movers.push(el);
+    });
+    // принудительный reflow, затем снять инверсию (gotcha a: rAF + страховочный таймаут)
+    void root.offsetWidth;
+    const playOne = el => {
+      el.style.transition = 'transform .6s var(--ease-calm)';
+      el.style.transform = '';
+    };
+    requestAnimationFrame(() => movers.forEach(playOne));
+    setTimeout(() => movers.forEach(el => { if (el.style.transform !== '') playOne(el); }), 60);
+    // подсветить цели зелёным сразу (relax-эффект — через CSS-transition фона при render)
+    setTimeout(() => {
+      movers.forEach(el => { el.classList.remove('moving','excess'); el.style.transition=''; el.style.transform=''; });
+      root.querySelectorAll('.cell.target-free').forEach(c => c.classList.remove('target-free'));
+      if (done) done();
+    }, 720);
+  }
+  function epicTeam(epicId){ const e = D.epics.find(x => x.id === epicId); return e ? e.team : ''; }
+
+  // ── сводка перегруза ──
+  function countOverloads(data) {
+    let cells = 0, excess = 0;
+    D.teams.forEach(team => {
+      const cap = CAPACITY[team] || 5;
+      cols.forEach(c => { const ld = load(data, team, c.key); if (ld > cap) { cells++; excess += ld - cap; } });
+    });
+    return { cells, excess };
+  }
+  const summary = document.getElementById('summary');
+  function updateSummary(data) {
+    const o = countOverloads(data);
+    if (o.cells === 0) {
+      summary.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-on-course)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'+
+        '<span><span class="n ok">0</span> перегруженных окон — план сбалансирован.</span>';
+    } else {
+      summary.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-off-course)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>'+
+        '<span><span class="n warn">'+o.cells+'</span> перегруженных окон · <span class="n warn">'+o.excess+'</span> лишних работ. Нажмите «Выровнять нагрузку».</span>';
+    }
+  }
+  let flashTimer;
+  function flashSummary(text) {
+    const prev = summary.innerHTML;
+    summary.innerHTML = '<span style="color:var(--prizma-on-course)">'+esc(text)+'</span>';
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => updateSummary(JSON.parse(snapshot)), 2400);
+  }
+
+  balanceBtn.addEventListener('click', applyBalance);
+  revertBtn.addEventListener('click', () => {
+    if (animating) return;
+    snapshot = initialSnapshot;
+    render();
+    revertBtn.disabled = true;
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

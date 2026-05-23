@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 40 · Табло здоровья</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── slim topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 24px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 16px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+
+  .eyebrowbar { padding: 12px 24px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* ── board ── */
+  .board { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 40px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 1200px; margin: 0 auto; }
+
+  /* gauge card */
+  .gauge { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 20px 20px 16px; display: flex; flex-direction: column; align-items: center; position: relative; }
+  .gauge::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 2px 2px 0; background: var(--prizma-border-strong); }
+  .gauge.ok::before { background: var(--prizma-on-course); }
+  .gauge.drift::before { background: var(--prizma-drift); }
+  .gauge.off::before { background: var(--prizma-off-course); }
+  .gauge .glabel { font: 700 11px/1 var(--font); letter-spacing: .7px; text-transform: uppercase; color: var(--prizma-text-tertiary); align-self: flex-start; padding-left: 8px; }
+  .gauge .gsvg { width: 100%; max-width: 230px; }
+  .gauge .gsvg svg { width: 100%; height: auto; display: block; }
+  .gauge .gfoot { width: 100%; border-top: 1px solid var(--prizma-border); margin-top: 10px; padding-top: 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .gauge .gfoot .gd { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .gauge .gfoot .gd b { color: var(--prizma-text-secondary); font: 600 11.5px/1 var(--mono); font-weight: 700; }
+  .gauge .gfoot .gtag { font: 700 10px/1 var(--mono); letter-spacing: .3px; padding: 4px 7px; border-radius: var(--r-sm); }
+  .gauge.ok .gfoot .gtag { color: var(--prizma-on-course); background: var(--prizma-on-course-bg); }
+  .gauge.drift .gfoot .gtag { color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+  .gauge.off .gfoot .gtag { color: var(--prizma-off-course); background: var(--prizma-off-course-bg); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Табло здоровья</span>
+    <span class="sub">шкалы квартала</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-on-course)"></i>в норме</span>
+      <span><i style="background:var(--prizma-drift)"></i>внимание</span>
+      <span><i style="background:var(--prizma-off-course)"></i>тревога</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 40 · Scoreboard · окно 1.21</span>
+    <span class="hint">шесть дисциплинированных шкал — стрелка и дуга окрашены по порогу.</span>
+  </div>
+
+  <div class="board">
+    <div class="grid" id="grid"></div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ── метрики ──
+  const epics = D.epics;
+  const allPills = epics.reduce((n, e) => n + e.pills.length, 0);
+  const donePills = epics.reduce((n, e) => n + e.pills.filter(p => p.state === 'done').length, 0);
+  const onCourse = epics.filter(e => !e.risk).length;
+  const drift = epics.filter(e => e.risk === 'drift').length;
+  const off = epics.filter(e => e.risk === 'off-course').length;
+
+  // % по курсу
+  const pctOnCourse = Math.round(onCourse / epics.length * 100);
+  // готовность — средняя doneRatio
+  const readiness = Math.round(epics.reduce((a, e) => a + H.doneRatio(e), 0) / epics.length * 100);
+
+  // загрузка (capacity util) — средний коэффициент по командам в текущем окне 1.21
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  const utils = D.teams.map(t => H.loadByTeamRelease(t, 'r121') / (CAPACITY[t] || 4));
+  const avgUtil = utils.reduce((a, b) => a + b, 0) / utils.length;       // ~доля
+  const utilPct = Math.round(avgUtil * 100);
+  const overTeams = utils.filter(u => u > 1).length;
+
+  // индекс риска — взвешенная доля рисковой массы (срыв×2 + дрейф) к максимуму
+  const riskScore = Math.round((off * 2 + drift) / (epics.length * 2) * 100);
+
+  // стабильность — обратная churn: 1 − (переносы / эпики×норма)
+  const totMoves = epics.reduce((a, e) => a + (e.moves || 0), 0);
+  const churn = totMoves / epics.length;                 // ср. переносов на эпик
+  const stability = Math.max(0, Math.round((1 - Math.min(churn / 3, 1)) * 100));
+
+  // композит здоровья — среднее «хороших» осей (по курсу, готовность, стабильность, обратная загрузка-перегруз, обратный риск)
+  const utilHealth = Math.round(Math.max(0, 100 - Math.max(0, avgUtil - 0.85) / 0.85 * 100));
+  const health = Math.round((pctOnCourse + readiness + stability + (100 - riskScore) + utilHealth) / 5);
+
+  // ── классификация цвета по порогу ──
+  // higherBetter: высокое = хорошо (по курсу, готовность, стабильность, здоровье)
+  // lowerBetter:  низкое = хорошо (индекс риска)
+  // band (загрузка): целевая зона ~70–95%, ниже = недогруз (drift лёгкий), выше = перегруз (off)
+  function statusHB(v, warn, bad) { return v >= warn ? 'ok' : (v >= bad ? 'drift' : 'off'); }
+  function statusLB(v, warn, bad) { return v <= warn ? 'ok' : (v <= bad ? 'drift' : 'off'); }
+  function statusBand(v) {
+    if (v > 100) return 'off';         // перегруз
+    if (v >= 70) return 'ok';          // целевая зона
+    if (v >= 45) return 'drift';       // недогруз — лёгкое внимание
+    return 'drift';
+  }
+
+  const colorOf = st => st === 'ok' ? 'var(--prizma-on-course)' : st === 'drift' ? 'var(--prizma-drift)' : 'var(--prizma-off-course)';
+  const tagOf = st => st === 'ok' ? 'В НОРМЕ' : st === 'drift' ? 'ВНИМАНИЕ' : 'ТРЕВОГА';
+
+  const GAUGES = [
+    { label: 'Здоровье квартала', value: health, unit: '%', max: 100, status: statusHB(health, 70, 50),
+      detail: 'композит 5 осей', kv: health + '%' },
+    { label: '% по курсу', value: pctOnCourse, unit: '%', max: 100, status: statusHB(pctOnCourse, 70, 50),
+      detail: onCourse + ' из ' + epics.length + ' эпиков', kv: onCourse + '/' + epics.length },
+    { label: 'Загрузка', value: utilPct, unit: '%', max: 130, status: statusBand(utilPct),
+      detail: overTeams + ' ' + (overTeams === 1 ? 'команда' : 'команд') + ' в перегрузе', kv: utilPct + '%', band: true },
+    { label: 'Индекс риска', value: riskScore, unit: '', max: 100, status: statusLB(riskScore, 20, 40), invert: true,
+      detail: off + ' срыв · ' + drift + ' дрейф', kv: riskScore },
+    { label: 'Готовность', value: readiness, unit: '%', max: 100, status: statusHB(readiness, 50, 30),
+      detail: donePills + ' из ' + allPills + ' работ', kv: readiness + '%' },
+    { label: 'Стабильность', value: stability, unit: '%', max: 100, status: statusHB(stability, 65, 40),
+      detail: totMoves + ' переносов · ' + churn.toFixed(1) + '/эпик', kv: stability + '%' },
+  ];
+
+  // ── SVG arc gauge ──
+  // полукруг 270° (от 7:30 до 4:30), радиус фикс; viewBox для масштаба
+  const VB = 240, CX = 120, CY = 128, R = 92, SW = 14;
+  const START = 135, SWEEP = 270;              // градусы: старт слева-низ, по часовой
+  const rad = a => (a - 90) * Math.PI / 180;   // 0° = вверх → корректируем
+  function pt(angDeg, r) {
+    const a = (angDeg) * Math.PI / 180;
+    return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+  }
+  // угол для значения 0..1 вдоль дуги (135° → 135+270=405°≡45°)
+  function angleAt(frac) { return START + Math.max(0, Math.min(1, frac)) * SWEEP; }
+  function arcPath(r, a0, a1) {
+    const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    return 'M ' + x0.toFixed(2) + ' ' + y0.toFixed(2) + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x1.toFixed(2) + ' ' + y1.toFixed(2);
+  }
+
+  function gaugeSvg(g) {
+    const frac = Math.max(0, Math.min(1, g.value / g.max));
+    const col = colorOf(g.status);
+    const aVal = angleAt(frac);
+    let s = '<svg viewBox="0 0 ' + VB + ' ' + (VB - 30) + '" role="img" aria-label="' + esc(g.label) + ' ' + g.kv + '">';
+
+    // зональная подложка дуги (нейтральные пороги — тонкие сегменты-риски на треке)
+    // полная нейтральная дорожка
+    s += '<path d="' + arcPath(R, START, START + SWEEP) + '" fill="none" stroke="var(--prizma-bg-tertiary)" stroke-width="' + SW + '" stroke-linecap="round"/>';
+
+    // целевые зоны порогов — едва заметные семантические дуги ПОД значением (контекст «куда стремиться»)
+    if (g.band) {
+      // целевая зона 70..100% подсвечена on-course едва
+      const z0 = angleAt(70 / g.max), z1 = angleAt(100 / g.max);
+      s += '<path d="' + arcPath(R, z0, z1) + '" fill="none" stroke="var(--prizma-on-course)" stroke-width="3" stroke-linecap="round" opacity=".35"/>';
+      // перегруз 100..max — off-course едва
+      const o1 = angleAt(1);
+      s += '<path d="' + arcPath(R, z1, o1) + '" fill="none" stroke="var(--prizma-off-course)" stroke-width="3" stroke-linecap="round" opacity=".35"/>';
+    }
+
+    // активная дуга значения
+    if (frac > 0.001) s += '<path d="' + arcPath(R, START, aVal) + '" fill="none" stroke="' + col + '" stroke-width="' + SW + '" stroke-linecap="round"/>';
+
+    // тики (0, четверти, max) — нейтральные
+    for (let i = 0; i <= 4; i++) {
+      const a = angleAt(i / 4);
+      const [tx0, ty0] = pt(a, R - SW / 2 - 3);
+      const [tx1, ty1] = pt(a, R - SW / 2 - 9);
+      s += '<line x1="' + tx0.toFixed(1) + '" y1="' + ty0.toFixed(1) + '" x2="' + tx1.toFixed(1) + '" y2="' + ty1.toFixed(1) + '" stroke="var(--prizma-text-tertiary)" stroke-width="1.5" opacity=".5"/>';
+    }
+
+    // стрелка (needle) — от центра к значению, семантический цвет
+    const [nx, ny] = pt(aVal, R - SW / 2 - 4);
+    s += '<line x1="' + CX + '" y1="' + CY + '" x2="' + nx.toFixed(1) + '" y2="' + ny.toFixed(1) + '" stroke="' + col + '" stroke-width="2.5" stroke-linecap="round"/>';
+    s += '<circle cx="' + CX + '" cy="' + CY + '" r="6" fill="var(--prizma-bg-elevated)" stroke="' + col + '" stroke-width="2.5"/>';
+    s += '<circle cx="' + CX + '" cy="' + CY + '" r="1.8" fill="' + col + '"/>';
+
+    // центральное значение (mono)
+    s += '<text x="' + CX + '" y="' + (CY - 18) + '" text-anchor="middle" fill="var(--prizma-text-primary)" font-family="var(--mono)" font-size="40" font-weight="800" letter-spacing="-1">' + esc(String(g.kv).replace(/[%]/g, '')) + (g.unit === '%' ? '<tspan font-size="20" font-weight="700" fill="var(--prizma-text-tertiary)" dx="1">%</tspan>' : '') + '</text>';
+
+    s += '</svg>';
+    return s;
+  }
+
+  function render() {
+    document.getElementById('grid').innerHTML = GAUGES.map(g =>
+      '<div class="gauge ' + g.status + '">' +
+        '<div class="glabel">' + esc(g.label) + '</div>' +
+        '<div class="gsvg">' + gaugeSvg(g) + '</div>' +
+        '<div class="gfoot"><span class="gd">' + esc(g.detail) + '</span><span class="gtag">' + tagOf(g.status) + '</span></div>' +
+      '</div>'
+    ).join('');
+  }
+
+  // ── init: sync + setTimeout + resize (gotcha a; SVG viewBox scales itself) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

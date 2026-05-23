@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 33 · Перетащить исполнителя</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── трей людей ── */
+  .tray { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 16px; margin-bottom: 14px;
+    border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); }
+  .tray .tlabel { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-right: 4px; }
+  .person { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 5px;
+    border: 1px solid var(--prizma-border-strong); border-radius: 18px; background: var(--prizma-bg-tertiary);
+    cursor: grab; user-select: none; transition: border-color .15s, transform .12s var(--ease-calm), box-shadow .15s; }
+  .person:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,.28); }
+  .person.dragging { opacity: .4; cursor: grabbing; }
+  .person.flagged { border-color: var(--prizma-off-course); }
+  .mono { width: 26px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; font: 700 11px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-primary);
+    background: var(--prizma-bg); box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .person.flagged .mono { color: var(--prizma-off-course); box-shadow: inset 0 0 0 1px var(--prizma-off-course); }
+  .person .pn { font-size: 12.5px; font-weight: 600; }
+  .person .ld { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .person.flagged .ld { color: var(--prizma-off-course); }
+  .person .warn { width: 14px; height: 14px; color: var(--prizma-off-course); display: none; }
+  .person.flagged .warn { display: block; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 560px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 240px repeat(5, 1fr); min-width: 920px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px; min-height: 46px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 22px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 15px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .ghead.today { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow .tm { width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 var(--mono); letter-spacing: .6px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: 4px; color: var(--prizma-text-secondary); }
+  .teamrow b { font-size: 13px; }
+  .teamrow .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 13px; font-weight: 600; }
+  .elabel .meta { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; transition: box-shadow .14s, background .14s, transform .12s var(--ease-calm); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill .wt { font-weight: 600; }
+  .pill .who { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--prizma-text-secondary); font-weight: 600; }
+  .pill .who .mini { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font: 700 8px/1 var(--mono); color: var(--prizma-text-primary); background: var(--prizma-bg); box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .pill .who.none { color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill[data-state="done"] { opacity: .7; }
+  .pill[data-state="done"] .wt { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* dropzone-подсветка при перетаскивании человека */
+  .pill.drop-ok { box-shadow: inset 0 0 0 1px var(--prizma-information); cursor: copy; }
+  .pill.drop-over { background: color-mix(in srgb, var(--prizma-information) 22%, transparent); transform: translateY(-1px); }
+  /* подсветка пилюль человека при hover в трее */
+  .pill.lit { box-shadow: inset 0 0 0 1px var(--prizma-information); background: var(--prizma-information-bg); }
+  .pill.just-assigned { box-shadow: inset 0 0 0 1px var(--prizma-on-course); }
+  /* перегруз релиза этим человеком */
+  .pill.overloaded::after { content: ""; position: absolute; right: 4px; top: 4px; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-off-course); }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    display: flex; align-items: center; gap: 12px; padding: 11px 13px 11px 14px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 10px 34px rgba(0,0,0,.45);
+    transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; font-size: 13px; max-width: 520px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.warn { border-left: 3px solid var(--prizma-off-course); }
+  .toast .ic { width: 16px; height: 16px; flex: none; color: var(--prizma-off-course); }
+  .toast.ok { border-left: 3px solid var(--prizma-on-course); }
+  .toast.ok .ic { color: var(--prizma-on-course); }
+  .toast .undo { background: none; border: none; color: var(--prizma-information); font: 600 13px/1 var(--font); cursor: pointer; padding: 4px 6px; }
+
+  .bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 33 · Drag</div>
+      <h1>Перетащить исполнителя</h1>
+      <p>Возьмите аватар из трея и бросьте на пилюлю работы — исполнитель назначен, имя появляется на пилюле. Если человек становится перегружен (более <b id="capN">2</b> работ в одном релизе) — он помечается риском. Наведите на человека в трее — его работы подсвечиваются на Ганте.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="tray" id="tray"><span class="tlabel">Команда</span></div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Перегруз считается по числу работ человека внутри одного релиза.</span>
+  </div>
+
+  <div class="gantt" id="gantt"></div>
+</div>
+
+<div class="toast" id="toast"><svg class="ic" id="toastIc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg><span id="toastText"></span><button class="undo" id="toastUndo">Отменить</button></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const CAP = 2; // порог перегруза: > CAP работ в одном релизе
+  document.getElementById('capN').textContent = CAP;
+  const root = document.getElementById('gantt');
+  const tray = document.getElementById('tray');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c ? c.short : k; };
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function initials(name){ const parts = String(name).trim().split(/\s+/); return parts.length>1 ? (parts[0][0]+parts[1][0]) : parts[0].slice(0,2); }
+
+  // ── список людей из реальных who ──
+  const people = [...new Set(D.epics.flatMap(e => e.pills.map(p => p.who).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,'ru'));
+
+  let snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, pills: e.pills })));
+  let lastAssign = null;
+
+  // перегруз: множество "who|col" где у человека > CAP работ в релизе
+  function overloadSets(data){
+    const byWhoCol = {}; // who|col -> count
+    data.forEach(e => e.pills.forEach(p => { if (p.who){ const k = p.who+'|'+p.col; byWhoCol[k] = (byWhoCol[k]||0)+1; } }));
+    const overCells = new Set(); const overPeople = new Set();
+    Object.keys(byWhoCol).forEach(k => { if (byWhoCol[k] > CAP){ overCells.add(k); overPeople.add(k.split('|')[0]); } });
+    return { overCells, overPeople, byWhoCol };
+  }
+  // нагрузка человека = всего назначенных работ
+  function loadOf(data, who){ return data.reduce((n,e)=>n+e.pills.filter(p=>p.who===who).length,0); }
+
+  function renderTray(data){
+    const { overPeople } = overloadSets(data);
+    tray.innerHTML = '<span class="tlabel">Команда</span>' + people.map(name => {
+      const flagged = overPeople.has(name);
+      return '<div class="person'+(flagged?' flagged':'')+'" draggable="true" data-who="'+esc(name)+'">' +
+        '<span class="mono">'+esc(initials(name)).toUpperCase()+'</span>' +
+        '<span class="pn">'+esc(name)+'</span>' +
+        '<span class="ld">'+loadOf(data,name)+'</span>' +
+        '<svg class="warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>' +
+        '</div>';
+    }).join('');
+    wireTray();
+  }
+
+  function render() {
+    const data = JSON.parse(snapshot);
+    const pillsById = {}; data.forEach(d => pillsById[d.id] = d.pills);
+    const { overCells } = overloadSets(data);
+    let html = '<div class="grid">';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const today = c.current;
+      const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : '';
+      html += '<div class="gcell ghead' + (today?' today':'') + '"><span class="rel' + (c.dated?(c.current?' cur':''):' muted') + '">' + c.short + '</span>' + (today?'<span class="cur-tag">ТЕК.</span>':'') + (dates?'<span class="dates">'+dates+'</span>':'') + '</div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.epics.filter(e => e.team === team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      html += '<div class="teamrow"><span class="tm">'+team.slice(0,2)+'</span><b>'+team+'</b><span class="cnt">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        const pills = pillsById[e.id] || e.pills;
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+team+'</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-col="'+c.key+'">';
+          pills.filter(p=>p.col===c.key).forEach((p,i) => { html += pillHtml(e.id, p, c.key, i, overCells); });
+          html += '</div>';
+        });
+      });
+    });
+    html += '</div>';
+    root.innerHTML = html;
+    wirePills();
+  }
+
+  function pillHtml(epicId, p, col, idx, overCells) {
+    const over = p.who && overCells.has(p.who+'|'+col);
+    let who;
+    if (p.who) who = '<span class="who" data-who="'+esc(p.who)+'"><span class="mini">'+esc(initials(p.who)).toUpperCase()+'</span>'+esc(p.who)+'</span>';
+    else who = '<span class="who none">не назначен</span>';
+    return '<div class="pill'+(over?' overloaded':'')+'" data-epic="'+epicId+'" data-col="'+col+'" data-idx="'+idx+'" data-state="'+p.state+'" data-who="'+(p.who?esc(p.who):'')+'" style="--wt:'+wtVar(p.wt)+'">' +
+      (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+      '<span class="wt">'+p.wt+'</span>'+who+'</div>';
+  }
+
+  // ── DnD: человек → пилюля ──
+  let dragWho = null;
+  function wireTray(){
+    tray.querySelectorAll('.person').forEach(per => {
+      per.addEventListener('dragstart', e => {
+        dragWho = per.dataset.who; per.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed='copy'; e.dataTransfer.setData('text/plain', dragWho); } catch(_){}
+        root.querySelectorAll('.pill').forEach(pl => pl.classList.add('drop-ok'));
+      });
+      per.addEventListener('dragend', () => {
+        per.classList.remove('dragging'); dragWho = null;
+        root.querySelectorAll('.pill').forEach(pl => pl.classList.remove('drop-ok','drop-over'));
+      });
+      // hover → подсветка пилюль человека
+      per.addEventListener('mouseenter', () => litFor(per.dataset.who));
+      per.addEventListener('mouseleave', () => root.querySelectorAll('.pill.lit').forEach(pl => pl.classList.remove('lit')));
+    });
+  }
+  function litFor(who){
+    root.querySelectorAll('.pill').forEach(pl => pl.classList.toggle('lit', pl.dataset.who === who));
+  }
+
+  function wirePills(){
+    root.querySelectorAll('.pill').forEach(pill => {
+      pill.addEventListener('dragover', e => { if (!dragWho) return; e.preventDefault(); pill.classList.add('drop-over'); });
+      pill.addEventListener('dragleave', () => pill.classList.remove('drop-over'));
+      pill.addEventListener('drop', e => {
+        if (!dragWho) return; e.preventDefault();
+        assign(pill.dataset.epic, +pill.dataset.idx, dragWho, pill.dataset.col);
+      });
+      // hover пилюли — подсветить всю команду этого человека в трее? нет: подсветим самого
+      pill.addEventListener('mouseenter', () => { if (pill.dataset.who){ const per = tray.querySelector('.person[data-who="'+cssEsc(pill.dataset.who)+'"]'); if (per) per.style.borderColor = 'var(--prizma-information)'; } });
+      pill.addEventListener('mouseleave', () => { tray.querySelectorAll('.person').forEach(p => p.style.borderColor = ''); });
+    });
+  }
+  function cssEsc(s){ return String(s).replace(/"/g,'\\"'); }
+
+  function assign(epicId, idx, who, col) {
+    const data = JSON.parse(snapshot);
+    const ep = data.find(d => d.id === epicId);
+    const arr = ep.pills.filter(p => p.col === col);
+    const target = arr[idx]; if (!target) return;
+    const realIdx = ep.pills.indexOf(target);
+    lastAssign = { snapshot, who, epic: ep.id };
+    ep.pills[realIdx] = Object.assign({}, target, { who });
+    snapshot = JSON.stringify(data);
+
+    // считаем перегруз ПОСЛЕ назначения
+    const { overCells, byWhoCol } = overloadSets(data);
+    const nowOver = overCells.has(who+'|'+col);
+    renderTray(data); render();
+    // мигнуть только что назначенной пилюле
+    const justEl = root.querySelector('.pill[data-epic="'+epicId+'"][data-col="'+col+'"][data-idx="'+idx+'"]');
+    if (justEl){ justEl.classList.add('just-assigned'); setTimeout(()=>justEl.classList.remove('just-assigned'), 1400); }
+
+    const epName = D.epics.find(e=>e.id===epicId).epic;
+    if (nowOver) {
+      const cnt = byWhoCol[who+'|'+col];
+      showToast('warn', '«'+who+'» перегружен: '+cnt+' работ в релизе '+relShort(col)+'. Назначено на «'+shortName(epName)+'».', true);
+    } else {
+      showToast('ok', '«'+who+'» назначен на «'+shortName(epName)+'» ('+relShort(col)+').', true);
+    }
+  }
+  function shortName(s){ return s.split(' ').slice(0,3).join(' '); }
+
+  // ── toast ──
+  const toast = document.getElementById('toast'), tText = document.getElementById('toastText'), tIc = document.getElementById('toastIc');
+  let toastTimer;
+  const ICONS = {
+    warn: '<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+    ok: '<path d="M20 6 9 17l-5-5"/>',
+    plain: '<circle cx="12" cy="12" r="9"/>'
+  };
+  function showToast(kind, text, withUndo) {
+    toast.className = 'toast show ' + (kind==='warn'?'warn':(kind==='ok'?'ok':''));
+    tIc.innerHTML = ICONS[kind] || ICONS.plain;
+    tText.textContent = text;
+    document.getElementById('toastUndo').style.display = withUndo ? '' : 'none';
+    clearTimeout(toastTimer); toastTimer = setTimeout(()=>toast.classList.remove('show'), 4800);
+  }
+  document.getElementById('toastUndo').addEventListener('click', () => {
+    if (lastAssign){ snapshot = lastAssign.snapshot; lastAssign = null; const d = JSON.parse(snapshot); renderTray(d); render(); showToast('plain','Назначение отменено', false); }
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    snapshot = JSON.stringify(D.epics.map(e => ({ id: e.id, pills: e.pills })));
+    lastAssign = null; const d = JSON.parse(snapshot); renderTray(d); render(); showToast('plain','Состояние сброшено', false);
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  const init = JSON.parse(snapshot);
+  renderTray(init); render();
+})();
+</script>
+</body>
+</html>

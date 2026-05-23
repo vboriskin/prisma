@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 32 · Диалог с планом</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* ── chat shell ── */
+  .shell { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; }
+  .convo { flex: 1; min-height: 0; width: 100%; max-width: 760px; overflow-y: auto; padding: 24px 24px 8px; }
+  .intro { margin-bottom: 22px; }
+  .intro .pz-eyebrow { display: block; margin-bottom: 8px; }
+  .intro h2 { font: 600 19px/1.35 var(--font); margin: 0; color: var(--prizma-text-primary); max-width: 560px; }
+  .intro p { font: 400 13px/1.5 var(--font); color: var(--prizma-text-tertiary); margin: 8px 0 0; max-width: 520px; }
+
+  /* messages */
+  .msg { margin-bottom: 18px; display: flex; flex-direction: column; }
+  .msg.me { align-items: flex-end; }
+  .bubble-q { max-width: 78%; background: var(--prizma-information-bg); border: 1px solid color-mix(in srgb, var(--prizma-information) 30%, transparent);
+    color: var(--prizma-text-primary); border-radius: var(--r-lg) var(--r-lg) var(--r-sm) var(--r-lg); padding: 9px 14px; font: 500 13.5px/1.45 var(--font); }
+  .ans { max-width: 92%; display: flex; gap: 11px; align-items: flex-start; }
+  .ans .av { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--prizma-border-strong); display: flex; align-items: center; justify-content: center; color: var(--prizma-insight); background: var(--prizma-bg-elevated); margin-top: 1px; }
+  .ans .av svg { width: 15px; height: 15px; }
+  .ans .body { min-width: 0; flex: 1; }
+  .ans .txt { font: 400 13.5px/1.55 var(--font); color: var(--prizma-text-primary); }
+  .ans .txt b { font-weight: 600; }
+  .ans .txt .hl-off { color: var(--prizma-off-course); font-weight: 600; }
+  .ans .txt .hl-drift { color: var(--prizma-drift); font-weight: 600; }
+  .ans .txt .hl-ok { color: var(--prizma-on-course); font-weight: 600; }
+  .ans .txt .num { font-family: var(--mono); font-feature-settings: "tnum" 1; font-weight: 600; }
+
+  /* embedded mini-views */
+  .mini { margin-top: 11px; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); padding: 13px 14px; }
+  .mini .mh { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; }
+  .mini .mh .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .mini .mh .mi { width: 12px; height: 12px; color: var(--prizma-text-tertiary); }
+
+  /* mini: risk chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .echip { position: relative; display: inline-flex; flex-direction: column; gap: 3px; padding: 7px 11px 7px 13px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); min-width: 120px; }
+  .echip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; background: var(--prizma-drift); }
+  .echip.off::before { background: var(--prizma-off-course); }
+  .echip .en { font: 600 12px/1.25 var(--font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .echip .em { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 7px; }
+  .echip .em .tag { text-transform: uppercase; letter-spacing: .3px; }
+  .echip .em .tag.off { color: var(--prizma-off-course); }
+  .echip .em .tag.drift { color: var(--prizma-drift); }
+
+  /* mini: capacity bars */
+  .capbars { display: flex; flex-direction: column; gap: 8px; }
+  .capbar { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 10px; }
+  .capbar .cn { font: 500 11.5px/1 var(--font); color: var(--prizma-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .capbar .track { height: 9px; border-radius: 5px; background: var(--prizma-bg-tertiary); position: relative; overflow: hidden; }
+  .capbar .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: var(--prizma-drift); opacity: .75; }
+  .capbar .track i.over { background: var(--prizma-off-course); opacity: .82; }
+  .capbar .track .capline { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 1px dashed var(--prizma-text-secondary); opacity: .55; }
+  .capbar .cv { font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); text-align: right; }
+  .capbar .cv.over { color: var(--prizma-off-course); }
+
+  /* mini: mono stat row */
+  .statline { display: flex; gap: 26px; }
+  .statline .st .v { font: 300 30px/1 var(--mono); font-feature-settings: "tnum" 1; letter-spacing: -.02em; }
+  .statline .st .v.ok { color: var(--prizma-on-course); }
+  .statline .st .v.prog { color: var(--prizma-information); }
+  .statline .st .v.risk { color: var(--prizma-off-course); }
+  .statline .st .l { margin-top: 5px; font: 600 9px/1 var(--font); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+
+  /* mini: bar timeline (countdown / milestones) */
+  .mlist { display: flex; flex-direction: column; gap: 9px; }
+  .mline { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; }
+  .mline .ml-nm { font: 500 12px/1.2 var(--font); }
+  .mline .ml-nm .dt { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; display: block; }
+  .mline .ml-d { font: 700 14px/1 var(--mono); color: var(--prizma-text-secondary); text-align: right; }
+  .mline .ml-d.soon { color: var(--prizma-information); }
+  .mline .ml-d small { display: block; font: 600 8px/1 var(--font); letter-spacing: .3px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 2px; }
+
+  /* mini: pill row (work types of an epic) */
+  .wtpills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wp { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px; font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .wp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .wp .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .wp .col { font: 600 8.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .wp[data-done] { opacity: .62; }
+  .wp[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+  /* typing dots */
+  .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-text-tertiary); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; }
+  .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+
+  /* ── composer ── */
+  .composer { width: 100%; max-width: 760px; flex: none; padding: 8px 24px 18px; }
+  .suggest { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 11px; }
+  .sg { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; font: 500 12px/1 var(--font);
+    color: var(--prizma-text-secondary); background: transparent; border: 1px solid var(--prizma-border-strong); border-radius: 99px; transition: border-color .15s, color .15s; }
+  .sg:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+  .sg svg { width: 12px; height: 12px; }
+  .inputrow { display: flex; gap: 9px; align-items: center; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-xl); padding: 6px 6px 6px 16px; }
+  .inputrow:focus-within { border-color: var(--prizma-information); }
+  .inputrow input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--prizma-text-primary); font: 400 14px/1.4 var(--font); }
+  .inputrow input::placeholder { color: var(--prizma-text-tertiary); }
+  .send { flex: none; width: 34px; height: 34px; border-radius: var(--r-lg); border: 0; background: var(--prizma-information); color: #0A0A0F; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: filter .15s; }
+  .send:hover { filter: brightness(1.08); }
+  .send svg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Диалог с планом</span>
+    <span class="pz-eyebrow">Редизайн 32 · conversational</span>
+    <span class="spacer"></span>
+    <span class="sub">Q2 · 16 эпиков</span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="shell">
+    <div class="convo" id="convo">
+      <div class="intro">
+        <span class="pz-eyebrow">Призма · ассистент плана</span>
+        <h2>Спросите план о квартале — рисках, ёмкости, вехах и переносах.</h2>
+        <p>Ответы собираются из данных Ганта: статусы эпиков, нагрузка команд, дедлайны. Выберите вопрос ниже или напишите свой.</p>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="suggest" id="suggest"></div>
+      <div class="inputrow">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--prizma-text-tertiary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <input id="q" type="text" placeholder="Напишите вопрос о плане…" autocomplete="off">
+        <button class="send" id="send" aria-label="Отправить"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const now = new Date(D.today);
+  const DAY = 864e5;
+  const convo = document.getElementById('convo');
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  const fmt = d => new Date(d).toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const relShort = k => { const c = cols.find(x => x.key === k); return c ? c.short : k; };
+
+  const AV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 18h16L12 3z"/><path d="M12 3v15" opacity=".4"/></svg>';
+
+  // ════ mini-view builders (each returns HTML; some take a measure-callback for charts) ════
+
+  // 1) риск-чипы: эпики под риском в окне 1.21 (есть progress/planned pill в r121 и risk)
+  function viewRiskIn(relKey) {
+    const eps = D.epics.filter(e => e.risk && e.pills.some(p => p.col === relKey)).sort((a, b) =>
+      (b.risk === 'off-course' ? 1 : 0) - (a.risk === 'off-course' ? 1 : 0));
+    const chips = eps.map(e => {
+      const off = e.risk === 'off-course';
+      const ratio = Math.round(H.doneRatio(e) * 100);
+      return '<div class="echip' + (off ? ' off' : '') + '"><span class="en" title="' + esc(e.epic) + '">' + esc(e.epic) + '</span>' +
+        '<span class="em"><span class="tag ' + (off ? 'off' : 'drift') + '">' + (off ? 'срыв' : 'дрейф') + '</span><span>' + esc(e.team) + '</span><span>' + ratio + '%</span></span></div>';
+    }).join('');
+    return miniBox('Под риском в ' + relShort(relKey), iconRisk, '<div class="chips">' + chips + '</div>');
+  }
+
+  // 2) capacity bars: загрузка команд в текущем окне vs ёмкость
+  const CAP = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  function viewCapacity(relKey) {
+    const rows = D.teams.map(t => ({ t, load: H.loadByTeamRelease(t, relKey), cap: CAP[t] || 4 }))
+      .sort((a, b) => (b.load / b.cap) - (a.load / a.cap));
+    const maxRatio = Math.max.apply(null, rows.map(r => r.load / r.cap).concat(1.2));
+    const bars = rows.map(r => {
+      const ratio = r.load / r.cap, over = ratio > 1;
+      const pct = (ratio / maxRatio * 100);
+      const capPct = ((1) / maxRatio * 100);
+      return '<div class="capbar"><span class="cn" title="' + esc(r.t) + '">' + esc(r.t) + '</span>' +
+        '<span class="track"><i class="' + (over ? 'over' : '') + '" style="width:' + pct.toFixed(1) + '%"></i><span class="capline" style="left:' + capPct.toFixed(1) + '%"></span></span>' +
+        '<span class="cv' + (over ? ' over' : '') + '">' + r.load + '/' + r.cap + '</span></div>';
+    }).join('');
+    return miniBox('Загрузка команд · ' + relShort(relKey), iconGrid, '<div class="capbars">' + bars + '</div>');
+  }
+
+  // 3) stat line: здоровье квартала
+  function viewHealth() {
+    const onC = D.epics.filter(e => !e.risk).length;
+    const prog = D.epics.filter(e => e.pills.some(p => p.state === 'progress')).length;
+    const risk = D.epics.filter(e => e.risk).length;
+    const allP = D.epics.reduce((n, e) => n + e.pills.length, 0);
+    const doneP = D.epics.reduce((n, e) => n + e.pills.filter(p => p.state === 'done').length, 0);
+    const html = '<div class="statline">' +
+      '<div class="st"><div class="v ok">' + onC + '</div><div class="l">по курсу</div></div>' +
+      '<div class="st"><div class="v prog">' + prog + '</div><div class="l">в работе</div></div>' +
+      '<div class="st"><div class="v risk">' + risk + '</div><div class="l">под риском</div></div>' +
+      '<div class="st"><div class="v">' + Math.round(doneP / allP * 100) + '<span style="font-size:15px">%</span></div><div class="l">готовность</div></div>' +
+      '</div>';
+    return miniBox('Сводка квартала', iconChart, html);
+  }
+
+  // 4) milestones countdown
+  function viewMilestones() {
+    const ms = D.milestones.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const list = ms.map(m => {
+      const days = Math.round((new Date(m.date).getTime() - now.getTime()) / DAY);
+      const past = days < 0, soon = !past && days <= 9;
+      const big = past ? '−' + (-days) : (days === 0 ? '0' : '' + days);
+      const sub = past ? 'позади' : (days === 0 ? 'сегодня' : plural(days, 'день', 'дня', 'дней'));
+      return '<div class="mline"><div class="ml-nm">' + esc(m.label) + '<span class="dt">' + fmt(m.date) + '</span></div>' +
+        '<div class="ml-d' + (soon ? ' soon' : '') + '">' + big + '<small>' + sub + '</small></div></div>';
+    }).join('');
+    return miniBox('Ближайшие вехи', iconFlag, '<div class="mlist">' + list + '</div>');
+  }
+
+  // 5) work-type pills of an epic (deep-dive)
+  function viewEpicPills(e) {
+    const pills = e.pills.map(p => {
+      const done = p.state === 'done';
+      const who = p.who ? '<span class="who">' + esc(p.who) + '</span>' : '';
+      return '<span class="wp"' + (done ? ' data-done' : '') + ' style="--wt:' + wtVar(p.wt) + '"><span class="nm">' + esc(p.wt) + '</span><span class="col">' + esc(relShort(p.col)) + '</span>' + who + '</span>';
+    }).join('');
+    return miniBox(e.epic + ' · работы', iconList, '<div class="wtpills">' + pills + '</div>');
+  }
+
+  // mini chrome
+  function miniBox(title, ico, inner) {
+    return '<div class="mini"><div class="mh">' + ico + '<span class="pz-eyebrow">' + esc(title) + '</span></div>' + inner + '</div>';
+  }
+  const iconRisk = '<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>';
+  const iconGrid = '<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>';
+  const iconChart = '<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg>';
+  const iconFlag = '<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M5 4h12l-2 4 2 4H5"/></svg>';
+  const iconList = '<svg class="mi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>';
+
+  // ════ intent → answer ════
+  function answer(qRaw) {
+    const q = qRaw.toLowerCase();
+    // риск в 1.21 / под риском
+    if (/риск|срыв|дрейф|опасн/.test(q)) {
+      const rel = /1\.?20/.test(q) ? 'r120' : (/1\.?22/.test(q) ? 'r122' : 'r121');
+      const eps = D.epics.filter(e => e.risk && e.pills.some(p => p.col === rel));
+      const off = eps.filter(e => e.risk === 'off-course').length;
+      const dr = eps.filter(e => e.risk === 'drift').length;
+      const txt = 'В окне <b>' + relShort(rel) + '</b> под риском <span class="num">' + eps.length + '</span> ' + plural(eps.length, 'эпик', 'эпика', 'эпиков') + ': ' +
+        '<span class="hl-off">' + off + ' со срывом сроков</span> и <span class="hl-drift">' + dr + ' в дрейфе</span>. Самый острый — «' + esc((eps.find(e => e.risk === 'off-course') || eps[0] || {}).epic || '') + '».';
+      return { txt, view: viewRiskIn(rel) };
+    }
+    // перегруз / ёмкость
+    if (/перегруж|ёмкост|емкост|нагруз|загруж|капасит|capacity/.test(q)) {
+      const rel = /1\.?20/.test(q) ? 'r120' : (/1\.?22/.test(q) ? 'r122' : 'r121');
+      const over = D.teams.map(t => ({ t, r: H.loadByTeamRelease(t, rel) / (CAP[t] || 4) })).filter(x => x.r > 1).sort((a, b) => b.r - a.r);
+      const txt = over.length
+        ? 'В <b>' + relShort(rel) + '</b> перегружены <span class="num">' + over.length + '</span> ' + plural(over.length, 'команда', 'команды', 'команд') + ': прежде всего <span class="hl-off">' + esc(over[0].t) + '</span>. Пунктир — порог ёмкости.'
+        : 'В <b>' + relShort(rel) + '</b> явных перегрузов нет — все команды в пределах ёмкости. Ближе всего к порогу — нагруженные команды ниже.';
+      return { txt, view: viewCapacity(rel) };
+    }
+    // вехи / дедлайны / сроки
+    if (/вех|дедлайн|срок|когда|отсчёт|отсчет|релиз-кандидат|код-фриз/.test(q)) {
+      const next = D.milestones.map(m => ({ m, d: Math.round((new Date(m.date) - now) / DAY) })).filter(x => x.d >= 0).sort((a, b) => a.d - b.d)[0];
+      const txt = next
+        ? 'Ближайшая веха — <b>' + esc(next.m.label) + '</b> через <span class="num">' + next.d + '</span> ' + plural(next.d, 'день', 'дня', 'дней') + ' (' + fmt(next.m.date) + ').'
+        : 'Все вехи квартала уже позади.';
+      return { txt, view: viewMilestones() };
+    }
+    // здоровье / статус / как дела / итог
+    if (/здоров|статус|как дела|итог|сводк|обзор|по курсу|общ/.test(q)) {
+      const onC = D.epics.filter(e => !e.risk).length;
+      const txt = 'По курсу <span class="hl-ok">' + onC + ' из ' + D.epics.length + '</span> эпиков. Остальные требуют внимания. Ключевые цифры квартала:';
+      return { txt, view: viewHealth() };
+    }
+    // переносы / churn
+    if (/перенос|двига|churn|тасу|переезж/.test(q)) {
+      const tot = D.epics.reduce((n, e) => n + (e.moves || 0), 0);
+      const worst = D.epics.slice().sort((a, b) => (b.moves || 0) - (a.moves || 0))[0];
+      const txt = 'За квартал зафиксировано <span class="num">' + tot + '</span> ' + plural(tot, 'перенос', 'переноса', 'переносов') + ' эпиков между окнами. Рекордсмен — «' + esc(worst.epic) + '» (' + worst.moves + '). Это маркер нестабильного плана:';
+      return { txt, view: viewEpicPills(worst) };
+    }
+    // упоминание конкретного эпика по слову
+    const hit = D.epics.find(e => q.length > 3 && e.epic.toLowerCase().includes(q.split(' ').filter(w => w.length > 4)[0] || ''));
+    if (hit) {
+      const st = hit.risk === 'off-course' ? '<span class="hl-off">срыв сроков</span>' : hit.risk === 'drift' ? '<span class="hl-drift">дрейф</span>' : '<span class="hl-ok">по курсу</span>';
+      const txt = '«' + esc(hit.epic) + '» — команда <b>' + esc(hit.team) + '</b>, статус ' + st + ', переносов <span class="num">' + hit.moves + '</span>, оценка <span class="num">' + H.effortOf(hit) + '</span> чел-дней. Состав работ:';
+      return { txt, view: viewEpicPills(hit) };
+    }
+    // fallback → здоровье
+    const onC = D.epics.filter(e => !e.risk).length;
+    return { txt: 'Покажу сводку квартала. По курсу <span class="hl-ok">' + onC + ' из ' + D.epics.length + '</span> эпиков. Спросите про риски, ёмкость команд, вехи или переносы:', view: viewHealth() };
+  }
+
+  // ════ rendering ════
+  function pushQ(text) {
+    const d = document.createElement('div');
+    d.className = 'msg me';
+    d.innerHTML = '<div class="bubble-q">' + esc(text) + '</div>';
+    convo.appendChild(d);
+    scroll();
+  }
+  function pushA(text, viewHtml) {
+    const d = document.createElement('div');
+    d.className = 'msg';
+    d.innerHTML = '<div class="ans"><div class="av">' + AV + '</div><div class="body"><div class="txt">' + text + '</div>' + (viewHtml || '') + '</div></div>';
+    convo.appendChild(d);
+    scroll();
+    return d;
+  }
+  function pushTyping() {
+    const d = document.createElement('div');
+    d.className = 'msg';
+    d.innerHTML = '<div class="ans"><div class="av">' + AV + '</div><div class="body"><div class="typing"><i></i><i></i><i></i></div></div></div>';
+    convo.appendChild(d);
+    scroll();
+    return d;
+  }
+  function scroll() { convo.scrollTop = convo.scrollHeight; }
+
+  function ask(text, instant) {
+    if (!text.trim()) return;
+    pushQ(text);
+    if (instant) {
+      const a = answer(text);
+      pushA(a.txt, a.view);
+    } else {
+      const t = pushTyping();
+      setTimeout(() => {
+        const a = answer(text);
+        t.querySelector('.body').innerHTML = '<div class="txt">' + a.txt + '</div>' + (a.view || '');
+        scroll();
+      }, 480);
+    }
+  }
+
+  // ── suggested questions ──
+  const SUGGEST = ['Что под риском в 1.21?', 'Кто перегружен?', 'Когда ближайшие вехи?', 'Какие эпики чаще всего переносят?', 'Как здоровье квартала?'];
+  document.getElementById('suggest').innerHTML = SUGGEST.map(s =>
+    '<button class="sg" data-q="' + esc(s) + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>' + esc(s) + '</button>').join('');
+  document.getElementById('suggest').addEventListener('click', e => {
+    const b = e.target.closest('.sg'); if (b) ask(b.dataset.q, false);
+  });
+
+  // ── composer ──
+  const input = document.getElementById('q');
+  function submit() { const v = input.value; if (v.trim()) { ask(v, false); input.value = ''; } }
+  document.getElementById('send').addEventListener('click', submit);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+
+  // ── pre-seed conversation (instant, no typing) ──
+  ask('Что под риском в 1.21?', true);
+  ask('Кто перегружен?', true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

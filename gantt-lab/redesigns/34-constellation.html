@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 34 · Созвездие</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.size { width: 14px; height: 2px; border-radius: 0; background: var(--prizma-text-secondary); }
+
+  .body { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+  .eyebrowbar { position: absolute; top: 12px; left: 22px; z-index: 5; pointer-events: none; }
+  .skyhint { position: absolute; bottom: 14px; left: 22px; z-index: 5; font-size: 11px; color: var(--prizma-text-tertiary); pointer-events: none; }
+  .skyhint b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  svg.sky { display: block; width: 100%; height: 100%; }
+
+  /* faint background grain dots (decorative star-dust) */
+  .dust { fill: var(--prizma-text-tertiary); }
+
+  /* cluster region */
+  .clusterglow { fill: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); transition: fill .25s; }
+  .clusterglow.foc { fill: color-mix(in srgb, var(--prizma-information) 5%, transparent); }
+  .clusterlbl { fill: var(--prizma-text-tertiary); font: 700 10px var(--font); letter-spacing: .6px; text-transform: uppercase; transition: fill .2s; }
+  .clusterlbl.foc { fill: var(--prizma-text-secondary); }
+
+  /* north-star motif */
+  .ns-ray { stroke: var(--prizma-border-strong); stroke-width: 1; opacity: .5; }
+  .ns-core { fill: var(--prizma-information); }
+  .ns-halo { fill: none; stroke: var(--prizma-information); opacity: .35; }
+
+  /* dependency links */
+  .link { fill: none; stroke: var(--prizma-border-strong); stroke-width: 1.2; opacity: .35; transition: opacity .2s, stroke .2s, stroke-width .2s; }
+  .link.lit { opacity: 1; stroke: var(--prizma-information); stroke-width: 1.8; }
+  .link.dim { opacity: .07; }
+
+  /* stars */
+  .star { cursor: pointer; transition: opacity .2s; }
+  .star .halo { fill: none; opacity: 0; transition: opacity .25s, r .25s; }
+  .star.glow-drift .halo { stroke: var(--prizma-drift); opacity: .5; }
+  .star.glow-off .halo { stroke: var(--prizma-off-course); opacity: .6; }
+  .star .core { stroke: var(--prizma-border-strong); stroke-width: 1.2; transition: stroke .2s, stroke-width .2s; }
+  .star .spark { stroke: var(--prizma-text-primary); stroke-width: 1; opacity: 0; transition: opacity .2s; }
+  .star.glow-drift .core { fill: color-mix(in srgb, var(--prizma-drift) 28%, var(--prizma-bg-elevated)); stroke: var(--prizma-drift); }
+  .star.glow-off .core { fill: color-mix(in srgb, var(--prizma-off-course) 30%, var(--prizma-bg-elevated)); stroke: var(--prizma-off-course); }
+  .star:hover .core { stroke: var(--prizma-text-primary); stroke-width: 1.8; }
+  .star:hover .spark, .star.sel .spark { opacity: .7; }
+  .star.sel .core { stroke: var(--prizma-information); stroke-width: 2; }
+  .star.dim { opacity: .18; }
+  .star.lit { opacity: 1; }
+
+  /* hover label card (foreignObject-free → fixed HTML overlay) */
+  .card { position: absolute; z-index: 9; min-width: 200px; max-width: 264px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 14px 40px rgba(0,0,0,.55); padding: 12px 13px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .card.show { opacity: 1; transform: translateY(0); }
+  .card .team { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 7px; }
+  .card .team .rd { width: 7px; height: 7px; border-radius: 50%; }
+  .card h3 { font-size: 13px; font-weight: 700; margin: 7px 0 0; line-height: 1.3; }
+  .card .meta { display: flex; gap: 12px; margin-top: 9px; }
+  .card .meta .m { display: flex; flex-direction: column; gap: 2px; }
+  .card .meta .m .k { font: 700 8.5px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .card .meta .m .v { font: 600 13px/1 var(--mono); color: var(--prizma-text-primary); }
+  .card .deprow { margin-top: 10px; font-size: 11px; color: var(--prizma-text-secondary); display: flex; align-items: center; gap: 6px; }
+  .card .deprow svg { width: 11px; height: 11px; flex: none; color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Созвездие</span>
+    <span class="sub">эпики как звёздная карта</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="size"></i>размер ∝ трудозатраты</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="body" id="body">
+    <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 34 · Созвездие</span></div>
+    <svg class="sky" id="sky" preserveAspectRatio="xMidYMid meet"></svg>
+    <div class="card" id="card"></div>
+    <div class="skyhint">Наведите на звезду — связи и карточка · Клик — фокус на кластер команды · <b>Клик по пустому небу — сброс</b></div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const sky = document.getElementById('sky');
+  const bodyEl = document.getElementById('body');
+  const card = document.getElementById('card');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+
+  // фиксированный viewBox-холст; рисуем в координатах VB, SVG масштабирует
+  const VW = 1280, VH = 720;
+
+  // детерминированный псевдо-рандом (seed по строке) — раскладка стабильна
+  function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967295; }
+
+  // центры кластеров команд — мягкое кольцо вокруг центра неба (north-star),
+  // слегка сжатое по вертикали; организовано, но не сетка.
+  const teams = D.teams;
+  const cx0 = VW / 2, cy0 = VH / 2 + 8;
+  const ringRx = VW * 0.30, ringRy = VH * 0.30;
+  const clusterCenters = {};
+  teams.forEach((t, i) => {
+    const a = (-Math.PI / 2) + (i / teams.length) * Math.PI * 2; // старт сверху
+    clusterCenters[t] = { x: cx0 + Math.cos(a) * ringRx, y: cy0 + Math.sin(a) * ringRy, ang: a };
+  });
+
+  // позиция звезды: радиально-джиттерная вокруг центра её кластера.
+  // индекс эпика внутри команды задаёт угол по золотому шагу + джиттер по seed.
+  const GOLD = 2.399963; // золотой угол (рад)
+  const pos = {};
+  const radiusOf = e => { const eff = H.effortOf(e); return 7 + Math.sqrt(eff) * 2.7; }; // r ∝ √effort, читаемо
+  teams.forEach(t => {
+    const eps = H.teamEpics(t);
+    const c = clusterCenters[t];
+    eps.forEach((e, k) => {
+      const seed = hash(e.id);
+      // спираль внутри кластера: радиус растёт с индексом, угол по золотому шагу
+      const rr = 26 + k * 26 + seed * 18;
+      const ang = c.ang + Math.PI + k * GOLD + (seed - 0.5) * 0.9;
+      pos[e.id] = { x: c.x + Math.cos(ang) * rr, y: c.y + Math.sin(ang) * rr * 0.92, r: radiusOf(e) };
+    });
+  });
+
+  // спарк-крест внутри звезды (мини-блик), масштабируется по радиусу
+  function sparkPath(x, y, r) {
+    const a = r + 4;
+    return 'M' + (x - a) + ' ' + y + 'h' + (2 * a) + 'M' + x + ' ' + (y - a) + 'v' + (2 * a);
+  }
+
+  let selTeam = null, hoverId = null;
+
+  function build() {
+    sky.setAttribute('viewBox', '0 0 ' + VW + ' ' + VH);
+    let s = '';
+
+    // фоновая звёздная пыль — детерминированные крошечные точки
+    let dust = '';
+    for (let i = 0; i < 90; i++) {
+      const hx = hash('dx' + i), hy = hash('dy' + i), hr = hash('dr' + i);
+      dust += '<circle class="dust" cx="' + (hx * VW).toFixed(1) + '" cy="' + (hy * VH).toFixed(1) + '" r="' + (0.6 + hr * 0.9).toFixed(2) + '" opacity="' + (0.10 + hr * 0.18).toFixed(2) + '"/>';
+    }
+    s += '<g aria-hidden="true">' + dust + '</g>';
+
+    // кластерные регионы (мягкие пятна) + ярлыки
+    teams.forEach(t => {
+      const c = clusterCenters[t];
+      const eps = H.teamEpics(t);
+      // охватывающий радиус кластера
+      let rad = 60; eps.forEach((e, k) => { const p = pos[e.id]; const d = Math.hypot(p.x - c.x, p.y - c.y) + p.r; if (d > rad) rad = d; });
+      rad += 14;
+      const foc = selTeam === t ? ' foc' : '';
+      s += '<circle class="clusterglow' + foc + '" data-team="' + esc(t) + '" cx="' + c.x.toFixed(1) + '" cy="' + c.y.toFixed(1) + '" r="' + rad.toFixed(1) + '"/>';
+      // ярлык — наружу от центра неба
+      const lx = c.x + Math.cos(c.ang) * (rad + 4), ly = c.y + Math.sin(c.ang) * (rad + 4);
+      const anchor = lx < cx0 - 30 ? 'end' : (lx > cx0 + 30 ? 'start' : 'middle');
+      s += '<text class="clusterlbl' + foc + '" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="' + anchor + '">' + esc(t) + ' · ' + eps.length + '</text>';
+    });
+
+    // north-star мотив в центре (в-бренде, призма-голубой) — тихий ориентир
+    const rays = 8;
+    for (let i = 0; i < rays; i++) {
+      const a = (i / rays) * Math.PI * 2;
+      const rlen = i % 2 === 0 ? 46 : 26;
+      s += '<line class="ns-ray" x1="' + cx0 + '" y1="' + cy0 + '" x2="' + (cx0 + Math.cos(a) * rlen).toFixed(1) + '" y2="' + (cy0 + Math.sin(a) * rlen).toFixed(1) + '"/>';
+    }
+    s += '<circle class="ns-halo" cx="' + cx0 + '" cy="' + cy0 + '" r="9" stroke-width="1.2"/>';
+    s += '<circle class="ns-core" cx="' + cx0 + '" cy="' + cy0 + '" r="2.6"/>';
+
+    // dependency links (рисуем под звёздами): e -> dep (на что опирается)
+    D.epics.forEach(e => (e.deps || []).forEach(d => {
+      if (!pos[d]) return;
+      const a = pos[e.id], b = pos[d];
+      // лёгкая кривая через смещённую середину к центру неба — органичнее прямой
+      const mx = (a.x + b.x) / 2 + (cx0 - (a.x + b.x) / 2) * 0.12;
+      const my = (a.y + b.y) / 2 + (cy0 - (a.y + b.y) / 2) * 0.12;
+      s += '<path class="link" data-a="' + e.id + '" data-b="' + d + '" d="M' + a.x.toFixed(1) + ' ' + a.y.toFixed(1) + ' Q ' + mx.toFixed(1) + ' ' + my.toFixed(1) + ' ' + b.x.toFixed(1) + ' ' + b.y.toFixed(1) + '"/>';
+    }));
+
+    // stars
+    D.epics.forEach(e => {
+      const p = pos[e.id];
+      const glow = e.risk === 'off-course' ? ' glow-off' : (e.risk === 'drift' ? ' glow-drift' : '');
+      const fill = e.risk ? '' : 'var(--prizma-bg-elevated)';
+      s += '<g class="star' + glow + '" data-id="' + e.id + '" data-team="' + esc(e.team) + '">';
+      s += '<circle class="halo" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + (p.r + 7).toFixed(1) + '" stroke-width="2"/>';
+      s += '<path class="spark" d="' + sparkPath(p.x, p.y, p.r) + '"/>';
+      s += '<circle class="core" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + p.r.toFixed(1) + '"' + (fill ? ' fill="' + fill + '"' : '') + '/>';
+      s += '</g>';
+    });
+
+    sky.innerHTML = s;
+    wire();
+    applyHL();
+  }
+
+  function neighborsOf(id) {
+    const set = new Set([id]);
+    (byId[id].deps || []).forEach(d => { if (byId[d]) set.add(d); });
+    D.epics.forEach(e => { if ((e.deps || []).includes(id)) set.add(e.id); });
+    return set;
+  }
+
+  function wire() {
+    sky.querySelectorAll('.star').forEach(g => {
+      const id = g.dataset.id;
+      g.addEventListener('mouseenter', () => { hoverId = id; applyHL(); showCard(id); });
+      g.addEventListener('mouseleave', () => { hoverId = null; applyHL(); hideCard(); });
+      g.addEventListener('click', ev => { ev.stopPropagation(); selTeam = byId[id].team; build(); });
+    });
+    sky.querySelectorAll('.clusterglow').forEach(c => {
+      c.addEventListener('click', ev => { ev.stopPropagation(); selTeam = c.dataset.team; build(); });
+    });
+  }
+
+  // клик по пустому небу → сброс фокуса
+  sky.addEventListener('click', () => { if (selTeam) { selTeam = null; build(); } });
+
+  function applyHL() {
+    const focus = hoverId ? neighborsOf(hoverId) : null;
+    sky.querySelectorAll('.star').forEach(g => {
+      g.classList.remove('dim', 'lit', 'sel');
+      const id = g.dataset.id;
+      if (hoverId === id) g.classList.add('sel');
+      const inTeam = selTeam ? g.dataset.team === selTeam : true;
+      if (focus) {
+        g.classList.toggle('lit', focus.has(id));
+        g.classList.toggle('dim', !focus.has(id));
+      } else if (selTeam) {
+        g.classList.toggle('lit', inTeam);
+        g.classList.toggle('dim', !inTeam);
+      }
+    });
+    sky.querySelectorAll('.link').forEach(p => {
+      p.classList.remove('dim', 'lit');
+      if (focus) {
+        const on = focus.has(p.dataset.a) && focus.has(p.dataset.b) && (p.dataset.a === hoverId || p.dataset.b === hoverId);
+        p.classList.toggle('lit', on);
+        p.classList.toggle('dim', !on);
+      } else if (selTeam) {
+        const on = byId[p.dataset.a].team === selTeam || byId[p.dataset.b].team === selTeam;
+        p.classList.toggle('dim', !on);
+      }
+    });
+  }
+
+  function showCard(id) {
+    const e = byId[id];
+    const rdot = e.risk ? '<span class="rd" style="background:var(--prizma-' + e.risk + ')"></span>' : '';
+    const deps = (e.deps || []).length;
+    const blockers = D.epics.filter(x => (x.deps || []).includes(id)).length;
+    let h = '<div class="team">' + rdot + esc(e.team) + (e.risk ? ' · ' + (e.risk === 'off-course' ? 'срыв' : 'дрейф') : '') + '</div>';
+    h += '<h3>' + esc(e.epic) + '</h3>';
+    h += '<div class="meta">';
+    h += '<div class="m"><span class="k">Трудозатраты</span><span class="v">' + H.effortOf(e) + ' дн</span></div>';
+    h += '<div class="m"><span class="k">Работ</span><span class="v">' + e.pills.length + '</span></div>';
+    h += '<div class="m"><span class="k">Готово</span><span class="v">' + Math.round(H.doneRatio(e) * 100) + '%</span></div>';
+    h += '</div>';
+    if (deps || blockers) {
+      h += '<div class="deprow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>зависит от ' + deps + ' · блокирует ' + blockers + '</div>';
+    }
+    card.innerHTML = h;
+
+    // позиционируем карточку рядом со звездой (перевод VB-координат в пиксели)
+    const p = pos[id];
+    const rect = bodyEl.getBoundingClientRect();
+    const vb = sky.viewBox.baseVal;
+    const scale = Math.min(rect.width / vb.width, rect.height / vb.height);
+    const offX = (rect.width - vb.width * scale) / 2;
+    const offY = (rect.height - vb.height * scale) / 2;
+    const px = offX + p.x * scale, py = offY + p.y * scale;
+    card.classList.add('show');
+    const cw = card.offsetWidth, ch = card.offsetHeight;
+    let left = px + p.r * scale + 14;
+    if (left + cw > rect.width - 10) left = px - p.r * scale - cw - 14;
+    left = Math.max(10, Math.min(left, rect.width - cw - 10));
+    let top = py - ch / 2;
+    top = Math.max(10, Math.min(top, rect.height - ch - 10));
+    card.style.left = left.toFixed(0) + 'px';
+    card.style.top = top.toFixed(0) + 'px';
+  }
+  function hideCard() { card.classList.remove('show'); }
+
+  // init: sync + setTimeout + resize (gotcha a). viewBox + measure (gotcha d).
+  build();
+  setTimeout(build, 60);
+  window.addEventListener('resize', () => { if (hoverId) showCard(hoverId); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

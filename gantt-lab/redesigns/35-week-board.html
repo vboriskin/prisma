@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 35 · Неделя</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.dash { width: 14px; height: 0; border-radius: 0; border-top: 1px dotted var(--prizma-text-secondary); }
+
+  /* ── eyebrow + week nav ── */
+  .bar { padding: 9px 22px 6px; flex: none; display: flex; align-items: center; gap: 16px; }
+  .weeknav { display: inline-flex; align-items: center; gap: 10px; }
+  .weeknav .lbl { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); min-width: 200px; }
+  .weeknav .lbl .rng { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .weeknav button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); color: var(--prizma-text-secondary); cursor: pointer; transition: border-color .15s, color .15s; }
+  .weeknav button:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+  .weeknav .now { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); border: 1px solid var(--prizma-information); border-radius: var(--r-sm); padding: 4px 7px; background: transparent; cursor: pointer; }
+  .weeknav .now[hidden] { display: none; }
+  .barspacer { flex: 1; }
+  .summary { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .summary b { color: var(--prizma-text-secondary); font-weight: 700; }
+
+  /* ── board: team rows × day columns ── */
+  .board-scroll { flex: 1; overflow: auto; min-height: 0; padding: 4px 22px 22px; }
+  .board { min-width: 1180px; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+
+  .grid { display: grid; grid-template-columns: 150px repeat(7, 1fr); }
+
+  /* day header row */
+  .dhead { padding: 10px 10px 9px; border-left: 1px solid var(--prizma-border); display: flex; flex-direction: column; gap: 2px; }
+  .dhead.we { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .dhead.today { box-shadow: inset 0 2px 0 var(--prizma-information); }
+  .dhead .dow { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .dhead.we .dow { color: var(--prizma-text-secondary); }
+  .dhead.today .dow { color: var(--prizma-information); }
+  .dhead .dnum { font: 600 14px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .dhead.today .dnum { color: var(--prizma-information); }
+  .dhead .mile { margin-top: 4px; display: inline-flex; align-items: center; gap: 4px; font: 600 9px/1.2 var(--font); color: var(--prizma-text-secondary); }
+  .dhead .mile svg { width: 9px; height: 9px; flex: none; }
+  .corner { padding: 12px 14px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  /* team row */
+  .trow { display: contents; }
+  .rhead { padding: 0 14px; display: flex; flex-direction: column; justify-content: center; gap: 3px; min-height: 96px; border-top: 1px solid var(--prizma-border); }
+  .rhead .nm { font-size: 13px; font-weight: 600; }
+  .rhead .cap { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .rhead .rd { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-left: 5px; vertical-align: middle; }
+
+  .cell { border-left: 1px solid var(--prizma-border); border-top: 1px solid var(--prizma-border); min-height: 96px; padding: 7px 7px 8px; display: flex; flex-direction: column; gap: 4px; position: relative; }
+  .cell.we { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+  .cell.today { background: color-mix(in srgb, var(--prizma-information) 4%, transparent); }
+  .cell .relstart { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-text-secondary); }
+
+  /* day-activity item */
+  .item { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 7px 4px 9px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); font: 600 10.5px/1.2 var(--font); color: var(--prizma-text-primary); overflow: hidden; cursor: default; transition: box-shadow .12s; }
+  .item::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt, var(--prizma-information)); }
+  .item:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .item .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .wt { font: 700 8px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); flex: none; }
+  .item .live { width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .item.deadline { background: transparent; border: 1px solid var(--prizma-off-course); }
+  .item.deadline::before { display: none; }
+  .item.deadline .wt { color: var(--prizma-off-course); }
+  .item.moved { background: transparent; border: 1px dashed var(--prizma-drift); }
+  .item.moved::before { display: none; }
+  .item.moved .wt { color: var(--prizma-drift); }
+  .item svg { width: 10px; height: 10px; flex: none; }
+
+  .emptyday { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); opacity: .5; align-self: center; margin-top: 30px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Неделя</span>
+    <span class="sub">оперативный спринт-борд</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-information)"></i>в работе</span>
+      <span><i style="background:var(--prizma-off-course)"></i>дедлайн</span>
+      <span><i style="background:var(--prizma-drift)"></i>перенос</span>
+      <span><i class="dash"></i>веха</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="bar">
+    <span class="pz-eyebrow">Редизайн 35 · Неделя</span>
+    <div class="weeknav" id="nav">
+      <button id="prev" aria-label="Прошлая неделя"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <span class="lbl" id="navlbl"></span>
+      <button id="next" aria-label="Следующая неделя"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      <button class="now" id="thisweek" hidden>СЕГОДНЯ</button>
+    </div>
+    <span class="barspacer"></span>
+    <span class="summary" id="summary"></span>
+  </div>
+  <div class="board-scroll"><div class="board" id="board"></div></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');           // Date-объекты, не сырые ms (gotcha b)
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const MN = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+  const DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  const today = parse(D.today);
+  const dated = D.releases.filter(r => r.dated);
+
+  // понедельник недели (ISO: Пн=0) — как в календаре, через ms-сдвиг (gotcha b)
+  function mondayOf(d) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dow = (x.getDay() + 6) % 7;
+    return new Date(x.getTime() - dow * DAY);
+  }
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const isWE = d => ((d.getDay() + 6) % 7) >= 5;
+
+  const todayMon = mondayOf(today);
+  let weekMon = new Date(todayMon.getTime());           // текущая неделя по умолчанию
+
+  // какой релиз покрывает дату d (по диапазону start..end)
+  function relOf(d) {
+    return dated.find(r => { const s = parse(r.start), e = parse(r.end); return d >= s && d <= e; }) || null;
+  }
+
+  // ── деривация дневной активности из PZ_DATA (правдоподобно) ──
+  // progress-пилюли «активны» в РАБОЧИЕ дни того окна, к которому они принадлежат
+  // (видно, что реально движется в эту неделю). milestones — на свою точную дату.
+  // moves>0 → метка «перенос» на первый рабочий день окна эпика (свежий переезд).
+  // конец окна релиза → дедлайн (последний день окна) для незавершённых работ окна.
+  function activityFor(team, d) {
+    const out = [];
+    if (relOf(d) == null) return out;                   // активность только внутри датированных окон
+    const wd = (d.getDay() + 6) % 7;                    // Пн=0..Вс=6
+    const workday = wd <= 4;                            // Пн–Пт
+    H.teamEpics(team).forEach(e => {
+      e.pills.forEach(p => {
+        const r = dated.find(x => x.key === p.col);
+        if (!r) return;
+        const rs = parse(r.start), re = parse(r.end);
+        const inWin = d >= rs && d <= re;
+        if (!inWin) return;
+        // дедлайн: незавершённая работа в последний рабочий день окна
+        const lastWork = lastWorkdayOf(re);
+        if (p.state !== 'done' && sameDay(d, lastWork)) {
+          out.push({ kind: 'deadline', wt: p.wt, epic: e, risk: e.risk });
+          return;
+        }
+        // активна: progress-пилюля в рабочий день внутри своего окна
+        if (p.state === 'progress' && workday) {
+          out.push({ kind: 'live', wt: p.wt, epic: e, who: p.who, risk: e.risk });
+        }
+      });
+      // свежий перенос: на первый рабочий день окна, где у эпика есть pills
+      if ((e.moves || 0) >= 3) {
+        dated.forEach(r => {
+          if (!H.pillsOf(e, r.key).length) return;
+          const fw = firstWorkdayOf(parse(r.start));
+          if (sameDay(d, fw)) out.push({ kind: 'moved', wt: H.pillsOf(e, r.key)[0].wt, epic: e, moves: e.moves });
+        });
+      }
+    });
+    return out;
+  }
+  function firstWorkdayOf(d) { let x = new Date(d.getTime()); while (((x.getDay() + 6) % 7) >= 5) x = new Date(x.getTime() + DAY); return x; }
+  function lastWorkdayOf(d) { let x = new Date(d.getTime()); while (((x.getDay() + 6) % 7) >= 5) x = new Date(x.getTime() - DAY); return x; }
+
+  const board = document.getElementById('board');
+  const navLbl = document.getElementById('navlbl');
+  const summaryEl = document.getElementById('summary');
+  const thisWeekBtn = document.getElementById('thisweek');
+
+  function weekDays() { const a = []; for (let i = 0; i < 7; i++) a.push(new Date(weekMon.getTime() + i * DAY)); return a; }
+
+  function render() {
+    const days = weekDays();
+    const wkEnd = days[6];
+
+    // навигационный ярлык
+    const sameMonth = weekMon.getMonth() === wkEnd.getMonth();
+    const rng = weekMon.getDate() + (sameMonth ? '' : ' ' + MN[weekMon.getMonth()]) + ' – ' + wkEnd.getDate() + ' ' + MN[wkEnd.getMonth()];
+    const rel = relOf(today >= days[0] && today <= wkEnd ? today : days[3]);
+    navLbl.innerHTML = '<span class="rng">' + rng + '</span>' + (rel ? ' · окно ' + esc(rel.short) : '');
+    thisWeekBtn.hidden = sameDay(weekMon, todayMon);
+
+    let html = '';
+    // header: corner + 7 days
+    html += '<div class="grid">';
+    html += '<div class="corner"><span class="pz-eyebrow">Команда / День</span></div>';
+    days.forEach(d => {
+      const wd = (d.getDay() + 6) % 7;
+      const we = wd >= 5;
+      const td = sameDay(d, today);
+      const r = relOf(d);
+      const isStart = r && sameDay(d, parse(r.start));
+      const mile = D.milestones.find(m => sameDay(parse(m.date), d));
+      let h = '<div class="dhead' + (we ? ' we' : '') + (td ? ' today' : '') + '">';
+      h += '<span class="dow">' + DOW[wd] + (td ? ' · сегодня' : '') + '</span>';
+      h += '<span class="dnum">' + d.getDate() + ' ' + MN[d.getMonth()] + '</span>';
+      if (isStart) h += '<span class="mile"><svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-text-secondary)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/></svg>старт ' + esc(r.short) + '</span>';
+      if (mile) h += '<span class="mile"><svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-text-secondary)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/></svg>' + esc(mile.label) + '</span>';
+      h += '</div>';
+      html += h;
+    });
+    html += '</div>';
+
+    // team rows
+    let liveTotal = 0, dlTotal = 0;
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team);
+      const risk = eps.some(e => e.risk === 'off-course') ? 'off-course' : (eps.some(e => e.risk === 'drift') ? 'drift' : null);
+      html += '<div class="grid">';
+      html += '<div class="rhead"><span class="nm">' + esc(team) + (risk ? '<span class="rd" style="background:var(--prizma-' + risk + ')"></span>' : '') + '</span><span class="cap">' + eps.length + ' эпиков</span></div>';
+      days.forEach(d => {
+        const wd = (d.getDay() + 6) % 7;
+        const we = wd >= 5;
+        const td = sameDay(d, today);
+        const r = relOf(d);
+        const isStart = r && sameDay(d, parse(r.start));
+        const acts = activityFor(team, d);
+        // порядок: дедлайны, затем в работе, затем переносы
+        acts.sort((a, b) => ({ deadline: 0, live: 1, moved: 2 }[a.kind] - { deadline: 0, live: 1, moved: 2 }[b.kind]));
+        liveTotal += acts.filter(a => a.kind === 'live').length;
+        dlTotal += acts.filter(a => a.kind === 'deadline').length;
+
+        let cell = '<div class="cell' + (we ? ' we' : '') + (td ? ' today' : '') + '">';
+        if (isStart) cell += '<span class="relstart"></span>';
+        if (!acts.length) {
+          cell += we ? '' : '<span class="emptyday">—</span>';
+        } else {
+          acts.slice(0, 3).forEach(a => {
+            const nm = a.epic.epic.length > 18 ? a.epic.epic.slice(0, 17) + '…' : a.epic.epic;
+            if (a.kind === 'deadline') {
+              cell += '<div class="item deadline" title="' + esc(a.epic.epic) + ' · дедлайн ' + a.wt + '"><svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-off-course)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg><span class="nm">' + esc(nm) + '</span><span class="wt">' + a.wt + '</span></div>';
+            } else if (a.kind === 'moved') {
+              cell += '<div class="item moved" title="' + esc(a.epic.epic) + ' · ' + a.moves + ' переноса"><svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-drift)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span class="nm">' + esc(nm) + '</span><span class="wt">×' + a.moves + '</span></div>';
+            } else {
+              cell += '<div class="item" style="--wt:' + wtVar(a.wt) + '" title="' + esc(a.epic.epic) + ' · ' + (D.WT[a.wt] ? D.WT[a.wt].label : a.wt) + (a.who ? ' · ' + a.who : '') + '"><span class="live"></span><span class="nm">' + esc(nm) + '</span><span class="wt">' + a.wt + '</span></div>';
+            }
+          });
+          if (acts.length > 3) cell += '<span class="emptyday" style="opacity:.7;margin-top:2px;align-self:flex-start">+' + (acts.length - 3) + ' ещё</span>';
+        }
+        cell += '</div>';
+        html += cell;
+      });
+      html += '</div>';
+    });
+
+    board.innerHTML = html;
+    summaryEl.innerHTML = 'в работе <b>' + liveTotal + '</b> · дедлайнов <b>' + dlTotal + '</b>';
+  }
+
+  document.getElementById('prev').addEventListener('click', () => { weekMon = new Date(weekMon.getTime() - 7 * DAY); render(); });
+  document.getElementById('next').addEventListener('click', () => { weekMon = new Date(weekMon.getTime() + 7 * DAY); render(); });
+  thisWeekBtn.addEventListener('click', () => { weekMon = new Date(todayMon.getTime()); render(); });
+
+  // init: sync + setTimeout + resize (gotcha a)
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => {});
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

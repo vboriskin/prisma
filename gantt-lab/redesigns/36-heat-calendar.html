@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 36 · Тепло-календарь</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend .swatches { display: inline-flex; gap: 3px; }
+  .top .legend .sw { width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--prizma-border); }
+
+  .bar { padding: 10px 22px 4px; flex: none; display: flex; align-items: baseline; gap: 16px; }
+  .bar .note { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── heat grid ── */
+  .scroll { flex: 1; overflow: auto; min-height: 0; padding: 8px 22px 24px; }
+  .heat { display: inline-grid; gap: 0; }   /* grid set in JS: months row, dow col */
+
+  .months { display: flex; height: 16px; margin-left: 34px; }
+  .months .mlbl { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); white-space: nowrap; }
+
+  .gridwrap { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+  .dows { display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; width: 28px; flex: none; }
+  .dows span { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; align-items: center; height: 15px; }
+  .dows span.we { color: var(--prizma-text-secondary); }
+
+  .weeks { display: flex; gap: 3px; }
+  .wkcol { display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; }
+
+  .cell { width: 15px; height: 15px; border-radius: 3px; background: var(--cellbg, transparent); border: 1px solid var(--prizma-border); position: relative; cursor: default; transition: outline-color .12s; }
+  .cell.out { background: transparent; border-color: transparent; }
+  .cell.we { border-color: color-mix(in srgb, var(--prizma-border) 60%, transparent); }
+  .cell.today { outline: 2px solid var(--prizma-information); outline-offset: 1px; z-index: 2; }
+  .cell.relbound::after { content: ""; position: absolute; inset: 0; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .cell:hover { outline: 2px solid var(--prizma-text-secondary); outline-offset: 1px; z-index: 3; }
+  .cell.today:hover { outline-color: var(--prizma-information); }
+
+  /* release window markers under the grid */
+  .relrow { display: flex; gap: 3px; margin-top: 8px; margin-left: 34px; }
+  .relseg { height: 4px; border-radius: 2px; position: relative; }
+  .rellbls { display: flex; margin-left: 34px; margin-top: 5px; position: relative; height: 14px; }
+  .rellbl { position: absolute; font: 700 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .rellbl.cur { color: var(--prizma-text-secondary); }
+
+  /* ── legend ramp footer ── */
+  .footer { display: flex; align-items: center; gap: 18px; margin-top: 16px; margin-left: 34px; }
+  .footer .ramp-wrap { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .footer .ramp { display: inline-flex; gap: 3px; }
+  .footer .ramp .sw { width: 15px; height: 15px; border-radius: 3px; border: 1px solid var(--prizma-border); }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 170px; max-width: 250px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 10px 12px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tt { font: 700 12px/1 var(--mono); margin-bottom: 6px; color: var(--prizma-text-primary); }
+  .tip .tr { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tip .tr:last-child { margin-bottom: 0; }
+  .tip .tr .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .tag { display: inline-block; margin-top: 6px; font: 700 9px/1 var(--mono); letter-spacing: .3px; padding: 3px 6px; border-radius: var(--r-sm); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Тепло-календарь</span>
+    <span class="sub">ритм квартала · одно полотно</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span>тише</span>
+      <span class="swatches" id="legSw"></span>
+      <span>плотнее</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="bar">
+    <span class="pz-eyebrow">Редизайн 36 · Тепло-календарь</span>
+    <span class="note">Тон ячейки = синтезированная активность дня (работы в окне + близость к границам релизов). Сегодня обведено.</span>
+  </div>
+  <div class="scroll">
+    <div class="heat" id="heat">
+      <div class="months" id="months"></div>
+      <div class="gridwrap">
+        <div class="dows" id="dows"></div>
+        <div class="weeks" id="weeks"></div>
+      </div>
+      <div class="relrow" id="relrow"></div>
+      <div class="rellbls" id="rellbls"></div>
+      <div class="footer">
+        <div class="ramp-wrap"><span>0</span><span class="ramp" id="rampSw"></span><span>пик</span></div>
+        <div class="ramp-wrap" style="margin-left:8px"><span class="sw" style="width:13px;height:13px;outline:2px solid var(--prizma-information);outline-offset:1px"></span><span>сегодня</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');           // Date-объекты, не сырые ms (gotcha b)
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MNNOM = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+  const MN2 = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  const today = parse(D.today);
+  const dated = D.releases.filter(r => r.dated);
+
+  function mondayOf(d) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dow = (x.getDay() + 6) % 7;
+    return new Date(x.getTime() - dow * DAY);             // ms-сдвиг, не component-overflow (gotcha b)
+  }
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  // окно полотна: от старта первого до конца последнего датированного релиза,
+  // расширенное до полной недели Пн–Вс с обеих сторон.
+  const spanStart = parse(dated[0].start);
+  const spanEnd = parse(dated[dated.length - 1].end);
+  const gridStart = mondayOf(spanStart);
+  const gridEnd = new Date(mondayOf(spanEnd).getTime() + 7 * DAY); // эксклюзивно (начало след. недели)
+
+  function relOf(d) {
+    return dated.find(r => { const s = parse(r.start), e = parse(r.end); return d >= s && d <= e; }) || null;
+  }
+  function inSpan(d) { return d >= spanStart && d <= spanEnd; }
+
+  // ── синтез интенсивности дня ──
+  // база = число работ (pills), чьё окно покрывает день. progress/риск весят больше.
+  // близость к границам окна (старт/конец ±2 дня) добавляет «всплеск» — релизные
+  // рубежи горячее. выходные приглушены. результат нормируется → 0..1.
+  const cache = {};
+  function intensityRaw(d) {
+    const key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+    if (cache[key] != null) return cache[key];
+    const r = relOf(d);
+    let v = 0, count = 0;
+    if (r) {
+      const rs = parse(r.start), re = parse(r.end);
+      const nearStart = Math.abs((d - rs) / DAY) <= 2;
+      const nearEnd = Math.abs((re - d) / DAY) <= 2;
+      const boundary = nearStart || nearEnd ? 1 : 0;
+      D.epics.forEach(e => {
+        const pills = H.pillsOf(e, r.key);
+        pills.forEach(p => {
+          count += 1;
+          let w = 1;
+          if (p.state === 'progress') w += 1.4;
+          if (p.state === 'done') w += 0.3;
+          if (e.risk === 'off-course') w += 0.8; else if (e.risk === 'drift') w += 0.4;
+          v += w;
+        });
+      });
+      v += boundary * (count * 0.5 + 2);                  // всплеск у рубежей
+      if (r.current) v += count * 0.25;                   // текущее окно чуть теплее
+    }
+    // выходные приглушаем (меньше активности)
+    const wd = (d.getDay() + 6) % 7;
+    if (wd >= 5) v *= 0.45;
+    cache[key] = { v, count };
+    return cache[key];
+  }
+
+  // нормировка: соберём max по окну, отмасштабируем 0..1
+  let vmax = 0;
+  for (let t = gridStart.getTime(); t < gridEnd.getTime(); t += DAY) {
+    const d = new Date(t);
+    if (!inSpan(d)) continue;
+    const r = intensityRaw(d);
+    if (r.v > vmax) vmax = r.v;
+  }
+  vmax = vmax || 1;
+
+  // 5-ступенчатый рамп neutral→information→drift через color-mix
+  // (нейтральная база, к голубому «инфо», на пике лёгкий дрейф-амбер)
+  function tintFor(level01) {
+    if (level01 <= 0.001) return 'color-mix(in srgb, var(--prizma-text-primary) 3%, transparent)';
+    // 5 корзин для дискретного «contributions»-вида
+    const q = Math.min(4, Math.floor(level01 * 4.999)); // 0..4
+    const ramp = [
+      'color-mix(in srgb, var(--prizma-information) 16%, transparent)',
+      'color-mix(in srgb, var(--prizma-information) 34%, transparent)',
+      'color-mix(in srgb, var(--prizma-information) 56%, transparent)',
+      'color-mix(in srgb, var(--prizma-drift) 52%, transparent)',
+      'color-mix(in srgb, var(--prizma-drift) 78%, transparent)',
+    ];
+    return ramp[q];
+  }
+  const RAMP_SWATCHES = [
+    'color-mix(in srgb, var(--prizma-text-primary) 3%, transparent)',
+    'color-mix(in srgb, var(--prizma-information) 16%, transparent)',
+    'color-mix(in srgb, var(--prizma-information) 34%, transparent)',
+    'color-mix(in srgb, var(--prizma-information) 56%, transparent)',
+    'color-mix(in srgb, var(--prizma-drift) 52%, transparent)',
+    'color-mix(in srgb, var(--prizma-drift) 78%, transparent)',
+  ];
+
+  const tip = document.getElementById('tip');
+  let tipEl = null;
+
+  function build() {
+    // построим список недель (колонок) от gridStart до gridEnd
+    const weeks = [];
+    for (let t = gridStart.getTime(); t < gridEnd.getTime(); t += 7 * DAY) {
+      const mon = new Date(t);
+      const days = [];
+      for (let i = 0; i < 7; i++) days.push(new Date(mon.getTime() + i * DAY));
+      weeks.push({ mon, days });
+    }
+
+    // dow-подписи слева (Пн..Вс), помечаем Сб/Вс
+    document.getElementById('dows').innerHTML = DOW.map((n, i) => '<span class="' + (i >= 5 ? 'we' : '') + '">' + n + '</span>').join('');
+
+    // колонки недель
+    const weeksEl = document.getElementById('weeks');
+    let wh = '';
+    weeks.forEach(wk => {
+      wh += '<div class="wkcol">';
+      wk.days.forEach(d => {
+        const within = inSpan(d);
+        const wd = (d.getDay() + 6) % 7;
+        const we = wd >= 5;
+        const td = sameDay(d, today);
+        const r = within ? relOf(d) : null;
+        const isBound = r && (sameDay(d, parse(r.start)) || sameDay(d, parse(r.end)));
+        const raw = within ? intensityRaw(d) : { v: 0, count: 0 };
+        const lvl = within ? raw.v / vmax : 0;
+        const bg = within ? tintFor(lvl) : 'transparent';
+        let cls = 'cell';
+        if (!within) cls += ' out';
+        if (we && within) cls += ' we';
+        if (isBound) cls += ' relbound';
+        if (td) cls += ' today';
+        const dd = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0');
+        wh += '<div class="' + cls + '" style="--cellbg:' + bg + '" data-d="' + dd + '" data-cnt="' + raw.count + '" data-rel="' + (r ? esc(r.short) : '') + '" data-cur="' + (r && r.current ? '1' : '') + '" data-bound="' + (isBound ? '1' : '') + '" data-today="' + (td ? '1' : '') + '"></div>';
+      });
+      wh += '</div>';
+    });
+    weeksEl.innerHTML = wh;
+
+    // месячные подписи сверху — абсолютно по левому отступу первой недели месяца
+    const cellW = 15, gap = 3, colW = cellW + gap;
+    const monthsEl = document.getElementById('months');
+    monthsEl.style.position = 'relative';
+    monthsEl.innerHTML = '';
+    let lastMonth = -1;
+    weeks.forEach((wk, wi) => {
+      const mid = wk.days[3];
+      if (mid.getMonth() !== lastMonth) {
+        lastMonth = mid.getMonth();
+        const span = document.createElement('span');
+        span.className = 'mlbl';
+        span.style.position = 'absolute';
+        span.style.left = (wi * colW) + 'px';
+        span.textContent = MNNOM[mid.getMonth()];
+        monthsEl.appendChild(span);
+      }
+    });
+    monthsEl.style.width = (weeks.length * colW) + 'px';
+
+    // полоса окон релизов под сеткой (нейтрально-серая; текущее чуть ярче)
+    const relRow = document.getElementById('relrow');
+    const relLbls = document.getElementById('rellbls');
+    relRow.style.position = 'relative';
+    relRow.style.height = '4px';
+    relRow.style.display = 'block';
+    relRow.style.width = (weeks.length * colW) + 'px';
+    relLbls.style.width = (weeks.length * colW) + 'px';
+    let rr = '', rl = '';
+    dated.forEach(r => {
+      const s = parse(r.start), e = parse(r.end);
+      const x0 = ((s - gridStart) / DAY) / 7 * colW;
+      const x1 = ((e - gridStart) / DAY + 1) / 7 * colW;
+      const tone = r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-border-strong)';
+      rr += '<div class="relseg" style="position:absolute;left:' + x0.toFixed(1) + 'px;width:' + (x1 - x0).toFixed(1) + 'px;background:' + tone + ';opacity:' + (r.current ? '.9' : '.5') + '"></div>';
+      rl += '<span class="rellbl' + (r.current ? ' cur' : '') + '" style="left:' + x0.toFixed(1) + 'px">' + esc(r.short) + (r.current ? ' · тек' : '') + '</span>';
+    });
+    relRow.innerHTML = rr;
+    relLbls.innerHTML = rl;
+
+    // легенды-свотчи
+    document.getElementById('legSw').innerHTML = RAMP_SWATCHES.slice(1).map(c => '<span class="sw" style="background:' + c + '"></span>').join('');
+    document.getElementById('rampSw').innerHTML = RAMP_SWATCHES.map(c => '<span class="sw" style="background:' + c + '"></span>').join('');
+
+    wireTips();
+  }
+
+  // ── tooltip: «DD.MM · N работ активно» ──
+  function wireTips() {
+    document.querySelectorAll('.cell:not(.out)').forEach(c => {
+      c.addEventListener('mouseenter', () => {
+        tipEl = c;
+        const dd = c.dataset.d, cnt = +c.dataset.cnt, rel = c.dataset.rel;
+        let h = '<div class="tt">' + dd + ' · ' + cnt + ' ' + plural(cnt) + ' активно</div>';
+        if (rel) h += '<div class="tr"><span>Окно</span><span class="v">' + esc(rel) + '</span></div>';
+        if (c.dataset.bound) h += '<div class="tr"><span>Рубеж</span><span class="v">старт/финиш окна</span></div>';
+        if (c.dataset.today) h += '<span class="tag" style="color:var(--prizma-information);border:1px solid var(--prizma-information)">СЕГОДНЯ</span>';
+        else if (c.dataset.cur) h += '<span class="tag" style="color:var(--prizma-text-secondary);border:1px solid var(--prizma-border-strong)">текущее окно</span>';
+        tip.innerHTML = h;
+        positionTip(c);
+      });
+      c.addEventListener('mouseleave', () => { if (tipEl === c) { tip.classList.remove('show'); tipEl = null; } });
+    });
+  }
+  function plural(n) {
+    const a = Math.abs(n) % 100, b = n % 10;
+    if (a > 10 && a < 20) return 'работ';
+    if (b > 1 && b < 5) return 'работы';
+    if (b === 1) return 'работа';
+    return 'работ';
+  }
+  function positionTip(el) {
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = 'hidden'; tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px'; tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+
+  // init: sync + setTimeout + resize (gotcha a); measured layout (gotcha d)
+  build();
+  setTimeout(build, 60);
+  window.addEventListener('resize', () => { if (tipEl) positionTip(tipEl); });
+  window.addEventListener('scroll', () => { if (tipEl) positionTip(tipEl); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

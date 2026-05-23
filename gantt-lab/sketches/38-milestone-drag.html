@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 38 · Двигать веху</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 700px; }
+  .bar { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .spacer { flex: 1; }
+  .readout { display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px; border-radius: var(--r-md);
+    border: 1px solid var(--prizma-border-strong); background: var(--prizma-bg-elevated); font-size: 12.5px;
+    opacity: 0; transform: translateY(-3px); transition: opacity .15s var(--ease-calm), transform .15s var(--ease-calm); }
+  .readout.show { opacity: 1; transform: translateY(0); }
+  .readout .ttl { color: var(--prizma-text-secondary); }
+  .readout .dt { font: 700 12.5px/1 var(--mono); color: var(--prizma-text-primary); }
+  .readout .delta { font: 600 11px/1 var(--mono); color: var(--prizma-information); }
+
+  .board { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; background: var(--prizma-bg-elevated); }
+  .chart { position: relative; }
+
+  /* ось дат */
+  .axis { position: relative; height: 64px; border-bottom: 1px solid var(--prizma-border-strong); }
+  .axis-svg { position: absolute; left: 0; top: 0; }
+  /* зона перетаскивания вех — поверх оси */
+  .flagzone { position: absolute; left: 0; top: 0; height: 64px; z-index: 6; }
+
+  /* флаг-веха */
+  .flag { position: absolute; top: 8px; transform: translateX(-1px); cursor: grab; z-index: 7; user-select: none;
+    transition: filter .12s; }
+  .flag.dragging { cursor: grabbing; z-index: 9; }
+  .flag .stem { position: absolute; left: 0; top: 0; width: 0; height: 220px; border-left: 1px dotted var(--prizma-text-secondary); pointer-events: none; }
+  .flag .knob { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 7px;
+    background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong); border-left: 3px solid var(--prizma-text-secondary);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .flag .knob .lab { font: 600 10.5px/1 var(--font); color: var(--prizma-text-primary); }
+  .flag .knob .d { font: 700 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .flag .knob svg { width: 11px; height: 11px; color: var(--prizma-text-tertiary); }
+  .flag.moved .knob { border-left-color: var(--prizma-information); }
+  .flag.moved .knob .d { color: var(--prizma-information); }
+  .flag.moved .stem { border-left-color: var(--prizma-information); border-left-style: dashed; }
+  .flag:hover { filter: brightness(1.12); }
+
+  /* сегодня */
+  .todaystem { position: absolute; top: 0; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 5; pointer-events: none; }
+
+  /* строки эпиков */
+  .lane-grid { display: grid; grid-template-columns: 248px 1fr; }
+  .ep-lbl { padding: 0 14px; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); position: relative;
+    background: var(--prizma-bg-elevated); position: sticky; left: 0; z-index: 3; }
+  .ep-lbl .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ep-lbl .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 8px; }
+  .ep-lbl.flagged { box-shadow: inset 3px 0 0 var(--prizma-off-course); }
+  .ep-lbl .warn { display: none; align-items: center; gap: 4px; font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-off-course); margin-top: 2px; }
+  .ep-lbl.flagged .warn { display: inline-flex; }
+  .ep-lbl .warn svg { width: 10px; height: 10px; }
+
+  .team-row { display: grid; grid-template-columns: 248px 1fr; }
+  .team-lbl { position: sticky; left: 0; z-index: 3; background: var(--prizma-bg-elevated); padding: 8px 14px 7px;
+    font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary);
+    border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); }
+  .team-band { background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border); }
+
+  .lane { position: relative; min-height: 44px; border-bottom: 1px solid var(--prizma-border); }
+  /* бар-окно эпика на оси дат */
+  .ebar { position: absolute; top: 50%; transform: translateY(-50%); height: 22px; border-radius: var(--r-sm);
+    background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong); display: flex; align-items: center;
+    overflow: hidden; transition: box-shadow .15s; }
+  .ebar .cap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .ebar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--prizma-text-primary) 13%, transparent); }
+  .ebar .lab { position: relative; z-index: 2; padding: 0 8px 0 10px; font: 600 10px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .ebar.past-flag { box-shadow: inset 0 0 0 1px var(--prizma-off-course); }
+  .ebar.past-flag .lab { color: var(--prizma-off-course); }
+  .ebar.dep-flag { box-shadow: inset 0 0 0 1px var(--prizma-drift); }
+  .ebar .deadtick { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 1.5px solid var(--prizma-text-secondary); z-index: 3; }
+  .ebar.past-flag .deadtick { border-left-color: var(--prizma-off-course); }
+
+  /* фон-слой релиз-полос */
+  .gridlayer { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; }
+  .relband { position: absolute; top: 0; bottom: 0; }
+  .relband.cur { background: color-mix(in srgb, var(--prizma-text-primary) 4%, transparent); }
+  .relband.alt { background: color-mix(in srgb, var(--prizma-text-primary) 1.6%, transparent); }
+
+  .summary { margin-top: 16px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--prizma-text-secondary); min-height: 20px; }
+  .summary .n { font: 700 12.5px/1 var(--mono); color: var(--prizma-off-course); }
+  .summary svg { width: 14px; height: 14px; color: var(--prizma-off-course); }
+  .note { margin-top: 10px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 700px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 38 · Двигать веху</div>
+      <h1>Двигать веху</h1>
+      <p>Перетащите флаг-веху по оси дат — её дата обновляется в реальном времени. Эпики, чьи дедлайны теперь выходят за веху или которые от неё зависят, тут же подсвечиваются срывом. Видно, как сдвиг целевой даты расходится волной по плану.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Тащите флаг вехи влево-вправо.</span>
+    <span class="spacer"></span>
+    <span class="readout" id="readout"><span class="ttl" id="roTtl">Веха</span><span class="dt" id="roDt"></span><span class="delta" id="roDelta"></span></span>
+  </div>
+  <div class="board" id="board">
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+  <p class="note">Дедлайн эпика = конец самого позднего датированного окна его работ. Веха «ловит» эпик, если его дедлайн оказался <em>позже</em> вехи, либо если эпик зависит от эпика, привязанного к вехе. Зависимости — <code>epic.deps[]</code>.</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = d => d.toLocaleDateString('ru', { day: '2-digit', month: 'long' });
+  const fmtShort = d => d.toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+
+  // ── ось: датированные релизы r120..r122 ──
+  const dated = D.releases.filter(r => r.dated);
+  const axisStart = parse(dated[0].start);
+  const lastEnd = parse(dated[dated.length - 1].end);
+  const axisEnd = new Date(lastEnd.getTime() + DAY);     // Date-объект (gotcha b)
+  const spanMs = axisEnd - axisStart;
+  const PX_PER_DAY = 15;
+  const trackW = Math.round(spanMs / DAY * PX_PER_DAY);
+  const LBL_W = 248;
+  const xOf = d => (d - axisStart) / spanMs * trackW;            // d — Date
+  const dateAtX = x => new Date(axisStart.getTime() + Math.round(x / trackW * spanMs / DAY) * DAY); // snap к дню
+
+  // эпики с датированными работами + их дедлайн (конец позднего окна)
+  function epicDeadline(e) {
+    let hi = null;
+    e.pills.forEach(p => {
+      const r = D.releases.find(x => x.key === p.col);
+      if (!r || !r.dated) return;
+      const en = parse(r.end);
+      if (hi === null || en > hi) hi = en;
+    });
+    return hi; // Date | null
+  }
+  function epicStart(e) {
+    let lo = null;
+    e.pills.forEach(p => {
+      const r = D.releases.find(x => x.key === p.col);
+      if (!r || !r.dated) return;
+      const s = parse(r.start);
+      if (lo === null || s < lo) lo = s;
+    });
+    return lo;
+  }
+
+  // привязка вехи → эпик (для ripple по зависимостям). Демо-сопоставление по дате/смыслу.
+  const MS_ANCHOR = { m1: 'e2', m2: 'e1', m3: 'e8' };
+
+  // изменяемые даты вех (мс), стартуют из PZ_DATA
+  const msDates = {};
+  D.milestones.forEach(m => msDates[m.id] = parse(m.date).getTime());
+
+  const chart = document.getElementById('chart');
+  const board = document.getElementById('board');
+
+  function gridLayerHtml(h) {
+    let s = '<div class="gridlayer" style="left:'+LBL_W+'px;width:'+trackW+'px;height:'+h+'px">';
+    dated.forEach((r, i) => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cls = r.current ? 'cur' : (i % 2 ? 'alt' : '');
+      s += '<div class="relband '+cls+'" style="left:'+x1.toFixed(1)+'px;width:'+(x2-x1).toFixed(1)+'px"></div>';
+    });
+    s += '</div>';
+    return s;
+  }
+
+  function axisHtml() {
+    const Hh = 64;
+    let s = '<div class="lane-grid">';
+    s += '<div class="ep-lbl" style="min-height:64px;justify-content:flex-end;padding-bottom:10px"><span class="pz-eyebrow">Команда · Эпик</span></div>';
+    s += '<div style="position:relative">';
+    s += '<div class="axis"><svg class="axis-svg" width="'+trackW+'" height="'+Hh+'" viewBox="0 0 '+trackW+' '+Hh+'">';
+    // релиз-подписи + границы (нейтральные)
+    dated.forEach(r => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cx = (x1 + x2) / 2;
+      const fill = r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)';
+      s += '<text x="'+cx.toFixed(1)+'" y="16" text-anchor="middle" fill="'+fill+'" font-family="var(--mono)" font-size="11" font-weight="700" letter-spacing=".5">'+r.short+(r.current?' · ТЕК.':'')+'</text>';
+      s += '<line x1="'+x1.toFixed(1)+'" y1="0" x2="'+x1.toFixed(1)+'" y2="'+Hh+'" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    });
+    s += '<line x1="'+xOf(axisEnd).toFixed(1)+'" y1="0" x2="'+xOf(axisEnd).toFixed(1)+'" y2="'+Hh+'" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    // недельные даты
+    let t = new Date(axisStart.getTime());
+    while (t < axisEnd) {
+      s += '<text x="'+(xOf(t)+4).toFixed(1)+'" y="60" fill="var(--prizma-text-tertiary)" font-family="var(--mono)" font-size="9">'+fmtShort(t)+'</text>';
+      t = new Date(t.getTime() + 7 * DAY);
+    }
+    s += '</svg>';
+    // зона флагов (DOM-флаги, draggable)
+    s += '<div class="flagzone" id="flagzone" style="width:'+trackW+'px"></div>';
+    s += '</div></div>';
+    return s;
+  }
+
+  function bodyHtml() {
+    let s = '';
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team).filter(e => epicDeadline(e));   // только датированные
+      if (!eps.length) return;
+      s += '<div class="team-row"><div class="team-lbl">'+esc(team)+'</div><div class="team-band"></div></div>';
+      eps.forEach(e => {
+        const start = epicStart(e), dead = epicDeadline(e);
+        const x1 = xOf(start), x2 = xOf(new Date(dead.getTime() + DAY));
+        const w = Math.max(22, x2 - x1);
+        const dr = H.doneRatio(e);
+        const firstWt = e.pills[0] ? e.pills[0].wt : 'BE';
+        s += '<div class="lane-grid">';
+        s += '<div class="ep-lbl" data-id="'+e.id+'"><span class="nm">'+esc(e.epic)+'</span>'+
+             '<span class="meta"><span>дедлайн '+fmtShort(dead)+'</span></span>'+
+             '<span class="warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><span class="wtxt">за вехой</span></span></div>';
+        s += '<div class="lane"><div class="ebar" data-id="'+e.id+'" data-dead="'+dead.getTime()+'" style="left:'+x1.toFixed(1)+'px;width:'+w.toFixed(1)+'px;--wt:'+wtVar(firstWt)+'">'+
+             '<span class="fill" style="width:'+(dr*100).toFixed(1)+'%"></span><span class="cap"></span>'+
+             '<span class="deadtick" style="right:0"></span>'+
+             '<span class="lab">'+e.epic.length+'</span></div></div>';
+        s += '</div>';
+      });
+    });
+    return s;
+  }
+  // переопределим текст бара на готовность (короче)
+  function laneLab(e){ return Math.round(H.doneRatio(e)*100)+'%'; }
+
+  function render() {
+    chart.style.width = (LBL_W + trackW) + 'px';
+    chart.innerHTML = axisHtml() + '<div class="chart-body" style="position:relative">' + bodyHtml() + '</div>';
+    // корректные подписи баров
+    chart.querySelectorAll('.ebar').forEach(b => {
+      const e = D.epics.find(x => x.id === b.dataset.id);
+      b.querySelector('.lab').textContent = laneLab(e);
+    });
+    placeOverlays();
+    buildFlags();
+    recompute();
+  }
+
+  function placeOverlays() {
+    const body = chart.querySelector('.chart-body');
+    body.querySelectorAll('.gridlayer, .todaystem').forEach(n => n.remove());
+    const h = body.scrollHeight;
+    body.insertAdjacentHTML('afterbegin', gridLayerHtml(h));
+    const tx = LBL_W + xOf(parse(D.today));
+    const tl = document.createElement('div'); tl.className = 'todaystem';
+    tl.style.left = tx.toFixed(1) + 'px'; tl.style.height = h + 'px';
+    body.appendChild(tl);
+    // высота стеблей флагов = высота тела + ось
+    const totalH = h + 64;
+    chart.querySelectorAll('.flag .stem').forEach(st => st.style.height = totalH + 'px');
+  }
+
+  function buildFlags() {
+    const zone = chart.querySelector('#flagzone');
+    zone.innerHTML = '';
+    D.milestones.forEach(m => {
+      const x = xOf(new Date(msDates[m.id]));
+      const moved = msDates[m.id] !== parse(m.date).getTime();
+      const f = document.createElement('div');
+      f.className = 'flag' + (moved ? ' moved' : '');
+      f.dataset.id = m.id;
+      f.style.left = x.toFixed(1) + 'px';
+      f.innerHTML = '<span class="stem"></span>'+
+        '<span class="knob"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h11l-2 3 2 3H4"/></svg>'+
+        '<span class="lab">'+esc(m.label)+'</span><span class="d">'+fmtShort(new Date(msDates[m.id]))+'</span></span>';
+      zone.appendChild(f);
+      wireFlag(f, m);
+    });
+    placeOverlays();
+  }
+
+  // перетаскивание флага (pointer events — точный snap к дню)
+  function wireFlag(flag, m) {
+    const knob = flag.querySelector('.knob');
+    knob.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      flag.classList.add('dragging');
+      const zoneRect = chart.querySelector('#flagzone').getBoundingClientRect();
+      const move = ev => {
+        let x = ev.clientX - zoneRect.left;
+        x = Math.max(0, Math.min(x, trackW));
+        const snapped = dateAtX(x);
+        msDates[m.id] = snapped.getTime();
+        flag.style.left = xOf(snapped).toFixed(1) + 'px';
+        flag.querySelector('.d').textContent = fmtShort(snapped);
+        flag.classList.toggle('moved', msDates[m.id] !== parse(m.date).getTime());
+        showReadout(m, snapped);
+        recompute();
+      };
+      const up = () => {
+        flag.classList.remove('dragging');
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      showReadout(m, new Date(msDates[m.id]));
+    });
+  }
+
+  const readout = document.getElementById('readout');
+  let roTimer;
+  function showReadout(m, d) {
+    document.getElementById('roTtl').textContent = m.label + ' ·';
+    document.getElementById('roDt').textContent = fmt(d);
+    const deltaDays = Math.round((d.getTime() - parse(m.date).getTime()) / DAY);
+    const dEl = document.getElementById('roDelta');
+    dEl.textContent = deltaDays === 0 ? '' : (deltaDays > 0 ? '+'+deltaDays+' дн' : deltaDays+' дн');
+    dEl.style.color = deltaDays > 0 ? 'var(--prizma-off-course)' : (deltaDays < 0 ? 'var(--prizma-on-course)' : 'var(--prizma-information)');
+    readout.classList.add('show');
+    clearTimeout(roTimer);
+    roTimer = setTimeout(() => readout.classList.remove('show'), 3500);
+  }
+
+  // пересчёт ripple: какие эпики «за вехой» или зависят от привязанного эпика
+  function recompute() {
+    // флаг-метки эпиков
+    const flagged = new Set();        // дедлайн за вехой
+    const depFlagged = new Set();     // зависит от эпика, привязанного к сдвинутой вехе
+    D.milestones.forEach(m => {
+      const mt = msDates[m.id];
+      const moved = mt !== parse(m.date).getTime();
+      // эпики, чей дедлайн позже этой вехи (веха = верхняя граница)
+      D.epics.forEach(e => {
+        const dead = epicDeadline(e);
+        if (dead && dead.getTime() > mt) flagged.add(e.id);
+      });
+      // ripple по зависимостям: если веха сдвинута и привязана к эпику-якорю
+      if (moved) {
+        const anchor = MS_ANCHOR[m.id];
+        if (anchor) {
+          D.epics.forEach(e => { if ((e.deps || []).includes(anchor)) depFlagged.add(e.id); });
+        }
+      }
+    });
+    // самая ранняя веха как «общая верхняя граница» для подписи tick уже не нужна —
+    // подсветим бары: past-flag если дедлайн позже ЛЮБОЙ вехи, чья дата < дедлайна
+    chart.querySelectorAll('.ebar').forEach(b => {
+      const id = b.dataset.id;
+      const isPast = flagged.has(id);
+      const isDep = depFlagged.has(id) && !isPast;
+      b.classList.toggle('past-flag', isPast);
+      b.classList.toggle('dep-flag', isDep);
+    });
+    chart.querySelectorAll('.ep-lbl').forEach(l => {
+      const id = l.dataset.id; if (!id) return;
+      const isPast = flagged.has(id);
+      const isDep = depFlagged.has(id) && !isPast;
+      l.classList.toggle('flagged', isPast || isDep);
+      const wt = l.querySelector('.wtxt');
+      if (wt) wt.textContent = isPast ? 'за вехой' : (isDep ? 'зависимость' : '');
+      if (l.classList.contains('flagged')) {
+        l.style.boxShadow = 'inset 3px 0 0 ' + (isPast ? 'var(--prizma-off-course)' : 'var(--prizma-drift)');
+        const wsvg = l.querySelector('.warn'); if (wsvg) wsvg.style.color = isPast ? 'var(--prizma-off-course)' : 'var(--prizma-drift)';
+      } else {
+        l.style.boxShadow = '';
+      }
+    });
+    // сводка
+    const total = flagged.size + depFlagged.size;
+    const sum = document.getElementById('summary');
+    if (total === 0) {
+      sum.innerHTML = '<span style="color:var(--prizma-text-tertiary)">Ни один эпик не выходит за вехи.</span>';
+    } else {
+      sum.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>'+
+        '<span><span class="n">'+total+'</span> эпиков задеты сдвигом вех ('+flagged.size+' за вехой, '+depFlagged.size+' по зависимостям).</span>';
+    }
+  }
+
+  document.getElementById('reset').addEventListener('click', () => {
+    D.milestones.forEach(m => msDates[m.id] = parse(m.date).getTime());
+    buildFlags(); recompute();
+    readout.classList.remove('show');
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // init: sync + setTimeout + resize (gotcha a)
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => { placeOverlays(); buildFlags(); recompute(); });
+})();
+</script>
+</body>
+</html>

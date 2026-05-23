@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 36 · Семантический зум</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; }
+
+  /* ── управление зумом ── */
+  .bar { display: flex; align-items: center; gap: 14px; margin: 18px 0 16px; }
+  .zoom { display: inline-flex; align-items: center; gap: 12px; padding: 8px 14px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); background: var(--prizma-bg-elevated); }
+  .zoom .zbtn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); background: transparent; color: var(--prizma-text-secondary); cursor: pointer; transition: color .15s, border-color .15s; }
+  .zoom .zbtn:hover { color: var(--prizma-information); border-color: var(--prizma-information); }
+  .zoom .zbtn svg { width: 14px; height: 14px; }
+  .zoom input[type=range] { -webkit-appearance: none; appearance: none; width: 220px; height: 4px; border-radius: 2px; background: var(--prizma-bg-tertiary); outline: none; cursor: pointer; }
+  .zoom input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--prizma-information); border: 2px solid var(--prizma-bg-elevated); box-shadow: 0 0 0 1px var(--prizma-information); cursor: grab; transition: transform .12s var(--ease-spring); }
+  .zoom input[type=range]::-webkit-slider-thumb:active { transform: scale(1.2); cursor: grabbing; }
+  .zoom input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--prizma-information); border: 2px solid var(--prizma-bg-elevated); cursor: grab; }
+  .zoom input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--prizma-bg-tertiary); }
+
+  /* индикатор уровня детализации */
+  .lod { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .lod .seg { position: relative; padding: 7px 13px; font: 700 10px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border-right: 1px solid var(--prizma-border); cursor: pointer; transition: color .2s var(--ease-calm); user-select: none; }
+  .lod .seg:last-child { border-right: none; }
+  .lod .seg::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--prizma-information); transition: height .2s var(--ease-calm); }
+  .lod .seg.on { color: var(--prizma-text-primary); }
+  .lod .seg.on::before { height: 2px; }
+  .bar .scaleNote { font-size: 12.5px; color: var(--prizma-text-tertiary); margin-left: auto; }
+  .bar .scaleNote b { color: var(--prizma-text-secondary); font: 700 12px/1 var(--mono); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 640px; background: var(--prizma-bg-elevated); }
+  /* первая колонка масштабируется вместе с зумом через переменную --lblw */
+  .grid { display: grid; grid-template-columns: var(--lblw, 220px) repeat(5, minmax(120px,1fr)); min-width: 860px; transition: grid-template-columns .35s var(--ease-calm); }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: var(--rowmin, 50px); transition: min-height .35s var(--ease-calm), padding .35s var(--ease-calm); }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; min-height: 0; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .tc { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; justify-content: center; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .elabel .meta { display: flex; align-items: center; gap: 7px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); transition: opacity .3s var(--ease-calm); }
+  .elabel .riskdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  /* при L0 — узкая колонка, прячем мету и сжимаем имя */
+  .stage[data-lod="0"] .elabel .meta { opacity: 0; height: 0; }
+  .stage[data-lod="0"] .elabel .nm { font-size: 11px; }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: center; align-items: center; position: relative; }
+
+  /* ── пилюля: единый элемент, морфится между L0/L1/L2 через классы уровня на .stage ── */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; overflow: hidden;
+    transition: width .35s var(--ease-calm), height .35s var(--ease-calm), padding .35s var(--ease-calm),
+                gap .25s var(--ease-calm), background .3s var(--ease-calm), border-radius .35s var(--ease-calm); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-border-strong)); transition: width .35s var(--ease-calm); }
+  .pill .who, .pill .nm { transition: opacity .2s var(--ease-calm), max-width .35s var(--ease-calm); white-space: nowrap; overflow: hidden; }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); max-width: 80px; }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .prog { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+
+  /* L2 — полная пилюля (wt + исполнитель + состояние) */
+  .stage[data-lod="2"] .pill { padding: 5px 9px 5px 11px; }
+  .stage[data-lod="2"] .pill[data-state="done"] { opacity: .72; }
+
+  /* L1 — компактная: только wt-ярлык, без исполнителя/состояния */
+  .stage[data-lod="1"] .pill { padding: 4px 7px 4px 9px; gap: 0; }
+  .stage[data-lod="1"] .pill .who { opacity: 0; max-width: 0; }
+  .stage[data-lod="1"] .pill .dot6, .stage[data-lod="1"] .pill .prog { display: none; }
+
+  /* L0 — точка-текстура: квадратик в цвет типа работы, без текста */
+  .stage[data-lod="0"] .cell { gap: 3px; }
+  .stage[data-lod="0"] .pill { width: 12px; height: 12px; padding: 0; border-radius: 3px; background: var(--prizma-bg-tertiary); }
+  .stage[data-lod="0"] .pill::before { width: 100%; opacity: .85; }
+  .stage[data-lod="0"] .pill .nm, .stage[data-lod="0"] .pill .who, .stage[data-lod="0"] .pill .dot6, .stage[data-lod="0"] .pill .prog { opacity: 0; max-width: 0; }
+  .stage[data-lod="0"] .pill[data-state="done"] { opacity: .5; }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: flex; align-items: center; gap: 7px; }
+  .legend .d0 { width: 12px; height: 12px; border-radius: 3px; background: var(--prizma-bg-tertiary); box-shadow: inset 3px 0 0 var(--wt-be); }
+  .legend .d1 { padding: 3px 6px; border-radius: 3px; background: var(--prizma-bg-tertiary); box-shadow: inset 3px 0 0 var(--wt-fe); font: 700 9px/1 var(--font); color: var(--prizma-text-secondary); }
+  .legend .d2 { padding: 3px 7px 3px 9px; border-radius: 3px; background: var(--prizma-bg-tertiary); box-shadow: inset 3px 0 0 var(--wt-qa); font: 600 9px/1 var(--font); color: var(--prizma-text-primary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 36 · Семантический зум</div>
+      <h1>Семантический зум</h1>
+      <p>Один экран масштабируется от обзора всего портфеля до полной детализации. Ползунок (или +/−, либо колесо с Ctrl над сеткой) плавно морфит каждую ячейку между тремя уровнями детализации: <b>L0</b> — точка-текстура на пилюлю, <b>L1</b> — компактная пилюля (только тип работы), <b>L2</b> — полная пилюля (тип + исполнитель + статус). Это LOD на уровне ячейки, не плотностная адаптация всей страницы.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <div class="zoom">
+      <button class="zbtn" id="zout" title="Меньше деталей" aria-label="Меньше деталей">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+      <input type="range" id="zr" min="0" max="200" value="200" step="1" aria-label="Уровень детализации">
+      <button class="zbtn" id="zin" title="Больше деталей" aria-label="Больше деталей">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <div class="lod" id="lodSeg">
+      <span class="seg" data-lvl="0">L0 · обзор</span>
+      <span class="seg" data-lvl="1">L1 · компакт</span>
+      <span class="seg" data-lvl="2">L2 · детали</span>
+    </div>
+    <span class="scaleNote">видно работ: <b id="pillCount">0</b></span>
+  </div>
+
+  <div class="gantt" id="gantt"><div class="stage" id="stage" data-lod="2"><div class="grid" id="grid"></div></div></div>
+
+  <div class="legend">
+    <div class="it"><span class="d0"></span>L0 — точка-текстура</div>
+    <div class="it"><span class="d1">BE</span>L1 — тип работы</div>
+    <div class="it"><span class="d2">QA Волков</span>L2 — тип + исполнитель</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+
+  const stage = document.getElementById('stage');
+  const grid = document.getElementById('grid');
+  const zr = document.getElementById('zr');
+
+  // ── рендер сетки (один раз; зум меняет только data-lod + переменные) ──
+  let totalPills = 0;
+  function renderGrid() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="tc">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        const rdot = e.risk ? '<span class="riskdot" style="background:'+riskColor(e.risk)+'"></span>' : '';
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+rdot+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach(p => {
+            if (p.col !== c.key) return;
+            totalPills++;
+            const titleTxt = p.wt + (p.who ? ' · '+p.who : '') + ' · ' + p.state;
+            html += '<div class="pill" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'" title="'+esc(titleTxt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              (p.state==='progress'?'<span class="prog"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+    document.getElementById('pillCount').textContent = totalPills;
+  }
+
+  // ── применение зума ──
+  // Непрерывный слайдер 0..200 → дискретный data-lod {0,1,2} с порогами,
+  // плюс непрерывная интерполяция ширины колонки-меток и высоты строк (морфинг).
+  const LBL = { min: 150, max: 232 };   // ширина колонки эпиков по уровню зума
+  const ROW = { min: 30,  max: 52 };    // min-height строки
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  function levelFromValue(v) { return v < 67 ? 0 : (v < 140 ? 1 : 2); }
+
+  function applyZoom(v) {
+    const t = v / 200;                          // 0..1 непрерывно
+    const lvl = levelFromValue(v);
+    stage.setAttribute('data-lod', String(lvl));
+    // непрерывный морфинг геометрии — синхронно с дискретным уровнем
+    grid.style.setProperty('--lblw', lerp(LBL.min, LBL.max, t).toFixed(1) + 'px');
+    grid.style.setProperty('--rowmin', lerp(ROW.min, ROW.max, t).toFixed(1) + 'px');
+    // индикатор сегментов
+    document.querySelectorAll('#lodSeg .seg').forEach(s => s.classList.toggle('on', +s.dataset.lvl === lvl));
+  }
+
+  zr.addEventListener('input', () => applyZoom(+zr.value));
+
+  // +/− кнопки — шагают между центрами уровней
+  const LEVEL_VALUE = [33, 103, 200];
+  function curLevel(){ return levelFromValue(+zr.value); }
+  function step(dir) {
+    const nl = Math.max(0, Math.min(2, curLevel() + dir));
+    zr.value = LEVEL_VALUE[nl];
+    applyZoom(+zr.value);
+  }
+  document.getElementById('zin').addEventListener('click', () => step(+1));
+  document.getElementById('zout').addEventListener('click', () => step(-1));
+
+  // клик по сегменту LOD — прыжок на уровень
+  document.getElementById('lodSeg').addEventListener('click', e => {
+    const seg = e.target.closest('.seg'); if (!seg) return;
+    zr.value = LEVEL_VALUE[+seg.dataset.lvl];
+    applyZoom(+zr.value);
+  });
+
+  // Ctrl/⌘ + колесо над сеткой — масштаб детализации (GOTCHA b: работаем с числами, не датами)
+  document.getElementById('gantt').addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const next = Math.max(0, Math.min(200, +zr.value - Math.sign(e.deltaY) * 12));
+    zr.value = next;
+    applyZoom(next);
+  }, { passive: false });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  renderGrid();
+  applyZoom(+zr.value);
+  setTimeout(() => applyZoom(+zr.value), 60);
+  window.addEventListener('resize', () => applyZoom(+zr.value));
+})();
+</script>
+</body>
+</html>

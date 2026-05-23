@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 35 · Что изменилось</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; }
+
+  /* ── бар возврата ── */
+  .bar { display: flex; align-items: center; gap: 14px; margin: 18px 0 16px; flex-wrap: wrap; }
+  .since { display: inline-flex; align-items: baseline; gap: 9px; }
+  .since .n { font: 700 22px/1 var(--mono); color: var(--prizma-information); transition: color .4s var(--ease-calm); }
+  .since.clear .n { color: var(--prizma-text-tertiary); }
+  .since .lab { font-size: 13px; color: var(--prizma-text-secondary); }
+  .since .lab b { color: var(--prizma-text-primary); font-weight: 600; }
+  .bar .spacer { flex: 1; }
+
+  /* легенда типов изменений */
+  .legend { display: flex; align-items: center; gap: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 22px; height: 14px; border-radius: 3px; flex: none; }
+  .legend .sw.moved { border: 1px dashed var(--prizma-drift); }
+  .legend .sw.done { background: var(--prizma-on-course-bg); box-shadow: inset 2px 0 0 var(--prizma-on-course); }
+  .legend .sw.added { position: relative; border: 1px solid var(--prizma-border-strong); }
+  .legend .sw.added::after { content: ""; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); }
+
+  .layout { display: grid; grid-template-columns: 1fr 282px; gap: 18px; align-items: start; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 620px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 210px repeat(5, minmax(118px,1fr)); min-width: 820px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .chg { margin-left: auto; font: 700 9px/1 var(--mono); color: var(--prizma-information); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; position: relative; }
+
+  /* пилюли */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; cursor: default;
+    transition: box-shadow .5s var(--ease-calm), background .5s var(--ease-calm), opacity .3s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); transition: background .5s var(--ease-calm); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+
+  /* ── маркировка изменений (видна, пока .stage.fresh) ── */
+  /* moved — амбер пунктир-контур (drift) */
+  .stage.fresh .pill.c-moved { box-shadow: inset 0 0 0 1px var(--prizma-drift); }
+  .stage.fresh .pill.c-moved::before { background: var(--prizma-drift); }
+  /* newly done — зелёная вспышка-фон (on-course) */
+  .stage.fresh .pill.c-done { background: var(--prizma-on-course-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-on-course) 40%, transparent); opacity: 1; }
+  .stage.fresh .pill.c-done.flash { animation: flash 1.4s var(--ease-calm) 1; }
+  @keyframes flash { 0% { box-shadow: inset 0 0 0 2px var(--prizma-on-course); } 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-on-course) 40%, transparent); } }
+  /* newly added — голубая точка-индикатор (information) */
+  .pill .newdot { display: none; position: absolute; top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--prizma-information); box-shadow: 0 0 0 2px var(--prizma-bg-elevated); }
+  .stage.fresh .pill.c-added { overflow: visible; }
+  .stage.fresh .pill.c-added .newdot { display: block; }
+
+  /* призрак исходной позиции перенесённой пилюли */
+  .ghost { display: none; align-items: center; gap: 5px; padding: 4px 8px 4px 9px; position: relative;
+    border: 1px dashed color-mix(in srgb, var(--prizma-drift) 55%, var(--prizma-border-strong));
+    border-radius: var(--r-sm); font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); opacity: 0; transition: opacity .4s var(--ease-calm); }
+  .ghost svg { width: 11px; height: 11px; color: var(--prizma-drift); }
+  .stage.fresh .ghost { display: inline-flex; opacity: .85; }
+
+  /* ── боковой список изменений ── */
+  .side { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); position: sticky; top: 18px; overflow: hidden; }
+  .side .sh { padding: 12px 14px 10px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: center; justify-content: space-between; }
+  .side .sh .pz-eyebrow { margin: 0; }
+  .side .list { max-height: 540px; overflow: auto; }
+  .ci { display: flex; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); cursor: pointer; transition: background .15s; }
+  .ci:last-child { border-bottom: none; }
+  .ci:hover { background: var(--prizma-bg-tertiary); }
+  .ci.read { opacity: .4; }
+  .ci .ico { width: 26px; height: 26px; flex: none; border-radius: var(--r-sm); display: grid; place-items: center; border: 1px solid var(--prizma-border); }
+  .ci .ico svg { width: 14px; height: 14px; }
+  .ci.moved .ico { color: var(--prizma-drift); }
+  .ci.done .ico { color: var(--prizma-on-course); }
+  .ci.added .ico { color: var(--prizma-information); }
+  .ci .body { flex: 1; min-width: 0; }
+  .ci .t1 { font-size: 12.5px; font-weight: 600; }
+  .ci .t1 .wt { font: 700 10px/1 var(--mono); color: var(--prizma-text-secondary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 2px 4px; margin-right: 5px; }
+  .ci .t2 { font: 500 10.5px/1.3 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .side .empty { padding: 28px 16px; text-align: center; font-size: 12.5px; color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 35 · Что изменилось</div>
+      <h1>Что изменилось с прошлого захода</h1>
+      <p>Возврат в контекст: всё, что произошло с <b>прошлого захода 21 мая</b>, подсвечено прямо в сетке — перенесённые пилюли в амбер-контуре с призраком старой позиции, только что завершённые вспыхивают зелёным, новые помечены голубой точкой. Сбоку — мини-лента событий. «Отметить прочитанным» гасит подсветку с плавным затуханием.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <div class="since" id="since">
+      <span class="n" id="chgN">0</span>
+      <span class="lab"><b>изменений</b> с 21 мая</span>
+    </div>
+    <span class="spacer"></span>
+    <div class="legend">
+      <div class="it"><span class="sw moved"></span>перенос</div>
+      <div class="it"><span class="sw done"></span>завершено</div>
+      <div class="it"><span class="sw added"></span>добавлено</div>
+    </div>
+    <button class="pz-btn" id="markread">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      Отметить прочитанным
+    </button>
+  </div>
+
+  <div class="layout">
+    <div class="gantt" id="gantt"><div class="stage fresh" id="stage"><div class="grid" id="grid"></div></div></div>
+    <aside class="side">
+      <div class="sh"><span class="pz-eyebrow">Лента изменений</span><span class="pz-eyebrow" id="sideCnt"></span></div>
+      <div class="list" id="sideList"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const datedKeys = cols.filter(c => c.dated).map(c => c.key); // r120, r121, r122
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c?c.short:k; };
+
+  // ── синтез изменений «с 21 мая» из moves/states ──
+  // Детерминированно из датасета (без рандома между перезагрузками):
+  //  • moved  — эпики с moves>0: самая поздняя датированная пилюля «переехала» на релиз позже
+  //  • done   — пилюли state==='done' в r121-окне или последняя done каждого 2-го рискового эпика → «только что завершено»
+  //  • added  — пилюли state==='unplanned' → «только что добавлено»
+  // changes[]: { type, epicId, pillIdx, wt, who, epic, team, from?, to? }
+  const changes = [];
+
+  D.epics.forEach((e, ei) => {
+    // moved (drift-контур + призрак исходной позиции)
+    if (e.moves && e.moves > 0) {
+      let bestIdx = -1, bestRank = -1;
+      e.pills.forEach((p, idx) => { const r = datedKeys.indexOf(p.col); if (r > bestRank) { bestRank = r; bestIdx = idx; } });
+      if (bestIdx >= 0 && bestRank > 0) {
+        const p = e.pills[bestIdx];
+        changes.push({ type:'moved', epicId:e.id, pillIdx:bestIdx, wt:p.wt, who:p.who,
+          epic:e.epic, team:e.team, from: datedKeys[bestRank-1], to: p.col });
+      }
+    }
+    // added (незапланированные)
+    e.pills.forEach((p, idx) => {
+      if (p.state === 'unplanned') {
+        changes.push({ type:'added', epicId:e.id, pillIdx:idx, wt:p.wt, who:p.who, epic:e.epic, team:e.team, to:p.col });
+      }
+    });
+    // done — «недавно завершённые»: done-пилюли в текущем окне ИЛИ у каждого 2-го эпика крайняя done
+    e.pills.forEach((p, idx) => {
+      if (p.state !== 'done') return;
+      const recent = (p.col === 'r121') || (ei % 2 === 0 && idx === lastDoneIdx(e));
+      if (recent) changes.push({ type:'done', epicId:e.id, pillIdx:idx, wt:p.wt, who:p.who, epic:e.epic, team:e.team, to:p.col });
+    });
+  });
+  function lastDoneIdx(e){ let li=-1; e.pills.forEach((p,i)=>{ if(p.state==='done') li=i; }); return li; }
+
+  // дедуп (пилюля могла попасть и в moved и в done — оставляем приоритет moved>added>done)
+  const pri = { moved:3, added:2, done:1 };
+  const seen = {};
+  const uniqueChanges = [];
+  changes.sort((a,b)=>pri[b.type]-pri[a.type]).forEach(ch => {
+    const k = ch.epicId+'-'+ch.pillIdx;
+    if (seen[k]) return; seen[k] = true; uniqueChanges.push(ch);
+  });
+
+  let unread = uniqueChanges.length;
+  document.getElementById('chgN').textContent = unread;
+  document.getElementById('sideCnt').textContent = unread + ' нов.';
+
+  const changeOf = (epicId, pillIdx) => uniqueChanges.find(c => c.epicId === epicId && c.pillIdx === pillIdx) || null;
+
+  const ICO = {
+    moved: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+    done:  '<path d="M20 6L9 17l-5-5"/>',
+    added: '<path d="M12 5v14M5 12h14"/>',
+  };
+  const verb = { moved:'перенесено', done:'завершено', added:'добавлено' };
+
+  // ── рендер сетки ──
+  const grid = document.getElementById('grid');
+  const stage = document.getElementById('stage');
+  function renderGrid() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      const tChg = uniqueChanges.filter(c => c.team === team).length;
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b>'+(tChg?'<span class="chg" data-team-chg="'+esc(team)+'">+'+tChg+'</span>':'')+'</div>';
+      eps.forEach(e => {
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          // призраки исходных позиций перенесённых пилюль (where from===c.key)
+          uniqueChanges.forEach(ch => {
+            if (ch.type === 'moved' && ch.epicId === e.id && ch.from === c.key) {
+              html += '<span class="ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+ICO.moved+'</svg>'+ch.wt+'</span>';
+            }
+          });
+          e.pills.forEach((p, idx) => {
+            if (p.col !== c.key) return;
+            const ch = changeOf(e.id, idx);
+            const ccls = ch ? ' c-'+ch.type + (ch.type==='done'?' flash':'') : '';
+            html += '<div class="pill'+ccls+'" data-pid="'+e.id+'-'+idx+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') +
+              '<span class="newdot"></span></div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  // ── боковая лента ──
+  const sideList = document.getElementById('sideList');
+  function renderSide() {
+    if (!uniqueChanges.length) { sideList.innerHTML = '<div class="empty">Изменений нет — вы в курсе.</div>'; return; }
+    let html = '';
+    uniqueChanges.forEach(ch => {
+      const tail = ch.type === 'moved' ? (relShort(ch.from)+' → '+relShort(ch.to))
+                 : (verb[ch.type] + ' · ' + relShort(ch.to));
+      html += '<div class="ci '+ch.type+'" data-pid="'+ch.epicId+'-'+ch.pillIdx+'">' +
+        '<span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+ICO[ch.type]+'</svg></span>' +
+        '<div class="body"><div class="t1"><span class="wt">'+ch.wt+'</span>'+esc(ch.epic)+'</div>' +
+        '<div class="t2">'+esc(ch.team)+' · '+tail+(ch.who?' · '+esc(ch.who):'')+'</div></div></div>';
+    });
+    sideList.innerHTML = html;
+  }
+
+  // hover в ленте → подсветка пилюли в сетке
+  sideList.addEventListener('mouseover', e => {
+    const ci = e.target.closest('.ci'); if (!ci) return;
+    const pill = grid.querySelector('.pill[data-pid="'+ci.dataset.pid+'"]');
+    if (pill) { pill.style.outline = '2px solid var(--prizma-information)'; pill.style.outlineOffset = '2px'; pill.scrollIntoView({block:'nearest', inline:'nearest'}); }
+  });
+  sideList.addEventListener('mouseout', e => {
+    const ci = e.target.closest('.ci'); if (!ci) return;
+    const pill = grid.querySelector('.pill[data-pid="'+ci.dataset.pid+'"]');
+    if (pill) { pill.style.outline = ''; }
+  });
+
+  // ── отметить прочитанным: гасит подсветку с затуханием ──
+  document.getElementById('markread').addEventListener('click', () => {
+    stage.classList.remove('fresh');           // CSS-transition уводит контуры/фоны плавно
+    document.getElementById('since').classList.add('clear');
+    document.getElementById('chgN').textContent = '0';
+    sideList.querySelectorAll('.ci').forEach((ci, i) => setTimeout(() => ci.classList.add('read'), i * 40));
+    document.getElementById('sideCnt').textContent = 'прочитано';
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  renderGrid();
+  renderSide();
+  setTimeout(() => { /* перезапуск flash-анимации после layout */ grid.querySelectorAll('.pill.flash').forEach(p => { p.classList.remove('flash'); void p.offsetWidth; p.classList.add('flash'); }); }, 60);
+})();
+</script>
+</body>
+</html>

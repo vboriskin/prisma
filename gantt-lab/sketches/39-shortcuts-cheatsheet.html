@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 39 · Шпаргалка клавиш</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+  .bar { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); display: inline-flex; align-items: center; gap: 7px; }
+  .bar .hint kbd { font: 600 10px/1 var(--mono); padding: 3px 6px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+
+  /* ── мини-гант (фон под оверлеем) ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .grow { display: grid; grid-template-columns: 210px repeat(4, 1fr); }
+  .grow + .grow .gc, .grow + .grow .gh { border-top: 1px solid var(--prizma-border); }
+  .corner { padding: 12px 16px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .chead { padding: 12px 14px 10px; border-left: 1px solid var(--prizma-border); }
+  .chead .rel { font: 300 16px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .chead .rel.cur { color: var(--prizma-text-primary); }
+  .chead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+
+  .gh { padding: 0 16px; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 56px; }
+  .gh .nm { font-size: 12.5px; font-weight: 600; }
+  .gh .ep { font-size: 11px; color: var(--prizma-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gc { border-left: 1px solid var(--prizma-border); min-height: 56px; padding: 9px 10px; display: flex; flex-wrap: wrap; align-content: center; gap: 5px; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; user-select: none; cursor: pointer;
+    transition: box-shadow .12s, transform .12s var(--ease-spring); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill[data-done] { opacity: .72; }
+  .pill[data-done] .pn { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  /* фокус-«взятая» пилюля для демо-навигации клавишами */
+  .pill.sel { box-shadow: inset 0 0 0 1px var(--prizma-information); transform: scale(1.04); }
+
+  /* ── оверлей-шпаргалка ── */
+  .scrim { position: fixed; inset: 0; z-index: var(--z-overlay); background: color-mix(in srgb, var(--prizma-bg) 72%, transparent);
+    backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 24px;
+    opacity: 0; pointer-events: none; transition: opacity .18s var(--ease-calm); }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .sheet { width: min(720px, 100%); max-height: 86vh; overflow: auto; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-xl); box-shadow: 0 24px 80px rgba(0,0,0,.6);
+    transform: translateY(10px) scale(.98); transition: transform .2s var(--ease-calm); }
+  .scrim.show .sheet { transform: translateY(0) scale(1); }
+  .sheet .sh-head { display: flex; align-items: center; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid var(--prizma-border); position: sticky; top: 0; background: var(--prizma-bg-elevated); z-index: 2; }
+  .sheet .sh-head .ic { width: 18px; height: 18px; color: var(--prizma-information); flex: none; }
+  .sheet .sh-head h2 { margin: 0; font-size: 15px; font-weight: 700; }
+  .sheet .sh-head .sp { flex: 1; }
+  .sheet .sh-head .closeb { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); color: var(--prizma-text-secondary); cursor: pointer; }
+  .sheet .sh-head .closeb:hover { color: var(--prizma-text-primary); border-color: var(--prizma-border-strong); }
+
+  .groups { padding: 14px 22px 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px 28px; }
+  @media (max-width: 620px) { .groups { grid-template-columns: 1fr; } }
+  .grp .pz-eyebrow { display: block; margin-bottom: 10px; padding-bottom: 7px; border-bottom: 1px solid var(--prizma-border); }
+  .grp ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .grp li { display: flex; align-items: center; gap: 12px; }
+  .grp li .keys { display: inline-flex; align-items: center; gap: 4px; flex: none; min-width: 92px; }
+  .grp li .desc { font-size: 13px; color: var(--prizma-text-secondary); }
+
+  /* kbd-чип — CSS, без unicode box-drawing */
+  kbd.k { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 24px; padding: 0 7px;
+    font: 600 11.5px/1 var(--mono); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border: 1px solid var(--prizma-border-strong); border-bottom-width: 2px; border-radius: var(--r-sm);
+    box-shadow: 0 1px 0 rgba(0,0,0,.25); }
+  kbd.k.wide { min-width: auto; }
+  .sep { color: var(--prizma-text-tertiary); font-size: 11px; }
+
+  .footnote { padding: 12px 22px 18px; border-top: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .footnote kbd.k { height: 20px; min-width: 18px; }
+
+  /* статус-строка демонстрации действий */
+  .statusbar { margin-top: 16px; min-height: 22px; display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--prizma-text-secondary); }
+  .statusbar .badge { font: 700 9px/1 var(--mono); letter-spacing: .4px; padding: 4px 7px; border-radius: var(--r-sm); border: 1px solid var(--prizma-border-strong); color: var(--prizma-text-tertiary); }
+  .statusbar .live { color: var(--prizma-information); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 39 · Шпаргалка клавиш</div>
+      <h1>Шпаргалка клавиш</h1>
+      <p>Скрытая мощь — наружу. Нажмите <b>?</b> (или кнопку «Горячие клавиши») — спокойная карточка покажет всю клавиатурную карту, сгруппированную по смыслу. Клавиши нарисованы как мягкие mono-чипы. <b>Esc</b> закрывает.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn pz-btn-primary" id="open">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+      Горячие клавиши
+    </button>
+    <span class="hint">Или просто нажмите <kbd>?</kbd> в любой момент · <kbd>↑</kbd><kbd>↓</kbd> навигация по пилюлям</span>
+  </div>
+
+  <div class="gantt" id="gantt"></div>
+
+  <div class="statusbar" id="statusbar"><span class="badge">ДЕМО</span><span>Выберите пилюлю стрелками и нажмите клавишу действия — статус покажется ниже.</span></div>
+</div>
+
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Горячие клавиши">
+  <div class="sheet">
+    <div class="sh-head">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M10 13h.01M14 13h.01M18 13h.01M8 16h8" opacity=".7"/></svg>
+      <h2>Горячие клавиши</h2>
+      <span class="sp"></span>
+      <button class="closeb" id="closeb" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="groups" id="groups"></div>
+    <div class="footnote">
+      <kbd class="k wide">Esc</kbd> закрыть эту карточку · <kbd class="k wide">?</kbd> открыть снова
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+
+  // ── мини-гант ──
+  const cols = D.releases.filter(r => r.dated);
+  const epics = D.epics.filter(e => ['e1','e2','e7','e13','e10','e12'].includes(e.id));
+  const root = document.getElementById('gantt');
+  let html = '<div class="grow"><div class="corner"><span class="pz-eyebrow">Команда / Эпик</span></div>';
+  cols.forEach(c => {
+    html += '<div class="chead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'</div>';
+  });
+  html += '</div>';
+  let pid = 0;
+  epics.forEach(e => {
+    html += '<div class="grow"><div class="gh"><span class="nm">'+esc(e.team)+'</span><span class="ep" title="'+esc(e.epic)+'">'+esc(e.epic)+'</span></div>';
+    cols.forEach(c => {
+      const pills = D.helpers.pillsOf(e, c.key);
+      html += '<div class="gc">';
+      pills.forEach(p => {
+        const id = 'p'+(pid++);
+        const done = p.state === 'done', prog = p.state === 'progress';
+        html += '<span class="pill" id="'+id+'" data-wt="'+p.wt+'" data-rel="'+esc(c.short)+'"'+(done?' data-done':'')+' style="--wt:'+wtVar(p.wt)+'" tabindex="0">'+
+          '<span class="pn">'+p.wt+'</span>'+(p.who?'<span class="who">'+esc(p.who)+'</span>':'')+(prog?'<span class="dot"></span>':'')+'</span>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  root.innerHTML = html;
+  const pills = Array.from(root.querySelectorAll('.pill'));
+
+  // ── карта клавиш (kbd-чипы — CSS, не unicode box) ──
+  const K = s => '<kbd class="k'+(s.length>1?' wide':'')+'">'+esc(s)+'</kbd>';
+  const arrows = K('←')+K('→')+K('↑')+K('↓');
+  const GROUPS = [
+    { title: 'Навигация', items: [
+      { keys: arrows, desc: 'перемещение фокуса по пилюлям' },
+      { keys: K('Tab'), desc: 'следующий элемент' },
+      { keys: K('Home')+'<span class="sep">/</span>'+K('End'), desc: 'к началу / концу строки' },
+    ]},
+    { title: 'Действия', items: [
+      { keys: K('Enter'), desc: 'взять работу в фокус' },
+      { keys: K('D'), desc: 'отметить готовой' },
+      { keys: K('M'), desc: 'перенести в следующий релиз' },
+      { keys: K('A'), desc: 'назначить исполнителя' },
+      { keys: K('R'), desc: 'пометить риском' },
+    ]},
+    { title: 'Вид', items: [
+      { keys: K('⌘')+K('K'), desc: 'командный поиск' },
+      { keys: K('?'), desc: 'эта справка' },
+      { keys: K('T'), desc: 'переключить тему' },
+    ]},
+    { title: 'Выделение', items: [
+      { keys: K('⇧')+arrows.replace(/<\/?kbd[^>]*>/g, m => m), desc: 'выделить диапазон' },
+      { keys: K('⌘')+K('A'), desc: 'выделить всё в строке' },
+      { keys: K('Esc'), desc: 'снять выделение / закрыть' },
+    ]},
+  ];
+  // упростим «выделение диапазона»: Shift + стрелки
+  GROUPS[3].items[0].keys = K('⇧')+K('←')+K('→');
+
+  const groupsEl = document.getElementById('groups');
+  groupsEl.innerHTML = GROUPS.map(g =>
+    '<div class="grp"><span class="pz-eyebrow">'+esc(g.title)+'</span><ul>'+
+    g.items.map(it => '<li><span class="keys">'+it.keys+'</span><span class="desc">'+esc(it.desc)+'</span></li>').join('')+
+    '</ul></div>'
+  ).join('');
+
+  // ── открытие/закрытие оверлея ──
+  const scrim = document.getElementById('scrim');
+  let lastFocus = null;
+  function openSheet() {
+    lastFocus = document.activeElement;
+    scrim.classList.add('show');
+    document.getElementById('closeb').focus();
+  }
+  function closeSheet() {
+    scrim.classList.remove('show');
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function sheetOpen() { return scrim.classList.contains('show'); }
+
+  document.getElementById('open').addEventListener('click', openSheet);
+  document.getElementById('closeb').addEventListener('click', closeSheet);
+  scrim.addEventListener('mousedown', e => { if (e.target === scrim) closeSheet(); });
+
+  // ── демо-навигация и действия клавишами ──
+  let selIdx = -1;
+  function select(i) {
+    if (!pills.length) return;
+    selIdx = (i + pills.length) % pills.length;
+    pills.forEach((p, k) => p.classList.toggle('sel', k === selIdx));
+    pills[selIdx].focus();
+  }
+  const statusbar = document.getElementById('statusbar');
+  function status(text) {
+    statusbar.innerHTML = '<span class="badge live">КЛАВИША</span><span>'+esc(text)+'</span>';
+  }
+  function curPill() { return selIdx >= 0 ? pills[selIdx] : null; }
+  function pillName(p) { return p ? p.dataset.wt + ' · ' + p.dataset.rel : ''; }
+
+  pills.forEach((p, i) => p.addEventListener('click', () => select(i)));
+
+  document.addEventListener('keydown', e => {
+    // оверлей открыт: только Esc / ? обрабатываем
+    if (sheetOpen()) {
+      if (e.key === 'Escape') { e.preventDefault(); closeSheet(); }
+      else if (e.key === '?') { e.preventDefault(); closeSheet(); }
+      return;
+    }
+    // не перехватываем при наборе в полях
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return;
+
+    if (e.key === '?') { e.preventDefault(); openSheet(); return; }
+    if (e.key === 'Escape') { pills.forEach(p => p.classList.remove('sel')); selIdx = -1; status('Выделение снято.'); return; }
+
+    // ⌘K — командный поиск (демо)
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); status('Командный поиск (⌘K) — заглушка в этом скетче.'); return; }
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); select(selIdx + 1); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); select(selIdx - 1); return; }
+
+    const p = curPill();
+    const k = e.key.toLowerCase();
+    if (k === 'enter') { e.preventDefault(); if (selIdx < 0) select(0); status('Взято: ' + pillName(curPill())); return; }
+    if (!p && 'dmar'.includes(k)) { status('Сначала выберите пилюлю — стрелки или клик.'); return; }
+    if (k === 'd') { p.setAttribute('data-done',''); const dot = p.querySelector('.dot'); if (dot) dot.remove(); status('Готово: ' + pillName(p)); }
+    else if (k === 'm') { p.style.transition='transform .3s var(--ease-spring)'; p.style.transform='translateX(16px) scale(1.04)'; setTimeout(()=>{p.style.transform='';},320); status('К переносу в следующий релиз: ' + pillName(p)); }
+    else if (k === 'a') { let w = p.querySelector('.who'); if (!w){ w=document.createElement('span'); w.className='who'; p.appendChild(w);} w.textContent='Петров'; status('Назначен Петров: ' + pillName(p)); }
+    else if (k === 'r') { p.style.boxShadow='inset 0 0 0 1px var(--prizma-drift)'; status('Помечено риском: ' + pillName(p)); }
+    else if (k === 't') { document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); status('Тема переключена.'); }
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

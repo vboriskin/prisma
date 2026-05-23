@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 32 · Прогресс пилюли</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 880px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 640px; }
+
+  .panel { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); overflow: hidden; }
+  .erow { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--prizma-border); }
+  .erow:last-child { border-bottom: 0; }
+  .erow .info { width: 220px; flex: none; display: flex; flex-direction: column; gap: 4px; }
+  .erow .info .nm { font-size: 13.5px; font-weight: 600; }
+  .erow .info .meta { display: flex; align-items: center; gap: 7px; font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .erow .info .meta .rel { color: var(--prizma-text-secondary); }
+  .erow .track { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+
+  /* ── скраб-пилюля ── ширина = ёмкость для жеста ── */
+  .scrub { position: relative; height: 38px; border-radius: var(--r-md); background: var(--prizma-bg-tertiary);
+    overflow: hidden; cursor: ew-resize; user-select: none; touch-action: none;
+    box-shadow: inset 0 0 0 1px var(--prizma-border); transition: box-shadow .15s; }
+  .scrub::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); z-index: 3; }
+  .scrub:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .scrub.scrubbing { box-shadow: inset 0 0 0 1px var(--prizma-information); }
+  .scrub.scrubbing .knob { opacity: 1; }
+
+  /* заливка — приглушённый on-course-tint, без градиента-декора */
+  .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background: var(--prizma-on-course-bg); border-right: 1px solid color-mix(in srgb, var(--prizma-on-course) 50%, transparent);
+    z-index: 1; transition: width .04s linear; }
+  .scrub.done .fill { background: color-mix(in srgb, var(--prizma-on-course) 18%, transparent); }
+
+  .knob { position: absolute; top: 50%; width: 3px; height: 22px; transform: translate(-50%,-50%); background: var(--prizma-on-course);
+    border-radius: 2px; z-index: 4; opacity: 0; transition: opacity .15s; pointer-events: none; }
+
+  .label { position: relative; z-index: 2; display: flex; align-items: center; gap: 8px; height: 100%; padding-left: 13px; pointer-events: none; }
+  .label .wt { font: 600 12px/1 var(--font); color: var(--prizma-text-primary); }
+  .label .wtfull { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .label .dot6 { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-on-course); opacity: 0; }
+  .scrub.done .label .dot6 { opacity: 1; }
+  .scrub.done .label .wt { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); color: var(--prizma-text-secondary); }
+  .scrub.zero .label .wt { color: var(--prizma-text-secondary); }
+
+  .pct { margin-left: auto; padding-right: 13px; font: 600 14px/1 var(--mono); font-feature-settings: "tnum" 1; color: var(--prizma-text-primary); }
+  .scrub.zero .pct { color: var(--prizma-text-tertiary); }
+  .scrub.done .pct { color: var(--prizma-on-course); }
+
+  .statetag { font: 700 9px/1 var(--mono); letter-spacing: .4px; padding: 3px 6px; border-radius: 3px; align-self: flex-start; }
+  .statetag.s-zero { color: var(--prizma-text-tertiary); background: var(--prizma-bg-tertiary); }
+  .statetag.s-prog { color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .statetag.s-done { color: var(--prizma-on-course); background: var(--prizma-on-course-bg); }
+  .erow .right { width: 92px; flex: none; display: flex; justify-content: flex-end; }
+
+  .hint { margin: 16px 2px 0; font-size: 12px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 7px; }
+  .hint svg { width: 14px; height: 14px; flex: none; }
+  .note { margin-top: 10px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 32 · Scrub</div>
+      <h1>Прогресс пилюли</h1>
+      <p>Проведите горизонтально по пилюле в работе — и выставите готовность 0–100 %. Приглушённая заливка растёт, моно-процент обновляется вживую. Отпустите на значении. На 100 % — готово (зачёркнуто, зелёная точка), на 0 % — не начато. Скраб прямо в строке, без формы.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="panel" id="panel"></div>
+
+  <p class="hint">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/><path d="M15 18V6"/><path d="M5 6v12"/></svg>
+    Тащите влево/вправо. Шаг привязки — 5 %. Двойной клик — переключить 0 / 100 %.
+  </p>
+  <p class="note">Берём реальные пилюли со <code>state==='progress'</code> из <code>PZ_DATA.epics</code> (плюс пара соседних для контраста). Процент — UI-локальное состояние скетча; в приложении писался бы в модель работы эпика.</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const relShort = k => { const c = D.releases.find(r=>r.key===k); return c ? c.short : k; };
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  // ── собрать выборку пилюль: все progress + по одному done/planned для контраста ──
+  const items = [];
+  D.epics.forEach(e => e.pills.forEach((p, i) => { if (p.state === 'progress') items.push({ e, p, i, init: seed(p, 'progress') }); }));
+  // добор контраста
+  outer: for (const e of D.epics) for (let i=0;i<e.pills.length;i++){ const p=e.pills[i]; if (p.state==='done'){ items.push({e,p,i,init:100}); break outer; } }
+  outer2: for (const e of D.epics) for (let i=0;i<e.pills.length;i++){ const p=e.pills[i]; if (p.state==='planned' && p.who){ items.push({e,p,i,init:0}); break outer2; } }
+  // и один planned без who → 0
+  for (const e of D.epics){ const p = e.pills.find(x=>x.state==='planned' && !x.who); if (p){ items.push({e,p,i:e.pills.indexOf(p),init:0}); break; } }
+
+  // детерминированный «init %» для progress-пилюль (псевдо, чтобы не было нулей/сотен)
+  function seed(p){ const s = (p.wt.charCodeAt(0) + (p.who?p.who.length:3)*7) % 7; return [20,35,45,55,65,40,30][s]; }
+
+  const panel = document.getElementById('panel');
+  panel.innerHTML = items.map((it, idx) => {
+    const wfull = (D.WT[it.p.wt] && D.WT[it.p.wt].label) || '';
+    const who = it.p.who ? it.p.who : 'не назначен';
+    return '<div class="erow">' +
+        '<div class="info"><span class="nm">'+esc(it.e.epic)+'</span><span class="meta"><span class="rel">'+relShort(it.p.col)+'</span> · '+esc(who)+'</span></div>' +
+        '<div class="track">' +
+          '<div class="scrub" data-idx="'+idx+'" role="slider" aria-label="Готовность '+esc(it.e.epic)+' '+it.p.wt+'" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+it.init+'" tabindex="0" style="--wt:'+wtVar(it.p.wt)+'">' +
+            '<div class="fill"></div>' +
+            '<div class="knob"></div>' +
+            '<div class="label"><span class="dot6"></span><span class="wt">'+it.p.wt+'</span><span class="wtfull">'+esc(wfull)+'</span><span class="pct">'+it.init+'%</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="right"><span class="statetag" data-tag="'+idx+'"></span></div>' +
+      '</div>';
+  }).join('');
+
+  const vals = items.map(it => clamp(it.init));
+  panel.querySelectorAll('.scrub').forEach(el => paint(el, vals[+el.dataset.idx]));
+
+  function clamp(v){ return Math.max(0, Math.min(100, Math.round(v/5)*5)); }
+
+  function paint(el, v) {
+    const fill = el.querySelector('.fill');
+    const knob = el.querySelector('.knob');
+    const pct = el.querySelector('.pct');
+    fill.style.width = v + '%';
+    knob.style.left = v + '%';
+    pct.textContent = v + '%';
+    el.setAttribute('aria-valuenow', v);
+    el.classList.toggle('done', v >= 100);
+    el.classList.toggle('zero', v <= 0);
+    const tag = panel.querySelector('.statetag[data-tag="'+el.dataset.idx+'"]');
+    if (v >= 100) { tag.className = 'statetag s-done'; tag.textContent = 'ГОТОВО'; }
+    else if (v <= 0) { tag.className = 'statetag s-zero'; tag.textContent = 'НЕ НАЧАТО'; }
+    else { tag.className = 'statetag s-prog'; tag.textContent = 'В РАБОТЕ'; }
+  }
+
+  function pctFromEvent(el, clientX) {
+    const r = el.getBoundingClientRect();
+    return clamp((clientX - r.left) / r.width * 100);
+  }
+
+  // ── pointer-скраб ──
+  let active = null;
+  panel.querySelectorAll('.scrub').forEach(el => {
+    el.addEventListener('pointerdown', e => {
+      active = el; el.classList.add('scrubbing');
+      el.setPointerCapture(e.pointerId);
+      const v = pctFromEvent(el, e.clientX); vals[+el.dataset.idx] = v; paint(el, v);
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', e => {
+      if (active !== el) return;
+      const v = pctFromEvent(el, e.clientX); vals[+el.dataset.idx] = v; paint(el, v);
+    });
+    const end = e => { if (active === el){ el.classList.remove('scrubbing'); try{ el.releasePointerCapture(e.pointerId); }catch(_){} active = null; } };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    // двойной клик — тумблер 0/100
+    el.addEventListener('dblclick', () => { const i = +el.dataset.idx; vals[i] = vals[i] >= 100 ? 0 : 100; paint(el, vals[i]); });
+    // клавиатура — стрелки ±5
+    el.addEventListener('keydown', e => {
+      const i = +el.dataset.idx; let v = vals[i];
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') v += 5;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') v -= 5;
+      else if (e.key === 'Home') v = 0;
+      else if (e.key === 'End') v = 100;
+      else return;
+      e.preventDefault(); v = clamp(v); vals[i] = v; paint(el, v);
+    });
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

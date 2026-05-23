@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 33 · Солнечные лучи</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 13px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* ── stage ── */
+  .body { flex: 1; min-height: 0; display: flex; }
+  .stagewrap { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .eyebrowbar { position: absolute; top: 14px; left: 22px; z-index: 5; pointer-events: none; }
+  .eyebrowbar .note { display: block; margin-top: 5px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 280px; }
+  svg.sun { display: block; width: 100%; height: 100%; }
+
+  /* wedges */
+  .wedge { cursor: pointer; transition: opacity .18s var(--ease-calm), filter .18s var(--ease-calm); }
+  .wedge path { stroke: var(--prizma-bg); stroke-width: 1.4; transition: fill .2s; }
+  .wedge.team path { stroke-width: 2; }
+  .wedge.dim { opacity: .26; }
+  .wedge.lit { opacity: 1; }
+  .wedge:hover path { filter: brightness(1.18); }
+  .wedge.sel path { stroke: var(--prizma-text-primary); stroke-width: 2; }
+
+  /* arc labels */
+  .alabel { fill: var(--prizma-text-primary); font: 600 10px var(--font); pointer-events: none; }
+  .alabel.team { font: 700 10.5px var(--font); letter-spacing: .4px; }
+  .alabel.faint { fill: var(--prizma-text-secondary); }
+  .alabel.mono { font: 700 9px var(--mono); fill: var(--prizma-text-tertiary); }
+
+  /* center readout */
+  .hub { pointer-events: none; }
+  .hub .c-eyebrow { fill: var(--prizma-text-tertiary); font: 700 9.5px var(--font); letter-spacing: .6px; text-transform: uppercase; }
+  .hub .c-title { fill: var(--prizma-text-primary); font: 600 15px var(--font); }
+  .hub .c-num { fill: var(--prizma-text-primary); font: 200 34px var(--mono); letter-spacing: -.02em; }
+  .hub .c-num tspan.u { font: 700 12px var(--mono); fill: var(--prizma-text-tertiary); }
+  .hub .c-sub { font: 700 10px var(--mono); letter-spacing: .3px; }
+
+  /* ── side: status legend + breadcrumb ── */
+  .side { width: 232px; flex: none; border-left: 1px solid var(--prizma-border); padding: 18px 18px; display: flex; flex-direction: column; gap: 18px; }
+  .crumb { display: flex; align-items: center; gap: 8px; }
+  .crumb .back { display: none; }
+  .crumb .back.show { display: inline-flex; }
+  .crumb .here { font: 600 13px/1.3 var(--font); }
+  .crumb .here small { display: block; font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; }
+
+  .lg { }
+  .lg .pz-eyebrow { display: block; margin-bottom: 11px; }
+  .lgrow { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 12px; color: var(--prizma-text-secondary); }
+  .lgrow .sw { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid var(--prizma-border); }
+  .lgrow .ct { margin-left: auto; font: 700 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .hint { margin-top: auto; font: 400 11px/1.5 var(--font); color: var(--prizma-text-tertiary); border-top: 1px solid var(--prizma-border); padding-top: 14px; }
+  .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Солнечные лучи</span>
+    <span class="pz-eyebrow">Редизайн 33 · sunburst</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-on-course)"></i>готово</span>
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <div class="stagewrap" id="stage">
+      <div class="eyebrowbar">
+        <span class="pz-eyebrow">Радиальное разбиение</span>
+        <span class="note">Угол ∝ трудоёмкость. Кольца: команды → релизы → эпики. Цвет — статус/риск. Клик по команде — увеличить.</span>
+      </div>
+      <svg class="sun" id="sun" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Радиальная карта квартала"></svg>
+    </div>
+
+    <aside class="side">
+      <div class="crumb">
+        <button class="pz-btn pz-btn-icon back" id="back" aria-label="Назад"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+        <div class="here" id="here">Весь квартал<small id="here-sub"></small></div>
+      </div>
+      <div class="lg">
+        <span class="pz-eyebrow">Статусы</span>
+        <div id="legend"></div>
+      </div>
+      <div class="hint" id="hint">Наведите на сектор — увидите название, объём и статус в центре. <b>Клик по команде</b> раскроет её на весь круг.</div>
+    </aside>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases;
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const sun = document.getElementById('sun');
+  const stage = document.getElementById('stage');
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  const relShort = k => { const c = cols.find(x => x.key === k); return c ? c.short : k; };
+
+  // ── status of an epic: risk wins, else done/progress/plan ──
+  const STATUS = {
+    off:   { lbl: 'срыв сроков', col: 'var(--prizma-off-course)' },
+    drift: { lbl: 'дрейф',       col: 'var(--prizma-drift)' },
+    done:  { lbl: 'готово',      col: 'var(--prizma-on-course)' },
+    prog:  { lbl: 'в работе',    col: 'var(--prizma-information)' },
+    plan:  { lbl: 'план',        col: 'var(--prizma-border-strong)' },
+  };
+  function statusOf(e) {
+    if (e.risk === 'off-course') return 'off';
+    if (e.risk === 'drift') return 'drift';
+    const tot = e.pills.length || 1;
+    const dn = e.pills.filter(p => p.state === 'done').length;
+    const pr = e.pills.filter(p => p.state === 'progress').length;
+    if (dn === tot) return 'done';
+    if (pr > 0 || (dn > 0 && dn < tot)) return 'prog';
+    return 'plan';
+  }
+  // fill for a status: done = faint on-course; risk = solid; neutral base for plan/prog
+  function fillFor(stKey) {
+    if (stKey === 'off') return 'color-mix(in srgb, var(--prizma-off-course) 62%, var(--prizma-bg-tertiary))';
+    if (stKey === 'drift') return 'color-mix(in srgb, var(--prizma-drift) 58%, var(--prizma-bg-tertiary))';
+    if (stKey === 'done') return 'color-mix(in srgb, var(--prizma-on-course) 26%, var(--prizma-bg-tertiary))';
+    if (stKey === 'prog') return 'color-mix(in srgb, var(--prizma-text-primary) 14%, var(--prizma-bg-tertiary))';
+    return 'var(--prizma-bg-tertiary)';
+  }
+  // neutral grey for team / release rings (release zones = NEUTRAL per brandbook)
+  const teamFill = 'color-mix(in srgb, var(--prizma-text-primary) 9%, var(--prizma-bg-elevated))';
+  const relFill = 'color-mix(in srgb, var(--prizma-text-primary) 5%, var(--prizma-bg-elevated))';
+
+  // ── build hierarchy: team → release(present) → epic ──
+  // each epic's effort attributed to its dominant dated release (most pills); else its first pill col.
+  function dominantCol(e) {
+    const cnt = {}; e.pills.forEach(p => { cnt[p.col] = (cnt[p.col] || 0) + 1; });
+    let best = e.pills[0] ? e.pills[0].col : 'backlog', n = -1;
+    Object.keys(cnt).forEach(k => { if (cnt[k] > n) { n = cnt[k]; best = k; } });
+    return best;
+  }
+  const relOrder = { backlog: 0, r120: 1, r121: 2, r122: 3, overtime: 4 };
+
+  function buildModel(filterTeam) {
+    const teams = (filterTeam ? [filterTeam] : D.teams).map(team => {
+      const eps = H.teamEpics(team).map(e => ({ e, value: Math.max(1, H.effortOf(e)), col: dominantCol(e), st: statusOf(e) }));
+      // group epics by release
+      const relMap = {};
+      eps.forEach(o => { (relMap[o.col] = relMap[o.col] || []).push(o); });
+      const rels = Object.keys(relMap).sort((a, b) => (relOrder[a] ?? 9) - (relOrder[b] ?? 9)).map(col => {
+        const items = relMap[col].sort((a, b) => b.value - a.value);
+        return { col, items, value: items.reduce((s, o) => s + o.value, 0) };
+      });
+      const value = rels.reduce((s, r) => s + r.value, 0) || 1;
+      return { team, rels, value };
+    });
+    const total = teams.reduce((s, t) => s + t.value, 0) || 1;
+    return { teams, total };
+  }
+
+  // ── geometry helpers ──
+  function polar(cx, cy, r, ang) { return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)]; }
+  // annular sector path between radii r0..r1 and angles a0..a1 (radians, clockwise from -90°)
+  function arcPath(cx, cy, r0, r1, a0, a1) {
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    const [x00, y00] = polar(cx, cy, r0, a0);
+    const [x01, y01] = polar(cx, cy, r1, a0);
+    const [x10, y10] = polar(cx, cy, r1, a1);
+    const [x11, y11] = polar(cx, cy, r0, a1);
+    // outer arc a0->a1 (sweep 1), inner arc a1->a0 (sweep 0)
+    return 'M' + x01.toFixed(2) + ' ' + y01.toFixed(2) +
+      ' A' + r1.toFixed(2) + ' ' + r1.toFixed(2) + ' 0 ' + large + ' 1 ' + x10.toFixed(2) + ' ' + y10.toFixed(2) +
+      ' L' + x11.toFixed(2) + ' ' + y11.toFixed(2) +
+      ' A' + r0.toFixed(2) + ' ' + r0.toFixed(2) + ' 0 ' + large + ' 0 ' + x00.toFixed(2) + ' ' + y00.toFixed(2) + ' Z';
+  }
+
+  let zoomTeam = null;     // null = whole quarter; else team name
+  let VB = 720;            // square viewBox side (set on render)
+
+  function render() {
+    const rect = stage.getBoundingClientRect();
+    const side = Math.max(360, Math.min(rect.width - 28, rect.height - 28));
+    VB = 720; // fixed viewBox; SVG scales via preserveAspectRatio
+    sun.setAttribute('viewBox', '0 0 ' + VB + ' ' + VB);
+    sun.style.maxWidth = side + 'px';
+    sun.style.maxHeight = side + 'px';
+
+    const cx = VB / 2, cy = VB / 2;
+    const r0 = 92;                 // hub radius
+    const rings = [r0, 196, 286, 348]; // boundaries: hub | team | release | epic
+    const model = buildModel(zoomTeam);
+    const GAP = 0.012;             // angular gap between teams (rad)
+
+    let s = '';
+    const TAU = Math.PI * 2;
+    const start = -Math.PI / 2;    // 12 o'clock
+
+    // distribute teams over full circle, proportional to value
+    let cursor = start;
+    const teamSpanRaw = model.teams.length;
+    model.teams.forEach((t, ti) => {
+      const frac = t.value / model.total;
+      const a0 = cursor + (model.teams.length > 1 ? GAP / 2 : 0);
+      const a1 = cursor + frac * TAU - (model.teams.length > 1 ? GAP / 2 : 0);
+      cursor += frac * TAU;
+      const mid = (a0 + a1) / 2;
+
+      // team wedge (neutral grey)
+      s += '<g class="wedge team" data-kind="team" data-team="' + esc(t.team) + '" data-name="' + esc(t.team) + '" data-num="' + t.value + '" data-unit="дн" data-sub="' + H.teamEpics(t.team).length + ' эпиков" data-subcol="var(--prizma-text-tertiary)">' +
+        '<path d="' + arcPath(cx, cy, rings[0], rings[1], a0, a1) + '" fill="' + teamFill + '"/></g>';
+      s += arcText(cx, cy, (rings[0] + rings[1]) / 2, mid, t.team, 'alabel team', a0, a1);
+
+      // releases within team (ring 2)
+      let rcur = a0;
+      const relSpan = (a1 - a0);
+      t.rels.forEach(r => {
+        const rf = r.value / t.value;
+        const ra0 = rcur, ra1 = rcur + rf * relSpan;
+        rcur = ra1;
+        const rmid = (ra0 + ra1) / 2;
+        s += '<g class="wedge rel" data-kind="rel" data-team="' + esc(t.team) + '" data-name="' + esc(relShort(r.col)) + ' · ' + esc(t.team) + '" data-num="' + r.value + '" data-unit="дн" data-sub="' + r.items.length + ' эпиков" data-subcol="var(--prizma-text-tertiary)">' +
+          '<path d="' + arcPath(cx, cy, rings[1], rings[2], ra0, ra1) + '" fill="' + relFill + '"/></g>';
+        // release short label if span wide enough
+        if ((ra1 - ra0) > 0.16) s += arcText(cx, cy, (rings[1] + rings[2]) / 2, rmid, relShort(r.col), 'alabel mono', ra0, ra1);
+
+        // epics within release (ring 3)
+        let ecur = ra0;
+        const espan = (ra1 - ra0);
+        r.items.forEach(o => {
+          const ef = o.value / r.value;
+          const ea0 = ecur, ea1 = ecur + ef * espan;
+          ecur = ea1;
+          const emid = (ea0 + ea1) / 2;
+          const st = STATUS[o.st];
+          s += '<g class="wedge epic" data-kind="epic" data-team="' + esc(t.team) + '" data-name="' + esc(o.e.epic) + '" data-num="' + o.value + '" data-unit="дн" data-sub="' + esc(st.lbl) + '" data-subcol="' + st.col + '">' +
+            '<path d="' + arcPath(cx, cy, rings[2], rings[3], ea0, ea1) + '" fill="' + fillFor(o.st) + '"/></g>';
+          // epic label only when zoomed (enough room) and span wide enough
+          if (zoomTeam && (ea1 - ea0) > 0.10) {
+            const short = o.e.epic.length > 18 ? o.e.epic.slice(0, 17) + '…' : o.e.epic;
+            s += arcText(cx, cy, (rings[2] + rings[3]) / 2, emid, short, 'alabel faint', ea0, ea1);
+          }
+        });
+      });
+    });
+
+    // hub (center)
+    s += '<g class="hub" id="hub"></g>';
+
+    sun.innerHTML = s;
+    wire();
+    setHub(null);
+  }
+
+  // place a label along arc; flip text if on left half for readability; only if arc wide enough
+  function arcText(cx, cy, r, mid, text, cls, a0, a1) {
+    if ((a1 - a0) < 0.085) return '';
+    let deg = mid * 180 / Math.PI;
+    // normalize 0..360
+    let nd = (deg + 360) % 360;
+    let rot = nd, anchor = 'middle';
+    // keep upright-ish: if pointing down-left, flip 180
+    if (nd > 90 && nd < 270) rot = nd + 180;
+    const [x, y] = polar(cx, cy, r, mid);
+    return '<text class="' + cls + '" x="' + x.toFixed(2) + '" y="' + y.toFixed(2) + '" text-anchor="' + anchor + '" dominant-baseline="central" transform="rotate(' + rot.toFixed(1) + ' ' + x.toFixed(2) + ' ' + y.toFixed(2) + ')">' + esc(text) + '</text>';
+  }
+
+  // center readout
+  function setHub(data) {
+    const hub = document.getElementById('hub');
+    if (!hub) return;
+    const cx = VB / 2, cy = VB / 2;
+    if (!data) {
+      if (zoomTeam) {
+        const m = buildModel(zoomTeam).teams[0];
+        data = { eyebrow: 'команда', title: zoomTeam, num: m ? m.value : 0, unit: 'дн', sub: H.teamEpics(zoomTeam).length + ' ' + plural(H.teamEpics(zoomTeam).length, 'эпик', 'эпика', 'эпиков'), subcol: 'var(--prizma-text-tertiary)' };
+      } else {
+        const tot = D.epics.reduce((n, e) => n + H.effortOf(e), 0);
+        data = { eyebrow: 'квартал Q2', title: D.teams.length + ' команд', num: tot, unit: 'дн', sub: D.epics.length + ' эпиков', subcol: 'var(--prizma-text-tertiary)' };
+      }
+    }
+    const title = data.title.length > 17 ? data.title.slice(0, 16) + '…' : data.title;
+    let h = '';
+    h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 34) + '" text-anchor="middle">' + esc(data.eyebrow) + '</text>';
+    h += '<text class="c-title" x="' + cx + '" y="' + (cy - 14) + '" text-anchor="middle">' + esc(title) + '</text>';
+    h += '<text class="c-num" x="' + cx + '" y="' + (cy + 20) + '" text-anchor="middle">' + data.num + '<tspan class="u" dx="3">' + esc(data.unit) + '</tspan></text>';
+    h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 42) + '" text-anchor="middle" fill="' + data.subcol + '">' + esc(data.sub) + '</text>';
+    hub.innerHTML = h;
+  }
+
+  // ── interactions ──
+  function wire() {
+    sun.querySelectorAll('.wedge').forEach(g => {
+      g.addEventListener('mouseenter', () => {
+        setHub({ eyebrow: g.dataset.kind === 'team' ? 'команда' : g.dataset.kind === 'rel' ? 'релиз' : 'эпик',
+                 title: g.dataset.name, num: g.dataset.num, unit: g.dataset.unit, sub: g.dataset.sub, subcol: g.dataset.subcol });
+        const team = g.dataset.team;
+        sun.querySelectorAll('.wedge').forEach(w => {
+          w.classList.toggle('lit', w.dataset.team === team);
+          w.classList.toggle('dim', w.dataset.team !== team);
+        });
+      });
+      g.addEventListener('mouseleave', () => {
+        sun.querySelectorAll('.wedge').forEach(w => w.classList.remove('lit', 'dim'));
+        setHub(null);
+      });
+      g.addEventListener('click', () => {
+        if (g.dataset.kind === 'team' && !zoomTeam) { zoomTeam = g.dataset.team; refresh(); }
+        else if (zoomTeam) { /* in zoom, clicking team-ring does nothing special */ }
+      });
+    });
+  }
+
+  // ── side: breadcrumb + legend ──
+  function refresh() {
+    render();
+    const back = document.getElementById('back');
+    const here = document.getElementById('here');
+    const sub = document.getElementById('here-sub');
+    if (zoomTeam) {
+      back.classList.add('show');
+      here.firstChild.textContent = zoomTeam;
+      const eps = H.teamEpics(zoomTeam);
+      sub.textContent = eps.length + ' ' + plural(eps.length, 'эпик', 'эпика', 'эпиков') + ' · ' + buildModel(zoomTeam).teams[0].value + ' дн';
+    } else {
+      back.classList.remove('show');
+      here.firstChild.textContent = 'Весь квартал';
+      sub.textContent = D.teams.length + ' команд · ' + D.epics.length + ' эпиков';
+    }
+  }
+  document.getElementById('back').addEventListener('click', () => { zoomTeam = null; refresh(); });
+
+  // legend with live counts (epics by status across whole quarter)
+  (function legend() {
+    const counts = { off: 0, drift: 0, done: 0, prog: 0, plan: 0 };
+    D.epics.forEach(e => counts[statusOf(e)]++);
+    const order = ['off', 'drift', 'prog', 'done', 'plan'];
+    document.getElementById('legend').innerHTML = order.map(k =>
+      '<div class="lgrow"><span class="sw" style="background:' + fillFor(k) + '"></span>' + STATUS[k].lbl + '<span class="ct">' + counts[k] + '</span></div>').join('');
+  })();
+
+  // ── layout: sync + 60ms + resize (GOTCHA a & d) ──
+  refresh();
+  setTimeout(refresh, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>
