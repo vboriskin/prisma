@@ -13,6 +13,12 @@
 
 import { Utils } from '../utils.js';
 
+// AUDIT-18 — SVG вместо сырых глифов × ‹ › (единый язык со spine-pill).
+const _SVG = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const _SVG_X    = _SVG('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>');
+const _SVG_PREV = _SVG('<polyline points="15 18 9 12 15 6"/>');
+const _SVG_NEXT = _SVG('<polyline points="9 18 15 12 9 6"/>');
+
 const _activePopovers = new Set();
 
 export function closeAllCellPopovers() {
@@ -50,9 +56,9 @@ export function openCellNotesPopover({ row, col, anchorEl, releaseLabel, onChang
     const showEditor = isAdding || empty;
     const stepperHtml = list.length > 1
       ? `<div class="gdt-cellpop-stepper">
-           <button type="button" class="gdt-cellpop-step gdt-cellpop-prev" aria-label="Предыдущая заметка" ${activeIdx <= 0 ? 'disabled' : ''}>‹</button>
+           <button type="button" class="gdt-cellpop-step gdt-cellpop-prev" aria-label="Предыдущая заметка" ${activeIdx <= 0 ? 'disabled' : ''}>${_SVG_PREV}</button>
            <span class="gdt-cellpop-counter">${activeIdx + 1} / ${list.length}</span>
-           <button type="button" class="gdt-cellpop-step gdt-cellpop-next" aria-label="Следующая заметка" ${activeIdx >= list.length - 1 ? 'disabled' : ''}>›</button>
+           <button type="button" class="gdt-cellpop-step gdt-cellpop-next" aria-label="Следующая заметка" ${activeIdx >= list.length - 1 ? 'disabled' : ''}>${_SVG_NEXT}</button>
          </div>`
       : (list.length === 1 ? `<span class="gdt-cellpop-counter">1 заметка</span>` : '');
     const editorHtml = showEditor
@@ -78,7 +84,7 @@ export function openCellNotesPopover({ row, col, anchorEl, releaseLabel, onChang
       <div class="gdt-cellpop-arrow" aria-hidden="true"></div>
       <div class="gdt-cellpop-head">
         <div class="gdt-cellpop-title">Заметки · ${esc(releaseLabel || col)}</div>
-        <button type="button" class="gdt-cellpop-close" aria-label="Закрыть">×</button>
+        <button type="button" class="gdt-cellpop-close" aria-label="Закрыть">${_SVG_X}</button>
       </div>
       <div class="gdt-cellpop-stepper-wrap">${stepperHtml}</div>
       ${editorHtml}

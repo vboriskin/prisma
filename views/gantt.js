@@ -1749,7 +1749,14 @@ export const GanttView = {
             (_risksByCol[r.col] ||= []).push(r);
           }
         }
-        const _RISK_GLYPHS = { 'open-question': '?', 'dangling': '◇', 'hard-deadline': '!' };
+        // AUDIT-18 — SVG-иконки вместо сырых глифов ?◇! (единый язык с note-SVG).
+        const _RISK_SVG_INNER = {
+          'open-question': '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+          'dangling':      '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2"/>',
+          'hard-deadline': '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+        };
+        const _RISK_GLYPHS = Object.fromEntries(Object.entries(_RISK_SVG_INNER).map(([k, inner]) =>
+          [k, `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`]));
         const _RISK_LABELS = { 'open-question': 'Открытый вопрос', 'dangling': 'Подвешенная активность', 'hard-deadline': 'Жёсткий дедлайн' };
         const _riskGlyph = (colKey) => {
           if (colKey === 'backlog') return '';
@@ -2968,7 +2975,7 @@ export const GanttView = {
         ? `
           <div class="gdt-ctx-title">${label} <span class="gdt-ctx-title-meta">след переноса</span></div>
           <div class="gdt-ctx-section gdt-ctx-section-danger">
-            ${_row('gdt-ctx-item-danger', 'undo-move', 'Убрать след переноса', '✕')}
+            ${_row('gdt-ctx-item-danger', 'undo-move', 'Убрать след переноса', Icons.get('x', { size: 14 }))}
           </div>
         `
         : `
@@ -2985,12 +2992,12 @@ export const GanttView = {
 
           <div class="gdt-ctx-section">
             <div class="gdt-ctx-section-head">Положение</div>
-            ${isMoveTarget ? _row('', 'revert-move', `Вернуть в ${_bucketChip(moveSrcLabel)}`, '↩') : ''}
+            ${isMoveTarget ? _row('', 'revert-move', `Вернуть в ${_bucketChip(moveSrcLabel)}`, Icons.get('undo', { size: 14 })) : ''}
             ${nextLabel
-              ? _row('', 'move-next', `Перенести в ${_bucketChip(nextLabel)}`, '⇥')
-              : _row('gdt-ctx-item-disabled', '', 'Последний релиз', '⇥')}
-            ${_row(canLeft  ? '' : 'gdt-ctx-item-disabled', 'move-left',  'Сдвинуть влево',  '←')}
-            ${_row(canRight ? '' : 'gdt-ctx-item-disabled', 'move-right', 'Сдвинуть вправо', '→')}
+              ? _row('', 'move-next', `Перенести в ${_bucketChip(nextLabel)}`, Icons.get('chevron-right', { size: 14 }))
+              : _row('gdt-ctx-item-disabled', '', 'Последний релиз', Icons.get('chevron-right', { size: 14 }))}
+            ${_row(canLeft  ? '' : 'gdt-ctx-item-disabled', 'move-left',  'Сдвинуть влево',  Icons.get('chevron-left', { size: 14 }))}
+            ${_row(canRight ? '' : 'gdt-ctx-item-disabled', 'move-right', 'Сдвинуть вправо', Icons.get('chevron-right', { size: 14 }))}
           </div>
 
           <div class="gdt-ctx-section">
@@ -3007,7 +3014,7 @@ export const GanttView = {
           </div>
 
           <div class="gdt-ctx-section gdt-ctx-section-danger">
-            ${_row('gdt-ctx-item-danger', 'delete', 'Удалить из колодца', '⌫')}
+            ${_row('gdt-ctx-item-danger', 'delete', 'Удалить из колодца', Icons.get('trash', { size: 14 }))}
           </div>
         `;
       document.body.appendChild(menu);

@@ -13,10 +13,22 @@
 
 import { Utils } from '../utils.js';
 
+// AUDIT-18 — SVG вместо сырых глифов ? ◇ ! × ‹ › (единый язык со spine-pill).
+const _SVG = (inner, sz = 14) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const _SVG_X    = _SVG('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>');
+const _SVG_PREV = _SVG('<polyline points="15 18 9 12 15 6"/>');
+const _SVG_NEXT = _SVG('<polyline points="9 18 15 12 9 6"/>');
+const _KIND_SVG = {
+  'open-question': '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  'dangling':      '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2"/>',
+  'hard-deadline': '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+};
+const _kindSvg = (kind, sz = 13) => _SVG(_KIND_SVG[kind] || _KIND_SVG['open-question'], sz);
+
 const KIND_META = {
-  'open-question': { label: 'Открытый вопрос',      glyph: '?',  cssVar: '--prizma-drift',     fallback: '#f59e0b' },
-  'dangling':      { label: 'Подвешенная активность', glyph: '◇',  cssVar: '--prizma-information', fallback: '#4f46e5' },
-  'hard-deadline': { label: 'Жёсткий дедлайн',       glyph: '!',  cssVar: '--prizma-off-course', fallback: '#dc2626' },
+  'open-question': { label: 'Открытый вопрос',      cssVar: '--prizma-drift',     fallback: '#f59e0b' },
+  'dangling':      { label: 'Подвешенная активность', cssVar: '--prizma-information', fallback: '#4f46e5' },
+  'hard-deadline': { label: 'Жёсткий дедлайн',       cssVar: '--prizma-off-course', fallback: '#dc2626' },
 };
 
 const KIND_ORDER = ['open-question', 'dangling', 'hard-deadline'];
@@ -70,16 +82,16 @@ export function openCellRisksPopover({ row, col, anchorEl, releaseLabel, onChang
     const showEditor = isAdding || empty;
     const stepperHtml = list.length > 1
       ? `<div class="gdt-cellpop-stepper">
-           <button type="button" class="gdt-cellpop-step gdt-cellpop-prev" aria-label="Предыдущий риск" ${activeIdx <= 0 ? 'disabled' : ''}>‹</button>
+           <button type="button" class="gdt-cellpop-step gdt-cellpop-prev" aria-label="Предыдущий риск" ${activeIdx <= 0 ? 'disabled' : ''}>${_SVG_PREV}</button>
            <span class="gdt-cellpop-counter">${activeIdx + 1} / ${list.length}</span>
-           <button type="button" class="gdt-cellpop-step gdt-cellpop-next" aria-label="Следующий риск" ${activeIdx >= list.length - 1 ? 'disabled' : ''}>›</button>
+           <button type="button" class="gdt-cellpop-step gdt-cellpop-next" aria-label="Следующий риск" ${activeIdx >= list.length - 1 ? 'disabled' : ''}>${_SVG_NEXT}</button>
          </div>`
       : (list.length === 1 ? `<span class="gdt-cellpop-counter">1 риск</span>` : '');
 
     const kindOptions = KIND_ORDER.map(k => {
       const m = KIND_META[k];
       const selected = k === draftKind ? ' selected' : '';
-      return `<option value="${k}"${selected}>${esc(m.glyph)}  ${esc(m.label)}</option>`;
+      return `<option value="${k}"${selected}>${esc(m.label)}</option>`;
     }).join('');
 
     const editorHtml = showEditor
@@ -106,7 +118,7 @@ export function openCellRisksPopover({ row, col, anchorEl, releaseLabel, onChang
           const dueHtml = current.dueDate ? `<span class="gdt-cellpop-due-view">До ${esc(_fmtDate(current.dueDate))}</span>` : '';
           return `<div class="gdt-cellpop-body">
             <div class="gdt-cellpop-kind-view" data-kind="${esc(current.kind)}">
-              <span class="gdt-cellpop-kind-glyph">${esc(m.glyph)}</span>
+              <span class="gdt-cellpop-kind-glyph">${_kindSvg(current.kind)}</span>
               <span class="gdt-cellpop-kind-label">${esc(m.label)}</span>
             </div>
             <div class="gdt-cellpop-text-view">${esc(current.text)}</div>
@@ -122,7 +134,7 @@ export function openCellRisksPopover({ row, col, anchorEl, releaseLabel, onChang
       <div class="gdt-cellpop-arrow" aria-hidden="true"></div>
       <div class="gdt-cellpop-head">
         <div class="gdt-cellpop-title">Риски · ${esc(releaseLabel || col)}</div>
-        <button type="button" class="gdt-cellpop-close" aria-label="Закрыть">×</button>
+        <button type="button" class="gdt-cellpop-close" aria-label="Закрыть">${_SVG_X}</button>
       </div>
       <div class="gdt-cellpop-stepper-wrap">${stepperHtml}</div>
       ${editorHtml}

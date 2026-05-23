@@ -21802,7 +21802,8 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 .gdt-cellpop-close {
   background: transparent; border: 0; color: var(--text-3);
-  font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px;
+  cursor: pointer; padding: 2px 4px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .gdt-cellpop-close:hover { color: var(--text-1); }
 .gdt-cellpop-stepper-wrap {
@@ -21818,7 +21819,8 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   background: transparent; border: 1px solid var(--border);
   border-radius: 4px;
   width: 22px; height: 22px;
-  font-size: 14px; line-height: 1; cursor: pointer; color: var(--text-2);
+  cursor: pointer; color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .gdt-cellpop-step:hover:not(:disabled) { border-color: var(--prizma-information); color: var(--prizma-information); }
 .gdt-cellpop-step:disabled { opacity: .35; cursor: default; }

@@ -16,6 +16,7 @@ import { state } from '../state.js';
 import { buildGraphLayout } from '../dependencyEngine.js';
 import { Services } from '../app/services.js';
 import { Storage } from '../dataStore.js';
+import { ConfirmDialog } from '../app/uxKit.js';
 
 const OVERLAY_ID = 'dep-graph-overlay';
 
@@ -199,11 +200,20 @@ export const DependencyGraphView = {
     });
     // «×» на ребре — удалить зависимость + перерисовать граф.
     root.querySelectorAll('.dep-edge-del').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const dependent  = btn.dataset.dependent;
         const dependency = btn.dataset.dependency;
-        if (!window.confirm(`Удалить зависимость?\n«${dependent}» больше не будет зависеть от «${dependency}».`)) return;
+        // AUDIT-9 — in-app ConfirmDialog вместо native confirm() (dark-first,
+        // консистентно с остальным проектом).
+        const ok = await ConfirmDialog.show({
+          title: 'Удалить зависимость?',
+          message: `«${dependent}» больше не будет зависеть от «${dependency}».`,
+          confirmLabel: 'Удалить',
+          cancelLabel: 'Отмена',
+          danger: true,
+        }).catch(() => false);
+        if (!ok) return;
         _removeDep(dependent, dependency);
         // Перерисовать overlay на месте (граф мог стать пустым).
         root.innerHTML = _renderOverlay();
