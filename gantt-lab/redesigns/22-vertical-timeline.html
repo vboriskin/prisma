@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 22 · Вертикальная хронолента</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
+  /* ── scroll viewport ── */
+  .scroll { flex: 1; overflow-y: auto; min-height: 0; }
+  .stage { position: relative; max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+  /* центральный «рельс» (spine) */
+  .spine-line { position: absolute; left: 50%; transform: translateX(-50%); top: 0; bottom: 0; width: 2px; background: var(--prizma-border-strong); z-index: 1; }
+  /* пройденный участок (до «сейчас») — приглушён */
+  .spine-line .past { position: absolute; left: 0; right: 0; top: 0; background: var(--prizma-border); }
+
+  /* «сейчас» — станция вверху */
+  .now-head { position: relative; z-index: 4; text-align: center; padding: 22px 0 10px; }
+  .now-head .pz-eyebrow { color: var(--prizma-information); }
+  .now-head h1 { font-size: 18px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 4px; }
+  .now-head .sub { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .now-head .node { width: 16px; height: 16px; border-radius: 50%; background: var(--prizma-information); border: 3px solid var(--prizma-bg); margin: 12px auto 0; box-shadow: 0 0 0 4px var(--prizma-information-bg); }
+  .now-head .arrow { margin: 6px auto 0; color: var(--prizma-information); width: 14px; height: 14px; }
+
+  /* станции-вехи + границы релизов */
+  .station { position: relative; z-index: 3; display: flex; justify-content: center; }
+  .station .marker { display: inline-flex; flex-direction: column; align-items: center; background: var(--prizma-bg); padding: 8px 0; }
+  .station .dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--prizma-text-secondary); background: var(--prizma-bg); }
+  .station.soon .dot { border-color: var(--prizma-information); background: var(--prizma-information); }
+  .station.past .dot { border-color: var(--prizma-text-tertiary); background: var(--prizma-text-tertiary); opacity: .6; }
+  .station .lb { font: 600 11px/1.3 var(--font); color: var(--prizma-text-secondary); margin-top: 6px; text-align: center; white-space: nowrap; }
+  .station .dd { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .station .cd { font: 700 9px/1 var(--mono); color: var(--prizma-information); margin-top: 3px; }
+  .station.past .cd { color: var(--prizma-text-tertiary); }
+
+  /* граница релиза — широкая «зонная» метка поперёк */
+  .relband { position: relative; z-index: 2; }
+  .relband .rule { position: absolute; left: 24px; right: 24px; height: 1px; background: var(--prizma-border); }
+  .relband .tag { position: absolute; left: 50%; transform: translateX(-50%) translateY(-50%); background: var(--prizma-bg); padding: 3px 12px; border: 1px solid var(--prizma-border); border-radius: 999px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .relband .tag .rel { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .relband .tag.cur .rel { color: var(--prizma-text-primary); }
+  .relband .tag .dt { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .relband .tag .cur-pin { font: 700 8.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); }
+
+  /* эпик-карточка, ответвление от рельса */
+  .branch { position: absolute; z-index: 3; width: calc(50% - 60px); }
+  .branch.left { left: 24px; }
+  .branch.right { right: 24px; }
+  /* коннектор от рельса к карточке */
+  .branch .conn { position: absolute; top: 22px; height: 2px; background: var(--prizma-border-strong); }
+  .branch.left .conn { right: -36px; width: 36px; }
+  .branch.right .conn { left: -36px; width: 36px; }
+  .branch .conn::after { content: ""; position: absolute; top: 50%; width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-bg); border: 2px solid var(--prizma-border-strong); transform: translateY(-50%); }
+  .branch.left .conn::after { right: -4px; }
+  .branch.right .conn::after { left: -4px; }
+  .branch.drift .conn, .branch.drift .conn::after { background: var(--prizma-bg); border-color: var(--prizma-drift); }
+  .branch.drift .conn { background: var(--prizma-drift); }
+  .branch.off .conn { background: var(--prizma-off-course); }
+  .branch.off .conn::after { border-color: var(--prizma-off-course); }
+
+  .card { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 11px 13px 11px 14px; transition: border-color .15s, transform .15s var(--ease-calm); }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-border-strong); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .card.drift::before { background: var(--prizma-drift); width: 3px; }
+  .card.off::before { background: var(--prizma-off-course); width: 3px; }
+  .card:hover { border-color: var(--prizma-border-strong); transform: translateY(-1px); }
+  .card .ch { display: flex; align-items: flex-start; gap: 8px; }
+  .card .team-tag { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font: 700 9px/1 var(--mono); letter-spacing: .3px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+  .card .nm { font-size: 12.5px; font-weight: 600; line-height: 1.3; flex: 1; }
+  .card .rk { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; }
+  .card .rk.drift { background: var(--prizma-drift); } .card .rk.off { background: var(--prizma-off-course); }
+  .card .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .wtchip { position: relative; display: inline-flex; align-items: center; padding: 2px 6px 2px 8px; font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .wtchip.done { opacity: .5; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .wtchip.prog::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); margin-left: 4px; }
+  .card .cf { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+  .card .cf .who { font-size: 10px; color: var(--prizma-text-tertiary); }
+  .card .cf .eff { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* «дальше» хвост */
+  .future-tail { position: relative; z-index: 3; text-align: center; padding: 18px 0 40px; }
+  .future-tail .node { width: 11px; height: 11px; border-radius: 50%; border: 2px dashed var(--prizma-text-tertiary); background: var(--prizma-bg); margin: 0 auto 8px; }
+  .future-tail .t { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* бэклог-сноска (вне временной оси) */
+  .backlog-note { max-width: 1180px; margin: 0 auto 30px; padding: 0 24px; }
+  .backlog-note .inner { border: 1px dashed var(--prizma-border-strong); border-radius: var(--r-md); padding: 11px 14px; }
+  .backlog-note .bh { display: flex; align-items: center; gap: 8px; }
+  .backlog-note .bh .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .backlog-note .bh .cnt { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-left: auto; }
+  .backlog-note .blist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .backlog-note .bchip { font: 500 11px/1 var(--font); color: var(--prizma-text-secondary); border: 1px solid var(--prizma-border); border-radius: var(--r-sm); padding: 5px 9px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Вертикальная хронолента</span>
+    <span class="pz-eyebrow">Редизайн 22 · transit</span>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-information)"></i>сейчас</span><span><i style="background:var(--prizma-drift)"></i>дрейф</span><span><i style="background:var(--prizma-off-course)"></i>риск</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="scroll">
+    <div class="stage" id="stage">
+      <div class="spine-line" id="spine"><div class="past" id="spine-past"></div></div>
+      <div class="now-head">
+        <div class="pz-eyebrow">Сейчас · вниз = в будущее</div>
+        <h1>Сегодня, 23 мая</h1>
+        <div class="sub" id="now-sub">окно 1.21</div>
+        <div class="node"></div>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+      </div>
+      <!-- станции/релизы/ветви позиционируются скриптом -->
+    </div>
+
+    <div class="backlog-note">
+      <div class="inner">
+        <div class="bh">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--prizma-text-tertiary)"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+          <span class="pz-eyebrow">Бэклог · вне временной оси</span>
+          <span class="cnt" id="bl-cnt"></span>
+        </div>
+        <div class="blist" id="bl-list"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const now = new Date(D.today);
+  const DAY = 864e5;
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  function fmt(d) { return new Date(d).toLocaleDateString('ru', { day: '2-digit', month: 'short' }); }
+
+  // ── временная шкала вертикали ──
+  // верх (y=topY px) = сегодня; низ = конец последнего датированного релиза + хвост.
+  const dated = cols.filter(c => c.dated);
+  const T_NOW = now.getTime();
+  const T_END = new Date(dated[dated.length - 1].end).getTime();
+  // диапазон: от (начало текущего/первого окна или сегодня, что раньше) до конца + поля будущего
+  const T_LO = Math.min(T_NOW, new Date(dated[0].start).getTime());
+  const FUTURE_PAD = 12 * DAY;
+  const T_HI = T_END + FUTURE_PAD;
+  const SPAN = T_HI - T_LO || 1;
+
+  // вертикальная геометрия (px). Передаём Date-объекты → .getTime(), не сырые ms.
+  const TOP_Y = 250;            // ниже now-head
+  const PX_PER_DAY = 7.0;       // плотность; масштаб скролла
+  function yOf(dateObj) {
+    const t = (dateObj instanceof Date ? dateObj.getTime() : new Date(dateObj).getTime());
+    return TOP_Y + ((t - T_NOW) / DAY) * PX_PER_DAY;
+  }
+
+  const stage = document.getElementById('stage');
+
+  function epicAnchorDate(e) {
+    // якорь эпика = середина окна его «главной» пилюли:
+    // приоритет — progress-пилюля (то что движется), иначе первая датированная пилюля.
+    const prog = e.pills.find(p => p.state === 'progress');
+    const pick = prog || e.pills.find(p => { const c = cols.find(x => x.key === p.col); return c && c.dated; });
+    if (!pick) return null;
+    const c = cols.find(x => x.key === pick.col);
+    if (!c || !c.dated) return null;
+    const mid = (new Date(c.start).getTime() + new Date(c.end).getTime()) / 2;
+    return new Date(mid);
+  }
+
+  function cardHtml(e) {
+    const riskCls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : '');
+    const rk = e.risk === 'off-course' ? '<span class="rk off" title="риск срыва"></span>'
+             : e.risk === 'drift' ? '<span class="rk drift" title="дрейф"></span>' : '';
+    const chips = e.pills.map(p => {
+      const cls = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : '');
+      return '<span class="wtchip' + cls + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc((D.WT[p.wt] || {}).label || p.wt) + '">' + esc(p.wt) + '</span>';
+    }).join('');
+    const who = (e.pills.find(p => p.who) || {}).who;
+    return '<div class="ch"><span class="team-tag" title="' + esc(e.team) + '">' + esc(e.team.slice(0, 2)) + '</span>' +
+      '<span class="nm">' + esc(e.epic) + '</span>' + rk + '</div>' +
+      '<div class="chips">' + chips + '</div>' +
+      '<div class="cf"><span class="who">' + (who ? esc(who) : esc(e.team)) + '</span><span class="eff pz-mono">' + D.helpers.effortOf(e) + ' дн</span></div>';
+  }
+
+  function render() {
+    // очистить динамику
+    stage.querySelectorAll('.station, .relband, .branch, .future-tail').forEach(n => n.remove());
+
+    // высота сцены
+    const stageH = yOf(new Date(T_HI)) + 80;
+    stage.style.height = stageH + 'px';
+
+    // spine «прошлое» — у нас сейчас наверху, прошлого почти нет; оставим тонкую засветку до TOP_Y
+    const past = document.getElementById('spine-past');
+    past.style.height = TOP_Y + 'px';
+
+    // границы релизов (начало каждого датированного окна, если в зоне видимости)
+    dated.forEach(c => {
+      const ys = yOf(new Date(c.start));
+      const band = document.createElement('div');
+      band.className = 'relband';
+      band.style.position = 'absolute';
+      band.style.left = '0'; band.style.right = '0';
+      band.style.top = ys + 'px';
+      band.style.height = '0';
+      const dt = fmt(c.start) + ' – ' + fmt(c.end);
+      band.innerHTML = '<div class="rule"></div><div class="tag' + (c.current ? ' cur' : '') + '">' +
+        '<span class="rel">' + esc(c.short) + '</span><span class="dt">' + esc(dt) + '</span>' +
+        (c.current ? '<span class="cur-pin">ТЕК.</span>' : '') + '</div>';
+      stage.appendChild(band);
+    });
+
+    // станции-вехи
+    D.milestones.forEach(m => {
+      const t = new Date(m.date).getTime();
+      const y = yOf(new Date(m.date));
+      const days = Math.round((t - T_NOW) / DAY);
+      const past = days < 0, soon = !past && days <= 9;
+      const cls = past ? 'past' : (soon ? 'soon' : '');
+      const cd = past ? (-days) + ' дн назад' : (days === 0 ? 'сегодня' : 'через ' + days + ' ' + plural(days, 'день', 'дня', 'дней'));
+      const st = document.createElement('div');
+      st.className = 'station ' + cls;
+      st.style.position = 'absolute';
+      st.style.left = '0'; st.style.right = '0';
+      st.style.top = (y - 16) + 'px';
+      st.innerHTML = '<div class="marker"><span class="dot"></span><span class="lb">' + esc(m.label) + '</span><span class="dd">' + fmt(m.date) + '</span><span class="cd">' + esc(cd) + '</span></div>';
+      stage.appendChild(st);
+    });
+
+    // эпик-ветви — датированные, по якорю; чередуем сторону, разводим по вертикали при коллизии
+    const anchored = D.epics.map(e => ({ e, d: epicAnchorDate(e) })).filter(x => x.d).sort((a, b) => a.d - b.d);
+    const lastBottom = { left: -1e9, right: -1e9 };
+    const CARD_GAP = 12, EST_H = 96;
+    let side = 'left';
+    anchored.forEach(({ e, d }) => {
+      let y = yOf(d);
+      // не наезжать на предыдущую карточку той же стороны
+      if (y < lastBottom[side] + CARD_GAP) y = lastBottom[side] + CARD_GAP;
+      lastBottom[side] = y + EST_H;
+      const riskCls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : '');
+      const br = document.createElement('div');
+      br.className = 'branch ' + side + (riskCls ? ' ' + riskCls : '');
+      br.style.top = y + 'px';
+      br.innerHTML = '<span class="conn"></span><div class="card ' + riskCls + '">' + cardHtml(e) + '</div>';
+      stage.appendChild(br);
+      side = side === 'left' ? 'right' : 'left';
+    });
+
+    // хвост «дальше»
+    const tail = document.createElement('div');
+    tail.className = 'future-tail';
+    tail.style.position = 'absolute';
+    tail.style.left = '0'; tail.style.right = '0';
+    tail.style.top = yOf(new Date(T_END)) + 30 + 'px';
+    tail.innerHTML = '<div class="node"></div><div class="t">дальше — следующие кварталы</div>';
+    stage.appendChild(tail);
+  }
+
+  // ── backlog (вне оси) ──
+  const backlog = D.epics.filter(e => e.pills.length && e.pills.every(p => {
+    const c = cols.find(x => x.key === p.col); return !(c && c.dated);
+  }));
+  document.getElementById('bl-cnt').textContent = backlog.length + ' ' + plural(backlog.length, 'эпик', 'эпика', 'эпиков');
+  document.getElementById('bl-list').innerHTML = backlog.length
+    ? backlog.map(e => '<span class="bchip">' + esc(e.epic) + ' · ' + esc(e.team) + '</span>').join('')
+    : '<span class="bchip" style="border-style:dashed">пусто</span>';
+
+  document.getElementById('now-sub').textContent = 'окно ' + (cols.find(c => c.current) || {}).short;
+
+  // sync + 60ms + resize (не полагаемся только на rAF)
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => setTimeout(render, 0));
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

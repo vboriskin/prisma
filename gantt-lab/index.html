@@ -187,8 +187,8 @@
   fillLenses(); fillVariants(); fillApple();
   fillGrid('sketchGrid', D.sketches, 'sketches');
   fillGrid('redesignGrid', D.redesigns, 'redesigns');
-  const sc = document.getElementById('sketchCount'); if (sc) sc.textContent = D.sketches.length + ' · две волны';
-  const rc = document.getElementById('redesignCount'); if (rc) rc.textContent = D.redesigns.length + ' · две волны';
+  const sc = document.getElementById('sketchCount'); if (sc) sc.textContent = D.sketches.length + ' прототипов';
+  const rc = document.getElementById('redesignCount'); if (rc) rc.textContent = D.redesigns.length + ' прототипов';
 
   // theme toggle
   document.getElementById('themeToggle').addEventListener('click', function () {

@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 22 · Инлайн-правка</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 620px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 280px repeat(5, minmax(120px,1fr)); min-width: 880px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px 10px; min-height: 48px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 11px 10px 9px; }
+  .ghead .rel { font: 300 19px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 5px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
+  .elabel .meta { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* редактируемое имя эпика */
+  .nm { position: relative; display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; line-height: 1.35;
+    color: var(--prizma-text-primary); border-radius: var(--r-sm); padding: 2px 5px; margin: -2px -5px; max-width: 100%;
+    cursor: text; transition: background .12s, box-shadow .12s; }
+  .nm:hover { background: var(--prizma-bg-tertiary); }
+  .nm .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nm .pencil { opacity: 0; flex: none; margin-left: 6px; color: var(--prizma-text-tertiary); transition: opacity .12s; }
+  .nm:hover .pencil { opacity: 1; }
+  .nm.saved { animation: savedflash .9s var(--ease-calm); }
+  @keyframes savedflash { 0% { background: var(--prizma-on-course-bg); } 100% { background: transparent; } }
+
+  /* инлайн-инпут имени */
+  .nm-input { font: 600 13px/1.35 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 4px 7px; width: 100%;
+    box-shadow: 0 0 0 3px var(--prizma-information-bg); outline: none; }
+  .nm-input:focus { border-color: var(--prizma-information); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+
+  /* пилюли */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; cursor: pointer; transition: box-shadow .14s var(--ease-calm), background .14s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .who.unset { font-style: italic; opacity: .8; }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nmw { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .dot6 { background: var(--prizma-information); }
+  .pill.editing { background: var(--prizma-bg); box-shadow: inset 0 0 0 1px var(--prizma-information), 0 0 0 3px var(--prizma-information-bg); cursor: default; }
+  .pill.saved { animation: pillflash .9s var(--ease-calm); }
+  @keyframes pillflash { 0% { box-shadow: inset 0 0 0 1px var(--prizma-on-course), 0 0 0 3px var(--prizma-on-course-bg); } 100% { box-shadow: none; } }
+
+  /* инлайн-селект исполнителя в пилюле */
+  .who-sel { font: 500 10px/1 var(--mono); color: var(--prizma-text-primary); background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 2px 4px; outline: none; cursor: pointer; }
+  .who-sel:focus { border-color: var(--prizma-information); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 22 · Прямое редактирование</div>
+      <h1>Инлайн-правка</h1>
+      <p>Никаких модалок. Двойной клик по названию эпика превращает его в поле ввода с тихим фокус-кольцом: Enter или потеря фокуса сохраняет, Esc отменяет. Двойной клик по пилюле открывает инлайн-выбор исполнителя. Правка точечная и оптимистичная — всё остальное в сетке остаётся на месте.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint"><b>Двойной клик</b> по названию эпика — правка текста · <b>двойной клик</b> по пилюле — смена исполнителя.</span>
+  </div>
+
+  <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+
+  // реальные исполнители из данных + несколько свободных из той же обоймы
+  const WHO_POOL = (() => {
+    const set = new Set();
+    D.epics.forEach(e => e.pills.forEach(p => { if (p.who) set.add(p.who); }));
+    return Array.from(set).sort((a,b)=>a.localeCompare(b,'ru'));
+  })();
+
+  const baseline = D.epics.map(e => ({ id: e.id, epic: e.epic, team: e.team, pills: e.pills.map(p => Object.assign({}, p)) }));
+  let model = JSON.parse(JSON.stringify(baseline));
+  const grid = document.getElementById('grid');
+  let editing = false; // защита: пока редактируем — render не разрушает поле
+
+  function render() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = model.filter(e => e.team === team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="cnt">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        html += '<div class="gcell elabel" data-epic="'+e.id+'">' +
+          '<span class="nm" data-epic="'+e.id+'" tabindex="0" title="Двойной клик — переименовать">' +
+            '<span class="label">'+esc(e.epic)+'</span>' +
+            '<svg class="pencil" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>' +
+          '</span>' +
+          '<span class="meta">'+esc(team)+'</span>' +
+        '</div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach((p, idx) => {
+            if (p.col !== c.key) return;
+            const who = p.who
+              ? '<span class="who">'+esc(p.who)+'</span>'
+              : (p.state==='done' ? '' : '<span class="who unset">не назн.</span>');
+            html += '<div class="pill" data-key="'+e.id+':'+idx+'" data-state="'+p.state+'" title="Двойной клик — исполнитель" style="--wt:'+wtVar(p.wt)+'">' +
+              '<span class="dot6"'+(p.state==='progress'?'':' style="display:none"')+'></span>' +
+              '<span class="nmw">'+p.wt+'</span>'+who+'</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  // ── правка имени эпика ──
+  function editName(span) {
+    if (editing) return;
+    const eid = span.dataset.epic;
+    const ep = model.find(e => e.id === eid);
+    if (!ep) return;
+    editing = true;
+    const prev = ep.epic;
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'nm-input'; input.value = prev;
+    input.setAttribute('aria-label', 'Название эпика');
+    span.replaceWith(input);
+    input.focus(); input.select();
+
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true; editing = false;
+      const val = input.value.trim();
+      if (commit && val) ep.epic = val;
+      // восстановить span на месте инпута (без полного render — соседи не дёргаются)
+      const fresh = makeNameSpan(eid, ep.epic);
+      input.replaceWith(fresh);
+      if (commit && val && val !== prev) {
+        fresh.classList.add('saved');
+        setTimeout(() => fresh.classList.remove('saved'), 950);
+      }
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  function makeNameSpan(eid, text) {
+    const s = document.createElement('span');
+    s.className = 'nm'; s.dataset.epic = eid; s.tabIndex = 0; s.title = 'Двойной клик — переименовать';
+    s.innerHTML = '<span class="label">'+esc(text)+'</span>' +
+      '<svg class="pencil" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
+    return s;
+  }
+
+  // ── правка исполнителя пилюли ──
+  function editAssignee(pill) {
+    if (editing) return;
+    const key = pill.dataset.key;
+    const [eid, idxStr] = key.split(':');
+    const ep = model.find(e => e.id === eid);
+    if (!ep) return;
+    const p = ep.pills[+idxStr];
+    if (!p) return;
+    editing = true;
+    pill.classList.add('editing');
+    const whoSpan = pill.querySelector('.who');
+    const prevWho = p.who;
+
+    const sel = document.createElement('select');
+    sel.className = 'who-sel'; sel.setAttribute('aria-label', 'Исполнитель');
+    sel.innerHTML = '<option value="">— не назн.</option>' +
+      WHO_POOL.map(w => '<option value="'+esc(w)+'"'+(w===p.who?' selected':'')+'>'+esc(w)+'</option>').join('');
+    if (whoSpan) whoSpan.replaceWith(sel);
+    else pill.appendChild(sel);
+    sel.focus();
+
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true; editing = false;
+      if (commit) p.who = sel.value || null;
+      pill.classList.remove('editing');
+      // вернуть who-span на место (точечно)
+      const w = document.createElement('span');
+      if (p.who) { w.className = 'who'; w.textContent = p.who; }
+      else if (p.state !== 'done') { w.className = 'who unset'; w.textContent = 'не назн.'; }
+      else { w.remove(); }
+      if (sel.parentNode) sel.replaceWith(w.className ? w : document.createTextNode(''));
+      if (commit && (sel.value || null) !== prevWho) {
+        pill.classList.add('saved');
+        setTimeout(() => pill.classList.remove('saved'), 950);
+      }
+    };
+    sel.addEventListener('change', () => finish(true));
+    sel.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    sel.addEventListener('blur', () => finish(true));
+  }
+
+  // делегирование dblclick
+  grid.addEventListener('dblclick', e => {
+    const nm = e.target.closest('.nm');
+    if (nm) { editName(nm); return; }
+    const pill = e.target.closest('.pill');
+    if (pill && !pill.classList.contains('editing')) { editAssignee(pill); }
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    if (editing) return;
+    model = JSON.parse(JSON.stringify(baseline));
+    render();
+  });
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

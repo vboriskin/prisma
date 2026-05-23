@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 29 · Слияние правок</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 620px; }
+
+  /* ── шапка-сводка импорта ── */
+  .summary { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated);
+    padding: 15px 17px; display: flex; align-items: center; gap: 18px; margin-bottom: 16px; }
+  .summary .file { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
+  .summary .file .fi { width: 17px; height: 17px; color: var(--prizma-text-secondary); flex: none; }
+  .summary .file .fn { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .summary .file .fn small { display: block; font: 500 10.5px/1.3 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .summary .stat { text-align: right; }
+  .summary .stat .n { font: 700 18px/1 var(--mono); letter-spacing: -.01em; }
+  .summary .stat .auto .n { color: var(--prizma-on-course); }
+  .summary .stat .conf .n { color: var(--prizma-drift); }
+  .summary .stat small { display: block; font-size: 10px; color: var(--prizma-text-tertiary); margin-top: 4px; text-transform: lowercase; }
+  .summary .sep { width: 1px; align-self: stretch; background: var(--prizma-border); }
+
+  /* ── авто-применяемые (свёрнуто) ── */
+  .auto-block { border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: color-mix(in srgb, var(--prizma-on-course) 4%, var(--prizma-bg-elevated)); margin-bottom: 18px; overflow: hidden; }
+  .auto-head { padding: 11px 15px; display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; }
+  .auto-head .ai { width: 15px; height: 15px; color: var(--prizma-on-course); flex: none; }
+  .auto-head .at { font-size: 12.5px; font-weight: 600; flex: 1; }
+  .auto-head .toggle { font: 600 11px/1 var(--font); color: var(--prizma-information); display: flex; align-items: center; gap: 5px; }
+  .auto-head .toggle svg { width: 12px; height: 12px; transition: transform .2s var(--ease-calm); }
+  .auto-block.open .toggle svg { transform: rotate(180deg); }
+  .auto-list { max-height: 0; overflow: hidden; transition: max-height .26s var(--ease-calm); }
+  .auto-block.open .auto-list { max-height: 420px; }
+  .auto-list ul { list-style: none; margin: 0; padding: 4px 15px 13px; border-top: 1px solid var(--prizma-border); }
+  .auto-list li { display: flex; align-items: baseline; gap: 9px; padding: 7px 0; font-size: 12px; }
+  .auto-list li + li { border-top: 1px solid var(--prizma-border); }
+  .auto-list .ep { color: var(--prizma-text-primary); font-weight: 600; min-width: 0; }
+  .auto-list .fld { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); text-transform: uppercase; letter-spacing:.3px; }
+  .auto-list .chg { margin-left: auto; font: 500 11.5px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .auto-list .chg .arrow { color: var(--prizma-text-tertiary); margin: 0 5px; }
+  .auto-list .chg .to { color: var(--prizma-on-course); }
+
+  /* ── конфликты ── */
+  .conf-label { font-size: 12px; font-weight: 700; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  .conf-label .ci { width: 14px; height: 14px; color: var(--prizma-drift); }
+  .conf-list { display: flex; flex-direction: column; gap: 12px; }
+
+  .conf { border: 1px solid var(--prizma-border); border-left: 3px solid var(--prizma-drift); border-radius: var(--r-md);
+    background: var(--prizma-bg-elevated); padding: 13px 15px 14px; transition: border-color .2s, opacity .2s; }
+  .conf.resolved { border-left-color: var(--prizma-on-course); }
+  .conf.skipped { border-left-color: var(--prizma-text-tertiary); opacity: .6; }
+  .conf-hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 11px; }
+  .conf-hd .ep { font-size: 13px; font-weight: 700; }
+  .conf-hd .fld { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); text-transform: uppercase; letter-spacing:.3px;
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 3px 6px; }
+  .conf-hd .st { margin-left: auto; font: 600 10px/1 var(--mono); letter-spacing:.3px; text-transform: uppercase; opacity: 0; transition: opacity .15s; }
+  .conf.resolved .conf-hd .st { opacity: 1; color: var(--prizma-on-course); }
+  .conf.skipped .conf-hd .st { opacity: 1; color: var(--prizma-text-tertiary); }
+
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .opt { position: relative; display: block; border: 1px solid var(--prizma-border); border-radius: var(--r-sm);
+    padding: 10px 12px 10px 34px; cursor: pointer; transition: border-color .14s, background .14s; }
+  .opt:hover { border-color: var(--prizma-border-strong); }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt .mark { position: absolute; left: 12px; top: 11px; width: 15px; height: 15px; border-radius: 50%;
+    border: 1.5px solid var(--prizma-border-strong); transition: border-color .14s, background .14s; }
+  .opt .mark::after { content: ""; position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--prizma-information); transform: translate(-50%,-50%) scale(0); transition: transform .14s var(--ease-spring); }
+  .opt .src { font: 700 9px/1 var(--mono); letter-spacing:.4px; text-transform: uppercase; color: var(--prizma-text-tertiary); display: block; margin-bottom: 5px; }
+  .opt .val { font-size: 12.5px; font-weight: 600; color: var(--prizma-text-primary); line-height: 1.3; }
+  .opt input:checked ~ .mark { border-color: var(--prizma-information); }
+  .opt input:checked ~ .mark::after { transform: translate(-50%,-50%) scale(1); }
+  .opt:has(input:checked) { border-color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .opt.local .src { color: var(--prizma-information); }
+  .opt.file .src { color: var(--prizma-insight); }
+
+  .skip-row { margin-top: 10px; }
+  .skip { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px/1 var(--font); color: var(--prizma-text-tertiary);
+    background: transparent; border: none; cursor: pointer; padding: 4px 0; transition: color .14s; }
+  .skip:hover { color: var(--prizma-text-secondary); }
+  .skip svg { width: 12px; height: 12px; }
+  .skip.active { color: var(--prizma-text-primary); }
+
+  /* ── футер действий ── */
+  .actbar { position: sticky; bottom: 0; margin-top: 22px; padding: 14px 0 4px; background: linear-gradient(to top, var(--prizma-bg) 70%, transparent);
+    display: flex; align-items: center; gap: 14px; }
+  .actbar .prog { font-size: 12px; color: var(--prizma-text-secondary); }
+  .actbar .prog b { color: var(--prizma-text-primary); font-family: var(--mono); }
+  .actbar .spacer { flex: 1; }
+
+  /* ── тост ── */
+  .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(14px); z-index: var(--z-overlay);
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-left: 3px solid var(--prizma-on-course);
+    border-radius: var(--r-md); padding: 12px 16px; font-size: 12.5px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .18s var(--ease-calm), transform .18s var(--ease-calm); display: flex; align-items: center; gap: 9px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .ti { width: 15px; height: 15px; color: var(--prizma-on-course); flex: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 29 · слияние правок</div>
+      <h1>Слияние правок</h1>
+      <p>Кто-то отредактировал план в выгруженном HTML и вернул файл. Бесспорные правки применятся сами — они свёрнуты. Спорные показаны парами «Локально / Из файла»: выберите версию или пропустите. Спокойно, по одной, без модального завала.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="summary">
+    <div class="file">
+      <svg class="fi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6" opacity=".5"/></svg>
+      <span class="fn">план-1.21-правки.html<small>импорт · сегодня · ред. М. Орлова</small></span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat auto"><span class="n" id="autoN">0</span><small>применятся<br>автоматически</small></div>
+    <div class="sep"></div>
+    <div class="stat conf"><span class="n" id="confN">0</span><small>конфликта<br>требуют выбора</small></div>
+  </div>
+
+  <div class="auto-block" id="autoBlock">
+    <div class="auto-head" id="autoHead">
+      <svg class="ai" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      <span class="at" id="autoTitle">Бесспорные правки</span>
+      <span class="toggle">показать<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+    </div>
+    <div class="auto-list"><ul id="autoList"></ul></div>
+  </div>
+
+  <p class="conf-label"><svg class="ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>Конфликты — нужен ваш выбор</p>
+  <div class="conf-list" id="confList"></div>
+
+  <div class="actbar">
+    <span class="prog">Решено <b id="doneCnt">0</b> из <b id="totalCnt">0</b> конфликтов</span>
+    <span class="spacer"></span>
+    <button class="pz-btn" id="skipAll">Пропустить все</button>
+    <button class="pz-btn pz-btn-primary" id="apply">Применить выбранное</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const byId = id => D.epics.find(e => e.id === id);
+
+  // Синтезируем ~6 правок из PZ_DATA: 3 авто-применяемых (бесспорных) + 3 конфликта.
+  // Поля правдоподобны: релиз пилюли, исполнитель, риск, оценка.
+  const AUTO = [
+    { ep: byId('e5').epic,  fld: 'статус',     from: 'в работе',  to: 'готово' },
+    { ep: byId('e10').epic, fld: 'исполнитель',from: '—',         to: 'Морозова' },
+    { ep: byId('e7').epic,  fld: 'оценка QA',  from: '8 дн',       to: '10 дн' },
+  ];
+  const CONFLICTS = [
+    { ep: byId('e1').epic,  fld: 'релиз BE',    local: '1.21', file: '1.22' },
+    { ep: byId('e13').epic, fld: 'риск',        local: 'срыв', file: 'дрейф' },
+    { ep: byId('e2').epic,  fld: 'исполнитель FE', local: '— не назначен', file: 'Ким' },
+  ];
+
+  document.getElementById('autoN').textContent = AUTO.length;
+  document.getElementById('confN').textContent = CONFLICTS.length;
+  document.getElementById('totalCnt').textContent = CONFLICTS.length;
+  document.getElementById('autoTitle').textContent = AUTO.length + ' ' + plural(AUTO.length,'бесспорная правка','бесспорные правки','бесспорных правок') + ' — применятся автоматически';
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // авто-список
+  document.getElementById('autoList').innerHTML = AUTO.map(a =>
+    '<li><span class="fld">'+esc(a.fld)+'</span><span class="ep">'+esc(a.ep)+'</span>'+
+    '<span class="chg">'+esc(a.from)+'<span class="arrow">→</span><span class="to">'+esc(a.to)+'</span></span></li>'
+  ).join('');
+
+  // конфликты
+  const confList = document.getElementById('confList');
+  confList.innerHTML = CONFLICTS.map((c, i) =>
+    '<div class="conf" data-i="'+i+'">'+
+      '<div class="conf-hd"><span class="ep">'+esc(c.ep)+'</span><span class="fld">'+esc(c.fld)+'</span><span class="st"></span></div>'+
+      '<div class="opts">'+
+        '<label class="opt local"><input type="radio" name="c'+i+'" value="local"><span class="mark"></span>'+
+          '<span class="src">Локально</span><span class="val">'+esc(c.local)+'</span></label>'+
+        '<label class="opt file"><input type="radio" name="c'+i+'" value="file"><span class="mark"></span>'+
+          '<span class="src">Из файла</span><span class="val">'+esc(c.file)+'</span></label>'+
+      '</div>'+
+      '<div class="skip-row"><button class="skip" data-skip="'+i+'">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8zM19 5v14"/></svg>Пропустить — оставить как есть</button></div>'+
+    '</div>'
+  ).join('');
+
+  const doneCnt = document.getElementById('doneCnt');
+  // состояние решений: undefined | 'local' | 'file' | 'skip'
+  const decided = {};
+
+  function refreshProgress() {
+    const n = Object.values(decided).filter(Boolean).length;
+    doneCnt.textContent = n;
+  }
+
+  confList.querySelectorAll('.conf').forEach(card => {
+    const i = +card.dataset.i;
+    const st = card.querySelector('.st');
+    const skipBtn = card.querySelector('.skip');
+
+    card.querySelectorAll('input[type=radio]').forEach(r => {
+      r.addEventListener('change', () => {
+        decided[i] = r.value;
+        card.classList.remove('skipped'); card.classList.add('resolved');
+        skipBtn.classList.remove('active');
+        st.textContent = r.value === 'local' ? 'локальная' : 'из файла';
+        refreshProgress();
+      });
+    });
+    skipBtn.addEventListener('click', () => {
+      decided[i] = 'skip';
+      card.querySelectorAll('input[type=radio]').forEach(r => r.checked = false);
+      card.classList.remove('resolved'); card.classList.add('skipped');
+      skipBtn.classList.add('active');
+      st.textContent = 'пропущено';
+      refreshProgress();
+    });
+  });
+
+  document.getElementById('skipAll').addEventListener('click', () => {
+    confList.querySelectorAll('.conf').forEach(card => {
+      const i = +card.dataset.i;
+      if (!decided[i]) card.querySelector('.skip').click();
+    });
+  });
+
+  // тост
+  const toast = document.getElementById('toast');
+  let toastT = null;
+  function showToast(text) {
+    toast.innerHTML = '<svg class="ti" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>'+text+'</span>';
+    toast.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+
+  document.getElementById('apply').addEventListener('click', () => {
+    // K = авто + явно выбранные (local/file), не считая пропущенных
+    const picked = CONFLICTS.filter((_, i) => decided[i] === 'local' || decided[i] === 'file').length;
+    const skipped = CONFLICTS.filter((_, i) => decided[i] === 'skip').length;
+    const K = AUTO.length + picked;
+    const T = AUTO.length + CONFLICTS.length;
+    let msg = 'Применено ' + K + ' из ' + T + ' правок';
+    if (skipped) msg += ' · ' + skipped + ' ' + plural(skipped,'пропущена','пропущено','пропущено');
+    const undecided = CONFLICTS.length - picked - skipped;
+    if (undecided) msg += ' · ' + undecided + ' ' + plural(undecided,'конфликт','конфликта','конфликтов') + ' без решения отложен';
+    showToast(msg);
+    // авто-раскрыть авто-блок чтобы было видно что вошло
+    document.getElementById('autoBlock').classList.add('open');
+  });
+
+  // тоггл авто-блока
+  document.getElementById('autoHead').addEventListener('click', () => {
+    document.getElementById('autoBlock').classList.toggle('open');
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

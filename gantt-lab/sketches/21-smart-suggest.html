@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 21 · Умные подсказки</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 20px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .layout { display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start; }
+  @media (max-width: 1040px) { .layout { grid-template-columns: 1fr; } }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 600px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 200px repeat(5, minmax(116px,1fr)); min-width: 760px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px 9px; min-height: 46px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 11px 9px 9px; }
+  .ghead .rel { font: 300 19px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 5px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 6px; }
+  .elabel .risk { display: inline-flex; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .elabel .risk.off-course { background: var(--prizma-off-course); }
+  .elabel .risk.drift { background: var(--prizma-drift); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; transition: box-shadow .25s var(--ease-calm), background .25s; }
+  /* подсветка ячеек, затрагиваемых наведённой/применяемой подсказкой — нейтральный insight-контур */
+  .cell.focus { box-shadow: inset 0 0 0 1px var(--prizma-insight); background: var(--prizma-insight-bg); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; transition: transform .4s var(--ease-spring), box-shadow .2s, opacity .3s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .dot6 { background: var(--prizma-information); }
+  .pill[data-state="unplanned"] { border: 1px dashed var(--prizma-border-strong); background: transparent; }
+  /* пилюля, которую подсказка предлагает тронуть */
+  .pill.target { box-shadow: 0 0 0 2px var(--prizma-insight); }
+  .pill.just-moved { animation: land .5s var(--ease-spring); }
+  @keyframes land { 0% { transform: scale(.82); } 100% { transform: scale(1); } }
+  .pill.no-owner { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-off-course) 50%, transparent); }
+  .pill .gap { font: 600 9.5px/1 var(--mono); color: var(--prizma-off-course); display: inline-flex; align-items: center; gap: 3px; }
+
+  /* ── панель подсказок ── единственное место, где звучит insight-цвет ── */
+  .panel { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); overflow: hidden; }
+  .panel-head { display: flex; align-items: center; gap: 9px; padding: 14px 16px 12px; border-bottom: 1px solid var(--prizma-border); }
+  .panel-head .spark { color: var(--prizma-insight); display: flex; }
+  .panel-head .t { font-size: 14px; font-weight: 700; }
+  .panel-head .cnt { margin-left: auto; font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .panel-body { padding: 12px; display: flex; flex-direction: column; gap: 11px; }
+
+  .card { position: relative; border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: var(--prizma-bg);
+    padding: 13px 14px 12px 16px; transition: border-color .15s, transform .35s var(--ease-calm), opacity .35s; }
+  .card::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--prizma-insight); }
+  .card:hover { border-color: var(--prizma-border-strong); }
+  .card .ck { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+  .card .kind { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-insight); }
+  .card .sev { margin-left: auto; font: 600 9.5px/1 var(--mono); padding: 3px 6px; border-radius: var(--r-sm); border: 1px solid var(--prizma-border); color: var(--prizma-text-tertiary); }
+  .card .sev.off-course { color: var(--prizma-off-course); border-color: color-mix(in srgb, var(--prizma-off-course) 35%, transparent); }
+  .card .sev.drift { color: var(--prizma-drift); border-color: color-mix(in srgb, var(--prizma-drift) 35%, transparent); }
+  .card .msg { font-size: 13px; line-height: 1.42; color: var(--prizma-text-primary); margin: 0 0 4px; }
+  .card .msg b { font-weight: 700; }
+  .card .why { font-size: 11.5px; color: var(--prizma-text-secondary); margin: 0 0 11px; }
+  .card .why .pz-mono { color: var(--prizma-text-primary); }
+  .card .acts { display: flex; align-items: center; gap: 8px; }
+  .card .apply { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; cursor: pointer;
+    font: 600 12px/1 var(--font); color: var(--prizma-insight); background: var(--prizma-insight-bg);
+    border: 1px solid color-mix(in srgb, var(--prizma-insight) 35%, transparent); border-radius: var(--r-md);
+    transition: filter .15s, background .15s; }
+  .card .apply:hover { filter: brightness(1.12); }
+  .card .apply svg { width: 13px; height: 13px; }
+  .card .hide { background: none; border: none; cursor: pointer; font: 500 12px/1 var(--font); color: var(--prizma-text-tertiary); padding: 6px 4px; border-radius: var(--r-sm); }
+  .card .hide:hover { color: var(--prizma-text-secondary); }
+  .card.applied { opacity: .5; }
+  .card.applied .acts { display: none; }
+  .card .done-tag { display: none; align-items: center; gap: 6px; font: 600 11.5px/1 var(--font); color: var(--prizma-on-course); }
+  .card .done-tag svg { width: 14px; height: 14px; }
+  .card.applied .done-tag { display: inline-flex; }
+  .card.leaving { opacity: 0; transform: translateX(12px); }
+
+  .empty { padding: 26px 14px; text-align: center; color: var(--prizma-text-tertiary); font-size: 12.5px; }
+  .panel-foot { padding: 10px 14px 13px; border-top: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px; }
+  .panel-foot .note { font-size: 10.5px; color: var(--prizma-text-tertiary); line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 21 · AI-нудж</div>
+      <h1>Умные подсказки</h1>
+      <p>Система читает план и тихо подсказывает, а не правит сама. Перегруз релиза, рискованный эпик без владельца, эпик-непоседа, недельный дедлайн без старта — каждая подсказка объясняет «почему» и предлагает один точный шаг. «Применить» проигрывает изменение прямо в сетке; «Скрыть» убирает нудж. Решение остаётся за человеком.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="layout">
+    <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <span class="spark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5 10.1 7.6 12 3z"/><path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z"/></svg>
+        </span>
+        <span class="t">Подсказки</span>
+        <span class="cnt" id="nudgeCnt"></span>
+      </div>
+      <div class="panel-body" id="cards"></div>
+      <div class="panel-foot">
+        <span class="note">Подсказки выведены из текущего состояния плана. Применение меняет только этот прототип — ничего не отправляется.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c ? c.short : k; };
+  const nextCol = k => { const i = cols.findIndex(c=>c.key===k); return (i>=0 && i<cols.length-1) ? cols[i+1].key : k; };
+  const ASSIGNEES = ['Сидоров','Морозова','Ким','Волков','Новиков','Орлов','Соколов','Зайцев'];
+
+  // Синтетическая ёмкость на команду — как в скетче 06 (источник реально — capacity сотрудников).
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+
+  // независимая модель пилюль (мутируем при «Применить»)
+  const baseline = D.epics.map(e => ({
+    id: e.id, epic: e.epic, team: e.team, risk: e.risk, moves: e.moves,
+    pills: e.pills.map(p => Object.assign({}, p))
+  }));
+  let model = JSON.parse(JSON.stringify(baseline));
+  const grid = document.getElementById('grid');
+
+  function epicById(id){ return model.find(e => e.id === id); }
+  function loadTR(team, col){ return model.filter(e=>e.team===team).reduce((n,e)=>n+e.pills.filter(p=>p.col===col).length,0); }
+
+  function render() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = model.filter(e => e.team === team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="cnt">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        const rdot = e.risk ? '<span class="risk '+e.risk+'" title="'+(e.risk==='off-course'?'срыв':'дрейф')+'"></span>' : '';
+        const churn = e.moves >= 3 ? '<span title="переносов">'+e.moves+' пер.</span>' : '';
+        html += '<div class="gcell elabel" data-epic="'+e.id+'"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+rdot+esc(team)+(churn?' · '+churn:'')+'</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach((p, idx) => {
+            if (p.col !== c.key) return;
+            const noOwner = !p.who && p.state !== 'done';
+            html += '<div class="pill'+(p._moved?' just-moved':'')+'" data-key="'+e.id+':'+idx+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              '<span class="dot6"'+(p.state==='progress'?'':' style="display:none"')+'></span>' +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who ? '<span class="who">'+esc(p.who)+'</span>' : '') + '</div>';
+            p._moved = false;
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  function cellEl(epic, col){ return grid.querySelector('.cell[data-epic="'+epic+'"][data-col="'+col+'"]'); }
+  function pillEl(key){ return grid.querySelector('.pill[data-key="'+key+'"]'); }
+
+  // ── вывод подсказок из данных ──
+  function deriveNudges() {
+    const out = [];
+
+    // 1) Перегруз релиза: команда×окно, где работ больше ёмкости. Берём самое тяжёлое.
+    let worst = null;
+    D.teams.forEach(team => {
+      cols.forEach(c => {
+        if (!c.dated) return;
+        const load = loadTR(team, c.key), cap = CAPACITY[team] || 3;
+        if (load > cap) {
+          const over = load - cap;
+          if (!worst || over > worst.over) worst = { team, col: c.key, load, cap, over };
+        }
+      });
+    });
+    if (worst) {
+      // выбрать «движимую» пилюлю из перегруженного окна (не done, желательно QA/поздняя дисциплина)
+      const eps = model.filter(e => e.team === worst.team);
+      let cand = null;
+      for (const e of eps) {
+        const order = ['QA','STAB','IMPL','MIG','FE','BA','AN','BE','HF'];
+        const ps = e.pills.map((p,i)=>({p,i})).filter(x => x.p.col === worst.col && x.p.state !== 'done' && x.p.state !== 'progress');
+        ps.sort((a,b)=> order.indexOf(a.p.wt) - order.indexOf(b.p.wt));
+        if (ps.length) { cand = { eid: e.id, idx: ps[0].i, wt: ps[0].p.wt, epic: e.epic }; break; }
+      }
+      if (cand) {
+        const to = nextCol(worst.col);
+        out.push({
+          id: 'cap', kind: 'Перегруз', sev: 'drift',
+          msg: 'Перенести <b>'+cand.wt+'</b> из <b>'+relShort(worst.col)+'</b> в <b>'+relShort(to)+'</b> — снимет перегруз «'+esc(worst.team)+'».',
+          why: 'В окне '+relShort(worst.col)+' у команды <span class="pz-mono">'+worst.load+'/'+worst.cap+'</span> работ. Сдвиг одной снимет пик.',
+          focus: [{epic: cand.eid, col: worst.col}, {epic: cand.eid, col: to}],
+          target: cand.eid+':'+cand.idx,
+          apply: () => { const e = epicById(cand.eid); e.pills[cand.idx].col = to; e.pills[cand.idx]._moved = true; }
+        });
+      }
+    }
+
+    // 2) Рискованный эпик без владельца: risk!=null и ни одной активной пилюли с who.
+    const risky = model.find(e => e.risk && e.pills.some(p => p.state!=='done') && !e.pills.some(p => p.who && p.state!=='done'));
+    if (risky) {
+      const idx = risky.pills.findIndex(p => p.state!=='done');
+      const who = ASSIGNEES[0];
+      out.push({
+        id: 'owner', kind: 'Без владельца', sev: risky.risk,
+        msg: 'Назначить владельца для <b>'+esc(risky.epic)+'</b> — эпик в риске, но без ответственного.',
+        why: 'Статус <span class="pz-mono">'+(risky.risk==='off-course'?'срыв':'дрейф')+'</span>, ни одна активная работа не закреплена за человеком.',
+        focus: risky.pills.map((p,i)=>({epic: risky.id, col: p.col})).filter((v,i,a)=>a.findIndex(x=>x.col===v.col)===i),
+        target: idx>=0 ? risky.id+':'+idx : null,
+        owner: true,
+        apply: () => { risky.pills.forEach(p => { if (p.state!=='done' && !p.who) p.who = who; }); }
+      });
+    }
+
+    // 3) Эпик-непоседа: moves >= 3 — заморозить от дальнейших переносов.
+    const churny = [...model].filter(e => e.moves >= 3).sort((a,b)=>b.moves-a.moves)[0];
+    if (churny) {
+      out.push({
+        id: 'churn', kind: 'Непоседа', sev: 'drift',
+        msg: 'Зафиксировать окно <b>'+esc(churny.epic)+'</b> — переносился <b>'+churny.moves+'×</b> за квартал.',
+        why: 'Частые сдвиги размывают план. Заморозка остановит дальнейшие переносы.',
+        focus: churny.pills.map(p=>({epic: churny.id, col: p.col})).filter((v,i,a)=>a.findIndex(x=>x.col===v.col)===i),
+        target: null,
+        apply: () => { churny._frozen = true; churny.moves = 0; }
+      });
+    }
+
+    // 4) Не начатый эпик с близким дедлайном: пилюля в текущем окне (1.21), но ни одной 'progress'.
+    const curCol = cols.find(c => c.current);
+    if (curCol) {
+      const end = new Date(curCol.end);
+      const today = new Date(D.today);
+      const daysLeft = Math.round((end - today) / 86400000);
+      const stuck = model.find(e =>
+        e.pills.some(p => p.col === curCol.key) &&
+        !e.pills.some(p => p.col === curCol.key && p.state === 'progress') &&
+        e.pills.some(p => p.col === curCol.key && (p.state === 'planned' || p.state === 'unplanned'))
+      );
+      if (stuck) {
+        const idx = stuck.pills.findIndex(p => p.col === curCol.key && (p.state==='planned'||p.state==='unplanned'));
+        out.push({
+          id: 'deadline', kind: 'Дедлайн', sev: 'off-course',
+          msg: 'Начать работу по <b>'+esc(stuck.epic)+'</b> — до конца '+relShort(curCol.key)+' осталось <b>'+daysLeft+' дн.</b>',
+          why: 'В текущем окне есть запланированная работа, но ни одна не в прогрессе. Окно закроется '+fmt(curCol.end)+'.',
+          focus: [{epic: stuck.id, col: curCol.key}],
+          target: idx>=0 ? stuck.id+':'+idx : null,
+          apply: () => { if (idx>=0) { stuck.pills[idx].state = 'progress'; stuck.pills[idx]._moved = true; if (!stuck.pills[idx].who) stuck.pills[idx].who = ASSIGNEES[2]; } }
+        });
+      }
+    }
+
+    return out;
+  }
+
+  // ── рендер карточек ──
+  const cardsEl = document.getElementById('cards');
+  const cntEl = document.getElementById('nudgeCnt');
+  let nudges = [];
+
+  function paintCards() {
+    cntEl.textContent = nudges.length ? nudges.length + ' активн.' : '';
+    if (!nudges.length) { cardsEl.innerHTML = '<div class="empty">План чистый — подсказок нет.</div>'; return; }
+    cardsEl.innerHTML = nudges.map(n =>
+      '<div class="card" data-id="'+n.id+'">' +
+        '<div class="ck"><span class="kind">'+esc(n.kind)+'</span><span class="sev '+n.sev+'">'+(n.sev==='off-course'?'срыв':(n.sev==='drift'?'дрейф':'инфо'))+'</span></div>' +
+        '<p class="msg">'+n.msg+'</p>' +
+        '<p class="why">'+n.why+'</p>' +
+        '<div class="acts">' +
+          '<button class="apply" data-act="apply">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Применить</button>' +
+          '<button class="hide" data-act="hide">Скрыть</button>' +
+        '</div>' +
+        '<span class="done-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Применено</span>' +
+      '</div>'
+    ).join('');
+  }
+
+  function clearFocus(){ grid.querySelectorAll('.cell.focus').forEach(c=>c.classList.remove('focus')); grid.querySelectorAll('.pill.target,.pill.no-owner').forEach(p=>p.classList.remove('target','no-owner')); }
+
+  function focusNudge(n) {
+    clearFocus();
+    (n.focus||[]).forEach(f => { const c = cellEl(f.epic, f.col); if (c) c.classList.add('focus'); });
+    if (n.target) { const p = pillEl(n.target); if (p) p.classList.add(n.owner ? 'no-owner' : 'target'); }
+  }
+
+  function wireCards() {
+    cardsEl.querySelectorAll('.card').forEach(card => {
+      const id = card.dataset.id;
+      const n = nudges.find(x => x.id === id);
+      if (!n) return;
+      card.addEventListener('mouseenter', () => focusNudge(n));
+      card.addEventListener('mouseleave', () => clearFocus());
+      card.querySelector('[data-act="apply"]').addEventListener('click', () => {
+        focusNudge(n);
+        n.apply();
+        render();
+        // дать кадру нарисоваться, затем подсветить итог
+        setTimeout(() => { focusNudge(n); }, 30);
+        card.classList.add('applied');
+        // через паузу — пересчитать список (подсказка ушла из актуальных)
+        setTimeout(() => {
+          clearFocus();
+          nudges = nudges.filter(x => x.id !== id);
+          paintCards(); wireCards();
+        }, 1400);
+      });
+      card.querySelector('[data-act="hide"]').addEventListener('click', () => {
+        card.classList.add('leaving');
+        clearFocus();
+        setTimeout(() => {
+          nudges = nudges.filter(x => x.id !== id);
+          paintCards(); wireCards();
+        }, 320);
+      });
+    });
+  }
+
+  function boot() {
+    render();
+    nudges = deriveNudges();
+    paintCards(); wireCards();
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

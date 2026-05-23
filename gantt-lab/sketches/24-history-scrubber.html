@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 24 · Машина времени плана</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── панель скруббера ── */
+  .scrub { display: flex; align-items: center; gap: 16px; margin: 18px 0 14px; padding: 14px 16px; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); }
+  .scrub .play { width: 38px; height: 38px; flex: none; border-radius: 50%; border: 1px solid var(--prizma-border-strong); background: transparent; color: var(--prizma-text-primary); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+  .scrub .play:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+  .scrub .play.on { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+
+  .track-wrap { flex: 1; }
+  .track-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
+  .track-top .now { display: flex; align-items: baseline; gap: 9px; }
+  .track-top .now .lab { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .track-top .now .val { font: 600 16px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.01em; }
+  .track-top .now .tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; padding: 3px 6px; border-radius: var(--r-sm); color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .track-top .drift { display: flex; align-items: baseline; gap: 6px; font-size: 11.5px; color: var(--prizma-text-secondary); }
+  .track-top .drift b { font: 700 14px/1 var(--mono); color: var(--prizma-drift); }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; cursor: pointer; margin: 0; }
+  input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: var(--prizma-bg-tertiary); }
+  input[type=range]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--prizma-bg-tertiary); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6.5px; border-radius: 50%; background: var(--prizma-information); box-shadow: 0 0 0 4px var(--prizma-information-bg); }
+  input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: var(--prizma-information); box-shadow: 0 0 0 4px var(--prizma-information-bg); }
+
+  .ticks { display: flex; justify-content: space-between; margin-top: 5px; padding: 0 1px; }
+  .ticks .t { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); position: relative; }
+  .ticks .t.cur { color: var(--prizma-information); }
+  .ticks .t.last { color: var(--prizma-text-secondary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 600px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 220px repeat(5, minmax(135px,1fr)); min-width: 895px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; position: relative; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none;
+    animation: pop .28s var(--ease-calm); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  /* пилюля, чьё положение в ЭТУ неделю отличается от текущего плана — амбер */
+  .pill.shifted { background: var(--prizma-drift-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-drift) 38%, transparent); }
+  .pill.shifted::before { background: var(--prizma-drift); }
+
+  @keyframes pop { from { opacity: 0; transform: translateY(-3px) scale(.97); } to { opacity: 1; transform: none; } }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 26px; height: 14px; border-radius: 3px; background: var(--prizma-drift-bg); box-shadow: inset 2px 0 0 var(--prizma-drift); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 24 · История</div>
+      <h1>Машина времени плана</h1>
+      <p>Тяните недельный ползунок назад — мини-гант перестраивается на состояние плана <b>на ту неделю</b>. Переносы каждого эпика разнесены по прошлым неделям: до своей недели переноса пилюля стояла на релиз раньше. Амбером подсвечены работы, чьё положение в выбранную неделю отличается от сегодняшнего. Кнопка ▷ проигрывает дрейф неделя за неделей.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="scrub">
+    <button class="play" id="play" aria-label="Проиграть">
+      <svg id="playIcon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <div class="track-wrap">
+      <div class="track-top">
+        <div class="now">
+          <span class="lab">Состояние на</span>
+          <span class="val" id="wkVal">—</span>
+          <span class="tag" id="wkTag" style="display:none">СЕГОДНЯ</span>
+        </div>
+        <div class="drift"><b id="driftN">0</b><span>пилюль отличается от текущего плана</span></div>
+      </div>
+      <input type="range" id="slider" min="0" max="5" step="1" value="5" aria-label="Неделя плана">
+      <div class="ticks" id="ticks"></div>
+    </div>
+  </div>
+
+  <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+
+  <div class="legend">
+    <div class="it"><span class="sw"></span>положение отличается от текущего плана</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const DAY = 86400000;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  // короткая дата для тиков (без месяца если совпадает с соседом — упрощаем: day.month)
+  const fmtShort = d => { const dt = new Date(d); return String(dt.getDate()).padStart(2,'0') + '.' + String(dt.getMonth()+1).padStart(2,'0'); };
+
+  // ── недельная ось: 6 недель, последняя = сегодня (23.05) ──
+  // GOTCHA b: всё через Date-объекты, никаких сырых ms.
+  const today = new Date(D.today + 'T00:00:00');
+  const WEEKS = 6;
+  const weeks = [];
+  for (let i = WEEKS - 1; i >= 0; i--) {
+    weeks.push(new Date(today.getTime() - i * 7 * DAY));
+  }
+  // weeks[0] = самая ранняя (~14.04), weeks[WEEKS-1] = сегодня
+
+  // только датированные релизы участвуют в «шаге назад на релиз»
+  const datedKeys = cols.filter(c => c.dated).map(c => c.key); // r120, r121, r122
+
+  // ── синтез истории переносов ──
+  // Для каждого эпика берём его самую позднюю датированную пилюлю (как в diff-скетче)
+  // и считаем, что каждый из `moves` переносов случился в свою прошлую неделю,
+  // двигая пилюлю на один датированный релиз вперёд. То есть, чем дальше назад
+  // по времени, тем раньше (левее) стоит пилюля.
+  // Чтобы дрейф нарастал ПЛАВНО при скруббинге (а не «щёлкал» на одной неделе),
+  // эпики «оседают» с разбросом: каждому даём свою якорную неделю по индексу,
+  // а его шаги раскладываем на соседние недели, заканчивая якорной.
+  const history = []; // { epicId, pillIdx, baseCol(текущий), steps:[{weekIdx, fromCol, toCol}] }
+  // кандидаты (с реальной возможностью двигаться назад) — собираем сперва, чтобы знать их число для разброса
+  const cand = [];
+  D.epics.forEach(e => {
+    const m = e.moves || 0;
+    if (m <= 0) return;
+    // ищем самую позднюю датированную пилюлю
+    let bestIdx = -1, bestRank = -1;
+    e.pills.forEach((p, idx) => {
+      const rank = datedKeys.indexOf(p.col);
+      if (rank > bestRank) { bestRank = rank; bestIdx = idx; }
+    });
+    if (bestIdx < 0 || bestRank < 0) return;
+    const maxBack = Math.min(m, bestRank); // не уходим левее первого датированного релиза
+    if (maxBack <= 0) return;
+    cand.push({ e, bestIdx, bestRank, maxBack });
+  });
+  cand.forEach((c, ci) => {
+    const { e, bestIdx, bestRank, maxBack } = c;
+    const curCol = e.pills[bestIdx].col;
+    // якорная неделя оседания: разносим эпики по неделям 1..WEEKS-1
+    const anchor = cand.length > 1
+      ? 1 + Math.round((ci / (cand.length - 1)) * (WEEKS - 2)) // 1..WEEKS-1
+      : Math.ceil((WEEKS - 1) / 2);
+    // шаги ложатся на последовательные недели, заканчиваясь на anchor:
+    // последний (финальный) шаг = anchor, предыдущие — на неделю раньше каждый (min 1).
+    const steps = [];
+    for (let s = 0; s < maxBack; s++) {
+      const weekIdx = Math.max(1, anchor - (maxBack - 1 - s)); // самый давний шаг — раньше
+      const toRank = bestRank - (maxBack - 1 - s);             // финальный шаг → bestRank
+      const fromRank = toRank - 1;
+      steps.push({ weekIdx, fromCol: datedKeys[fromRank], toCol: datedKeys[toRank] });
+    }
+    history.push({ epicId: e.id, pillIdx: bestIdx, baseCol: curCol, steps });
+  });
+
+  // colForWeek(epicId, pillIdx, weekIdx) → колонка пилюли НА выбранную неделю.
+  // Идём по шагам: каждый шаг с weekIdx <= выбранной уже «применён» (пилюля в toCol);
+  // если ни один не применён — пилюля в самой ранней fromCol первого шага.
+  function colForWeek(rec, weekIdx) {
+    let col = rec.steps[0].fromCol; // позиция до первого переноса
+    rec.steps.forEach(st => { if (st.weekIdx <= weekIdx) col = st.toCol; });
+    return col;
+  }
+
+  const grid = document.getElementById('grid');
+  const slider = document.getElementById('slider');
+  const wkVal = document.getElementById('wkVal');
+  const wkTag = document.getElementById('wkTag');
+  const driftN = document.getElementById('driftN');
+
+  // тики
+  const ticksRoot = document.getElementById('ticks');
+  ticksRoot.innerHTML = weeks.map((w,i) => {
+    const cls = i === WEEKS-1 ? ' cur' : (i === 0 ? ' last' : '');
+    return '<span class="t'+cls+'">'+fmtShort(w)+'</span>';
+  }).join('');
+
+  function render(weekIdx) {
+    const w = weeks[weekIdx];
+    const isToday = weekIdx === WEEKS - 1;
+    wkVal.textContent = fmt(w) + ' · нед ' + (weekIdx + 1);
+    wkTag.style.display = isToday ? '' : 'none';
+
+    // строим карту переопределённых позиций для этой недели + считаем дрейф
+    const override = {}; // "epicId#pillIdx" -> col
+    let drift = 0;
+    history.forEach(rec => {
+      const col = colForWeek(rec, weekIdx);
+      override[rec.epicId + '#' + rec.pillIdx] = col;
+      if (col !== rec.baseCol) drift++;
+    });
+    driftN.textContent = drift;
+
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b></div>';
+      eps.forEach(e => {
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach((p, idx) => {
+            const key = e.id + '#' + idx;
+            const effCol = (key in override) ? override[key] : p.col;
+            if (effCol !== c.key) return;
+            const shifted = (key in override) && override[key] !== p.col;
+            const cls = 'pill' + (shifted ? ' shifted' : '');
+            html += '<div class="'+cls+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  let cur = WEEKS - 1;
+  slider.value = cur;
+  function setWeek(i){ cur = Math.max(0, Math.min(WEEKS-1, i)); slider.value = cur; render(cur); }
+  slider.addEventListener('input', () => { stopPlay(); setWeek(+slider.value); });
+
+  // ── play ──
+  const playBtn = document.getElementById('play');
+  const playIcon = document.getElementById('playIcon');
+  let timer = null;
+  const PLAY_ICON = '<path d="M8 5v14l11-7z"/>';
+  const PAUSE_ICON = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+  function stopPlay(){ if (timer){ clearInterval(timer); timer = null; } playBtn.classList.remove('on'); playIcon.innerHTML = PLAY_ICON; }
+  function startPlay(){
+    // если на конце — начинаем с начала
+    if (cur >= WEEKS - 1) setWeek(0);
+    playBtn.classList.add('on'); playIcon.innerHTML = PAUSE_ICON;
+    timer = setInterval(() => {
+      if (cur >= WEEKS - 1) { stopPlay(); return; }
+      setWeek(cur + 1);
+    }, 950);
+  }
+  playBtn.addEventListener('click', () => { if (timer) stopPlay(); else startPlay(); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // первичный рендер (синхронно + страховочный таймер — GOTCHA a)
+  render(cur);
+  setTimeout(() => render(cur), 60);
+})();
+</script>
+</body>
+</html>

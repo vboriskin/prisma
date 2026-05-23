@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 24 · Календарь квартала</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.dot { width: 7px; height: 7px; border-radius: 50%; }
+  .top .legend i.flag { width: 0; height: 12px; border-radius: 0; border-left: 1px dotted var(--prizma-text-secondary); }
+
+  /* segmented month/quarter toggle */
+  .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .seg button { height: 30px; padding: 0 13px; font: 600 12px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: none; cursor: pointer; transition: background .15s, color .15s; }
+  .seg button + button { border-left: 1px solid var(--prizma-border-strong); }
+  .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  .eyebrowbar { padding: 9px 22px 4px; flex: none; display: flex; align-items: center; gap: 14px; }
+  .navmonth { display: inline-flex; align-items: center; gap: 10px; }
+  .navmonth .lbl { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); min-width: 132px; text-transform: capitalize; }
+  .navmonth button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); color: var(--prizma-text-secondary); cursor: pointer; transition: border-color .15s, color .15s; }
+  .navmonth button:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+  .navmonth button[disabled] { opacity: .3; cursor: default; }
+  .navmonth button[disabled]:hover { border-color: var(--prizma-border-strong); color: var(--prizma-text-secondary); }
+
+  /* ── calendar ── */
+  .cal-scroll { flex: 1; overflow: auto; min-height: 0; padding: 4px 22px 22px; }
+  .cal { display: flex; flex-direction: column; gap: 26px; min-width: 1180px; }
+
+  .month { }
+  .month-hd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px 2px; }
+  .month-hd .mn { font: 600 15px/1 var(--font); color: var(--prizma-text-primary); text-transform: capitalize; }
+  .month-hd .yr { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .dow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; margin-bottom: 1px; }
+  .dow span { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); padding: 0 0 6px 4px; }
+  .dow span.we { color: var(--prizma-text-secondary); }
+
+  .weeks { display: flex; flex-direction: column; gap: 1px; }
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+
+  .day { position: relative; min-height: 92px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-sm); padding: 6px 7px 7px; display: flex; flex-direction: column; gap: 3px; overflow: hidden; }
+  .day.out { background: transparent; border-color: transparent; }
+  .day.we { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+  .day .dnum { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); align-self: flex-start; }
+  .day.out .dnum { color: var(--prizma-text-tertiary); opacity: .4; }
+  .day.today { border-color: var(--prizma-information); }
+  .day.today .dnum { color: var(--prizma-information); }
+  .day .todaytag { position: absolute; top: 6px; right: 7px; font: 700 8px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); }
+
+  /* release date-range band sitting behind a day */
+  .day .relband { position: absolute; left: 0; right: 0; top: 0; height: 3px; }
+  .day .relstart { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .day .rellbl { position: absolute; top: 4px; left: 8px; font: 700 9px/1 var(--mono); letter-spacing: .4px; }
+
+  /* event chips inside a day */
+  .ev { position: relative; display: flex; align-items: center; gap: 5px; padding: 2px 5px 2px 8px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); font: 600 10px/1.25 var(--font); color: var(--prizma-text-primary); overflow: hidden; cursor: default; max-width: 100%; }
+  .ev::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt, var(--prizma-information)); }
+  .ev .et { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ev.mile { background: transparent; border: 1px dotted var(--prizma-border-strong); color: var(--prizma-text-secondary); padding-left: 6px; }
+  .ev.mile::before { display: none; }
+  .ev.mile svg { width: 9px; height: 9px; flex: none; color: var(--prizma-text-secondary); }
+  .ev.epic .ek { font: 700 8px/1 var(--mono); color: var(--prizma-text-tertiary); flex: none; }
+  .ev.epic.r-drift::before { background: var(--prizma-drift); }
+  .ev.epic.r-off::before { background: var(--prizma-off-course); }
+  .ev .more { color: var(--prizma-text-tertiary); }
+
+  .moreline { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); padding-left: 8px; }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 190px; max-width: 280px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 11px 13px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tt { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+  .tip .tr { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tip .tr .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Календарь квартала</span>
+    <span class="sub">Q2 · apr–jul · 5 команд</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-bg-tertiary);border:1px solid var(--prizma-border-strong)"></i>окно релиза</span>
+      <span><i class="dot" style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="dot" style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i class="flag"></i>веха</span>
+    </span>
+    <div class="seg" id="seg">
+      <button data-mode="quarter" class="on">Квартал</button>
+      <button data-mode="month">Месяц</button>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 24 · Календарь</span>
+    <div class="navmonth" id="nav" hidden>
+      <button id="prev" aria-label="Назад"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <span class="lbl" id="navlbl"></span>
+      <button id="next" aria-label="Вперёд"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+  </div>
+  <div class="cal-scroll"><div class="cal" id="cal"></div></div>
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  // даты передаём как Date-объекты, не сырые ms (gotcha b)
+  const parse = s => new Date(s + 'T00:00:00');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const MN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const MNNOM = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const fmtD = d => d.getDate() + ' ' + MN[d.getMonth()];
+
+  const today = parse(D.today);
+  const dated = D.releases.filter(r => r.dated);
+  // окно календаря — от старта первого до конца последнего датированного релиза
+  const spanStart = parse(dated[0].start);
+  const spanEnd = parse(dated[dated.length - 1].end);
+
+  // понедельник недели для даты (ISO-неделя: Пн=0)
+  function mondayOf(d) {
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dow = (x.getDay() + 6) % 7; // Вс=6, Пн=0
+    return new Date(x.getTime() - dow * DAY);
+  }
+  const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  // какой релиз покрывает дату d (по диапазону start..end включительно)
+  function relOf(d) {
+    return dated.find(r => {
+      const s = parse(r.start), e = parse(r.end);
+      return d >= s && d <= e;
+    }) || null;
+  }
+  // цвет полосы релиза — НЕЙТРАЛЬНЫЙ серый; текущий чуть ярче (брендбук: release zones neutral)
+  function relTone(r) { return r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-border-strong)'; }
+
+  // события по дням: эпики садятся на СТАРТ своего релиза (первый день окна),
+  // вехи — на свою точную дату.
+  const eventsByDay = {};
+  const dkey = d => d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+  function pushEv(d, ev) { (eventsByDay[dkey(d)] = eventsByDay[dkey(d)] || []).push(ev); }
+
+  // вехи + дедлайны (код-фриз и т.п. это milestones)
+  D.milestones.forEach(m => {
+    pushEv(parse(m.date), { kind: 'mile', label: m.label, date: m.date });
+  });
+  // эпики: на стартовый день каждого датированного релиза, где у эпика есть pills
+  D.epics.forEach(e => {
+    dated.forEach(r => {
+      const pills = H.pillsOf(e, r.key);
+      if (!pills.length) return;
+      const d = parse(r.start);
+      pushEv(d, { kind: 'epic', epic: e, rel: r, pills });
+    });
+  });
+
+  const cal = document.getElementById('cal');
+  const tip = document.getElementById('tip');
+  const segEl = document.getElementById('seg');
+  const navEl = document.getElementById('nav');
+  const navLbl = document.getElementById('navlbl');
+
+  let mode = 'quarter';
+  // месяцы квартала: список первых-чисел месяцев, пересекающих окно
+  const months = [];
+  {
+    let m = new Date(spanStart.getFullYear(), spanStart.getMonth(), 1);
+    const last = new Date(spanEnd.getFullYear(), spanEnd.getMonth(), 1);
+    while (m <= last) { months.push(new Date(m)); m = new Date(m.getFullYear(), m.getMonth() + 1, 1); }
+  }
+  // месяц по умолчанию для режима «Месяц» — тот, где сегодня (или ближайший в окне)
+  let monthIdx = months.findIndex(m => m.getFullYear() === today.getFullYear() && m.getMonth() === today.getMonth());
+  if (monthIdx < 0) monthIdx = 0;
+
+  function dowRow() {
+    const names = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+    return '<div class="dow">' + names.map((n, i) => '<span class="' + (i >= 5 ? 'we' : '') + '">' + n + '</span>').join('') + '</div>';
+  }
+
+  // одна ячейка-день
+  function dayCell(d, monthRef) {
+    const inMonth = d.getMonth() === monthRef.getMonth() && d.getFullYear() === monthRef.getFullYear();
+    const dow = (d.getDay() + 6) % 7;
+    const we = dow >= 5;
+    const isToday = sameDay(d, today);
+    let cls = 'day';
+    if (!inMonth) cls += ' out';
+    if (we && inMonth) cls += ' we';
+    if (isToday) cls += ' today';
+
+    let inner = '';
+    // полоса релиза (нейтральная) — только для дней внутри месяца и внутри окна
+    const r = inMonth ? relOf(d) : null;
+    if (r) {
+      const s = parse(r.start), e = parse(r.end);
+      const tone = relTone(r);
+      inner += '<div class="relband" style="background:' + tone + ';opacity:' + (r.current ? '.9' : '.5') + '"></div>';
+      // на стартовом дне окна — вертикальный кап + ярлык релиза
+      if (sameDay(d, s)) {
+        inner += '<div class="relstart" style="background:' + tone + '"></div>';
+        inner += '<div class="rellbl" style="color:' + (r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)') + '">' + esc(r.short) + (r.current ? ' · ТЕК' : '') + '</div>';
+      }
+    }
+    inner += '<span class="dnum">' + d.getDate() + '</span>';
+    if (isToday) inner += '<span class="todaytag">СЕГОДНЯ</span>';
+
+    // события дня
+    const evs = inMonth ? (eventsByDay[dkey(d)] || []) : [];
+    // вехи первыми, затем эпики
+    const miles = evs.filter(x => x.kind === 'mile');
+    const epicEvs = evs.filter(x => x.kind === 'epic');
+    const topPad = (r && sameDay(d, parse(r.start))) ? 16 : 0; // под ярлык релиза
+    if (topPad) inner += '<div style="height:' + topPad + 'px"></div>';
+
+    miles.forEach(m => {
+      inner += '<div class="ev mile" data-tip="mile" data-mlabel="' + esc(m.label) + '" data-mdate="' + esc(m.date) + '">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/></svg>' +
+        '<span class="et">' + esc(m.label) + '</span></div>';
+    });
+    const MAXE = 3;
+    const shown = epicEvs.slice(0, MAXE);
+    shown.forEach(ev => {
+      const e = ev.epic;
+      const rc = e.risk === 'off-course' ? ' r-off' : (e.risk === 'drift' ? ' r-drift' : '');
+      const firstWt = ev.pills[0] ? ev.pills[0].wt : 'BE';
+      inner += '<div class="ev epic' + rc + '" data-tip="epic" data-id="' + e.id + '" data-rel="' + ev.rel.key + '" style="--wt:' + wtVar(firstWt) + '">' +
+        '<span class="ek">' + ev.pills.length + '</span><span class="et">' + esc(e.epic) + '</span></div>';
+    });
+    if (epicEvs.length > MAXE) inner += '<div class="moreline">+' + (epicEvs.length - MAXE) + ' ещё</div>';
+
+    return '<div class="' + cls + '">' + inner + '</div>';
+  }
+
+  // сетка одного месяца (полные недели Пн–Вс)
+  function monthBlock(monthRef) {
+    const first = new Date(monthRef.getFullYear(), monthRef.getMonth(), 1);
+    const gridStart = mondayOf(first);
+    let html = '<div class="month">';
+    html += '<div class="month-hd"><span class="mn">' + MNNOM[monthRef.getMonth()] + '</span><span class="yr">' + monthRef.getFullYear() + '</span></div>';
+    html += dowRow();
+    html += '<div class="weeks">';
+    let cur = new Date(gridStart);
+    // рисуем до конца недели, в которой лежит последний день месяца
+    const lastOfMonth = new Date(monthRef.getFullYear(), monthRef.getMonth() + 1, 0);
+    const gridEnd = new Date(mondayOf(lastOfMonth).getTime() + 7 * DAY);
+    while (cur < gridEnd) {
+      html += '<div class="week">';
+      for (let i = 0; i < 7; i++) {
+        html += dayCell(cur, monthRef);
+        cur = new Date(cur.getTime() + DAY);
+      }
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function render() {
+    if (mode === 'quarter') {
+      navEl.hidden = true;
+      cal.innerHTML = months.map(monthBlock).join('');
+    } else {
+      navEl.hidden = false;
+      const m = months[monthIdx];
+      navLbl.textContent = MNNOM[m.getMonth()] + ' ' + m.getFullYear();
+      document.getElementById('prev').disabled = monthIdx <= 0;
+      document.getElementById('next').disabled = monthIdx >= months.length - 1;
+      cal.innerHTML = monthBlock(m);
+    }
+    wireTips();
+  }
+
+  // ── tooltip ──
+  let tipEl = null;
+  function buildEpicTip(e, relKey) {
+    const r = dated.find(x => x.key === relKey);
+    const pills = H.pillsOf(e, relKey);
+    let h = '<div class="tt">' + esc(e.epic) + '</div>';
+    h += '<div class="tr"><span>Команда</span><span class="v">' + esc(e.team) + '</span></div>';
+    if (r) h += '<div class="tr"><span>Релиз</span><span class="v">' + esc(r.short) + ' · ' + fmtD(parse(r.start)) + '</span></div>';
+    h += '<div class="tr"><span>Работ в окне</span><span class="v">' + pills.length + '</span></div>';
+    h += '<div class="tr"><span>Готовность</span><span class="v">' + Math.round(H.doneRatio(e) * 100) + '%</span></div>';
+    if (e.risk) h += '<div class="tr"><span>Риск</span><span class="v" style="color:var(--prizma-' + e.risk + ')">' + (e.risk === 'off-course' ? 'срыв' : 'дрейф') + '</span></div>';
+    return h;
+  }
+  function buildMileTip(label, date) {
+    let h = '<div class="tt">' + esc(label) + '</div>';
+    h += '<div class="tr"><span>Веха</span><span class="v">' + fmtD(parse(date)) + '</span></div>';
+    return h;
+  }
+  function positionTip(el) {
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = 'hidden'; tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px'; tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+  function wireTips() {
+    const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+    cal.querySelectorAll('.ev[data-tip]').forEach(ev => {
+      ev.addEventListener('mouseenter', () => {
+        tipEl = ev;
+        if (ev.dataset.tip === 'epic') tip.innerHTML = buildEpicTip(byId[ev.dataset.id], ev.dataset.rel);
+        else tip.innerHTML = buildMileTip(ev.dataset.mlabel, ev.dataset.mdate);
+        positionTip(ev);
+      });
+      ev.addEventListener('mouseleave', () => { if (tipEl === ev) { tip.classList.remove('show'); tipEl = null; } });
+    });
+  }
+
+  // ── controls ──
+  segEl.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.mode;
+    segEl.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+  document.getElementById('prev').addEventListener('click', () => { if (monthIdx > 0) { monthIdx--; render(); } });
+  document.getElementById('next').addEventListener('click', () => { if (monthIdx < months.length - 1) { monthIdx++; render(); } });
+
+  // ── init: sync + setTimeout + resize (gotcha a) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => { if (tipEl) positionTip(tipEl); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

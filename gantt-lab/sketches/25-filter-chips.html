@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 25 · Быстрые фильтры</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── чип-бар ── */
+  .chipbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin: 18px 0 14px; }
+  .chip { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+    font: 600 12.5px/1 var(--font); color: var(--prizma-text-secondary); background: transparent;
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); cursor: pointer; overflow: hidden;
+    transition: color .15s var(--ease-calm), border-color .15s, background .15s; }
+  .chip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--prizma-information); transition: width .15s var(--ease-calm); }
+  .chip:hover { color: var(--prizma-text-primary); border-color: var(--prizma-text-secondary); }
+  .chip.active { color: var(--prizma-text-primary); padding-left: 14px; background: var(--prizma-bg-elevated); }
+  .chip.active::before { width: 3px; }
+  .chip .ic { width: 14px; height: 14px; flex: none; color: var(--prizma-text-tertiary); }
+  .chip.active .ic { color: var(--prizma-information); }
+  .chip .cnt { font: 700 11px/1 var(--mono); padding: 3px 6px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); color: var(--prizma-text-secondary); min-width: 22px; text-align: center; }
+  .chip.active .cnt { color: var(--prizma-text-primary); }
+  .chip[data-zero="1"]:not(.active) { opacity: .5; }
+  /* «Все» — разделитель */
+  .chipbar .sep { width: 1px; height: 20px; background: var(--prizma-border-strong); margin: 0 3px; }
+  .chipbar .res { margin-left: auto; font-size: 12px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 8px; }
+  .chipbar .res b { font: 700 13px/1 var(--mono); color: var(--prizma-text-primary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 600px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 220px repeat(5, minmax(135px,1fr)); min-width: 895px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); transition: opacity .2s var(--ease-calm); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .tc { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .teamrow.empty { display: none; }
+
+  .erow { display: contents; }
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; transition: opacity .2s var(--ease-calm); }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { display: flex; align-items: center; gap: 7px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .elabel .riskdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; position: relative; transition: opacity .2s var(--ease-calm); }
+
+  /* приглушённые (не прошли фильтр) строки */
+  .gcell.dim { opacity: .14; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill.mine { box-shadow: inset 0 0 0 1px var(--prizma-information); }
+
+  .empty-note { padding: 40px 20px; text-align: center; color: var(--prizma-text-tertiary); font-size: 13px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 25 · Фильтры</div>
+      <h1>Быстрые фильтры</h1>
+      <p>Чип-бар над сеткой: каждый чип показывает живой счётчик подходящих эпиков (моно). Клик — мгновенно фильтрует грид: подходящие остаются, остальные глушатся. Фильтры комбинируются (И); «Все» сбрасывает. «Мои» — фиксированный пользователь <b>Сидоров</b>. Активный чип — полоса-слева на 3px, без заливки-акцента.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="chipbar" id="chipbar"></div>
+
+  <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const ME = 'Сидоров';
+  const CUR_REL = 'r121'; // окно, содержащее сегодня (23.05) — «эта неделя»
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+
+  // SVG-иконки (stroke currentColor) для чипов
+  const IC = {
+    all:    '<path d="M4 6h16M4 12h16M4 18h16"/>',
+    mine:   '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+    risk:   '<path d="M12 3l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+    prog:   '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/>',
+    week:   '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
+    moved:  '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+  };
+
+  // ── предикаты фильтров (на уровне эпика) ──
+  const FILTERS = [
+    { key: 'mine',  label: 'Мои',          ic: IC.mine,  test: e => e.pills.some(p => p.who === ME) },
+    { key: 'risk',  label: 'Риски',        ic: IC.risk,  test: e => !!e.risk },
+    { key: 'prog',  label: 'В работе',     ic: IC.prog,  test: e => e.pills.some(p => p.state === 'progress') },
+    { key: 'week',  label: 'Эта неделя',   ic: IC.week,  test: e => e.pills.some(p => p.col === CUR_REL) },
+    { key: 'moved', label: 'Перенесённые', ic: IC.moved, test: e => (e.moves || 0) > 0 },
+  ];
+
+  const active = new Set(); // активные ключи; пусто => «Все»
+
+  // комбинированная проверка (И всех активных)
+  function passes(e) {
+    if (active.size === 0) return true;
+    for (const k of active) { const f = FILTERS.find(x => x.key === k); if (f && !f.test(e)) return false; }
+    return true;
+  }
+
+  // счётчик для чипа: сколько эпиков прошло бы, если этот чип добавить к текущему набору
+  function countFor(key) {
+    const probe = new Set(active); probe.add(key);
+    return D.epics.filter(e => {
+      for (const k of probe) { const f = FILTERS.find(x => x.key === k); if (f && !f.test(e)) return false; }
+      return true;
+    }).length;
+  }
+
+  // ── чип-бар ──
+  const chipbar = document.getElementById('chipbar');
+  function renderChips() {
+    let html = '';
+    // «Все»
+    const allActive = active.size === 0;
+    html += '<button class="chip'+(allActive?' active':'')+'" data-key="__all"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+IC.all+'</svg>Все<span class="cnt">'+D.epics.length+'</span></button>';
+    html += '<span class="sep"></span>';
+    FILTERS.forEach(f => {
+      const on = active.has(f.key);
+      const n = countFor(f.key);
+      html += '<button class="chip'+(on?' active':'')+'" data-key="'+f.key+'" data-zero="'+(n===0&&!on?1:0)+'">' +
+        '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+f.ic+'</svg>' +
+        f.label + '<span class="cnt">'+n+'</span></button>';
+    });
+    // residual readout
+    const shown = D.epics.filter(passes).length;
+    html += '<span class="res">показано <b>'+shown+'</b> из '+D.epics.length+'</span>';
+    chipbar.innerHTML = html;
+  }
+
+  chipbar.addEventListener('click', e => {
+    const btn = e.target.closest('.chip'); if (!btn) return;
+    const key = btn.dataset.key;
+    if (key === '__all') { active.clear(); }
+    else { if (active.has(key)) active.delete(key); else active.add(key); }
+    renderChips();
+    applyFilter();
+  });
+
+  // ── рендер сетки (один раз; фильтр меняет только классы dim) ──
+  const grid = document.getElementById('grid');
+  function renderGrid() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      html += '<div class="teamrow" data-team="'+esc(team)+'"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="tc" data-team-cnt="'+esc(team)+'"></span></div>';
+      eps.forEach(e => {
+        const rdot = e.risk ? '<span class="riskdot" style="background:'+riskColor(e.risk)+'"></span>' : '';
+        html += '<div class="gcell elabel" data-epic="'+e.id+'"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+rdot+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach(p => {
+            if (p.col !== c.key) return;
+            const mine = p.who === ME ? ' mine' : '';
+            html += '<div class="pill'+mine+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  function applyFilter() {
+    const teamShown = {};
+    D.epics.forEach(e => {
+      const ok = passes(e);
+      grid.querySelectorAll('[data-epic="'+e.id+'"]').forEach(el => el.classList.toggle('dim', !ok));
+      if (ok) teamShown[e.team] = (teamShown[e.team] || 0) + 1;
+    });
+    // команды без видимых эпиков — скрываем шапку команды; иначе показываем счётчик
+    D.teams.forEach(team => {
+      const n = teamShown[team] || 0;
+      const tr = grid.querySelector('.teamrow[data-team="'+CSS.escape(team)+'"]');
+      if (tr) tr.classList.toggle('empty', n === 0 && active.size > 0);
+      const tc = grid.querySelector('[data-team-cnt="'+CSS.escape(team)+'"]');
+      if (tc) tc.textContent = (active.size > 0) ? (n + ' / ' + D.helpers.teamEpics(team).length) : (D.helpers.teamEpics(team).length + ' эпик');
+    });
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  renderGrid();
+  renderChips();
+  applyFilter();
+  setTimeout(applyFilter, 60);
+})();
+</script>
+</body>
+</html>

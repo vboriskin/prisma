@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 28 · Что если: ёмкость</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1140px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .layout { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+
+  /* ── матрица ── */
+  .matrix { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .row { display: grid; grid-template-columns: 190px repeat(5, 1fr); }
+  .row + .row .cell, .row + .row .rhead { border-top: 1px solid var(--prizma-border); }
+  .corner { padding: 13px 16px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .chead { padding: 12px 13px 10px; border-left: 1px solid var(--prizma-border); }
+  .chead .rel { font: 300 16px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .chead .rel.cur { color: var(--prizma-text-primary); }
+  .chead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+  .chead .dt { display: block; margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+
+  .rhead { padding: 0 16px; display: flex; flex-direction: column; justify-content: center; gap: 3px; min-height: 62px; }
+  .rhead .nm { font-size: 13px; font-weight: 600; }
+  .rhead .cap { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); transition: color .15s; }
+  .rhead.touched .cap { color: var(--prizma-information); }
+
+  .cell { border-left: 1px solid var(--prizma-border); min-height: 62px; padding: 10px 12px;
+    display: flex; flex-direction: column; justify-content: center; gap: 3px; position: relative;
+    transition: background .25s var(--ease-calm); }
+  .cell .load { font: 600 16px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.01em; }
+  .cell.empty .load { color: var(--prizma-text-tertiary); font-weight: 400; }
+  .cell .ratio { font: 500 11px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .cell.over .ratio { color: var(--prizma-text-primary); }
+  .cell .tag { font: 700 9px/1 var(--mono); letter-spacing: .3px; }
+  .cell.over .tag { color: var(--prizma-off-course); }
+  .cell.warn .tag { color: var(--prizma-drift); }
+
+  /* ── панель управления ── */
+  .panel { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); padding: 16px 16px 18px; position: sticky; top: 20px; }
+  .panel h2 { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
+  .panel .sub { margin: 0 0 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+
+  .slider { margin-bottom: 16px; }
+  .slider .sl-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+  .slider .sl-nm { font-size: 12.5px; font-weight: 600; }
+  .slider .sl-val { font: 600 12px/1 var(--mono); color: var(--prizma-text-primary); }
+  .slider .sl-val .delta { color: var(--prizma-information); margin-left: 5px; }
+  .slider .sl-val .delta.neg { color: var(--prizma-drift); }
+  .slider input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 3px;
+    background: var(--prizma-bg-tertiary); outline: none; cursor: pointer; }
+  .slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--prizma-information); border: 2px solid var(--prizma-bg-elevated); box-shadow: 0 1px 4px rgba(0,0,0,.4); cursor: grab; }
+  .slider input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--prizma-information);
+    border: 2px solid var(--prizma-bg-elevated); cursor: grab; }
+  .slider input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; }
+  .slider .scale { display: flex; justify-content: space-between; margin-top: 4px; }
+  .slider .scale span { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .pdiv { height: 1px; background: var(--prizma-border); margin: 4px 0 16px; }
+
+  /* читаемый вывод-инсайт */
+  .readout { border-radius: var(--r-md); background: var(--prizma-bg-tertiary); border-left: 3px solid var(--prizma-text-secondary);
+    padding: 11px 13px; font-size: 12px; line-height: 1.45; color: var(--prizma-text-secondary); min-height: 56px;
+    transition: border-color .2s, background .2s; }
+  .readout.alert { border-left-color: var(--prizma-off-course); background: var(--prizma-off-course-bg); color: var(--prizma-text-primary); }
+  .readout.calm { border-left-color: var(--prizma-on-course); }
+  .readout b { color: var(--prizma-text-primary); font-weight: 700; }
+  .readout .num { font-family: var(--mono); font-feature-settings: "tnum" 1; }
+
+  .pfoot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+  .pfoot .dirty { font: 600 10.5px/1 var(--mono); color: var(--prizma-drift); opacity: 0; transition: opacity .15s; }
+  .pfoot .dirty.on { opacity: 1; }
+
+  .legend { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+  .legend .lbl { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .legend .ramp { flex: 0 0 280px; height: 11px; border-radius: 6px; border: 1px solid var(--prizma-border);
+    background: linear-gradient(to right, color-mix(in srgb, var(--prizma-text-primary) 4%, transparent),
+      color-mix(in srgb, var(--prizma-drift) 38%, transparent), color-mix(in srgb, var(--prizma-off-course) 70%, transparent)); }
+  .legend .ticks { display: flex; justify-content: space-between; flex: 0 0 280px; margin-top: 4px; }
+  .legend .ticks span { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .legend-wrap { display: flex; flex-direction: column; }
+
+  .note { margin-top: 14px; font-size: 11px; color: var(--prizma-text-tertiary); max-width: 700px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 28 · что если</div>
+      <h1>Что если: ёмкость</h1>
+      <p>Прежде чем двигать людей в реальном плане — проверьте здесь. Тяните ползунок ёмкости команды, и тепловая матрица пересчитывается вживую: видно, где появится перегруз. Это песочница: ничего не сохраняется, пока вы не зафиксируете.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="layout">
+    <div>
+      <div class="matrix" id="matrix"></div>
+      <div class="legend">
+        <span class="lbl">Загрузка</span>
+        <div class="legend-wrap">
+          <div class="ramp"></div>
+          <div class="ticks"><span>свободно</span><span>в пределах</span><span>перегруз</span></div>
+        </div>
+      </div>
+      <p class="note">Загрузка = <code>helpers.loadByTeamRelease</code> ÷ ёмкость команды. Базовые ёмкости здесь синтетические (заданы в файле); в реальном приложении источник — <code>state.employees[].capacity</code>, агрегированная по команде на окно релиза. Ползунок меняет только локальную модель «что если».</p>
+    </div>
+
+    <div class="panel">
+      <h2>Ёмкость команд</h2>
+      <p class="sub">человек в команде · окно релиза</p>
+      <div id="sliders"></div>
+      <div class="pdiv"></div>
+      <div class="readout" id="readout">Двигайте ползунки — увидите эффект на перегруз.</div>
+      <div class="pfoot">
+        <button class="pz-btn" id="reset">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          Сброс
+        </button>
+        <span class="dirty" id="dirty">изменено · не сохранено</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const cols = D.releases;
+
+  // Синтетическая БАЗОВАЯ ёмкость на команду (человек = условных «слотов работ» за окно).
+  // В реальном приложении это сумма employees.capacity по команде на окно релиза.
+  const BASE = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  // текущая (симулируемая) ёмкость — копия базовой
+  const cap = Object.assign({}, BASE);
+  const MIN = 1, MAX = 6;
+
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  // тон ячейки по коэффициенту загрузки (та же шкала, что в скетче 06)
+  function cellTint(ratio) {
+    if (ratio <= 0) return 'transparent';
+    if (ratio <= 1) { const x = Math.round(6 + ratio * 34); return 'color-mix(in srgb, var(--prizma-drift) ' + x + '%, transparent)'; }
+    const over = Math.min(ratio - 1, 0.8) / 0.8; const x = Math.round(46 + over * 36);
+    return 'color-mix(in srgb, var(--prizma-off-course) ' + x + '%, transparent)';
+  }
+  function ratioClass(ratio) { return ratio > 1 ? 'over' : (ratio > 0.85 ? 'warn' : ''); }
+
+  /* ── каркас матрицы (строится один раз; обновляем только ячейки) ── */
+  const root = document.getElementById('matrix');
+  let html = '<div class="row"><div class="corner"><span class="pz-eyebrow">Команда / Релиз</span></div>';
+  cols.forEach(c => {
+    const dt = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+    html += '<div class="chead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dt">'+dt+'</span></div>';
+  });
+  html += '</div>';
+  D.teams.forEach(team => {
+    html += '<div class="row" data-team-row="'+esc(team)+'"><div class="rhead" data-rh="'+esc(team)+'"><span class="nm">'+esc(team)+'</span><span class="cap" data-cap="'+esc(team)+'"></span></div>';
+    cols.forEach(c => {
+      const load = D.helpers.loadByTeamRelease(team, c.key);
+      html += '<div class="cell'+(load===0?' empty':'')+'" data-team="'+esc(team)+'" data-col="'+c.key+'" data-load="'+load+'">'+
+        '<span class="load">'+load+'</span><span class="ratio"></span><span class="tag"></span></div>';
+    });
+    html += '</div>';
+  });
+  root.innerHTML = html;
+
+  // обновляет ячейки одной команды (или всех)
+  function paintTeam(team) {
+    const c = cap[team];
+    document.querySelector('[data-cap="'+CSS.escape(team)+'"]').textContent = 'ёмкость ' + c + '/окно';
+    const rh = document.querySelector('[data-rh="'+CSS.escape(team)+'"]');
+    rh.classList.toggle('touched', c !== BASE[team]);
+    root.querySelectorAll('.cell[data-team="'+CSS.escape(team)+'"]').forEach(cell => {
+      const load = +cell.dataset.load;
+      const ratio = load / c;
+      cell.style.background = cellTint(ratio);
+      cell.classList.remove('over', 'warn');
+      const rc = ratioClass(ratio); if (rc) cell.classList.add(rc);
+      const rEl = cell.querySelector('.ratio');
+      const tEl = cell.querySelector('.tag');
+      if (load === 0) { rEl.textContent = ''; tEl.textContent = ''; }
+      else {
+        rEl.textContent = '/ ' + c + ' · ' + ratio.toFixed(2);
+        tEl.textContent = ratio > 1 ? 'ПЕРЕГРУЗ' : (ratio > 0.85 ? 'НА ПРЕДЕЛЕ' : '');
+      }
+    });
+  }
+  function paintAll() { D.teams.forEach(paintTeam); }
+
+  /* ── ползунки ── */
+  const slWrap = document.getElementById('sliders');
+  slWrap.innerHTML = D.teams.map(team =>
+    '<div class="slider" data-sl="'+esc(team)+'">'+
+      '<div class="sl-top"><span class="sl-nm">'+esc(team)+'</span>'+
+        '<span class="sl-val"><span class="v" data-v="'+esc(team)+'">'+BASE[team]+'</span> чел.<span class="delta" data-d="'+esc(team)+'"></span></span></div>'+
+      '<input type="range" min="'+MIN+'" max="'+MAX+'" step="1" value="'+BASE[team]+'" data-team="'+esc(team)+'" aria-label="Ёмкость: '+esc(team)+'">'+
+      '<div class="scale"><span>'+MIN+'</span><span>база '+BASE[team]+'</span><span>'+MAX+'</span></div>'+
+    '</div>'
+  ).join('');
+
+  const readout = document.getElementById('readout');
+  const dirty = document.getElementById('dirty');
+
+  function pluralPpl(n){ const a=Math.abs(n); const m10=a%10,m100=a%100; if(m10===1&&m100!==11) return 'человеке'; return 'человеках'; }
+
+  // строит читаемый вывод: берём команду с самым свежим изменением и описываем эффект
+  function updateReadout(lastTeam) {
+    const anyDirty = D.teams.some(t => cap[t] !== BASE[t]);
+    dirty.classList.toggle('on', anyDirty);
+
+    if (!lastTeam || cap[lastTeam] === BASE[lastTeam]) {
+      // если последняя команда вернулась к базе — ищем любую перегруженную
+      const over = findWorstOverload();
+      if (over) { renderReadout(over.team, over.col, over.ratio, over.delta, 'alert'); return; }
+      readout.className = 'readout'; readout.textContent = anyDirty ? 'Изменения внесены — перегрузов нет.' : 'Двигайте ползунки — увидите эффект на перегруз.';
+      return;
+    }
+    // для изменённой команды — её худшее по перегрузу окно
+    const worst = worstCellFor(lastTeam);
+    const delta = cap[lastTeam] - BASE[lastTeam];
+    if (worst && worst.ratio > 1) renderReadout(lastTeam, worst.col, worst.ratio, delta, 'alert');
+    else if (worst) renderReadout(lastTeam, worst.col, worst.ratio, delta, worst.ratio > 0.85 ? '' : 'calm');
+    else { readout.className = 'readout'; readout.textContent = 'У команды «'+lastTeam+'» нет работ в окнах.'; }
+  }
+  function worstCellFor(team) {
+    let best = null;
+    cols.forEach(c => {
+      const load = D.helpers.loadByTeamRelease(team, c.key);
+      if (load === 0) return;
+      const ratio = load / cap[team];
+      if (!best || ratio > best.ratio) best = { col: c, load, ratio };
+    });
+    return best;
+  }
+  function findWorstOverload() {
+    let best = null;
+    D.teams.forEach(team => {
+      const w = worstCellFor(team);
+      if (w && w.ratio > 1 && (!best || w.ratio > best.ratio)) best = { team, col: w.col, ratio: w.ratio, delta: cap[team]-BASE[team] };
+    });
+    return best;
+  }
+  function renderReadout(team, col, ratio, delta, cls) {
+    readout.className = 'readout ' + cls;
+    const sign = delta < 0 ? '−' : '+';
+    const dtxt = delta === 0 ? '' : 'при <b>'+sign+Math.abs(delta)+' '+pluralPpl(delta)+'</b> в «'+esc(team)+'» ';
+    const verb = ratio > 1 ? '<b>перегруз</b>' : (ratio > 0.85 ? 'почти предел' : 'в пределах');
+    readout.innerHTML = dtxt + 'окно <b>'+esc(col.short)+'</b>: <span class="num">'+ratio.toFixed(2)+'</span> → '+verb+'.';
+  }
+
+  // навешиваем на ползунки
+  slWrap.querySelectorAll('input[type=range]').forEach(inp => {
+    const team = inp.dataset.team;
+    const onInput = () => {
+      cap[team] = +inp.value;
+      document.querySelector('[data-v="'+CSS.escape(team)+'"]').textContent = inp.value;
+      const d = cap[team] - BASE[team];
+      const dEl = document.querySelector('[data-d="'+CSS.escape(team)+'"]');
+      dEl.textContent = d === 0 ? '' : (d > 0 ? '+'+d : '−'+Math.abs(d));
+      dEl.classList.toggle('neg', d < 0);
+      paintTeam(team);            // живой пересчёт ТОЛЬКО этой команды
+      updateReadout(team);
+    };
+    inp.addEventListener('input', onInput);
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    D.teams.forEach(t => { cap[t] = BASE[t]; });
+    slWrap.querySelectorAll('input[type=range]').forEach(inp => {
+      inp.value = BASE[inp.dataset.team];
+      document.querySelector('[data-v="'+CSS.escape(inp.dataset.team)+'"]').textContent = BASE[inp.dataset.team];
+      const dEl = document.querySelector('[data-d="'+CSS.escape(inp.dataset.team)+'"]'); dEl.textContent = ''; dEl.classList.remove('neg');
+    });
+    paintAll();
+    readout.className = 'readout'; readout.textContent = 'Сброшено к базовым ёмкостям.';
+    dirty.classList.remove('on');
+  });
+
+  // первичная отрисовка (sync + страховка, не только rAF)
+  paintAll();
+  setTimeout(paintAll, 60);
+  window.addEventListener('resize', paintAll);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    setTimeout(paintAll, 0);
+  });
+})();
+</script>
+</body>
+</html>

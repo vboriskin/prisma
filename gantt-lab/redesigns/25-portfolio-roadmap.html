@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 25 · Портфельная дорожная карта</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.dot { width: 7px; height: 7px; border-radius: 50%; }
+  .top .legend i.flag { width: 0; height: 12px; border-radius: 0; border-left: 1px dotted var(--prizma-text-secondary); }
+  .top .legend i.fill { background: color-mix(in srgb, var(--prizma-text-primary) 16%, transparent); border: 1px solid var(--prizma-border-strong); }
+
+  .eyebrowbar { padding: 9px 22px 0; flex: none; }
+
+  /* ── roadmap ── */
+  .rm-scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
+  .rm { position: relative; min-width: 1180px; }
+
+  /* sticky left labels */
+  .LBLW { width: 220px; }
+
+  /* header: release columns */
+  .rm-head { position: sticky; top: 0; z-index: 8; background: var(--prizma-bg); display: grid; grid-template-columns: 220px 1fr; border-bottom: 1px solid var(--prizma-border-strong); height: 60px; }
+  .rm-head .corner { position: sticky; left: 0; z-index: 9; background: var(--prizma-bg); display: flex; align-items: flex-end; padding: 0 16px 11px; border-right: 1px solid var(--prizma-border); }
+  .rm-head .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .rm-head .cols { position: relative; }
+  .rm-head .colhd { position: absolute; top: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 14px; }
+  .rm-head .colhd .rn { font: 300 19px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .rm-head .colhd .rn.cur { color: var(--prizma-text-primary); }
+  .rm-head .colhd .dt { margin-top: 5px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .rm-head .colsep { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-border); }
+
+  /* faint release background bands (neutral grey) */
+  .rm-grid { position: absolute; top: 0; left: 220px; bottom: 0; pointer-events: none; z-index: 0; }
+  .rm-grid .band { position: absolute; top: 0; bottom: 0; }
+  .rm-grid .band.cur { background: color-mix(in srgb, var(--prizma-text-primary) 4%, transparent); }
+  .rm-grid .band.alt { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+  .rm-grid .sep { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-border); }
+
+  /* team swimlane */
+  .lane { display: grid; grid-template-columns: 220px 1fr; position: relative; }
+  .lane + .lane { border-top: 1px solid var(--prizma-border); }
+  .lane-lbl { position: sticky; left: 0; z-index: 6; background: var(--prizma-bg); border-right: 1px solid var(--prizma-border); padding: 14px 16px; display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+  .lane-lbl .tn { font: 600 13.5px/1.1 var(--font); color: var(--prizma-text-primary); }
+  .lane-lbl .tm { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 8px; }
+  .lane-lbl .tm .risk { color: var(--prizma-off-course); }
+  .lane-track { position: relative; padding: 12px 0; }
+
+  /* epic bar — neutral, rounded, status accent stripe-left + done-fill */
+  .bar { position: absolute; height: 30px; border-radius: var(--r-md); background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); overflow: hidden; display: flex; align-items: center; cursor: default; transition: box-shadow .15s, border-color .15s; }
+  .bar:hover { box-shadow: 0 6px 20px rgba(0,0,0,.45); border-color: var(--prizma-border-strong); z-index: 5; }
+  .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--prizma-text-primary) 13%, transparent); }
+  /* status accent stripe-left (2-3px) — semantic only */
+  .bar .accent { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; z-index: 2; background: var(--prizma-on-course); }
+  .bar.r-drift .accent { background: var(--prizma-drift); }
+  .bar.r-off .accent { background: var(--prizma-off-course); }
+  .bar .lab { position: relative; z-index: 2; padding: 0 10px 0 12px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .bar .lab .nm { font: 600 12px/1 var(--font); color: var(--prizma-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .lab .pct { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; }
+  .bar.is-done .lab .pct { color: var(--prizma-on-course); }
+
+  /* milestone vertical markers across lanes */
+  .mlayer { position: absolute; top: 0; left: 220px; bottom: 0; pointer-events: none; z-index: 4; }
+  .mline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dotted var(--prizma-text-secondary); }
+  .mlayer .mhead { position: absolute; top: 0; display: flex; align-items: center; gap: 4px; transform: translateX(-50%); background: var(--prizma-bg); padding: 0 5px; }
+  .mlayer .mhead svg { width: 10px; height: 10px; color: var(--prizma-text-secondary); }
+  .mlayer .mhead .mt { font: 600 9px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 200px; max-width: 290px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 11px 13px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tt { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+  .tip .tr { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tip .tr .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .relrow { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .tip .rc { font: 600 9.5px/1 var(--mono); padding: 4px 7px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); color: var(--prizma-text-tertiary); }
+  .tip .rc.has { color: var(--prizma-text-primary); border-color: var(--prizma-border-strong); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Портфельная дорожная карта</span>
+    <span class="sub">Q2 · уровень эпиков</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i class="fill"></i>готовность</span>
+      <span><i class="dot" style="background:var(--prizma-on-course)"></i>по курсу</span>
+      <span><i class="dot" style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i class="dot" style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="flag"></i>веха</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 25 · Roadmap</span></div>
+  <div class="rm-scroll" id="scroll">
+    <div class="rm" id="rm"></div>
+  </div>
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MN = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+  const fmtD = d => d.getDate() + ' ' + MN[d.getMonth()];
+
+  const LBL_W = 220;
+  const COL_W = 224;            // ширина одной релиз-колонки
+  // колонки роадмапа: все релизы (включая бэклог/овертайм для exec-обзора)
+  const cols = D.releases;
+  const trackW = cols.length * COL_W;
+  const colIndex = {}; cols.forEach((c, i) => colIndex[c.key] = i);
+  const xOfCol = i => i * COL_W;
+  const centerOfCol = i => i * COL_W + COL_W / 2;
+
+  // span эпика на уровне эпика: от самой ранней до самой поздней колонки, где есть pills
+  function epicSpan(e) {
+    let lo = Infinity, hi = -Infinity;
+    e.pills.forEach(p => {
+      const i = colIndex[p.col];
+      if (i === undefined) return;
+      if (i < lo) lo = i;
+      if (i > hi) hi = i;
+    });
+    if (lo === Infinity) return null;
+    return { lo, hi };
+  }
+
+  // дата-позиция для вехи: внутри своей релиз-колонки пропорционально окну релиза
+  function xOfDate(dateStr) {
+    const d = parse(dateStr);
+    const r = cols.find(c => c.dated && d >= parse(c.start) && d <= parse(c.end));
+    if (!r) return null;
+    const i = colIndex[r.key];
+    const s = parse(r.start), e = new Date(parse(r.end).getTime() + DAY);
+    const frac = (d - s) / (e - s);
+    return xOfCol(i) + Math.max(0, Math.min(1, frac)) * COL_W;
+  }
+
+  const rm = document.getElementById('rm');
+  const tip = document.getElementById('tip');
+  const scroll = document.getElementById('scroll');
+
+  function headHtml() {
+    let s = '<div class="rm-head">';
+    s += '<div class="corner"><span class="pz-eyebrow">Команда</span></div>';
+    s += '<div class="cols">';
+    cols.forEach((c, i) => {
+      const x = xOfCol(i);
+      const dt = c.dated ? fmtD(parse(c.start)) + ' – ' + fmtD(parse(c.end)) : 'без даты';
+      s += '<div class="colhd" style="left:' + x + 'px;width:' + COL_W + 'px">' +
+        '<span class="rn' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</span>' +
+        '<span class="dt">' + dt + '</span></div>';
+      s += '<div class="colsep" style="left:' + x + 'px"></div>';
+    });
+    s += '<div class="colsep" style="left:' + trackW + 'px"></div>';
+    s += '</div></div>';
+    return s;
+  }
+
+  function lanesHtml() {
+    let s = '';
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team);
+      const risky = eps.filter(e => e.risk).length;
+      const rowH = 12 + eps.length * 38 + 2; // padding + bars
+      s += '<div class="lane">';
+      s += '<div class="lane-lbl"><span class="tn">' + esc(team) + '</span><span class="tm"><span>' + eps.length + ' эпиков</span>' + (risky ? '<span class="risk">' + risky + ' под риском</span>' : '') + '</span></div>';
+      s += '<div class="lane-track" style="height:' + rowH + 'px">';
+      eps.forEach((e, idx) => {
+        const span = epicSpan(e);
+        if (!span) return;
+        const x1 = xOfCol(span.lo) + 8;
+        const x2 = xOfCol(span.hi) + COL_W - 8;
+        const w = Math.max(40, x2 - x1);
+        const dr = H.doneRatio(e);
+        const isDone = dr >= 0.999;
+        let cls = 'bar';
+        if (e.risk === 'off-course') cls += ' r-off';
+        else if (e.risk === 'drift') cls += ' r-drift';
+        if (isDone) cls += ' is-done';
+        const top = 12 + idx * 38;
+        s += '<div class="' + cls + '" data-id="' + e.id + '" style="left:' + x1.toFixed(1) + 'px;width:' + w.toFixed(1) + 'px;top:' + top + 'px">';
+        s += '<span class="fill" style="width:' + (dr * 100).toFixed(1) + '%"></span>';
+        s += '<span class="accent"></span>';
+        s += '<span class="lab"><span class="nm">' + esc(e.epic) + '</span><span class="pct">' + Math.round(dr * 100) + '%</span></span>';
+        s += '</div>';
+      });
+      s += '</div></div>';
+    });
+    return s;
+  }
+
+  function render() {
+    rm.innerHTML = '';
+    rm.style.width = (LBL_W + trackW) + 'px';
+    rm.insertAdjacentHTML('beforeend', headHtml());
+    const body = document.createElement('div');
+    body.style.position = 'relative';
+    body.innerHTML = lanesHtml();
+    rm.appendChild(body);
+    placeOverlays(body);
+    wireTips();
+  }
+
+  // фон-полосы релизов (нейтральные) + вехи поверх дорожек
+  function placeOverlays(body) {
+    const h = body.scrollHeight;
+    // background bands
+    let bands = '<div class="rm-grid" style="width:' + trackW + 'px;height:' + h + 'px">';
+    cols.forEach((c, i) => {
+      const cls = c.current ? 'cur' : (i % 2 ? 'alt' : '');
+      bands += '<div class="band ' + cls + '" style="left:' + xOfCol(i) + 'px;width:' + COL_W + 'px"></div>';
+      bands += '<div class="sep" style="left:' + xOfCol(i) + 'px"></div>';
+    });
+    bands += '<div class="sep" style="left:' + trackW + 'px"></div>';
+    bands += '</div>';
+    body.insertAdjacentHTML('afterbegin', bands);
+
+    // milestones — vertical markers across all lanes
+    let ms = '<div class="mlayer" style="width:' + trackW + 'px;height:' + h + 'px">';
+    D.milestones.forEach(m => {
+      const x = xOfDate(m.date);
+      if (x === null) return;
+      ms += '<div class="mline" style="left:' + x.toFixed(1) + 'px"></div>';
+      ms += '<div class="mhead" style="left:' + x.toFixed(1) + 'px">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18"/><path d="M5 4h11l-2.5 3.5L16 11H5"/></svg>' +
+        '<span class="mt">' + esc(m.label) + '</span></div>';
+    });
+    ms += '</div>';
+    body.insertAdjacentHTML('beforeend', ms);
+  }
+
+  // ── tooltip ──
+  let tipEl = null;
+  function buildTip(e) {
+    const dr = H.doneRatio(e);
+    let h = '<div class="tt">' + esc(e.epic) + '</div>';
+    h += '<div class="tr"><span>Команда</span><span class="v">' + esc(e.team) + '</span></div>';
+    h += '<div class="tr"><span>Готовность</span><span class="v">' + Math.round(dr * 100) + '%</span></div>';
+    h += '<div class="tr"><span>Оценка</span><span class="v">' + H.effortOf(e) + ' дн</span></div>';
+    h += '<div class="tr"><span>Работ</span><span class="v">' + e.pills.length + '</span></div>';
+    if (e.moves) h += '<div class="tr"><span>Переносов</span><span class="v">' + e.moves + '</span></div>';
+    if (e.risk) h += '<div class="tr"><span>Риск</span><span class="v" style="color:var(--prizma-' + e.risk + ')">' + (e.risk === 'off-course' ? 'срыв' : 'дрейф') + '</span></div>';
+    h += '<div class="relrow">';
+    cols.forEach(c => {
+      const n = H.pillsOf(e, c.key).length;
+      h += '<span class="rc' + (n ? ' has' : '') + '">' + esc(c.short) + (n ? ' · ' + n : '') + '</span>';
+    });
+    h += '</div>';
+    return h;
+  }
+  function positionTip(el) {
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = 'hidden'; tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px'; tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+  function wireTips() {
+    const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+    rm.querySelectorAll('.bar').forEach(bar => {
+      bar.addEventListener('mouseenter', () => { tipEl = bar; tip.innerHTML = buildTip(byId[bar.dataset.id]); positionTip(bar); });
+      bar.addEventListener('mouseleave', () => { if (tipEl === bar) { tip.classList.remove('show'); tipEl = null; } });
+    });
+  }
+
+  // ── init: sync + setTimeout + resize (gotcha a) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => render());
+  scroll.addEventListener('scroll', () => { if (tipEl) positionTip(tipEl); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

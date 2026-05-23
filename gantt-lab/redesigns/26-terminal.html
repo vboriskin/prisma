@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 26 · Терминал</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .now { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .now b { color: var(--prizma-information); font-weight: 600; }
+
+  .eyebrowbar { padding: 9px 22px 0; flex: none; }
+
+  /* ── terminal frame — TUI look via CSS borders/backgrounds, NO box-drawing chars ── */
+  .term-wrap { flex: 1; min-height: 0; padding: 10px 22px 18px; display: flex; }
+  .term { flex: 1; min-height: 0; display: flex; flex-direction: column; background: color-mix(in srgb, var(--prizma-bg-elevated) 60%, var(--prizma-bg)); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+
+  /* фальш-titlebar окна терминала (CSS, без glyph-кнопок) */
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--prizma-border); background: var(--prizma-bg-tertiary); flex: none; }
+  .term-bar .dotrow { display: flex; gap: 6px; }
+  .term-bar .dotrow i { width: 9px; height: 9px; border-radius: 50%; background: var(--prizma-border-strong); display: inline-block; }
+  .term-bar .ttl { font: 600 11px/1 var(--mono); color: var(--prizma-text-secondary); letter-spacing: .3px; }
+  .term-bar .ttl b { color: var(--prizma-text-primary); }
+  .term-bar .spacer { flex: 1; }
+  .term-bar .hint { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* область вывода — скроллится */
+  .out { flex: 1; overflow: auto; min-height: 0; padding: 14px 16px; font: 13px/1.55 var(--mono); font-feature-settings: "tnum" 1, "lnum" 1; color: var(--prizma-text-secondary); }
+  .out .line { white-space: pre-wrap; word-break: break-word; }
+  .out .cmd { color: var(--prizma-text-primary); }
+  .out .cmd .pr { color: var(--prizma-information); }
+  .out .muted { color: var(--prizma-text-tertiary); }
+  .out .head { color: var(--prizma-text-primary); font-weight: 700; }
+  .out .key { color: var(--prizma-text-primary); }
+  .out .num { color: var(--prizma-text-primary); }
+  .out .on { color: var(--prizma-on-course); }
+  .out .drift { color: var(--prizma-drift); }
+  .out .off { color: var(--prizma-off-course); }
+  .out .info { color: var(--prizma-information); }
+  .out .insight { color: var(--prizma-insight); }
+  .out .err { color: var(--prizma-off-course); }
+  .out .sep { color: var(--prizma-border-strong); }
+  .out .gap { height: 7px; }
+
+  /* «таблица» только через CSS-границы (никаких ascii-рамок) */
+  .row { display: flex; gap: 0; }
+  .row > span { padding-right: 18px; white-space: pre; }
+  .row .c-pad { padding-right: 0; }
+  .ruler { border-bottom: 1px solid var(--prizma-border); margin: 5px 0 6px; height: 0; }
+
+  /* статус-бар капасити: чисто CSS (заливка var(--prizma-bg-tertiary)) */
+  .meter { display: inline-flex; align-items: center; gap: 8px; }
+  .meter .track { width: 150px; height: 9px; border-radius: 3px; background: var(--prizma-bg-tertiary); overflow: hidden; position: relative; border: 1px solid var(--prizma-border); }
+  .meter .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--prizma-text-secondary); }
+  .meter .track i.hot { background: var(--prizma-drift); }
+  .meter .track i.crit { background: var(--prizma-off-course); }
+
+  /* prompt-строка ввода */
+  .prompt { flex: none; display: flex; align-items: center; gap: 9px; padding: 11px 16px; border-top: 1px solid var(--prizma-border); background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .prompt .ps1 { font: 700 13px/1 var(--mono); color: var(--prizma-information); flex: none; }
+  .prompt input { flex: 1; background: transparent; border: none; outline: none; color: var(--prizma-text-primary); font: 13px/1 var(--mono); caret-color: var(--prizma-information); padding: 3px 0; }
+  .prompt input::placeholder { color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Терминал</span>
+    <span class="sub">план как команды</span>
+    <span class="spacer"></span>
+    <span class="now" id="now"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 26 · Терминал</span></div>
+  <div class="term-wrap">
+    <div class="term">
+      <div class="term-bar">
+        <span class="dotrow"><i></i><i></i><i></i></span>
+        <span class="ttl"><b>prizma</b>@plan — Q2</span>
+        <span class="spacer"></span>
+        <span class="hint">help — список команд · ↑ — повтор</span>
+      </div>
+      <div class="out" id="out"></div>
+      <div class="prompt">
+        <span class="ps1">prizma&nbsp;$</span>
+        <input id="inp" type="text" autocomplete="off" spellcheck="false" placeholder="введите команду (help)…" aria-label="Командная строка">
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const MN = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+  const parse = s => new Date(s + 'T00:00:00');
+  const fmtD = d => d.getDate() + ' ' + MN[d.getMonth()];
+  const pad = (s, n) => { s = String(s); return s + ' '.repeat(Math.max(0, n - s.length)); };
+
+  const out = document.getElementById('out');
+  const inp = document.getElementById('inp');
+
+  // сегодня / сейчас
+  const today = parse(D.today);
+  const curRel = D.releases.find(r => r.dated && today >= parse(r.start) && today <= parse(r.end));
+  document.getElementById('now').innerHTML = 'сейчас: <b>' + fmtD(today) + '</b> · релиз ' + (curRel ? esc(curRel.short) : '—');
+
+  // нормализация ключа релиза: "1.21" / "121" / "r121" → r121
+  function relKey(arg) {
+    if (!arg) return null;
+    const a = arg.toLowerCase().replace(/[.\s]/g, '');
+    const map = { '120': 'r120', '121': 'r121', '122': 'r122', 'r120': 'r120', 'r121': 'r121', 'r122': 'r122', 'backlog': 'backlog', 'бэклог': 'backlog', 'overtime': 'overtime', 'овертайм': 'overtime' };
+    return map[a] || (D.releases.find(r => r.key === a || r.short.toLowerCase() === arg.toLowerCase()) || {}).key || null;
+  }
+  function riskWord(r) { return r === 'off-course' ? '<span class="off">срыв</span>' : (r === 'drift' ? '<span class="drift">дрейф</span>' : '<span class="on">по курсу</span>'); }
+  function stateWord(s) {
+    if (s === 'done') return '<span class="on">готово</span>';
+    if (s === 'progress') return '<span class="info">в работе</span>';
+    if (s === 'unplanned') return '<span class="drift">внепланово</span>';
+    return '<span class="muted">план</span>';
+  }
+
+  // ── печать ──
+  function emit(html) { const d = document.createElement('div'); d.className = 'line'; d.innerHTML = html; out.appendChild(d); }
+  function gap() { const d = document.createElement('div'); d.className = 'gap'; out.appendChild(d); }
+  function echoCmd(raw) { emit('<span class="cmd"><span class="pr">prizma $</span> ' + esc(raw) + '</span>'); }
+  function scrollEnd() { out.scrollTop = out.scrollHeight; }
+
+  // ── команды ──
+  function cmdHelp() {
+    emit('<span class="head">Команды</span>');
+    emit('<span class="sep">—</span>');
+    const rows = [
+      ['ls <релиз>', 'эпики и работы в окне релиза (напр. ls 1.21)'],
+      ['risk', 'эпики под риском (дрейф / срыв)'],
+      ['team <имя>', 'эпики команды (напр. team Платежи)'],
+      ['load', 'загрузка команд по релизам (капасити)'],
+      ['rel', 'окна релизов и даты'],
+      ['help', 'этот список'],
+      ['clear', 'очистить экран'],
+    ];
+    rows.forEach(r => emit('<span class="row"><span class="key" style="min-width:128px">' + esc(r[0]) + '</span><span class="muted c-pad">' + esc(r[1]) + '</span></span>'));
+    emit('<span class="muted">подсказка: ↑ — повтор последней команды</span>');
+  }
+
+  function cmdRel() {
+    emit('<span class="head">Окна релизов</span>');
+    emit('<div class="ruler"></div>');
+    D.releases.forEach(r => {
+      const dt = r.dated ? fmtD(parse(r.start)) + ' – ' + fmtD(parse(r.end)) : 'без даты';
+      const tag = r.current ? '<span class="info">  [ текущий ]</span>' : '';
+      emit('<span class="row"><span class="key" style="min-width:90px">' + esc(r.short) + '</span><span style="min-width:160px">' + dt + '</span><span class="c-pad">' + tag + '</span></span>');
+    });
+  }
+
+  function cmdLs(arg) {
+    const key = relKey(arg);
+    if (!key) { emit('<span class="err">ls: укажите релиз — 1.20 / 1.21 / 1.22 / backlog / overtime</span>'); return; }
+    const rel = D.releases.find(r => r.key === key);
+    const dt = rel.dated ? fmtD(parse(rel.start)) + ' – ' + fmtD(parse(rel.end)) : 'без даты';
+    emit('<span class="head">Релиз ' + esc(rel.short) + '</span> <span class="muted">' + dt + (rel.current ? ' · <span class="info">текущий</span>' : '') + '</span>');
+    emit('<div class="ruler"></div>');
+    let total = 0, found = 0;
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team).filter(e => H.pillsOf(e, key).length);
+      if (!eps.length) return;
+      found++;
+      emit('<span class="muted">' + esc(team) + '</span>');
+      eps.forEach(e => {
+        const pills = H.pillsOf(e, key);
+        total += pills.length;
+        const work = pills.map(p => p.wt + (p.who ? '(' + esc(p.who) + ')' : '')).join(' ');
+        const rk = e.risk ? ' · ' + riskWord(e.risk) : '';
+        emit('<span class="row"><span class="key" style="min-width:30px">' + esc(e.id) + '</span><span style="min-width:230px">' + esc(e.epic) + '</span><span class="c-pad muted">' + work + rk + '</span></span>');
+      });
+    });
+    if (!found) emit('<span class="muted">— нет эпиков в этом окне</span>');
+    else { gap(); emit('<span class="muted">итого работ: <span class="num">' + total + '</span></span>'); }
+  }
+
+  function cmdRisk() {
+    const risky = D.epics.filter(e => e.risk);
+    emit('<span class="head">Под риском</span> <span class="muted">' + risky.length + ' из ' + D.epics.length + '</span>');
+    emit('<div class="ruler"></div>');
+    const order = { 'off-course': 0, 'drift': 1 };
+    risky.slice().sort((a, b) => order[a.risk] - order[b.risk]).forEach(e => {
+      const done = Math.round(H.doneRatio(e) * 100);
+      emit('<span class="row"><span style="min-width:96px">' + riskWord(e.risk) + '</span><span class="muted" style="min-width:96px">' + esc(e.team) + '</span><span style="min-width:236px" class="key">' + esc(e.epic) + '</span><span class="c-pad muted">' + done + '% · ' + (e.moves || 0) + ' пер.</span></span>');
+    });
+    if (!risky.length) emit('<span class="on">— рисков нет</span>');
+  }
+
+  function cmdTeam(arg) {
+    if (!arg) { emit('<span class="err">team: укажите команду — ' + D.teams.map(esc).join(' / ') + '</span>'); return; }
+    const team = D.teams.find(t => t.toLowerCase() === arg.toLowerCase()) || D.teams.find(t => t.toLowerCase().indexOf(arg.toLowerCase()) === 0);
+    if (!team) { emit('<span class="err">team: команда «' + esc(arg) + '» не найдена</span>'); return; }
+    const eps = H.teamEpics(team);
+    const risky = eps.filter(e => e.risk).length;
+    emit('<span class="head">' + esc(team) + '</span> <span class="muted">' + eps.length + ' эпиков' + (risky ? ' · <span class="off">' + risky + ' под риском</span>' : '') + '</span>');
+    emit('<div class="ruler"></div>');
+    eps.forEach(e => {
+      const done = Math.round(H.doneRatio(e) * 100);
+      const rk = e.risk ? riskWord(e.risk) : '<span class="on">по курсу</span>';
+      // в каких релизах работы
+      const rels = D.releases.filter(r => H.pillsOf(e, r.key).length).map(r => r.short).join(' ');
+      emit('<span class="row"><span class="key" style="min-width:30px">' + esc(e.id) + '</span><span style="min-width:236px">' + esc(e.epic) + '</span><span style="min-width:92px">' + rk + '</span><span class="c-pad muted">' + done + '% · ' + H.effortOf(e) + ' дн · ' + esc(rels) + '</span></span>');
+    });
+  }
+
+  function cmdLoad() {
+    const datedRels = D.releases.filter(r => r.dated);
+    emit('<span class="head">Загрузка команд</span> <span class="muted">работ по релизам</span>');
+    emit('<div class="ruler"></div>');
+    // шапка
+    let head = '<span class="row"><span class="muted" style="min-width:118px">команда</span>';
+    datedRels.forEach(r => head += '<span class="muted" style="min-width:56px">' + esc(r.short) + '</span>');
+    head += '<span class="muted c-pad" style="min-width:170px">всего</span></span>';
+    emit(head);
+    // максимум для масштаба метра
+    let maxTotal = 1;
+    D.teams.forEach(t => { const s = datedRels.reduce((n, r) => n + H.loadByTeamRelease(t, r.key), 0); if (s > maxTotal) maxTotal = s; });
+    D.teams.forEach(team => {
+      let row = '<span class="row"><span class="key" style="min-width:118px">' + esc(team) + '</span>';
+      let tot = 0;
+      datedRels.forEach(r => { const n = H.loadByTeamRelease(team, r.key); tot += n; row += '<span style="min-width:56px" class="num">' + n + '</span>'; });
+      const pct = Math.round(tot / maxTotal * 100);
+      const lvl = pct >= 85 ? 'crit' : (pct >= 60 ? 'hot' : '');
+      row += '<span class="c-pad" style="min-width:170px"><span class="meter"><span class="track"><i class="' + lvl + '" style="width:' + pct + '%"></i></span><span class="num">' + tot + '</span></span></span>';
+      row += '</span>';
+      emit(row);
+    });
+    gap();
+    const grand = D.teams.reduce((n, t) => n + datedRels.reduce((m, r) => m + H.loadByTeamRelease(t, r.key), 0), 0);
+    emit('<span class="muted">всего датированных работ: <span class="num">' + grand + '</span></span>');
+  }
+
+  function run(raw) {
+    const line = raw.trim();
+    if (!line) return;
+    echoCmd(line);
+    const parts = line.split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const arg = parts.slice(1).join(' ');
+    switch (cmd) {
+      case 'help': case '?': cmdHelp(); break;
+      case 'ls': case 'list': cmdLs(arg); break;
+      case 'risk': case 'risks': cmdRisk(); break;
+      case 'team': cmdTeam(arg); break;
+      case 'load': case 'cap': case 'capacity': cmdLoad(); break;
+      case 'rel': case 'releases': cmdRel(); break;
+      case 'clear': case 'cls': out.innerHTML = ''; return;
+      default: emit('<span class="err">команда не найдена: ' + esc(cmd) + '</span> <span class="muted">— наберите help</span>');
+    }
+    gap();
+    scrollEnd();
+  }
+
+  // ── история ── (↑ повтор)
+  const hist = [];
+  let hi = -1;
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const v = inp.value;
+      if (v.trim()) { hist.push(v); }
+      hi = hist.length;
+      run(v);
+      inp.value = '';
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!hist.length) return;
+      hi = Math.max(0, hi - 1);
+      inp.value = hist[hi] || '';
+      requestAnimationFrame(() => inp.setSelectionRange(inp.value.length, inp.value.length));
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!hist.length) return;
+      hi = Math.min(hist.length, hi + 1);
+      inp.value = hist[hi] || '';
+    }
+  });
+
+  // фокус на ввод при клике в любое место терминала
+  document.querySelector('.term').addEventListener('click', () => {
+    if (window.getSelection().toString()) return; // не мешаем выделению/копированию
+    inp.focus();
+  });
+
+  // ── intro ──
+  function intro() {
+    emit('<span class="head">ПРИЗМА — план Q2</span> <span class="muted">терминальный режим</span>');
+    emit('<span class="muted">' + D.epics.length + ' эпиков · ' + D.teams.length + ' команд · текущий релиз <span class="info">' + (curRel ? esc(curRel.short) : '—') + '</span> · сейчас ' + fmtD(today) + '</span>');
+    emit('<span class="muted">наберите <span class="key">help</span> для списка команд. примеры: <span class="key">ls 1.21</span> · <span class="key">risk</span> · <span class="key">team Платежи</span> · <span class="key">load</span></span>');
+    gap();
+    scrollEnd();
+  }
+
+  // ── init: sync + setTimeout + focus (gotcha a) ──
+  intro();
+  setTimeout(() => { inp.focus(); scrollEnd(); }, 60);
+  window.addEventListener('resize', scrollEnd);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

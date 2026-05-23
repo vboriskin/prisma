@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 30 · Слой заметок</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── панель действий над гантом ── */
+  .bar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .bar .spacer { flex: 1; }
+  .bar .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* переключатель слоя */
+  .switch { display: inline-flex; align-items: center; gap: 9px; cursor: pointer; user-select: none; font-size: 12.5px; font-weight: 600; }
+  .switch .track { width: 38px; height: 22px; border-radius: 11px; background: var(--prizma-bg-tertiary);
+    border: 1px solid var(--prizma-border-strong); position: relative; transition: background .18s, border-color .18s; flex: none; }
+  .switch .knob { position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--prizma-text-secondary); transition: transform .2s var(--ease-spring), background .18s; }
+  .switch.on .track { background: var(--prizma-information-bg); border-color: var(--prizma-information); }
+  .switch.on .knob { transform: translateX(16px); background: var(--prizma-information); }
+  .switch .lab-off { color: var(--prizma-text-tertiary); }
+  .switch.on .lab-off { color: var(--prizma-text-primary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); position: relative; }
+  .grow { display: grid; grid-template-columns: 210px repeat(4, 1fr); }
+  .grow + .grow .gc, .grow + .grow .gh { border-top: 1px solid var(--prizma-border); }
+  .corner { padding: 12px 16px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .chead { padding: 12px 14px 10px; border-left: 1px solid var(--prizma-border); }
+  .chead .rel { font: 300 16px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .chead .rel.cur { color: var(--prizma-text-primary); }
+  .chead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+
+  .gh { padding: 0 16px; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 60px; }
+  .gh .nm { font-size: 12.5px; font-weight: 600; }
+  .gh .ep { font-size: 11px; color: var(--prizma-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .gc { border-left: 1px solid var(--prizma-border); min-height: 60px; padding: 9px 10px; display: flex; flex-wrap: wrap; align-content: center; gap: 5px; position: relative; }
+  .gc:hover .add-btn { opacity: 1; transform: scale(1); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill[data-done] { opacity: .72; }
+  .pill[data-done] .pn { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* ── маркер заметки (overlay) ── */
+  .marker { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%;
+    display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 3;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--accent); color: var(--accent);
+    box-shadow: 0 1px 4px rgba(0,0,0,.35); transition: transform .14s var(--ease-spring); }
+  .marker svg { width: 11px; height: 11px; }
+  .marker:hover { transform: scale(1.15); }
+  .marker.risk { --accent: var(--prizma-drift); }
+  .marker.note { --accent: var(--prizma-information); }
+  body.layer-on .marker { display: inline-flex; }
+  /* счётчик нескольких заметок */
+  .marker .badge { position: absolute; right: -5px; top: -5px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+    background: var(--accent); color: var(--prizma-bg); font: 700 8px/13px var(--mono); text-align: center; }
+
+  /* кнопка добавления (на hover ячейки, только при включённом слое) */
+  .add-btn { position: absolute; bottom: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%;
+    display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 2;
+    background: var(--prizma-bg-tertiary); border: 1px dashed var(--prizma-border-strong); color: var(--prizma-text-secondary);
+    opacity: 0; transform: scale(.7); transition: opacity .14s, transform .14s var(--ease-spring), border-color .14s, color .14s; }
+  .add-btn svg { width: 11px; height: 11px; }
+  .add-btn:hover { border-color: var(--prizma-information); color: var(--prizma-information); border-style: solid; }
+  body.layer-on .add-btn { display: inline-flex; }
+
+  .legend { margin-top: 14px; display: flex; align-items: center; gap: 18px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center; }
+  .legend .dot svg { width: 9px; height: 9px; }
+  .legend .dot.risk { --accent: var(--prizma-drift); }
+  .legend .dot.note { --accent: var(--prizma-information); }
+
+  /* ── popover заметки (anchored) ── */
+  .pop { position: fixed; z-index: var(--z-dropdown); width: 264px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 14px 44px rgba(0,0,0,.55);
+    padding: 0; opacity: 0; transform: translateY(6px) scale(.98); transform-origin: top center;
+    transition: opacity .15s var(--ease-calm), transform .16s var(--ease-spring); pointer-events: none; overflow: hidden; }
+  .pop.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+  .pop .pstrip { height: 3px; background: var(--accent, var(--prizma-information)); }
+  .pop .pbody { padding: 13px 14px 14px; }
+  .pop .ptype { display: flex; align-items: center; gap: 6px; font: 700 9px/1 var(--mono); letter-spacing:.4px; text-transform: uppercase;
+    color: var(--accent, var(--prizma-information)); margin-bottom: 8px; }
+  .pop .ptype svg { width: 11px; height: 11px; }
+  .pop .ptext { font-size: 12.5px; line-height: 1.45; color: var(--prizma-text-primary); }
+  .pop .pmeta { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--prizma-text-tertiary); }
+  .pop .pmeta .who { color: var(--prizma-text-secondary); font-weight: 600; }
+  .pop .pmeta .dt { font-family: var(--mono); }
+  .pop .pmeta .where { margin-left: auto; font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* мини-композер */
+  .pop textarea { width: 100%; min-height: 64px; resize: vertical; background: var(--prizma-bg); color: var(--prizma-text-primary);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 8px 9px; font: 400 12.5px/1.4 var(--font); outline: none; }
+  .pop textarea:focus { border-color: var(--prizma-information); }
+  .pop .ptype-pick { display: flex; gap: 6px; margin-bottom: 10px; }
+  .pop .tchip { font: 600 10px/1 var(--font); padding: 5px 9px; border-radius: var(--r-sm); border: 1px solid var(--prizma-border-strong);
+    background: transparent; color: var(--prizma-text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .14s; }
+  .pop .tchip svg { width: 11px; height: 11px; }
+  .pop .tchip.sel.note { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .pop .tchip.sel.risk { border-color: var(--prizma-drift); color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+  .pop .pactions { display: flex; gap: 8px; margin-top: 11px; }
+  .pop .pactions .pz-btn { height: 28px; font-size: 12px; flex: 1; justify-content: center; }
+
+  /* empty-state когда слой выключен */
+  .layer-hint { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); transition: opacity .2s; }
+  body.layer-on .layer-hint { opacity: .4; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 30 · слой заметок</div>
+      <h1>Слой заметок</h1>
+      <p>Контекст живёт поверх плана, а не в нём. Включите слой — на ячейках проступают маркеры заметок и рисков (как в Confluence): клик раскрывает закреплённую записку с автором и датой. Наведите на ячейку — «+» добавит свою. Выключите — план снова чист.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <div class="switch" id="layerSwitch" role="switch" aria-checked="false" tabindex="0">
+      <span class="track"><span class="knob"></span></span>
+      <span class="lab-off">Слой заметок: <span id="layerState">выкл</span></span>
+    </div>
+    <span class="spacer"></span>
+    <span class="cnt" id="noteCnt"></span>
+  </div>
+
+  <div class="gantt" id="gantt"></div>
+
+  <div class="legend">
+    <span class="it"><span class="dot note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>заметка</span>
+    <span class="it"><span class="dot risk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>риск-пометка</span>
+  </div>
+
+  <p class="layer-hint">Заметки — это отдельный слой поверх плана. Они не меняют данные эпиков и видны только когда слой включён.</p>
+</div>
+
+<div class="pop" id="pop"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+
+  const cols = D.releases.filter(r => r.dated);
+  const epics = D.epics.filter(e => ['e1','e2','e7','e8','e13','e12'].includes(e.id));
+
+  // ── синтетические заметки, закреплённые за конкретными ячейками (эпик × релиз) ──
+  // В реальном приложении это слой Confluence-комментариев, привязанный к плану.
+  const fmtDate = iso => new Date(iso).toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+  const notes = [
+    { epic:'e1',  col:'r121', type:'risk', text:'СБП-процессинг рискует не успеть к код-фризу: ждём ответ от смежников по контракту API.', who:'М. Орлов', date:'2026-05-20' },
+    { epic:'e13', col:'r121', type:'risk', text:'Платёжный флоу переносился 5 раз — на ретро решили заморозить scope до релиза.', who:'А. Ким', date:'2026-05-22' },
+    { epic:'e7',  col:'r120', type:'note', text:'Kafka-шина выкачена в прод, мониторинг зелёный. Можно закрывать как done.', who:'Д. Орлов', date:'2026-05-12' },
+    { epic:'e2',  col:'r121', type:'note', text:'QA по антифроду стартовало, тест-данные подготовлены. Без блокеров.', who:'С. Волков', date:'2026-05-21' },
+    { epic:'e8',  col:'r121', type:'note', text:'Миграция SOAP→REST идёт по плану, первый эндпоинт переключён на тест.', who:'И. Зайцев', date:'2026-05-19' },
+  ];
+  // ключ ячейки → массив заметок
+  const noteMap = {};
+  notes.forEach(n => { const k = n.epic + '|' + n.col; (noteMap[k] = noteMap[k] || []).push(n); });
+
+  /* ── рендер мини-ганта ── */
+  const root = document.getElementById('gantt');
+  const NOTE_GLYPH = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
+  const RISK_GLYPH = '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>';
+
+  let html = '<div class="grow"><div class="corner"><span class="pz-eyebrow">Команда / Эпик</span></div>';
+  cols.forEach(c => {
+    html += '<div class="chead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'</div>';
+  });
+  html += '</div>';
+
+  epics.forEach(e => {
+    html += '<div class="grow"><div class="gh"><span class="nm">'+esc(e.team)+'</span><span class="ep" title="'+esc(e.epic)+'">'+esc(e.epic)+'</span></div>';
+    cols.forEach(c => {
+      const pills = D.helpers.pillsOf(e, c.key);
+      const key = e.id + '|' + c.key;
+      html += '<div class="gc" data-key="'+key+'" data-epic="'+e.id+'" data-rel="'+esc(c.short)+'" data-team="'+esc(e.team)+'">';
+      pills.forEach(p => {
+        const done = p.state === 'done';
+        html += '<span class="pill"'+(done?' data-done':'')+' style="--wt:'+wtVar(p.wt)+'"><span class="pn">'+p.wt+'</span>'+
+          (p.who ? '<span class="who">'+esc(p.who)+'</span>' : '')+'</span>';
+      });
+      // маркер(ы) — рендерим всегда, скрыты CSS пока слой выключен
+      const arr = noteMap[key];
+      if (arr && arr.length) {
+        const top = arr[0]; // тип берём по первой; risk имеет приоритет
+        const hasRisk = arr.some(n => n.type === 'risk');
+        const cls = hasRisk ? 'risk' : 'note';
+        const glyph = hasRisk ? RISK_GLYPH : NOTE_GLYPH;
+        html += '<span class="marker '+cls+'" data-key="'+key+'" tabindex="0" role="button" aria-label="Открыть заметку">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+glyph+'</svg>'+
+          (arr.length > 1 ? '<span class="badge">'+arr.length+'</span>' : '')+'</span>';
+      }
+      // кнопка добавления
+      html += '<span class="add-btn" data-add="'+key+'" tabindex="0" role="button" aria-label="Добавить заметку" title="Добавить заметку">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  root.innerHTML = html;
+
+  function updateCount() {
+    const total = notes.length;
+    document.getElementById('noteCnt').textContent = total + ' ' + plural(total, 'заметка', 'заметки', 'заметок') + ' на плане';
+  }
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  updateCount();
+
+  /* ── переключатель слоя ── */
+  const sw = document.getElementById('layerSwitch');
+  function setLayer(on) {
+    document.body.classList.toggle('layer-on', on);
+    sw.classList.toggle('on', on);
+    sw.setAttribute('aria-checked', on ? 'true' : 'false');
+    document.getElementById('layerState').textContent = on ? 'вкл' : 'выкл';
+    if (!on) closePop();
+  }
+  sw.addEventListener('click', () => setLayer(!document.body.classList.contains('layer-on')));
+  sw.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sw.click(); } });
+
+  /* ── popover ── */
+  const pop = document.getElementById('pop');
+  let popAnchor = null;
+
+  function positionPop(anchorEl) {
+    const r = anchorEl.getBoundingClientRect();
+    pop.style.visibility = 'hidden';
+    pop.classList.add('show');
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = r.left + r.width / 2 - pw / 2;
+    let top = r.bottom + 8;
+    if (top + ph > window.innerHeight - 10) top = r.top - ph - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - pw - 10));
+    pop.style.left = left.toFixed(0) + 'px';
+    pop.style.top = top.toFixed(0) + 'px';
+    pop.style.visibility = '';
+  }
+
+  function openNotePop(marker) {
+    const key = marker.dataset.key;
+    const arr = noteMap[key] || [];
+    const cell = marker.closest('.gc');
+    const where = cell.dataset.team + ' · ' + cell.dataset.rel;
+    let body = '';
+    const accent = arr.some(n => n.type === 'risk') ? 'var(--prizma-drift)' : 'var(--prizma-information)';
+    arr.forEach((n, idx) => {
+      const isRisk = n.type === 'risk';
+      const glyph = isRisk ? RISK_GLYPH : NOTE_GLYPH;
+      const acc = isRisk ? 'var(--prizma-drift)' : 'var(--prizma-information)';
+      body += '<div class="pbody"'+(idx>0?' style="border-top:1px solid var(--prizma-border)"':'')+'>'+
+        '<div class="ptype" style="--accent:'+acc+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+glyph+'</svg>'+(isRisk?'риск':'заметка')+'</div>'+
+        '<div class="ptext">'+esc(n.text)+'</div>'+
+        '<div class="pmeta"><span class="who">'+esc(n.who)+'</span><span class="dt">'+fmtDate(n.date)+'</span><span class="where">'+esc(where)+'</span></div>'+
+        '</div>';
+    });
+    pop.style.setProperty('--accent', accent);
+    pop.innerHTML = '<div class="pstrip"></div>' + body;
+    popAnchor = marker;
+    positionPop(marker);
+  }
+
+  function openComposer(addBtn) {
+    const cell = addBtn.closest('.gc');
+    const where = cell.dataset.team + ' · ' + cell.dataset.rel;
+    const key = cell.dataset.key;
+    pop.style.setProperty('--accent', 'var(--prizma-information)');
+    pop.innerHTML = '<div class="pstrip"></div><div class="pbody">'+
+      '<div class="ptype">новая заметка · '+esc(where)+'</div>'+
+      '<div class="ptype-pick">'+
+        '<button class="tchip note sel" data-t="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+NOTE_GLYPH+'</svg>заметка</button>'+
+        '<button class="tchip risk" data-t="risk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+RISK_GLYPH+'</svg>риск</button>'+
+      '</div>'+
+      '<textarea placeholder="Что важно зафиксировать по этой ячейке?"></textarea>'+
+      '<div class="pactions"><button class="pz-btn" data-cancel>Отмена</button><button class="pz-btn pz-btn-primary" data-save>Добавить</button></div>'+
+      '</div>';
+    popAnchor = addBtn;
+    positionPop(addBtn);
+
+    let chosen = 'note';
+    pop.querySelectorAll('.tchip').forEach(ch => {
+      ch.addEventListener('click', () => {
+        chosen = ch.dataset.t;
+        pop.querySelectorAll('.tchip').forEach(x => x.classList.remove('sel'));
+        ch.classList.add('sel');
+        pop.style.setProperty('--accent', chosen === 'risk' ? 'var(--prizma-drift)' : 'var(--prizma-information)');
+      });
+    });
+    const ta = pop.querySelector('textarea');
+    setTimeout(() => ta.focus(), 30);
+    pop.querySelector('[data-cancel]').addEventListener('click', closePop);
+    pop.querySelector('[data-save]').addEventListener('click', () => {
+      const text = ta.value.trim();
+      if (!text) { closePop(); return; }
+      const n = { epic: cell.dataset.epic, col: cols.find(c => c.short === cell.dataset.rel).key, type: chosen, text, who: 'Вы', date: new Date().toISOString().slice(0,10) };
+      notes.push(n);
+      (noteMap[key] = noteMap[key] || []).push(n);
+      // обновить / создать маркер в ячейке
+      let marker = cell.querySelector('.marker');
+      const hasRisk = noteMap[key].some(x => x.type === 'risk');
+      const glyph = hasRisk ? RISK_GLYPH : NOTE_GLYPH;
+      if (!marker) {
+        marker = document.createElement('span');
+        marker.className = 'marker';
+        marker.dataset.key = key; marker.tabIndex = 0; marker.setAttribute('role','button');
+        marker.addEventListener('click', () => openNotePop(marker));
+        cell.appendChild(marker);
+      }
+      marker.className = 'marker ' + (hasRisk ? 'risk' : 'note');
+      const cnt = noteMap[key].length;
+      marker.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+glyph+'</svg>'+
+        (cnt > 1 ? '<span class="badge">'+cnt+'</span>' : '');
+      updateCount();
+      closePop();
+    });
+  }
+
+  function closePop() { pop.classList.remove('show'); popAnchor = null; }
+
+  // делегирование кликов внутри ганта
+  root.addEventListener('click', e => {
+    const marker = e.target.closest('.marker');
+    if (marker) { e.stopPropagation(); openNotePop(marker); return; }
+    const add = e.target.closest('.add-btn');
+    if (add) { e.stopPropagation(); openComposer(add); return; }
+  });
+  root.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const marker = e.target.closest('.marker');
+    if (marker) { e.preventDefault(); openNotePop(marker); return; }
+    const add = e.target.closest('.add-btn');
+    if (add) { e.preventDefault(); openComposer(add); }
+  });
+
+  // закрытие popover
+  document.addEventListener('mousedown', e => { if (popAnchor && !pop.contains(e.target) && !e.target.closest('.marker') && !e.target.closest('.add-btn')) closePop(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closePop(); });
+  window.addEventListener('scroll', () => { if (popAnchor) positionPop(popAnchor); }, true);
+  window.addEventListener('resize', () => { if (popAnchor) positionPop(popAnchor); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

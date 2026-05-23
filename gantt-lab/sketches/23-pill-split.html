@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 23 · Разбить работу на два окна</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 90px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: visible; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 240px repeat(4, minmax(150px,1fr)); min-width: 840px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 11px; min-height: 56px; }
+  .ghead { position: relative; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 11px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .elabel { display: flex; flex-direction: column; gap: 3px; justify-content: center; background: var(--prizma-bg-elevated); }
+  .elabel .nm { font-size: 13px; font-weight: 600; }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; transition: box-shadow .2s, background .2s; }
+  /* окно-приёмник подсвечивается, когда правый край тянут за границу */
+  .cell.spill-target { box-shadow: inset 0 0 0 1px var(--prizma-information); background: var(--prizma-information-bg); }
+
+  /* ── пилюля ── */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px 6px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; min-height: 28px;
+    transition: transform .42s var(--ease-spring), box-shadow .16s, opacity .3s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .nmw { white-space: nowrap; }
+  .pill .frac { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .pill .relt { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); padding-left: 6px; margin-left: 2px; border-left: 1px solid var(--prizma-border-strong); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .dot6 { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+
+  /* правый хват для разбивки */
+  .handle { position: absolute; right: -3px; top: 0; bottom: 0; width: 12px; cursor: ew-resize; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .14s; touch-action: none; }
+  .pill:hover .handle { opacity: 1; }
+  .handle::after { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--prizma-text-tertiary); }
+  .pill.grabbing { box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  .pill.grabbing .handle { opacity: 1; }
+  .pill.grabbing .handle::after { background: var(--prizma-information); }
+  /* визуальный «потяг» правого края во время drag */
+  .pill.stretching { box-shadow: inset 0 0 0 1px var(--prizma-information); }
+
+  /* появление новой половины */
+  .pill.born { animation: born .46s var(--ease-spring); }
+  @keyframes born { 0% { transform: scale(.6); opacity: 0; } 60% { opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+
+  /* связка половин: «объединить» */
+  .merge { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; cursor: pointer;
+    font: 600 10px/1 var(--font); color: var(--prizma-text-secondary); background: transparent;
+    border: 1px dashed var(--prizma-border-strong); border-radius: var(--r-sm); transition: color .14s, border-color .14s; }
+  .merge:hover { color: var(--prizma-information); border-color: var(--prizma-information); }
+  .merge svg { width: 11px; height: 11px; }
+  .merge.born { animation: born .46s var(--ease-spring); }
+
+  /* всплывающая подсказка-намёк во время потяга */
+  .ghosthint { position: fixed; z-index: 9000; pointer-events: none; padding: 5px 9px; border-radius: var(--r-sm);
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-information); font: 600 10.5px/1 var(--mono);
+    color: var(--prizma-text-primary); box-shadow: 0 6px 20px rgba(0,0,0,.4); opacity: 0; transition: opacity .12s; white-space: nowrap; }
+  .ghosthint.show { opacity: 1; }
+
+  .legend { margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 8px; }
+  .legend svg { color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 23 · Сплит работы</div>
+      <h1>Разбить работу на два окна</h1>
+      <p>Один тип работы не всегда влезает в одно окно релиза. Возьмите пилюлю за правый край и потяните за границу ячейки — она разделится надвое: половина остаётся в текущем релизе, половина уезжает в следующий, с пружинным приземлением. Связка помнит происхождение: «объединить» собирает половины обратно.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Наведитесь на пилюлю → потяните <b>правый край</b> вправо за границу окна, чтобы разбить работу на две части.</span>
+  </div>
+
+  <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+
+  <div class="legend">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M3 12h18"/></svg>
+    Разбивка делит оценку поровну (½ + ½) между текущим и следующим окном. Доли — демонстрационные.
+  </div>
+</div>
+
+<div class="ghosthint" id="ghosthint"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  // показываем только датированные окна (1.20–1.22 + не используем backlog/overtime), чтобы «следующее окно» было осмысленным
+  const cols = D.releases.filter(c => c.dated);
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c ? c.short : k; };
+  const nextCol = k => { const i = cols.findIndex(c=>c.key===k); return (i>=0 && i<cols.length-1) ? cols[i+1].key : null; };
+
+  // Подобраны несколько эпиков с пилюлями в датированных окнах — наглядный набор для сплита.
+  const PICK = ['e1','e4','e7','e10','e13'];
+  // Модель: каждый ряд = эпик; пилюли с уникальным id; split-пилюли несут groupId+half.
+  let uid = 0;
+  function build() {
+    return PICK.map(id => {
+      const e = D.epics.find(x => x.id === id);
+      const pills = e.pills
+        .filter(p => cols.some(c => c.key === p.col))
+        .map(p => ({ id: 'p'+(uid++), wt: p.wt, col: p.col, state: p.state, who: p.who, frac: 1, group: null, half: null }));
+      return { id: e.id, epic: e.epic, team: e.team, pills };
+    });
+  }
+  let model = build();
+
+  const grid = document.getElementById('grid');
+  const ghost = document.getElementById('ghosthint');
+
+  function render() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      const dates = fmt(c.start)+' – '+fmt(c.end);
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    model.forEach(e => {
+      html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+esc(e.team)+'</span></div>';
+      cols.forEach(c => {
+        html += '<div class="gcell cell" data-col="'+c.key+'" data-epic="'+e.id+'">';
+        e.pills.forEach(p => {
+          if (p.col !== c.key) return;
+          html += pillHtml(e.id, p);
+          // кнопка «объединить» рисуется рядом со второй половиной
+          if (p.group && p.half === 'b') {
+            html += '<button class="merge'+(p._born?' born':'')+'" data-merge="'+p.group+'" title="Объединить половины">' +
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-4 5 4 5"/><path d="M16 7l4 5-4 5"/></svg>объединить</button>';
+          }
+          p._born = false;
+        });
+        html += '</div>';
+      });
+    });
+    grid.innerHTML = html;
+    wire();
+  }
+
+  function pillHtml(eid, p) {
+    const fracLbl = p.group ? '<span class="frac">½</span>' : '';
+    const relLbl = p.group ? '<span class="relt">'+relShort(p.col)+'</span>' : '';
+    const who = p.who && !p.group ? '<span class="who">'+esc(p.who)+'</span>' : '';
+    return '<div class="pill'+(p._born?' born':'')+'" data-id="'+p.id+'" data-epic="'+eid+'" data-col="'+p.col+'" data-state="'+p.state+'"'+(p.group?' data-group="'+p.group+'"':'')+' style="--wt:'+wtVar(p.wt)+'">' +
+      (p.state==='progress' && !p.group ? '<span class="dot6"></span>' : '') +
+      '<span class="nmw">'+p.wt+'</span>'+fracLbl+relLbl+who+
+      (p.group ? '' : '<span class="handle" title="Потяните, чтобы разбить на два окна"></span>') +
+    '</div>';
+  }
+
+  // ── pointer-drag по правому хвату ──
+  let drag = null;
+  function wire() {
+    grid.querySelectorAll('.handle').forEach(h => {
+      h.addEventListener('pointerdown', onDown);
+    });
+    grid.querySelectorAll('.merge').forEach(b => {
+      b.addEventListener('click', () => mergeGroup(b.dataset.merge));
+    });
+  }
+
+  function onDown(e) {
+    e.preventDefault(); e.stopPropagation();
+    const pill = e.target.closest('.pill');
+    if (!pill) return;
+    const eid = pill.dataset.epic, fromCol = pill.dataset.col;
+    const to = nextCol(fromCol);
+    if (!to) return; // последнее окно — некуда разбивать
+    const cell = pill.closest('.cell');
+    const cellRect = cell.getBoundingClientRect();
+    drag = { pill, id: pill.dataset.id, eid, fromCol, to, startX: e.clientX, cellRight: cellRect.right, fired: false };
+    pill.classList.add('grabbing');
+    try { e.target.setPointerCapture(e.pointerId); } catch(_){}
+    e.target.addEventListener('pointermove', onMove);
+    e.target.addEventListener('pointerup', onUp);
+    e.target.addEventListener('pointercancel', onUp);
+  }
+
+  function onMove(e) {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    // визуальный потяг + порог «за границу ячейки»
+    const past = e.clientX > drag.cellRight - 6;
+    drag.pill.classList.toggle('stretching', dx > 4);
+    const tgtCell = grid.querySelector('.cell[data-epic="'+drag.eid+'"][data-col="'+drag.to+'"]');
+    if (tgtCell) tgtCell.classList.toggle('spill-target', past);
+    // подсказка у курсора
+    if (dx > 6) {
+      ghost.textContent = past ? '↳ разбить в ' + relShort(drag.to) : 'тяните за границу окна →';
+      ghost.style.left = (e.clientX + 14) + 'px';
+      ghost.style.top = (e.clientY - 10) + 'px';
+      ghost.classList.add('show');
+    } else {
+      ghost.classList.remove('show');
+    }
+    if (past && !drag.fired) { drag.fired = true; doSplit(drag.eid, drag.id, drag.fromCol, drag.to); }
+  }
+
+  function onUp(e) {
+    if (!drag) return;
+    const t = e.target;
+    try { t.releasePointerCapture(e.pointerId); } catch(_){}
+    t.removeEventListener('pointermove', onMove);
+    t.removeEventListener('pointerup', onUp);
+    t.removeEventListener('pointercancel', onUp);
+    ghost.classList.remove('show');
+    grid.querySelectorAll('.spill-target').forEach(c => c.classList.remove('spill-target'));
+    if (!drag.fired) { drag.pill.classList.remove('grabbing','stretching'); }
+    drag = null;
+  }
+
+  // ── разбивка: одна пилюля → две половины (current + next), связанные group ──
+  function doSplit(eid, pid, fromCol, toCol) {
+    const ep = model.find(e => e.id === eid);
+    if (!ep) return;
+    const i = ep.pills.findIndex(p => p.id === pid);
+    if (i < 0 || ep.pills[i].group) return;
+    const src = ep.pills[i];
+    const gid = 'g'+(uid++);
+    const a = { id: 'p'+(uid++), wt: src.wt, col: fromCol, state: src.state, who: src.who, frac: 0.5, group: gid, half: 'a', _born: true };
+    const b = { id: 'p'+(uid++), wt: src.wt, col: toCol, state: 'planned', who: src.who, frac: 0.5, group: gid, half: 'b', _born: true };
+    ep.pills.splice(i, 1, a, b);
+    render();
+  }
+
+  // ── объединение: две половины → одна пилюля обратно в исходное (первое) окно ──
+  function mergeGroup(gid) {
+    for (const ep of model) {
+      const halves = ep.pills.filter(p => p.group === gid);
+      if (halves.length === 2) {
+        const a = halves.find(h => h.half === 'a') || halves[0];
+        const idxA = ep.pills.indexOf(a);
+        const merged = { id: 'p'+(uid++), wt: a.wt, col: a.col, state: a.state, who: a.who, frac: 1, group: null, half: null, _born: true };
+        // удалить обе половины, вставить объединённую на место первой
+        ep.pills = ep.pills.filter(p => p.group !== gid);
+        ep.pills.splice(Math.min(idxA, ep.pills.length), 0, merged);
+        render();
+        return;
+      }
+    }
+  }
+
+  document.getElementById('reset').addEventListener('click', () => { uid = 0; model = build(); render(); });
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  render();
+  window.addEventListener('resize', () => { /* layout — grid auto, ничего пересчитывать не нужно */ });
+})();
+</script>
+</body>
+</html>

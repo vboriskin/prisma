@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 27 · Радиальное меню пилюли</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .grow { display: grid; grid-template-columns: 210px repeat(4, 1fr); }
+  .grow + .grow .gc, .grow + .grow .gh { border-top: 1px solid var(--prizma-border); }
+  .corner { padding: 12px 16px; display: flex; align-items: flex-end; }
+  .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .chead { padding: 12px 14px 10px; border-left: 1px solid var(--prizma-border); }
+  .chead .rel { font: 300 16px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .chead .rel.cur { color: var(--prizma-text-primary); }
+  .chead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+
+  .gh { padding: 0 16px; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 58px; }
+  .gh .nm { font-size: 12.5px; font-weight: 600; }
+  .gh .ep { font-size: 11px; color: var(--prizma-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .gc { border-left: 1px solid var(--prizma-border); min-height: 58px; padding: 9px 10px; display: flex; flex-wrap: wrap; align-content: center; gap: 5px; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; cursor: context-menu; user-select: none;
+    transition: box-shadow .12s, transform .12s var(--ease-spring); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill:hover { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .pill.menu-open { box-shadow: inset 0 0 0 1px var(--prizma-information); transform: scale(1.04); }
+  .pill[data-done] { opacity: .72; }
+  .pill[data-done] .pn { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill .who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill.gone { opacity: 0; transform: scale(.6); pointer-events: none; }
+  .pill .moved-tag { font: 700 8.5px/1 var(--mono); letter-spacing:.3px; color: var(--prizma-information); }
+  .pill .risk-tag { font: 700 8.5px/1 var(--mono); letter-spacing:.3px; color: var(--prizma-off-course); }
+
+  .hint { margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 7px; }
+  .hint kbd { font: 600 10px/1 var(--mono); padding: 3px 6px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+
+  /* ── радиальное меню ── */
+  .radial { position: fixed; z-index: var(--z-dropdown); width: 240px; height: 240px; margin: -120px 0 0 -120px;
+    pointer-events: none; opacity: 0; transform: scale(.55); transform-origin: center;
+    transition: opacity .16s var(--ease-calm), transform .2s var(--ease-spring); }
+  .radial.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+  .radial svg { width: 240px; height: 240px; overflow: visible; }
+  .sector { cursor: pointer; }
+  .sector .arc { fill: var(--prizma-bg-elevated); stroke: var(--prizma-border-strong); stroke-width: 1;
+    transition: fill .12s, stroke .12s; }
+  .sector:hover .arc, .sector.hot .arc { fill: var(--prizma-bg-tertiary); stroke: var(--accent, var(--prizma-information)); }
+  .sector .glyph { color: var(--prizma-text-secondary); transition: color .12s; pointer-events: none; }
+  .sector:hover .glyph, .sector.hot .glyph { color: var(--accent, var(--prizma-information)); }
+  .sector .lab { fill: var(--prizma-text-secondary); font: 600 10.5px/1 var(--font); text-anchor: middle; transition: fill .12s; pointer-events: none; }
+  .sector:hover .lab, .sector.hot .lab { fill: var(--prizma-text-primary); }
+  .hub { fill: var(--prizma-bg); stroke: var(--prizma-border); stroke-width: 1; }
+  .hub-lab { fill: var(--prizma-text-tertiary); font: 700 8px/1 var(--mono); letter-spacing:.3px; text-anchor: middle; text-transform: uppercase; }
+
+  /* ── тост ── */
+  .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(14px); z-index: var(--z-overlay);
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-left: 3px solid var(--accent, var(--prizma-information));
+    border-radius: var(--r-md); padding: 11px 15px; font-size: 12.5px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    opacity: 0; pointer-events: none; transition: opacity .18s var(--ease-calm), transform .18s var(--ease-calm); display: flex; align-items: center; gap: 9px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .ti { width: 14px; height: 14px; color: var(--accent, var(--prizma-information)); flex: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 27 · радиальное меню</div>
+      <h1>Радиальное меню пилюли</h1>
+      <p>Правый клик по пилюле раскрывает круговое меню прямо под курсором — пять секторов одинаково близко к руке. Никаких длинных списков: целишься в сторону, а не читаешь сверху вниз. Наведение подсвечивает сектор, клик выполняет действие. Esc или клик мимо — закрыть.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="gantt" id="gantt"></div>
+
+  <div class="hint">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="3"/><path d="M12 2v8M9 6h6" opacity=".5"/></svg>
+    Правый клик по любой пилюле · <kbd>Esc</kbd> закрыть
+  </div>
+</div>
+
+<div class="radial" id="radial" role="menu" aria-label="Действия с пилюлей"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+
+  // показываем только датированные релизы (без бэклога/овертайма) — компактный мини-гант
+  const cols = D.releases.filter(r => r.dated);
+  // подмножество эпиков с насыщенными пилюлями для демонстрации
+  const epics = D.epics.filter(e => ['e1','e2','e7','e8','e13','e12'].includes(e.id));
+
+  /* ── рендер мини-ганта ── */
+  const root = document.getElementById('gantt');
+  let html = '<div class="grow"><div class="corner"><span class="pz-eyebrow">Команда / Эпик</span></div>';
+  cols.forEach(c => {
+    html += '<div class="chead"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'</div>';
+  });
+  html += '</div>';
+
+  let pid = 0;
+  epics.forEach(e => {
+    html += '<div class="grow"><div class="gh"><span class="nm">'+esc(e.team)+'</span><span class="ep" title="'+esc(e.epic)+'">'+esc(e.epic)+'</span></div>';
+    cols.forEach(c => {
+      const pills = D.helpers.pillsOf(e, c.key);
+      html += '<div class="gc">';
+      pills.forEach(p => {
+        const id = 'p'+(pid++);
+        const done = p.state === 'done';
+        const prog = p.state === 'progress';
+        const unp = p.state === 'unplanned';
+        html += '<span class="pill" id="'+id+'" data-epic="'+e.id+'" data-wt="'+p.wt+'" data-rel="'+esc(c.short)+'"'+(done?' data-done':'')+' style="--wt:'+wtVar(p.wt)+'" tabindex="0">'+
+          '<span class="pn">'+p.wt+'</span>'+
+          (p.who ? '<span class="who">'+esc(p.who)+'</span>' : '')+
+          (prog ? '<span class="dot"></span>' : '')+
+          (unp ? '<span class="risk-tag">ВНЕПЛАН</span>' : '')+
+          '</span>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  root.innerHTML = html;
+
+  /* ── секторы радиального меню ──
+     Действия осознанно ровно 5 (бриф): Готово · Перенести → · Назначить · Риск · Удалить.
+     Геометрия: кольцо R=58..104 вокруг центра 120,120; каждый сектор = 72°. */
+  const ACTIONS = [
+    { key:'done',   label:'Готово',     accent:'var(--prizma-on-course)',  glyph:'<path d="M20 6 9 17l-5-5"/>' },
+    { key:'move',   label:'Перенести',  accent:'var(--prizma-information)',glyph:'<path d="M5 12h14M13 6l6 6-6 6"/>' },
+    { key:'assign', label:'Назначить',  accent:'var(--prizma-insight)',    glyph:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>' },
+    { key:'risk',   label:'Риск',       accent:'var(--prizma-drift)',      glyph:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>' },
+    { key:'delete', label:'Удалить',    accent:'var(--prizma-off-course)', glyph:'<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' },
+  ];
+  const CX = 120, CY = 120, R_IN = 58, R_OUT = 104, R_LAB = 81, R_GLYPH = 81, N = ACTIONS.length, STEP = 360 / N;
+  const polar = (cx, cy, r, deg) => { const a = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+  function arcPath(a0, a1) {
+    const [x0o, y0o] = polar(CX, CY, R_OUT, a0), [x1o, y1o] = polar(CX, CY, R_OUT, a1);
+    const [x0i, y0i] = polar(CX, CY, R_IN, a1),  [x1i, y1i] = polar(CX, CY, R_IN, a0);
+    const large = (a1 - a0) > 180 ? 1 : 0;
+    return `M ${x0o.toFixed(2)} ${y0o.toFixed(2)} A ${R_OUT} ${R_OUT} 0 ${large} 1 ${x1o.toFixed(2)} ${y1o.toFixed(2)} L ${x0i.toFixed(2)} ${y0i.toFixed(2)} A ${R_IN} ${R_IN} 0 ${large} 0 ${x1i.toFixed(2)} ${y1i.toFixed(2)} Z`;
+  }
+
+  function buildRadial() {
+    let s = '<svg viewBox="0 0 240 240">';
+    ACTIONS.forEach((act, i) => {
+      const a0 = i * STEP + 2, a1 = (i + 1) * STEP - 2; // 4° зазор между секторами
+      const mid = (a0 + a1) / 2;
+      const [lx, ly] = polar(CX, CY, R_LAB, mid);
+      const [gx, gy] = polar(CX, CY, R_GLYPH - 18, mid);
+      s += '<g class="sector" data-act="'+act.key+'" role="menuitem" tabindex="0" style="--accent:'+act.accent+'">';
+      s += '<path class="arc" d="'+arcPath(a0, a1)+'"/>';
+      s += '<g class="glyph" transform="translate('+gx.toFixed(1)+','+gy.toFixed(1)+')"><svg x="-9" y="-9" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+act.glyph+'</svg></g>';
+      s += '<text class="lab" x="'+lx.toFixed(1)+'" y="'+(ly+13).toFixed(1)+'">'+act.label+'</text>';
+      s += '</g>';
+    });
+    s += '<circle class="hub" cx="120" cy="120" r="'+(R_IN-6)+'"/>';
+    s += '<text class="hub-lab" id="hubLab" x="120" y="116">пилюля</text>';
+    s += '<text class="hub-lab" id="hubLab2" x="120" y="128" style="fill:var(--prizma-text-secondary)"></text>';
+    s += '</svg>';
+    return s;
+  }
+
+  const radial = document.getElementById('radial');
+  radial.innerHTML = buildRadial();
+  let activePill = null;
+
+  function openRadial(x, y, pill) {
+    activePill = pill;
+    pill.classList.add('menu-open');
+    radial.querySelector('#hubLab').textContent = pill.dataset.wt;
+    radial.querySelector('#hubLab2').textContent = pill.dataset.rel;
+    // клампим к окну, чтобы меню целиком влезло (радиус ~120)
+    const pad = 124;
+    x = Math.max(pad, Math.min(x, window.innerWidth - pad));
+    y = Math.max(pad, Math.min(y, window.innerHeight - pad));
+    radial.style.left = x + 'px';
+    radial.style.top = y + 'px';
+    radial.classList.add('show');
+  }
+  function closeRadial() {
+    radial.classList.remove('show');
+    radial.querySelectorAll('.sector').forEach(s => s.classList.remove('hot'));
+    if (activePill) activePill.classList.remove('menu-open');
+    activePill = null;
+  }
+
+  /* ── тост обратной связи ── */
+  const toast = document.getElementById('toast');
+  let toastT = null;
+  function showToast(text, accent, glyph) {
+    toast.style.setProperty('--accent', accent);
+    toast.innerHTML = '<svg class="ti" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+glyph+'</svg><span>'+text+'</span>';
+    toast.classList.add('show');
+    clearTimeout(toastT);
+    toastT = setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  // визуальный эффект действия на пилюле
+  function applyAction(actKey, pill) {
+    const act = ACTIONS.find(a => a.key === actKey);
+    const wt = pill.dataset.wt, rel = pill.dataset.rel;
+    if (actKey === 'done') {
+      pill.setAttribute('data-done', '');
+      const dot = pill.querySelector('.dot'); if (dot) dot.remove();
+      showToast('«'+wt+'» отмечена как готовая', act.accent, act.glyph);
+    } else if (actKey === 'move') {
+      pill.style.transition = 'transform .3s var(--ease-spring), opacity .3s';
+      pill.style.transform = 'translateX(18px)';
+      let tag = pill.querySelector('.moved-tag');
+      if (!tag) { tag = document.createElement('span'); tag.className = 'moved-tag'; pill.appendChild(tag); }
+      tag.textContent = '→ след.';
+      setTimeout(() => { pill.style.transform = ''; }, 320);
+      showToast('«'+wt+'» помечена к переносу в следующий релиз', act.accent, act.glyph);
+    } else if (actKey === 'assign') {
+      let who = pill.querySelector('.who');
+      if (!who) { who = document.createElement('span'); who.className = 'who'; pill.insertBefore(who, pill.querySelector('.dot')); }
+      who.textContent = 'Петров';
+      showToast('«'+wt+'» назначена на Петрова', act.accent, act.glyph);
+    } else if (actKey === 'risk') {
+      pill.style.boxShadow = 'inset 0 0 0 1px var(--prizma-drift)';
+      let tag = pill.querySelector('.risk-tag');
+      if (!tag) { tag = document.createElement('span'); tag.className = 'risk-tag'; tag.style.color = 'var(--prizma-drift)'; pill.appendChild(tag); }
+      tag.textContent = 'РИСК';
+      showToast('«'+wt+'» отмечена риском — уйдёт в триаж', act.accent, act.glyph);
+    } else if (actKey === 'delete') {
+      pill.classList.add('gone');
+      setTimeout(() => pill.remove(), 280);
+      showToast('«'+wt+'» удалена из '+rel, act.accent, act.glyph);
+    }
+  }
+
+  /* ── события ── */
+  root.querySelectorAll('.pill').forEach(pill => {
+    pill.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      if (activePill) closeRadial();
+      openRadial(e.clientX, e.clientY, pill);
+    });
+  });
+
+  radial.querySelectorAll('.sector').forEach(sec => {
+    sec.addEventListener('mouseenter', () => sec.classList.add('hot'));
+    sec.addEventListener('mouseleave', () => sec.classList.remove('hot'));
+    const fire = () => { const p = activePill; closeRadial(); if (p) applyAction(sec.dataset.act, p); };
+    sec.addEventListener('click', fire);
+    sec.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fire(); } });
+  });
+
+  // закрытие: клик мимо / Esc / контекст-меню в пустоте / скролл
+  document.addEventListener('mousedown', e => {
+    if (activePill && !radial.contains(e.target)) closeRadial();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && activePill) closeRadial(); });
+  document.addEventListener('contextmenu', e => {
+    // правый клик не по пилюле — закрыть открытое меню (но не мешать дефолту вне ганта)
+    if (activePill && !e.target.closest('.pill')) { e.preventDefault(); closeRadial(); }
+  });
+  window.addEventListener('scroll', () => { if (activePill) closeRadial(); }, true);
+  window.addEventListener('resize', () => { if (activePill) closeRadial(); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const el = document.documentElement; el.setAttribute('data-theme', el.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

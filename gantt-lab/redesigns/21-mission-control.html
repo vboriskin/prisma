@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 21 · Центр управления</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .clock { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); display: inline-flex; align-items: center; gap: 7px; }
+  .top .clock .live { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-information); }
+
+  /* ── cockpit grid ── */
+  .deck { flex: 1; min-height: 0; display: grid; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) var(--sp-4);
+    grid-template-columns: 1.55fr 1fr 1fr;
+    grid-template-rows: auto 1.15fr 1fr;
+    grid-template-areas:
+      "kpi   kpi   kpi"
+      "gantt gantt risk"
+      "heat  feed  miles"; }
+
+  /* panel chrome */
+  .panel { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .ph { display: flex; align-items: center; gap: 8px; padding: 11px 14px 9px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .ph .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .ph .ic { width: 13px; height: 13px; color: var(--prizma-text-tertiary); flex: none; }
+  .ph .badge { margin-left: auto; font: 700 10px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .ph .badge.alert { color: var(--prizma-off-course); }
+  .pb { flex: 1; min-height: 0; overflow-y: auto; }
+
+  /* ── KPI strip ── */
+  .kpi-panel { grid-area: kpi; }
+  .kpi-panel .pb { overflow: hidden; display: grid; grid-template-columns: repeat(6, 1fr); }
+  .kpi { padding: 13px 16px; border-right: 1px solid var(--prizma-border); }
+  .kpi:last-child { border-right: 0; }
+  .kpi .k-lbl { font: 700 9.5px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .kpi .k-val { margin-top: 8px; font: 800 23px/1 var(--mono); font-feature-settings: "tnum" 1; letter-spacing: -.01em; }
+  .kpi .k-val small { font-size: 12px; font-weight: 700; color: var(--prizma-text-tertiary); margin-left: 2px; }
+  .kpi .k-sub { margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+  .kpi.risk .k-val { color: var(--prizma-off-course); }
+  .kpi.prog .k-val { color: var(--prizma-information); }
+  .kpi.ok .k-val { color: var(--prizma-on-course); }
+
+  /* ── mini-gantt ── */
+  .gantt-panel { grid-area: gantt; }
+  .mg { position: relative; padding: 8px 14px 14px; }
+  .mg-scale { position: relative; height: 18px; margin: 4px 0 6px; }
+  .mg-scale .tk { position: absolute; top: 0; transform: translateX(-50%); font: 600 9px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .mg-scale .tk i { display: block; width: 1px; height: 6px; background: var(--prizma-border-strong); margin: 3px auto 0; }
+  .mg-track { position: relative; height: 16px; margin-bottom: 5px; }
+  .mg-track .lbl { position: absolute; left: 0; top: 50%; transform: translateY(-50%); font-size: 10.5px; color: var(--prizma-text-secondary); width: 116px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
+  .mg-track .rail { position: absolute; left: 124px; right: 4px; top: 0; bottom: 0; }
+  .mg-bar { position: absolute; top: 50%; transform: translateY(-50%); height: 9px; border-radius: 3px; background: var(--prizma-bg-tertiary); }
+  .mg-bar::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; border-radius: 3px 0 0 3px; background: var(--prizma-text-tertiary); }
+  .mg-bar.drift::before { background: var(--prizma-drift); }
+  .mg-bar.off::before { background: var(--prizma-off-course); }
+  .mg-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--prizma-text-secondary); opacity: .5; }
+  .mg-now { position: absolute; top: 22px; bottom: 6px; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 3; pointer-events: none; }
+  .mg-now .cap { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font: 700 8px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-information); background: var(--prizma-bg-elevated); padding: 0 4px; white-space: nowrap; }
+  .mg-zone { position: absolute; top: 22px; bottom: 6px; border-left: 1px solid var(--prizma-border); }
+  .mg-zone .zl { position: absolute; top: -16px; left: 5px; font: 600 8.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .mg-zone.cur .zl { color: var(--prizma-text-secondary); }
+
+  /* ── risk panel ── */
+  .risk-panel { grid-area: risk; }
+  .rrow { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 14px 9px 16px; border-bottom: 1px solid var(--prizma-border); }
+  .rrow:last-child { border-bottom: 0; }
+  .rrow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-drift); }
+  .rrow.off::before { background: var(--prizma-off-course); }
+  .rrow .rmain { flex: 1; min-width: 0; }
+  .rrow .rnm { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rrow .rst { font-size: 10px; color: var(--prizma-text-tertiary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rrow .rmv { font: 700 13px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; text-align: right; }
+  .rrow .rmv small { display: block; font: 700 8px/1 var(--font); letter-spacing: .3px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 2px; }
+
+  /* ── heat panel ── */
+  .heat-panel { grid-area: heat; }
+  .heat-panel .pb { overflow: auto; }
+  .hgrid { display: grid; grid-template-columns: 92px repeat(3, 1fr); min-width: 100%; }
+  .hgrid .hc { padding: 7px 9px; font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); text-align: center; border-bottom: 1px solid var(--prizma-border); }
+  .hgrid .hc.cur { color: var(--prizma-text-secondary); }
+  .hgrid .hc.corner { text-align: left; }
+  .hgrid .ht { padding: 0 10px; font-size: 11px; font-weight: 500; display: flex; align-items: center; border-bottom: 1px solid var(--prizma-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hgrid .hcell { border-left: 1px solid var(--prizma-border); border-bottom: 1px solid var(--prizma-border); min-height: 30px; display: flex; align-items: center; justify-content: center; font: 600 12px/1 var(--mono); color: var(--prizma-text-primary); position: relative; }
+  .hgrid .hcell.empty { color: var(--prizma-text-tertiary); font-weight: 400; }
+  .hgrid .hcell.over { color: var(--prizma-text-primary); }
+  .hgrid .hcell .ot { position: absolute; top: 2px; right: 3px; font: 700 7px/1 var(--mono); color: var(--prizma-off-course); }
+  .heat-legend { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--prizma-border); flex: none; font-size: 9.5px; color: var(--prizma-text-tertiary); }
+  .heat-legend .ramp { flex: 1; height: 7px; border-radius: 4px; border: 1px solid var(--prizma-border);
+    background: linear-gradient(to right, color-mix(in srgb, var(--prizma-text-primary) 4%, transparent), color-mix(in srgb, var(--prizma-drift) 36%, transparent), color-mix(in srgb, var(--prizma-off-course) 68%, transparent)); }
+
+  /* ── activity feed ── */
+  .feed-panel { grid-area: feed; }
+  .frow { position: relative; display: flex; gap: 10px; padding: 8px 14px 8px 14px; border-bottom: 1px solid var(--prizma-border); }
+  .frow:last-child { border-bottom: 0; }
+  .fdot { flex: none; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; background: var(--prizma-text-tertiary); }
+  .fdot.done { background: var(--prizma-on-course); }
+  .fdot.move { background: var(--prizma-drift); }
+  .fdot.start { background: var(--prizma-information); }
+  .fmain { flex: 1; min-width: 0; }
+  .ftxt { font-size: 11.5px; color: var(--prizma-text-primary); line-height: 1.35; }
+  .ftxt b { font-weight: 600; }
+  .ftxt .wt { font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); }
+  .fmeta { font-size: 9.5px; color: var(--prizma-text-tertiary); margin-top: 2px; }
+  .fmeta .arr { font-family: var(--mono); }
+
+  /* ── milestones countdown ── */
+  .miles-panel { grid-area: miles; }
+  .mrow { position: relative; display: flex; align-items: center; gap: 12px; padding: 11px 14px 11px 16px; border-bottom: 1px solid var(--prizma-border); }
+  .mrow:last-child { border-bottom: 0; }
+  .mrow::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-border-strong); }
+  .mrow.soon::before { background: var(--prizma-information); }
+  .mrow.past::before { background: var(--prizma-text-tertiary); }
+  .mrow .mmain { flex: 1; min-width: 0; }
+  .mrow .mnm { font-size: 12px; font-weight: 600; }
+  .mrow .mdt { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .mrow .mdays { flex: none; text-align: right; }
+  .mrow .mdays b { font: 800 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .mrow.soon .mdays b { color: var(--prizma-information); }
+  .mrow .mdays small { display: block; font: 700 8px/1 var(--font); letter-spacing: .3px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 2px; }
+  .mrow.past .mdays b { color: var(--prizma-text-tertiary); font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Центр управления</span>
+    <span class="pz-eyebrow">Редизайн 21 · cockpit</span>
+    <span class="spacer"></span>
+    <span class="clock"><span class="live"></span><span id="clock">23.05 · окно 1.21</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="deck">
+    <!-- KPI -->
+    <section class="panel kpi-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg>
+        <span class="pz-eyebrow">Сводка квартала</span>
+      </div>
+      <div class="pb" id="kpis"></div>
+    </section>
+
+    <!-- mini-gantt -->
+    <section class="panel gantt-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h14M4 18h7"/></svg>
+        <span class="pz-eyebrow">Мини-гант · окна 1.20 – 1.22</span>
+        <span class="badge" id="mg-badge"></span>
+      </div>
+      <div class="pb"><div class="mg" id="mg"></div></div>
+    </section>
+
+    <!-- risks -->
+    <section class="panel risk-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span class="pz-eyebrow">Риски</span>
+        <span class="badge alert" id="risk-badge"></span>
+      </div>
+      <div class="pb" id="risks"></div>
+    </section>
+
+    <!-- heat -->
+    <section class="panel heat-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span class="pz-eyebrow">Ёмкость команд</span>
+      </div>
+      <div class="pb"><div class="hgrid" id="heat"></div></div>
+      <div class="heat-legend"><span>свободно</span><div class="ramp"></div><span>перегрев</span></div>
+    </section>
+
+    <!-- feed -->
+    <section class="panel feed-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+        <span class="pz-eyebrow">Лента изменений</span>
+        <span class="badge" id="feed-badge"></span>
+      </div>
+      <div class="pb" id="feed"></div>
+    </section>
+
+    <!-- milestones -->
+    <section class="panel miles-panel">
+      <div class="ph">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18M5 4h12l-2 4 2 4H5"/></svg>
+        <span class="pz-eyebrow">Вехи · обратный отсчёт</span>
+      </div>
+      <div class="pb" id="miles"></div>
+    </section>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const now = new Date(D.today);
+  const DAY = 864e5;
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  function fmt(d) { return new Date(d).toLocaleDateString('ru', { day: '2-digit', month: 'short' }); }
+
+  // ── KPI strip ──
+  const totEpics = D.epics.length;
+  const inProgress = D.epics.filter(e => e.pills.some(p => p.state === 'progress')).length;
+  const allPills = D.epics.reduce((n, e) => n + e.pills.length, 0);
+  const donePills = D.epics.reduce((n, e) => n + e.pills.filter(p => p.state === 'done').length, 0);
+  const donePct = Math.round(donePills / allPills * 100);
+  const atRisk = D.epics.filter(e => e.risk).length;
+  const totMoves = D.epics.reduce((n, e) => n + (e.moves || 0), 0);
+  const totEst = D.epics.reduce((n, e) => n + D.helpers.effortOf(e), 0);
+  const KPIS = [
+    { lbl: 'Эпиков', val: totEpics, sub: D.teams.length + ' команд' },
+    { lbl: 'В работе', val: inProgress, sub: 'активные', cls: 'prog' },
+    { lbl: 'Готово', val: donePct, unit: '%', sub: donePills + ' из ' + allPills, cls: 'ok' },
+    { lbl: 'Под риском', val: atRisk, sub: 'дрейф + срыв', cls: 'risk' },
+    { lbl: 'Переносов', val: totMoves, sub: 'за квартал' },
+    { lbl: 'Ёмкость', val: totEst, unit: 'дн', sub: 'оценка' },
+  ];
+  document.getElementById('kpis').innerHTML = KPIS.map(k =>
+    '<div class="kpi ' + (k.cls || '') + '"><div class="k-lbl">' + esc(k.lbl) + '</div>' +
+    '<div class="k-val">' + k.val + (k.unit ? '<small>' + k.unit + '</small>' : '') + '</div>' +
+    '<div class="k-sub">' + esc(k.sub) + '</div></div>').join('');
+
+  // ── mini-gantt: эпики как бары между первой и последней дат-пилюлей ──
+  const dated = cols.filter(c => c.dated);
+  const lo = new Date(dated[0].start).getTime();
+  const hi = new Date(dated[dated.length - 1].end).getTime();
+  const span = hi - lo || 1;
+  const pos = t => ((t - lo) / span) * 100;
+  // дата релиза для колонки (середина окна) — используется для размещения недатированных пилюль рядом
+  function colMid(key) {
+    const c = cols.find(x => x.key === key);
+    if (c && c.dated) return (new Date(c.start).getTime() + new Date(c.end).getTime()) / 2;
+    return null;
+  }
+  function epicWindow(e) {
+    // собрать даты по колонкам пилюль (только датированные релизы)
+    const ts = [];
+    e.pills.forEach(p => {
+      const c = cols.find(x => x.key === p.col);
+      if (c && c.dated) { ts.push(new Date(c.start).getTime()); ts.push(new Date(c.end).getTime()); }
+    });
+    if (!ts.length) return null;
+    return { s: Math.min(...ts), e: Math.max(...ts) };
+  }
+  function renderGantt() {
+    const mg = document.getElementById('mg');
+    // только эпики с датированными пилюлями, отсортированы по старту
+    const rows = D.epics.map(e => ({ e, w: epicWindow(e) })).filter(r => r.w).sort((a, b) => a.w.s - b.w.s);
+    document.getElementById('mg-badge').textContent = rows.length + ' эпиков';
+    let h = '';
+    // шкала (по неделям не нужна — отметим границы релизов как зоны)
+    h += '<div class="mg-scale" id="mg-scale"></div>';
+    rows.forEach(r => {
+      const e = r.e, w = r.w;
+      const left = pos(w.s), width = Math.max(2, pos(w.e) - pos(w.s));
+      const cls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : '');
+      const ratio = D.helpers.doneRatio(e);
+      h += '<div class="mg-track" title="' + esc(e.epic) + '"><span class="lbl">' + esc(e.epic) + '</span>' +
+        '<div class="rail"><div class="mg-bar ' + cls + '" style="left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%">' +
+        '<span class="fill" style="width:' + (ratio * 100).toFixed(0) + '%"></span></div></div></div>';
+    });
+    mg.innerHTML = h;
+    // overlay зоны границ релизов + today (после layout — нужна ширина rail)
+    placeOverlay();
+  }
+  function placeOverlay() {
+    const mg = document.getElementById('mg');
+    const sample = mg.querySelector('.rail');
+    if (!sample) return;
+    const mgr = mg.getBoundingClientRect(), rr = sample.getBoundingClientRect();
+    const railLeft = rr.left - mgr.left, railW = rr.width;
+    mg.querySelectorAll('.mg-now, .mg-zone').forEach(n => n.remove());
+    // зоны: левая граница каждого датированного релиза
+    dated.forEach(c => {
+      const x = railLeft + railW * (pos(new Date(c.start).getTime()) / 100);
+      const z = document.createElement('div');
+      z.className = 'mg-zone' + (c.current ? ' cur' : '');
+      z.style.left = x.toFixed(1) + 'px';
+      z.innerHTML = '<span class="zl">' + esc(c.short) + '</span>';
+      mg.appendChild(z);
+    });
+    // today
+    const tx = railLeft + railW * (pos(now.getTime()) / 100);
+    const n = document.createElement('div');
+    n.className = 'mg-now';
+    n.style.left = tx.toFixed(1) + 'px';
+    n.innerHTML = '<span class="cap">СЕГОДНЯ</span>';
+    mg.appendChild(n);
+  }
+
+  // ── risks ──
+  const risky = D.epics.filter(e => e.risk).sort((a, b) => {
+    const r = (b.risk === 'off-course' ? 1 : 0) - (a.risk === 'off-course' ? 1 : 0);
+    return r !== 0 ? r : (b.moves || 0) - (a.moves || 0);
+  });
+  document.getElementById('risk-badge').textContent = risky.length + ' ' + plural(risky.length, 'эпик', 'эпика', 'эпиков');
+  document.getElementById('risks').innerHTML = risky.map(e => {
+    const off = e.risk === 'off-course';
+    const ratio = Math.round(D.helpers.doneRatio(e) * 100);
+    const st = (off ? 'Срыв сроков' : 'Дрейф') + ' · ' + e.team + ' · готовность ' + ratio + '%';
+    return '<div class="rrow ' + (off ? 'off' : '') + '">' +
+      '<div class="rmain"><div class="rnm">' + esc(e.epic) + '</div><div class="rst">' + esc(st) + '</div></div>' +
+      '<div class="rmv">' + e.moves + '<small>пер.</small></div></div>';
+  }).join('');
+
+  // ── heat: команда × датированный релиз ──
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  function cellTint(ratio) {
+    if (ratio <= 0) return 'transparent';
+    if (ratio <= 1) { const x = Math.round(6 + ratio * 32); return 'color-mix(in srgb, var(--prizma-drift) ' + x + '%, transparent)'; }
+    const over = Math.min(ratio - 1, 0.8) / 0.8; const x = Math.round(44 + over * 34);
+    return 'color-mix(in srgb, var(--prizma-off-course) ' + x + '%, transparent)';
+  }
+  const heatRels = ['r120', 'r121', 'r122'];
+  let heatHtml = '<div class="hc corner"><span class="pz-eyebrow">Команда</span></div>';
+  heatRels.forEach(k => { const c = cols.find(x => x.key === k); heatHtml += '<div class="hc' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</div>'; });
+  D.teams.forEach(team => {
+    const cap = CAPACITY[team] || 5;
+    heatHtml += '<div class="ht" title="' + esc(team) + '">' + esc(team) + '</div>';
+    heatRels.forEach(k => {
+      const load = D.helpers.loadByTeamRelease(team, k);
+      const ratio = load / cap, over = ratio > 1, empty = load === 0;
+      heatHtml += '<div class="hcell' + (empty ? ' empty' : '') + (over ? ' over' : '') + '" style="background:' + cellTint(ratio) + '" title="' + esc(team) + ' · ' + load + '/' + cap + '">' +
+        load + (over ? '<span class="ot">!</span>' : '') + '</div>';
+    });
+  });
+  document.getElementById('heat').innerHTML = heatHtml;
+
+  // ── activity feed: синтез из moves (переносы) + done (завершено) + progress (старт) ──
+  // событие переноса: эпик с moves>0 → «WT перенесён 1.20→1.21» (берём датированную пилюлю как «куда»)
+  const relLabel = { backlog: 'Бэклог', r120: '1.20', r121: '1.21', r122: '1.22', overtime: 'Овертайм' };
+  const relOrder = { backlog: 0, r120: 1, r121: 2, r122: 3, overtime: 4 };
+  const events = [];
+  D.epics.forEach(e => {
+    // done-события
+    e.pills.filter(p => p.state === 'done').forEach(p => {
+      events.push({ kind: 'done', sort: 30 + relOrder[p.col], wt: p.wt, epic: e.epic, team: e.team, col: p.col, who: p.who });
+    });
+    // start-события (в работе сейчас)
+    e.pills.filter(p => p.state === 'progress').forEach(p => {
+      events.push({ kind: 'start', sort: 20 + relOrder[p.col], wt: p.wt, epic: e.epic, team: e.team, col: p.col, who: p.who });
+    });
+    // move-события: если эпик переезжал, считаем что текущая запланированная пилюля «приехала» из предыдущего окна
+    if ((e.moves || 0) > 0) {
+      const planned = e.pills.filter(p => p.state === 'planned' && relOrder[p.col] >= 2);
+      const tgt = planned[0] || e.pills.find(p => relOrder[p.col] >= 2);
+      if (tgt) {
+        const fromIdx = Math.max(0, relOrder[tgt.col] - 1);
+        const fromKey = Object.keys(relOrder).find(k => relOrder[k] === fromIdx) || 'r120';
+        events.push({ kind: 'move', sort: 40 + relOrder[tgt.col], wt: tgt.wt, epic: e.epic, team: e.team, from: fromKey, col: tgt.col, moves: e.moves });
+      }
+    }
+  });
+  events.sort((a, b) => b.sort - a.sort);
+  const feed = events.slice(0, 22);
+  document.getElementById('feed-badge').textContent = events.length + ' событий';
+  document.getElementById('feed').innerHTML = feed.map(ev => {
+    let txt = '', meta = '';
+    if (ev.kind === 'done') {
+      txt = '<b>' + esc((D.WT[ev.wt] || {}).label || ev.wt) + '</b> завершено <span class="wt">' + esc(ev.wt) + '</span>';
+      meta = esc(ev.epic) + ' · ' + esc(relLabel[ev.col]) + (ev.who ? ' · ' + esc(ev.who) : '');
+    } else if (ev.kind === 'start') {
+      txt = '<b>' + esc((D.WT[ev.wt] || {}).label || ev.wt) + '</b> в работе <span class="wt">' + esc(ev.wt) + '</span>';
+      meta = esc(ev.epic) + ' · ' + esc(relLabel[ev.col]) + (ev.who ? ' · ' + esc(ev.who) : '');
+    } else {
+      txt = '<span class="wt">' + esc(ev.wt) + '</span> перенесён <span class="arr">' + esc(relLabel[ev.from]) + '&rarr;' + esc(relLabel[ev.col]) + '</span>';
+      meta = esc(ev.epic) + ' · ' + esc(ev.team) + ' · ' + ev.moves + ' ' + plural(ev.moves, 'перенос', 'переноса', 'переносов');
+    }
+    return '<div class="frow"><span class="fdot ' + ev.kind + '"></span><div class="fmain"><div class="ftxt">' + txt + '</div><div class="fmeta"><span class="arr"></span>' + meta + '</div></div></div>';
+  }).join('');
+
+  // ── milestones countdown ──
+  const ms = D.milestones.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  document.getElementById('miles').innerHTML = ms.map(m => {
+    const t = new Date(m.date).getTime();
+    const days = Math.round((t - now.getTime()) / DAY);
+    const past = days < 0;
+    const soon = !past && days <= 9;
+    const cls = past ? 'past' : (soon ? 'soon' : '');
+    const daysTxt = past ? (-days) + ' дн' : (days === 0 ? 'сегодня' : days + '');
+    const daysSub = past ? 'позади' : (days === 0 ? '' : plural(days, 'день', 'дня', 'дней'));
+    return '<div class="mrow ' + cls + '"><div class="mmain"><div class="mnm">' + esc(m.label) + '</div><div class="mdt">' + fmt(m.date) + '</div></div>' +
+      '<div class="mdays"><b>' + daysTxt + '</b>' + (daysSub ? '<small>' + daysSub + '</small>' : '') + '</div></div>';
+  }).join('');
+
+  // ── layout (gantt overlay): sync + 60ms + resize ──
+  function layout() { renderGantt(); }
+  layout();
+  setTimeout(layout, 60);
+  window.addEventListener('resize', () => setTimeout(placeOverlay, 0));
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    setTimeout(placeOverlay, 30);
+  });
+})();
+</script>
+</body>
+</html>

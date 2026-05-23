@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 29 · Сравнение снимков</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .eyebrow { margin-left: 2px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 13px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* ── summary strip ── */
+  .summary { flex: none; display: flex; align-items: center; gap: 0; padding: 11px 22px; border-bottom: 1px solid var(--prizma-border); }
+  .sm { display: flex; align-items: baseline; gap: 8px; padding-right: 26px; margin-right: 26px; border-right: 1px solid var(--prizma-border); }
+  .sm:last-of-type { border-right: 0; }
+  .sm .n { font: 800 22px/1 var(--mono); }
+  .sm .l { font-size: 11.5px; color: var(--prizma-text-secondary); }
+  .sm.moved .n { color: var(--prizma-drift); }
+  .sm.added .n { color: var(--prizma-information); }
+  .sm.done .n { color: var(--prizma-on-course); }
+  .summary .spacer { flex: 1; }
+  .summary .since { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); letter-spacing: .3px; }
+
+  /* ── compare layout ── */
+  .compare { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+  .side { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .side.left { border-right: 1px solid var(--prizma-border-strong); }
+
+  .side-h { flex: none; padding: 13px 18px 11px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: baseline; gap: 10px; }
+  .side-h .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .side-h .dt { font: 700 16px/1 var(--mono); letter-spacing: -.01em; }
+  .side.right .side-h .dt { color: var(--prizma-text-primary); }
+  .side.left .side-h .dt { color: var(--prizma-text-secondary); }
+  .side-h .tag { font: 600 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 3px 6px; }
+  .side.right .side-h .tag { color: var(--prizma-information); border-color: color-mix(in srgb, var(--prizma-information) 40%, transparent); }
+
+  .side-scroll { flex: 1; overflow: auto; min-height: 0; }
+
+  /* мини-гант: строки эпиков × колонки релизов */
+  .mg { display: grid; grid-template-columns: 150px repeat(5, minmax(58px, 1fr)); min-width: 480px; position: relative; }
+  .mh { position: sticky; top: 0; z-index: 6; background: var(--prizma-bg); padding: 9px 8px 8px; border-bottom: 1px solid var(--prizma-border); }
+  .mh .rel { font: 600 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .mh .rel.cur { color: var(--prizma-text-secondary); }
+  .mh.first { display: flex; align-items: flex-end; }
+  .mh.first .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  .team { grid-column: 1 / -1; position: sticky; left: 0; padding: 7px 12px 4px; font: 700 9px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); background: var(--prizma-bg); }
+
+  .elbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 7px 10px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 6px; }
+  .elbl .risk { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .elbl .nm { font-size: 11px; font-weight: 500; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .mc { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 5px 5px; display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; min-height: 34px; }
+  .mc.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+
+  /* мини-пилюля = work-type chip, 2px stripe-left */
+  .pl { position: relative; display: inline-flex; align-items: center; padding: 3px 6px 3px 8px; font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .pl::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt, var(--prizma-border-strong)); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pl.done { opacity: .55; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+  /* diff-подсветка (только на правой/текущей стороне) */
+  .pl.d-moved { background: var(--prizma-drift-bg); color: var(--prizma-text-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-drift) 40%, transparent); }
+  .pl.d-moved::before { background: var(--prizma-drift); }
+  .pl.d-done { background: var(--prizma-on-course-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-on-course) 32%, transparent); }
+  .pl.d-done::before { background: var(--prizma-on-course); }
+  /* добавленная (unplanned) */
+  .pl.d-added { background: var(--prizma-information-bg); color: var(--prizma-text-primary); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-information) 38%, transparent); }
+  .pl.d-added::before { background: var(--prizma-information); }
+  /* «дырка» на baseline там, откуда уехало */
+  .pl.ghost { background: transparent; border: 1px dashed color-mix(in srgb, var(--prizma-drift) 50%, var(--prizma-border-strong)); color: var(--prizma-text-tertiary); opacity: .85; }
+  .pl.ghost::before { display: none; }
+
+  /* ── center gutter с метками строк ── */
+  .gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Сравнение снимков</span>
+    <span class="pz-eyebrow eyebrow">Редизайн 29 · diff</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-drift)"></i>переехало</span>
+      <span><i style="background:var(--prizma-information)"></i>добавлено</span>
+      <span><i style="background:var(--prizma-on-course)"></i>завершено</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="summary" id="summary">
+    <div class="sm moved"><span class="n" id="sm-moved">0</span><span class="l">переехало</span></div>
+    <div class="sm done"><span class="n" id="sm-done">0</span><span class="l">завершено</span></div>
+    <div class="sm added"><span class="n" id="sm-added">0</span><span class="l">добавлено</span></div>
+    <span class="spacer"></span>
+    <span class="since">Изменения между снимками · 14.05 → 23.05</span>
+  </div>
+
+  <div class="compare">
+    <div class="side left">
+      <div class="side-h"><span class="tag">Базовый</span><span class="pz-eyebrow">План на</span><span class="dt">14.05</span></div>
+      <div class="side-scroll"><div class="mg" id="mg-base"></div></div>
+    </div>
+    <div class="side right">
+      <div class="side-h"><span class="tag">Текущий</span><span class="pz-eyebrow">Сегодня</span><span class="dt">23.05</span></div>
+      <div class="side-scroll"><div class="mg" id="mg-cur"></div></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+  const wtVar = wt => 'var(' + ({ BE: '--wt-be', FE: '--wt-fe', QA: '--wt-qa', AN: '--wt-an', BA: '--wt-ba', IMPL: '--wt-impl', MIG: '--wt-mig', STAB: '--wt-stab', HF: '--wt-hf' }[wt] || '--prizma-border-strong') + ')';
+
+  // ── синтез baseline (план на 14.05) ──
+  // Для эпиков с moves>0: их самая поздняя датированная пилюля считается
+  // переехавшей — на baseline она сидела на один датированный релиз раньше.
+  // unplanned-пилюли трактуем как ДОБАВЛЕННЫЕ после фиксации (их не было в baseline).
+  const datedKeys = cols.filter(c => c.dated).map(c => c.key); // r120, r121, r122
+
+  // diff[epicId] = { movedPillIdx, fromCol, toCol }  (для переехавших)
+  const movedBy = {};
+  D.epics.forEach(e => {
+    if (!e.moves || e.moves <= 0) return;
+    let bestIdx = -1, bestRank = -1;
+    e.pills.forEach((p, idx) => {
+      if (p.state === 'unplanned') return; // unplanned — это «добавлено», не «переехало»
+      const rank = datedKeys.indexOf(p.col);
+      if (rank > bestRank) { bestRank = rank; bestIdx = idx; }
+    });
+    if (bestIdx < 0 || bestRank <= 0) return;
+    movedBy[e.id] = { idx: bestIdx, fromCol: datedKeys[bestRank - 1], toCol: e.pills[bestIdx].col };
+  });
+
+  // классификация пилюли для текущего снимка
+  function pillClass(e, idx, p) {
+    if (p.state === 'unplanned') return 'd-added';
+    const mv = movedBy[e.id];
+    if (mv && mv.idx === idx) return 'd-moved';
+    if (p.state === 'done') return 'd-done';
+    return '';
+  }
+
+  // baseline-колонка пилюли (где она сидела на 14.05)
+  // moved → fromCol; added(unplanned) → отсутствует на baseline; иначе текущая.
+  function baselineCol(e, idx, p) {
+    if (p.state === 'unplanned') return null; // не было в baseline
+    const mv = movedBy[e.id];
+    if (mv && mv.idx === idx) return mv.fromCol;
+    return p.col;
+  }
+
+  // ── счётчики сводки ──
+  const movedCount = Object.keys(movedBy).length;
+  let doneCount = 0, addedCount = 0;
+  D.epics.forEach(e => e.pills.forEach(p => {
+    if (p.state === 'done') doneCount++;
+    if (p.state === 'unplanned') addedCount++;
+  }));
+  document.getElementById('sm-moved').textContent = movedCount;
+  document.getElementById('sm-done').textContent = doneCount;
+  document.getElementById('sm-added').textContent = addedCount;
+
+  function riskDot(e) {
+    if (!e.risk) return '';
+    const col = e.risk === 'off-course' ? 'var(--prizma-off-course)' : 'var(--prizma-drift)';
+    return '<span class="risk" style="background:' + col + '"></span>';
+  }
+
+  // ── рендер одной стороны ──
+  // mode: 'base' | 'cur'
+  function renderSide(el, mode) {
+    let html = '';
+    html += '<div class="mh first"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      html += '<div class="mh"><span class="rel' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</span></div>';
+    });
+    D.teams.forEach(team => {
+      html += '<div class="team">' + esc(team) + '</div>';
+      D.helpers.teamEpics(team).forEach(e => {
+        html += '<div class="elbl">' + riskDot(e) + '<span class="nm" title="' + esc(e.epic) + '">' + esc(e.epic) + '</span></div>';
+        cols.forEach(c => {
+          const bz = !c.dated;
+          html += '<div class="mc' + (bz ? ' bz' : '') + '">';
+          if (mode === 'cur') {
+            // текущие пилюли с diff-подсветкой
+            e.pills.forEach((p, idx) => {
+              if (p.col !== c.key) return;
+              const dc = pillClass(e, idx, p);
+              const stc = p.state === 'done' ? ' done' : '';
+              html += '<span class="pl' + (dc ? ' ' + dc : '') + stc + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '">' + esc(p.wt) + '</span>';
+            });
+          } else {
+            // baseline: пилюли по их позиции на 14.05; ghost там, откуда уехало
+            e.pills.forEach((p, idx) => {
+              const bc = baselineCol(e, idx, p);
+              if (bc !== c.key) return;
+              // на baseline done ещё не было завершено — показываем нейтрально
+              html += '<span class="pl" style="--wt:' + wtVar(p.wt) + '" title="' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '">' + esc(p.wt) + '</span>';
+            });
+          }
+          html += '</div>';
+        });
+      });
+    });
+    el.innerHTML = html;
+  }
+
+  renderSide(document.getElementById('mg-base'), 'base');
+  renderSide(document.getElementById('mg-cur'), 'cur');
+
+  // ── синхронный вертикальный скролл двух сторон ──
+  const sl = document.querySelector('.side.left .side-scroll');
+  const sr = document.querySelector('.side.right .side-scroll');
+  let lock = false;
+  function sync(from, to) {
+    if (lock) return; lock = true;
+    to.scrollTop = from.scrollTop;
+    requestAnimationFrame(() => { lock = false; });
+  }
+  sl.addEventListener('scroll', () => sync(sl, sr));
+  sr.addEventListener('scroll', () => sync(sr, sl));
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

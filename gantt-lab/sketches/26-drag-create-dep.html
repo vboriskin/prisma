@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 26 · Протянуть зависимость</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  .top { display: flex; align-items: flex-start; gap: 16px; padding: 18px 24px 14px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .head h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 5px 0 4px; }
+  .top .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 13px; max-width: 600px; }
+  .top .spacer { flex: 1; }
+
+  .main { display: flex; flex: 1; min-height: 0; }
+
+  /* ── сцена с узлами ── */
+  .scene { position: relative; flex: 1; overflow: auto; padding: 22px 24px 60px; }
+  svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 1; }
+  .scene.linking { cursor: crosshair; }
+
+  .teams { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 18px; }
+  .teamblock .tname { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; }
+
+  .epic { position: relative; display: flex; flex-direction: column; gap: 5px; width: 210px; padding: 12px 14px 12px 16px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md);
+    transition: opacity .2s var(--ease-calm), border-color .2s, box-shadow .2s, transform .15s var(--ease-calm); }
+  .epic::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-border-strong); border-radius: var(--r-md) 0 0 var(--r-md); transition: background .2s; }
+  .epic .nm { font: 600 12.5px/1.25 var(--font); color: var(--prizma-text-primary); padding-right: 22px; }
+  .epic .sub { display: flex; align-items: center; gap: 8px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .epic .sub .rel { color: var(--prizma-text-secondary); }
+  .epic .sub .depn { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* handle «связать» — появляется на hover */
+  .handle { position: absolute; top: 50%; right: -9px; transform: translateY(-50%) scale(.8); width: 22px; height: 22px;
+    border-radius: 50%; background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong);
+    color: var(--prizma-text-secondary); display: inline-flex; align-items: center; justify-content: center;
+    cursor: grab; opacity: 0; pointer-events: none; transition: opacity .15s var(--ease-calm), transform .15s var(--ease-spring), color .15s, border-color .15s; z-index: 5; touch-action: none; }
+  .epic:hover .handle { opacity: 1; transform: translateY(-50%) scale(1); pointer-events: auto; }
+  .handle:hover { color: var(--prizma-information); border-color: var(--prizma-information); }
+  .handle svg { width: 12px; height: 12px; pointer-events: none; }
+
+  /* состояния при протягивании */
+  .scene.linking .epic { opacity: .55; }
+  .epic.src { opacity: 1 !important; border-color: var(--prizma-information); }
+  .epic.src::before { background: var(--prizma-information); }
+  .epic.cand { opacity: 1 !important; }                                  /* допустимая цель */
+  .epic.cand.hot { border-color: var(--prizma-on-course); box-shadow: 0 0 0 1px var(--prizma-on-course), 0 6px 18px rgba(0,0,0,.3); transform: translateY(-1px); }
+  .epic.cand.hot::before { background: var(--prizma-on-course); }
+  .epic.invalid.hot { border-color: var(--prizma-off-course); box-shadow: 0 0 0 1px var(--prizma-off-course); }
+  .epic.invalid.hot::before { background: var(--prizma-off-course); }
+
+  /* подсветка узлов с зависимостями (вне drag) */
+  .epic.has-dep::before { background: var(--prizma-information); }
+
+  /* ── боковая панель «Зависимости» ── */
+  .side { width: 290px; flex: none; border-left: 1px solid var(--prizma-border); background: var(--prizma-bg-elevated); display: flex; flex-direction: column; }
+  .side .sh { padding: 16px 16px 12px; border-bottom: 1px solid var(--prizma-border); }
+  .side .sh .ttl { display: flex; align-items: baseline; gap: 8px; }
+  .side .sh .ttl h2 { font: 700 13px/1 var(--font); margin: 0; }
+  .side .sh .ttl .n { font: 700 13px/1 var(--mono); color: var(--prizma-information); }
+  .side .sh p { margin: 6px 0 0; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .side .list { flex: 1; overflow: auto; padding: 10px 12px 20px; display: flex; flex-direction: column; gap: 7px; }
+
+  .dep { display: flex; align-items: center; gap: 9px; padding: 9px 9px 9px 11px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: var(--prizma-bg); position: relative; animation: pop .25s var(--ease-calm); }
+  .dep::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--prizma-information); }
+  .dep .body { flex: 1; min-width: 0; }
+  .dep .pair { display: flex; align-items: center; gap: 6px; font: 600 11.5px/1.3 var(--font); color: var(--prizma-text-primary); }
+  .dep .pair .a { color: var(--prizma-text-primary); }
+  .dep .pair .b { color: var(--prizma-information); }
+  .dep .pair svg { width: 13px; height: 13px; color: var(--prizma-text-tertiary); flex: none; }
+  .dep .meta { margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .dep .meta .seed { color: var(--prizma-text-tertiary); }
+  .dep .rm { width: 24px; height: 24px; flex: none; border: none; background: transparent; color: var(--prizma-text-tertiary); border-radius: var(--r-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: color .15s, background .15s; }
+  .dep .rm:hover { color: var(--prizma-off-course); background: var(--prizma-off-course-bg); }
+  .dep .rm svg { width: 13px; height: 13px; }
+
+  .side .empty { padding: 24px 8px; text-align: center; font-size: 12px; color: var(--prizma-text-tertiary); }
+
+  @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* живая стрелка-резинка */
+  .wires path.live { stroke-dasharray: 5 4; }
+  .legend { display: flex; gap: 16px; margin-top: 10px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; font-size: 12.5px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.warn { border-color: color-mix(in srgb, var(--prizma-off-course) 55%, var(--prizma-border-strong)); }
+  .toast svg { width: 15px; height: 15px; flex: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="head">
+      <div class="pz-eyebrow">Скетч 26 · Граф</div>
+      <h1>Протянуть зависимость</h1>
+      <p>Наведите эпик — справа появится узелок <b>связать</b>. Потяните от него: рисуется живая стрелка, она «прилипает» к допустимой цели. Отпустите — создаётся зависимость (источник <b>зависит от</b> цели), стрелка остаётся, строка падает в список справа с × для удаления. Само-связь и циклы блокируются.</p>
+      <div class="legend">
+        <span><i style="border-color:var(--prizma-information)"></i>зависит от (создано/существует)</span>
+        <span><i style="border-color:var(--prizma-on-course)"></i>можно связать</span>
+        <span><i style="border-color:var(--prizma-off-course)"></i>цикл / само-связь</span>
+      </div>
+    </div>
+    <span class="spacer"></span>
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="main">
+    <div class="scene" id="scene">
+      <svg class="wires" id="wires" aria-hidden="true"></svg>
+      <div class="teams" id="teams"></div>
+    </div>
+    <aside class="side">
+      <div class="sh">
+        <div class="ttl"><h2>Зависимости</h2><span class="n" id="depN">0</span></div>
+        <p>Источник зависит от цели. Перетащите узелок «связать» от одного эпика к другому.</p>
+      </div>
+      <div class="list" id="depList"></div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast"><span id="toastIcon"></span><span id="toastText"></span></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+  const relShort = k => { const c = D.releases.find(r=>r.key===k); return c ? c.short : k; };
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const epicRel = e => { const order = ['r120','r121','r122','overtime','backlog']; for (const c of order){ if (e.pills.some(p=>p.col===c)) return c; } return e.pills[0]?.col || 'backlog'; };
+  const shortName = e => e.epic.split(' ').slice(0, 2).join(' ');
+
+  // ── модель зависимостей: deps[src] = Set(целей, от которых src зависит) ──
+  // seed из датасета (помечаем, чтобы отличать в списке)
+  const deps = {}; D.epics.forEach(e => deps[e.id] = new Set());
+  const seeded = new Set();
+  D.epics.forEach(e => (e.deps||[]).forEach(t => { if (byId[t]) { deps[e.id].add(t); seeded.add(e.id+'>'+t); } }));
+
+  // транзитивная проверка: зависит ли A (через свои deps) от B?
+  function dependsOn(a, b) {
+    const seen = new Set(); const stack = [...deps[a]];
+    while (stack.length) { const x = stack.pop(); if (x === b) return true; if (seen.has(x)) continue; seen.add(x); deps[x].forEach(y => stack.push(y)); }
+    return false;
+  }
+  // можно ли создать src → target (src зависит от target)?
+  // нельзя: само-связь, дубликат, и цикл (target уже зависит от src).
+  function canLink(src, target) {
+    if (src === target) return { ok: false, why: 'self' };
+    if (deps[src].has(target)) return { ok: false, why: 'dup' };
+    if (dependsOn(target, src)) return { ok: false, why: 'cycle' };
+    return { ok: true };
+  }
+
+  // ── рендер узлов ──
+  const teamsRoot = document.getElementById('teams');
+  function renderNodes() {
+    teamsRoot.innerHTML = D.teams.map(team => {
+      const eps = D.epics.filter(e => e.team === team);
+      const cards = eps.map(e => {
+        const rk = epicRel(e);
+        return '<div class="epic" data-id="'+e.id+'" tabindex="0">'+
+          '<span class="nm">'+esc(e.epic)+'</span>'+
+          '<span class="sub"><span class="rel">'+relShort(rk)+'</span>'+
+            '<span class="depn" data-depn="'+e.id+'"></span></span>'+
+          '<button class="handle" data-id="'+e.id+'" title="Связать" aria-label="Протянуть зависимость">'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>'+
+          '</button>'+
+        '</div>';
+      }).join('');
+      return '<div class="teamblock"><div class="tname">'+esc(team)+'</div><div class="row">'+cards+'</div></div>';
+    }).join('');
+    cacheEls();
+    refreshNodeMeta();
+  }
+
+  const scene = document.getElementById('scene');
+  const wires = document.getElementById('wires');
+  let cardEls = {};
+  function cacheEls(){ cardEls = {}; scene.querySelectorAll('.epic').forEach(el => cardEls[el.dataset.id] = el); }
+
+  function refreshNodeMeta() {
+    D.epics.forEach(e => {
+      const n = deps[e.id].size;
+      const el = scene.querySelector('[data-depn="'+e.id+'"]');
+      if (el) el.innerHTML = n ? ('<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"/></svg>'+n) : '<span style="opacity:.5">—</span>';
+      const card = cardEls[e.id];
+      if (card) card.classList.toggle('has-dep', n > 0);
+    });
+  }
+
+  // координаты центра/края относительно сцены (с учётом скролла)
+  function pt(el, edge){
+    const s = scene.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const x = r.left - s.left + scene.scrollLeft, y = r.top - s.top + scene.scrollTop;
+    if (edge === 'l') return [x, y + r.height/2];
+    if (edge === 'r') return [x + r.width, y + r.height/2];
+    return [x + r.width/2, y + r.height/2];
+  }
+
+  function arrowPath(from, to, cls, color){
+    const left = from[0] <= to[0];
+    const x1 = from[0], y1 = from[1], x2 = to[0], y2 = to[1];
+    const mx = (x1 + x2) / 2;
+    const c = color || 'var(--prizma-information)';
+    let s = '<path class="'+(cls||'')+'" d="M'+x1.toFixed(1)+' '+y1.toFixed(1)+' C '+mx.toFixed(1)+' '+y1.toFixed(1)+', '+mx.toFixed(1)+' '+y2.toFixed(1)+', '+x2.toFixed(1)+' '+y2.toFixed(1)+'" fill="none" stroke="'+c+'" stroke-width="1.7" '+(cls&&cls.indexOf('live')>=0?'stroke-dasharray="5 4" ':'')+'/>';
+    // наконечник у цели
+    const dir = left ? 1 : -1;
+    s += '<path d="M'+(x2 - 7*dir).toFixed(1)+' '+(y2-4).toFixed(1)+' L'+x2.toFixed(1)+' '+y2.toFixed(1)+' L'+(x2 - 7*dir).toFixed(1)+' '+(y2+4).toFixed(1)+'" fill="none" stroke="'+c+'" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>';
+    return s;
+  }
+
+  // отрисовать все существующие зависимости (src → target)
+  function drawDeps(extra){
+    let s = '';
+    Object.keys(deps).forEach(src => {
+      deps[src].forEach(target => {
+        const a = cardEls[src], b = cardEls[target];
+        if (!a || !b) return;
+        const left = pt(a)[0] <= pt(b)[0];
+        const from = left ? pt(a,'r') : pt(a,'l');
+        const to = left ? pt(b,'l') : pt(b,'r');
+        s += arrowPath(from, to, '', 'var(--prizma-information)');
+        s += '<circle cx="'+from[0].toFixed(1)+'" cy="'+from[1].toFixed(1)+'" r="2.6" fill="var(--prizma-information)"/>';
+      });
+    });
+    if (extra) s += extra;
+    wires.innerHTML = s;
+  }
+
+  // ── протягивание (pointer events) ──
+  let link = null; // { src, fromX, fromY, hot:targetId|null }
+  scene.addEventListener('pointerdown', e => {
+    const h = e.target.closest('.handle'); if (!h) return;
+    e.preventDefault();
+    const src = h.dataset.id;
+    const from = pt(cardEls[src], 'r');
+    link = { src, fromX: from[0], fromY: from[1], hot: null };
+    scene.classList.add('linking');
+    cardEls[src].classList.add('src');
+    // пометить кандидатов
+    D.epics.forEach(t => {
+      if (t.id === src) return;
+      const r = canLink(src, t.id);
+      cardEls[t.id].classList.add(r.ok ? 'cand' : 'invalid');
+    });
+    try { scene.setPointerCapture(e.pointerId); } catch(_){}
+    moveLink(e);
+  });
+
+  function nodeUnderPointer(e){
+    // ищем .epic под курсором через elementFromPoint (pointer capture перехватывает события)
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const epic = el && el.closest ? el.closest('.epic') : null;
+    return epic ? epic.dataset.id : null;
+  }
+
+  function moveLink(e){
+    if (!link) return;
+    const s = scene.getBoundingClientRect();
+    let tx = e.clientX - s.left + scene.scrollLeft;
+    let ty = e.clientY - s.top + scene.scrollTop;
+
+    // снап к цели
+    const overId = nodeUnderPointer(e);
+    let color = 'var(--prizma-information)';
+    // сброс hot
+    if (link.hot && link.hot !== overId) { cardEls[link.hot]?.classList.remove('hot'); link.hot = null; }
+    if (overId && overId !== link.src) {
+      const r = canLink(link.src, overId);
+      cardEls[overId].classList.add('hot'); link.hot = overId;
+      const to = pt(cardEls[overId], pt(cardEls[link.src])[0] <= pt(cardEls[overId])[0] ? 'l' : 'r');
+      tx = to[0]; ty = to[1];
+      color = r.ok ? 'var(--prizma-on-course)' : 'var(--prizma-off-course)';
+    }
+    const live = arrowPath([link.fromX, link.fromY], [tx, ty], 'live', color) +
+      '<circle cx="'+link.fromX.toFixed(1)+'" cy="'+link.fromY.toFixed(1)+'" r="3" fill="'+color+'"/>';
+    drawDeps(live);
+  }
+
+  function endLink(e){
+    if (!link) return;
+    const overId = nodeUnderPointer(e) || link.hot;
+    const src = link.src;
+    // очистка состояний
+    scene.classList.remove('linking');
+    Object.values(cardEls).forEach(el => el.classList.remove('src','cand','invalid','hot'));
+    const target = overId;
+    link = null;
+
+    if (target && target !== src) {
+      const r = canLink(src, target);
+      if (r.ok) {
+        deps[src].add(target);
+        refreshNodeMeta();
+        renderDepList();
+        drawDeps();
+        toast('Связь создана: «'+shortName(byId[src])+'» зависит от «'+shortName(byId[target])+'»', false);
+        return;
+      } else {
+        const msg = r.why === 'self' ? 'Эпик не может зависеть от себя'
+                  : r.why === 'dup' ? 'Такая зависимость уже есть'
+                  : 'Цикл: «'+shortName(byId[target])+'» уже зависит от «'+shortName(byId[src])+'»';
+        toast(msg, true);
+      }
+    }
+    drawDeps();
+  }
+
+  scene.addEventListener('pointermove', moveLink);
+  scene.addEventListener('pointerup', endLink);
+  scene.addEventListener('pointercancel', endLink);
+
+  // ── список зависимостей ──
+  const depList = document.getElementById('depList');
+  const depNEl = document.getElementById('depN');
+  function allDeps(){
+    const out = [];
+    Object.keys(deps).forEach(src => deps[src].forEach(t => out.push({ src, t })));
+    return out;
+  }
+  function renderDepList(){
+    const items = allDeps();
+    depNEl.textContent = items.length;
+    if (!items.length) { depList.innerHTML = '<div class="empty">Пока нет зависимостей.<br>Протяните узелок «связать» от эпика к эпику.</div>'; return; }
+    depList.innerHTML = items.map(({src, t}) => {
+      const isSeed = seeded.has(src+'>'+t);
+      return '<div class="dep" data-src="'+src+'" data-t="'+t+'">'+
+        '<div class="body">'+
+          '<div class="pair"><span class="a">'+esc(shortName(byId[src]))+'</span>'+
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>'+
+            '<span class="b">'+esc(shortName(byId[t]))+'</span></div>'+
+          '<div class="meta">'+esc(byId[src].team)+' · зависит от'+(isSeed?' <span class="seed">· из плана</span>':' <span class="seed">· новое</span>')+'</div>'+
+        '</div>'+
+        '<button class="rm" data-src="'+src+'" data-t="'+t+'" title="Удалить" aria-label="Удалить зависимость">'+
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'+
+        '</button>'+
+      '</div>';
+    }).join('');
+  }
+  depList.addEventListener('click', e => {
+    const rm = e.target.closest('.rm'); if (!rm) return;
+    deps[rm.dataset.src].delete(rm.dataset.t);
+    seeded.delete(rm.dataset.src+'>'+rm.dataset.t);
+    refreshNodeMeta(); renderDepList(); drawDeps();
+    toast('Зависимость удалена', false);
+  });
+
+  // ── toast ──
+  const toastEl = document.getElementById('toast'), toastText = document.getElementById('toastText'), toastIcon = document.getElementById('toastIcon');
+  let toastTimer;
+  const OK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-on-course)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const WARN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--prizma-off-course)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+  function toast(text, warn){
+    toastText.textContent = text;
+    toastIcon.innerHTML = warn ? WARN_SVG : OK_SVG;
+    toastEl.classList.toggle('warn', !!warn);
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>toastEl.classList.remove('show'), 3400);
+  }
+
+  // ── reset ──
+  document.getElementById('reset').addEventListener('click', () => {
+    D.epics.forEach(e => { deps[e.id] = new Set(); });
+    seeded.clear();
+    D.epics.forEach(e => (e.deps||[]).forEach(t => { if (byId[t]) { deps[e.id].add(t); seeded.add(e.id+'>'+t); } }));
+    refreshNodeMeta(); renderDepList(); drawDeps();
+    toast('Зависимости сброшены к плану', false);
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+    setTimeout(drawDeps, 60);
+  });
+
+  // ── init (синхронно + страховочный таймер + scroll/resize — GOTCHA a) ──
+  renderNodes();
+  renderDepList();
+  drawDeps();
+  setTimeout(drawDeps, 60);
+  scene.addEventListener('scroll', () => { if (!link) drawDeps(); });
+  window.addEventListener('resize', () => drawDeps());
+})();
+</script>
+</body>
+</html>
