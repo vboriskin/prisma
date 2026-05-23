@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 19 · Плотная таблица</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+
+  /* ── grid ── */
+  .scroll { flex: 1; overflow: auto; min-height: 0; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1180px; font-size: 12px; }
+
+  thead th { position: sticky; top: 0; z-index: 6; background: var(--prizma-bg); border-bottom: 1px solid var(--prizma-border-strong); padding: 0; }
+  thead th .hcell { display: flex; align-items: center; gap: 5px; padding: 11px 12px 10px; white-space: nowrap; cursor: pointer; user-select: none; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); transition: color .12s; }
+  thead th .hcell:hover { color: var(--prizma-text-primary); }
+  thead th.num .hcell { justify-content: flex-end; }
+  thead th .sort { width: 11px; height: 11px; flex: none; color: var(--prizma-text-tertiary); opacity: 0; transition: opacity .12s; }
+  thead th.sorted .hcell { color: var(--prizma-text-primary); }
+  thead th.sorted .sort { opacity: 1; color: var(--prizma-information); }
+
+  tbody td { border-bottom: 1px solid var(--prizma-border); padding: 9px 12px; color: var(--prizma-text-primary); vertical-align: middle; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  td.num { text-align: right; font-family: var(--mono); font-feature-settings: "tnum" 1, "lnum" 1; color: var(--prizma-text-secondary); }
+  td.num.zero { color: var(--prizma-text-tertiary); opacity: .55; }
+
+  /* sticky first columns: team + epic */
+  .c-team { width: 120px; }
+  .c-epic { width: 240px; }
+  thead th.c-team, thead th.c-epic { z-index: 7; }
+  td.c-team, td.c-epic, thead th.c-team, thead th.c-epic { position: sticky; background: var(--prizma-bg); }
+  thead th.c-team { left: 0; } td.c-team { left: 0; }
+  thead th.c-epic { left: 120px; } td.c-epic { left: 120px; box-shadow: 1px 0 0 var(--prizma-border); }
+  tbody tr:hover td.c-team, tbody tr:hover td.c-epic { background: var(--prizma-bg-elevated); }
+
+  .team-tag { display: inline-flex; align-items: center; height: 19px; padding: 0 7px; font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); }
+  .epic-nm { font-weight: 600; font-size: 12px; line-height: 1.3; }
+
+  /* pill-summary per release: small wt squares + count */
+  .psum { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+  .psum .pq { position: relative; width: 18px; height: 16px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); display: inline-flex; align-items: center; justify-content: center; font: 700 8px/1 var(--mono); color: var(--prizma-text-secondary); overflow: hidden; }
+  .psum .pq::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); }
+  .psum .pq.done { opacity: .45; }
+  .psum .pq.prog { box-shadow: inset 0 0 0 1px var(--prizma-information); }
+  .psum .pq.unplanned { background: transparent; border: 1px dashed var(--prizma-border-strong); }
+  .psum .dash { color: var(--prizma-text-tertiary); opacity: .4; font-family: var(--mono); }
+
+  /* готово % bar */
+  .ratio { display: flex; align-items: center; gap: 7px; justify-content: flex-end; }
+  .ratio .bar { width: 40px; height: 4px; border-radius: 2px; background: var(--prizma-bg-tertiary); overflow: hidden; flex: none; }
+  .ratio .bar i { display: block; height: 100%; background: var(--prizma-text-secondary); border-radius: 2px; }
+  .ratio .v { min-width: 30px; text-align: right; }
+
+  /* risk signal dot */
+  .risk-cell { display: flex; align-items: center; gap: 7px; }
+  .risk-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--prizma-on-course); }
+  .risk-dot.drift { background: var(--prizma-drift); }
+  .risk-dot.off { background: var(--prizma-off-course); }
+  .risk-lbl { font-size: 11px; color: var(--prizma-text-secondary); }
+
+  .deps { display: flex; gap: 4px; flex-wrap: wrap; }
+  .deps .dep { font: 600 9.5px/1 var(--mono); padding: 3px 6px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); color: var(--prizma-text-tertiary); }
+  .deps .none { color: var(--prizma-text-tertiary); opacity: .4; font-family: var(--mono); font-size: 11px; }
+
+  /* totals row */
+  tfoot td { position: sticky; bottom: 0; z-index: 6; background: var(--prizma-bg-elevated); border-top: 1px solid var(--prizma-border-strong); padding: 10px 12px; font-weight: 700; }
+  tfoot td.num { font-family: var(--mono); font-feature-settings: "tnum" 1; color: var(--prizma-text-primary); }
+  tfoot td.c-team { left: 0; position: sticky; z-index: 7; }
+  tfoot td.c-epic { left: 120px; position: sticky; z-index: 7; box-shadow: 1px 0 0 var(--prizma-border); }
+  tfoot .tlbl { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Плотная таблица</span>
+    <span class="sub">Q2 · 16 эпиков · 5 команд</span>
+    <span class="pz-eyebrow" style="margin-left:2px">Редизайн 19 · grid</span>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-on-course)"></i>по курсу</span><span><i style="background:var(--prizma-drift)"></i>дрейф</span><span><i style="background:var(--prizma-off-course)"></i>срыв</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="scroll">
+    <table id="tbl">
+      <thead><tr id="head"></tr></thead>
+      <tbody id="body"></tbody>
+      <tfoot id="foot"></tfoot>
+    </table>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const byId = id => D.epics.find(e => e.id === id);
+
+  const relCols = [
+    { key: 'r120', short: '1.20' },
+    { key: 'r121', short: '1.21' },
+    { key: 'r122', short: '1.22' },
+  ];
+  const riskRank = { 'off-course': 2, 'drift': 1, null: 0 };
+
+  // column model. sort: comparator value extractor.
+  const COLS = [
+    { id: 'team',  label: 'Команда', cls: 'c-team', get: e => e.team, type: 'str' },
+    { id: 'epic',  label: 'Эпик',    cls: 'c-epic', get: e => e.epic, type: 'str' },
+    { id: 'r120',  label: '1.20',    num: true, get: e => D.helpers.pillsOf(e, 'r120').length },
+    { id: 'r121',  label: '1.21',    num: true, get: e => D.helpers.pillsOf(e, 'r121').length },
+    { id: 'r122',  label: '1.22',    num: true, get: e => D.helpers.pillsOf(e, 'r122').length },
+    { id: 'bo',    label: 'Бэклог/ОТ', num: true, get: e => D.helpers.pillsOf(e, 'backlog').length + D.helpers.pillsOf(e, 'overtime').length },
+    { id: 'est',   label: 'Оценка, дн', num: true, get: e => D.helpers.effortOf(e) },
+    { id: 'done',  label: 'Готово, %', num: true, get: e => Math.round(D.helpers.doneRatio(e) * 100) },
+    { id: 'moves', label: 'Переносов', num: true, get: e => e.moves || 0 },
+    { id: 'risk',  label: 'Риск',    get: e => riskRank[e.risk || 'null'], type: 'num' },
+    { id: 'deps',  label: 'Зависимости', num: true, get: e => (e.deps || []).length },
+  ];
+
+  let sortKey = 'risk', sortDir = -1; // default: worst risk first
+
+  function relSummary(e, keys) {
+    let html = '';
+    keys.forEach(k => {
+      const pills = D.helpers.pillsOf(e, k);
+      html += pills.map(p => {
+        const st = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : (p.state === 'unplanned' ? ' unplanned' : ''));
+        return '<span class="pq' + st + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + ' · ' + esc(k) + (p.who ? ' · ' + esc(p.who) : '') + '">' + esc(p.wt[0]) + '</span>';
+      }).join('');
+    });
+    return html || '<span class="dash">—</span>';
+  }
+
+  function riskCell(e) {
+    const cls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : '');
+    const lbl = e.risk === 'off-course' ? 'срыв' : (e.risk === 'drift' ? 'дрейф' : 'по курсу');
+    return '<span class="risk-cell"><span class="risk-dot ' + cls + '"></span><span class="risk-lbl">' + lbl + '</span></span>';
+  }
+
+  function rowHtml(e) {
+    const done = Math.round(D.helpers.doneRatio(e) * 100);
+    const cnt = k => { const n = D.helpers.pillsOf(e, k).length; return '<td class="num' + (n ? '' : ' zero') + '">' + n + '</td>'; };
+    const bo = D.helpers.pillsOf(e, 'backlog').length + D.helpers.pillsOf(e, 'overtime').length;
+    const deps = (e.deps || []).map(byId).filter(Boolean);
+    const depHtml = deps.length
+      ? '<span class="deps">' + deps.map(d => '<span class="dep" title="' + esc(d.epic) + '">' + esc(d.team.slice(0,3)) + '·' + esc(d.id) + '</span>').join('') + '</span>'
+      : '<span class="deps"><span class="none">—</span></span>';
+    return '<tr>' +
+      '<td class="c-team"><span class="team-tag">' + esc(e.team) + '</span></td>' +
+      '<td class="c-epic"><span class="epic-nm">' + esc(e.epic) + '</span></td>' +
+      '<td class="num"><span class="psum">' + relSummary(e, ['r120']) + '</span></td>' +
+      '<td class="num"><span class="psum">' + relSummary(e, ['r121']) + '</span></td>' +
+      '<td class="num"><span class="psum">' + relSummary(e, ['r122']) + '</span></td>' +
+      '<td class="num"><span class="psum">' + relSummary(e, ['backlog', 'overtime']) + '</span></td>' +
+      '<td class="num">' + D.helpers.effortOf(e) + '</td>' +
+      '<td class="num"><span class="ratio"><span class="bar"><i style="width:' + done + '%"></i></span><span class="v">' + done + '%</span></span></td>' +
+      '<td class="num' + ((e.moves||0) ? '' : ' zero') + '">' + (e.moves || 0) + '</td>' +
+      '<td>' + riskCell(e) + '</td>' +
+      '<td>' + depHtml + '</td>' +
+      '</tr>';
+  }
+
+  function renderHead() {
+    document.getElementById('head').innerHTML = COLS.map(c => {
+      const sorted = c.id === sortKey;
+      const arrow = sortDir > 0
+        ? '<path d="M6 15l6-6 6 6"/>'   // asc ▲
+        : '<path d="M6 9l6 6 6-6"/>';   // desc ▼
+      return '<th class="' + (c.num ? 'num ' : '') + (c.cls || '') + (sorted ? ' sorted' : '') + '" data-col="' + c.id + '">' +
+        '<div class="hcell">' + esc(c.label) +
+        '<svg class="sort" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' + arrow + '</svg>' +
+        '</div></th>';
+    }).join('');
+    document.getElementById('head').querySelectorAll('th').forEach(th => {
+      th.addEventListener('click', () => {
+        const k = th.dataset.col;
+        if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = (COLS.find(c => c.id === k).type === 'str') ? 1 : -1; }
+        renderHead(); renderBody();
+      });
+    });
+  }
+
+  function renderBody() {
+    const col = COLS.find(c => c.id === sortKey);
+    const rows = D.epics.slice().sort((a, b) => {
+      let va = col.get(a), vb = col.get(b);
+      if (col.type === 'str') { const r = String(va).localeCompare(String(vb), 'ru'); return r * sortDir; }
+      return (va - vb) * sortDir;
+    });
+    document.getElementById('body').innerHTML = rows.map(rowHtml).join('');
+  }
+
+  function renderFoot() {
+    const sum = k => D.epics.reduce((n, e) => n + D.helpers.pillsOf(e, k).length, 0);
+    const totEst = D.epics.reduce((n, e) => n + D.helpers.effortOf(e), 0);
+    const totMoves = D.epics.reduce((n, e) => n + (e.moves || 0), 0);
+    const avgDone = Math.round(D.epics.reduce((n, e) => n + D.helpers.doneRatio(e), 0) / D.epics.length * 100);
+    const totDeps = D.epics.reduce((n, e) => n + (e.deps || []).length, 0);
+    const atRisk = D.epics.filter(e => e.risk).length;
+    document.getElementById('foot').innerHTML = '<tr>' +
+      '<td class="c-team"><span class="tlbl">Итого</span></td>' +
+      '<td class="c-epic"><span class="tlbl">' + D.epics.length + ' эпиков</span></td>' +
+      '<td class="num">' + sum('r120') + '</td>' +
+      '<td class="num">' + sum('r121') + '</td>' +
+      '<td class="num">' + sum('r122') + '</td>' +
+      '<td class="num">' + (sum('backlog') + sum('overtime')) + '</td>' +
+      '<td class="num">' + totEst + '</td>' +
+      '<td class="num">' + avgDone + '%</td>' +
+      '<td class="num">' + totMoves + '</td>' +
+      '<td class="num">' + atRisk + ' под риском</td>' +
+      '<td class="num">' + totDeps + '</td>' +
+      '</tr>';
+  }
+
+  renderHead();
+  renderBody();
+  renderFoot();
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

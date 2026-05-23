@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 17 · Свайп-перенос</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 720px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 20px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 560px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 16px 0 18px; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── эпик-блок ── */
+  .epic { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); overflow: hidden; margin-bottom: 16px; }
+  .epic-hd { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--prizma-border); }
+  .epic-hd .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .epic-hd .nm { font-size: 13px; font-weight: 600; }
+  .epic-hd .team { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .epic-hd .spacer { flex: 1; }
+
+  /* строка-пилюля: внешний rail держит action-фоны, внутренний слой свайпается */
+  .row { position: relative; overflow: hidden; border-bottom: 1px solid var(--prizma-border); }
+  .row:last-child { border-bottom: 0; }
+  .row.gone { /* анимация исчезновения после переноса */ }
+
+  /* action-фоны под пилюлей (раскрываются по мере свайпа) */
+  .action { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 0 18px;
+    font: 600 12px/1 var(--font); white-space: nowrap; opacity: 0; transition: opacity .1s; }
+  .action svg { width: 15px; height: 15px; }
+  .action.right { left: 0; right: 0; justify-content: flex-start; color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+  .action.left  { left: 0; right: 0; justify-content: flex-end; color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .row.armed-r .action.right { opacity: 1; }
+  .row.armed-l .action.left  { opacity: 1; }
+
+  /* свайпаемый передний план */
+  .swipe { position: relative; z-index: 2; display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; background: var(--prizma-bg-elevated);
+    cursor: grab; user-select: none; touch-action: pan-y;
+    will-change: transform; }
+  .swipe.dragging { cursor: grabbing; }
+  .swipe.snap { transition: transform .26s var(--ease-spring); }
+  .swipe.fly { transition: transform .34s var(--ease-spring), opacity .26s ease; }
+
+  /* грип-точки слева — affordance «меня можно тянуть» */
+  .grip { display: grid; grid-template-columns: repeat(2, 3px); gap: 3px; flex: none; opacity: .5; }
+  .grip i { width: 3px; height: 3px; border-radius: 50%; background: var(--prizma-text-secondary); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px 6px 13px;
+    font: 600 12px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; flex: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill .wt-lbl { font: 500 10px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .swipe .who { font-size: 11px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .swipe .spacer { flex: 1; }
+  /* текущий релиз пилюли — нейтральный chip справа */
+  .relchip { font: 600 11px/1 var(--mono); color: var(--prizma-text-secondary); padding: 4px 8px;
+    border: 1px solid var(--prizma-border); border-radius: var(--r-sm); flex: none; transition: color .2s, border-color .2s; }
+  .row.armed-r .relchip { color: var(--prizma-drift); border-color: color-mix(in srgb, var(--prizma-drift) 50%, transparent); }
+  .row.armed-l .relchip { color: var(--prizma-information); border-color: color-mix(in srgb, var(--prizma-information) 50%, transparent); }
+  .pill[data-done] { opacity: .7; }
+  .pill[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+  /* мини-шкала релизов внизу эпика — куда переносим */
+  .scale { display: flex; gap: 0; padding: 9px 16px; background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .scale .s { flex: 1; text-align: center; font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary);
+    padding: 5px 0; border-right: 1px solid var(--prizma-border); }
+  .scale .s:last-child { border-right: 0; }
+  .scale .s.cur { color: var(--prizma-information); }
+
+  .toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    transition: opacity .2s, transform .2s var(--ease-calm); z-index: 9000; font-size: 13px; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 17 · Жест</div>
+      <h1>Свайп-перенос</h1>
+      <p>Перенос работы между релизами одним касанием. Тяните пилюлю <b>вправо</b> — за порогом проступает «отложить на следующий релиз»; <b>влево</b> — «вернуть на предыдущий». Отпуск за порогом отправляет работу с пружинкой; недотянули — щёлкает обратно.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Порог переноса — четверть ширины строки.</span>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<div class="toast" id="toast"><span id="toastText"></span></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const list = document.getElementById('list');
+  const toast = document.getElementById('toast'), tText = document.getElementById('toastText');
+  let toastTimer;
+  function showToast(t){ tText.textContent = t; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(()=>toast.classList.remove('show'), 2600); }
+
+  // только датированные релизы участвуют в свайп-порядке (бэклог/овертайм — края)
+  const order = D.releases.map(r => r.key); // backlog,r120,r121,r122,overtime
+  function relShort(k){ const c = D.releases.find(r=>r.key===k); return c?c.short:k; }
+  function nextOf(k){ const i = order.indexOf(k); return i>=0 && i<order.length-1 ? order[i+1] : null; }
+  function prevOf(k){ const i = order.indexOf(k); return i>0 ? order[i-1] : null; }
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  // показываем несколько рисковых/живых эпиков как вертикальные списки пилюль
+  const SHOW = ['e1','e13','e7'];
+  // рабочая копия pills (для reset)
+  let work = {};
+  function seed(){ work = {}; SHOW.forEach(id => { const e = D.epics.find(x=>x.id===id); work[id] = e.pills.map(p => Object.assign({}, p)); }); }
+  seed();
+
+  function render() {
+    let html = '';
+    SHOW.forEach(id => {
+      const e = D.epics.find(x=>x.id===id);
+      const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-'+(e.risk==='off-course'?'off-course':'drift')+')"></span>' : '<span class="risk" style="background:var(--prizma-text-tertiary);opacity:.5"></span>';
+      html += '<div class="epic" data-epic="'+id+'">';
+      html += '<div class="epic-hd">'+riskDot+'<span class="nm">'+esc(e.epic)+'</span><span class="spacer"></span><span class="team">'+esc(e.team)+'</span></div>';
+      work[id].forEach((p, idx) => {
+        const next = nextOf(p.col), prev = prevOf(p.col);
+        const rLbl = next ? '→ отложить на '+relShort(next) : '→ дальше некуда';
+        const lLbl = prev ? 'вернуть на '+relShort(prev)+' ←' : 'раньше некуда';
+        const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+        const doneDot = p.state==='done' ? '<span class="dot6" style="background:var(--prizma-on-course)"></span>' : '';
+        html += '<div class="row" data-epic="'+id+'" data-idx="'+idx+'" data-next="'+(next||'')+'" data-prev="'+(prev||'')+'">'
+          + '<div class="action right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg><span>'+rLbl+'</span></div>'
+          + '<div class="action left"><span>'+lLbl+'</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></svg></div>'
+          + '<div class="swipe">'
+          + '<span class="grip"><i></i><i></i><i></i><i></i><i></i><i></i></span>'
+          + '<span class="pill" style="--wt:'+wtVar(p.wt)+'"'+(p.state==='done'?' data-done':'')+'>'+doneDot+'<span class="nm">'+(D.WT[p.wt]?D.WT[p.wt].label:p.wt)+'</span><span class="wt-lbl">'+p.wt+'</span></span>'
+          + who
+          + '<span class="spacer"></span>'
+          + '<span class="relchip">'+relShort(p.col)+'</span>'
+          + '</div></div>';
+      });
+      // мини-шкала
+      html += '<div class="scale">'+ D.releases.map(r=>'<div class="s'+(r.current?' cur':'')+'">'+r.short+'</div>').join('') +'</div>';
+      html += '</div>';
+    });
+    list.innerHTML = html;
+    wire();
+  }
+
+  function wire() {
+    list.querySelectorAll('.row').forEach(row => {
+      const swipe = row.querySelector('.swipe');
+      const next = row.dataset.next || null, prev = row.dataset.prev || null;
+      let startX = 0, dx = 0, dragging = false, pid = null, w = 0;
+
+      function onDown(e) {
+        if (e.button != null && e.button !== 0) return;
+        dragging = true; pid = e.pointerId;
+        startX = e.clientX; dx = 0; w = row.getBoundingClientRect().width;
+        swipe.classList.add('dragging'); swipe.classList.remove('snap','fly');
+        try { swipe.setPointerCapture(pid); } catch(_){}
+      }
+      function onMove(e) {
+        if (!dragging) return;
+        dx = e.clientX - startX;
+        // нельзя свайпать туда, куда некуда переносить — резиновое сопротивление
+        if (dx > 0 && !next) dx = dx * 0.18;
+        if (dx < 0 && !prev) dx = dx * 0.18;
+        swipe.style.transform = 'translateX(' + dx.toFixed(1) + 'px)';
+        const thr = w * 0.25;
+        row.classList.toggle('armed-r', dx > thr && !!next);
+        row.classList.toggle('armed-l', dx < -thr && !!prev);
+      }
+      function onUp() {
+        if (!dragging) return;
+        dragging = false;
+        try { swipe.releasePointerCapture(pid); } catch(_){}
+        swipe.classList.remove('dragging');
+        const thr = w * 0.25;
+        if (dx > thr && next) return commit(row, swipe, 'next', w);
+        if (dx < -thr && prev) return commit(row, swipe, 'prev', w);
+        // снап обратно
+        swipe.classList.add('snap');
+        swipe.style.transform = 'translateX(0)';
+        row.classList.remove('armed-r','armed-l');
+      }
+      swipe.addEventListener('pointerdown', onDown);
+      swipe.addEventListener('pointermove', onMove);
+      swipe.addEventListener('pointerup', onUp);
+      swipe.addEventListener('pointercancel', onUp);
+    });
+  }
+
+  function commit(row, swipe, dir, w) {
+    const epic = row.dataset.epic, idx = +row.dataset.idx;
+    const p = work[epic][idx];
+    const target = dir === 'next' ? nextOf(p.col) : prevOf(p.col);
+    if (!target) { swipe.classList.add('snap'); swipe.style.transform='translateX(0)'; return; }
+    const fromShort = relShort(p.col), toShort = relShort(target);
+    // улетаем в сторону жеста, затем перерисовываем
+    swipe.classList.add('fly');
+    swipe.style.transform = 'translateX(' + (dir==='next' ? w : -w) + 'px)';
+    swipe.style.opacity = '0';
+    const apply = () => {
+      p.col = target;
+      render();
+      showToast((D.WT[p.wt]?D.WT[p.wt].label:p.wt) + ': ' + fromShort + ' → ' + toShort);
+    };
+    let done = false;
+    const fin = () => { if (done) return; done = true; apply(); };
+    swipe.addEventListener('transitionend', fin, { once: true });
+    setTimeout(fin, 380); // подстраховка, если transitionend не прилетит
+  }
+
+  document.getElementById('reset').addEventListener('click', () => { seed(); render(); showToast('Состояние сброшено'); });
+  document.getElementById('tt').addEventListener('click', () => { const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+  render();
+})();
+</script>
+</body>
+</html>

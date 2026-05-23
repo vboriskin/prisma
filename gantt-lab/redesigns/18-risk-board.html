@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 18 · Доска здоровья</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* ── board: 3 health buckets ── */
+  .board { flex: 1; overflow: hidden; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 18px 22px 22px; min-height: 0; }
+  .col { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); overflow: hidden; transition: box-shadow .15s, border-color .15s; }
+  .col.over { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+  /* signal top-stripe — meaningful here (it IS health) */
+  .col-strip { height: 3px; background: var(--accent); flex: none; }
+  .ch { padding: 13px 15px 12px; border-bottom: 1px solid var(--prizma-border); flex: none; display: flex; align-items: center; gap: 10px; }
+  .ch .ic { width: 16px; height: 16px; color: var(--accent); flex: none; }
+  .ch .ct { font-size: 13.5px; font-weight: 700; }
+  .ch .csub { display: block; margin-top: 3px; font-size: 10px; color: var(--prizma-text-tertiary); }
+  .ch .cnt { margin-left: auto; font: 800 15px/1 var(--mono); color: var(--accent); }
+
+  .stack { flex: 1; overflow-y: auto; padding: 11px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* ── card ── */
+  .card { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 11px 13px 11px 14px; cursor: grab; user-select: none; transition: transform .12s var(--ease-calm), box-shadow .15s, border-color .15s, opacity .12s; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .card:hover { border-color: var(--prizma-border-strong); }
+  .card.dragging { opacity: .4; cursor: grabbing; box-shadow: 0 8px 24px rgba(0,0,0,.45); transform: scale(.98); }
+  .card-hd { display: flex; align-items: flex-start; gap: 8px; }
+  .card-nm { font-size: 12.5px; font-weight: 600; line-height: 1.3; flex: 1; }
+  .card-team { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; flex: none; font: 700 8.5px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); white-space: nowrap; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+  .wtchip { position: relative; display: inline-flex; align-items: center; padding: 3px 7px 3px 9px; font: 600 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .wtchip.done { opacity: .5; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .wtchip.prog::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); margin-left: 4px; }
+  .wtchip.unplanned { border: 1px dashed var(--prizma-border-strong); background: transparent; }
+
+  .reason { margin-top: 10px; border-top: 1px solid var(--prizma-border); padding-top: 9px; display: flex; flex-direction: column; gap: 6px; }
+  .reason .row { display: flex; align-items: flex-start; gap: 7px; font-size: 11px; line-height: 1.4; }
+  .reason .row .rl { display: inline-flex; align-items: center; gap: 4px; flex: none; font: 700 8.5px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); padding-top: 2px; min-width: 64px; }
+  .reason .why { color: var(--prizma-text-secondary); }
+  .reason .mit { color: var(--prizma-text-primary); }
+  .reason .mit-ic { width: 11px; height: 11px; color: var(--prizma-insight); }
+  .reason .why-ic { width: 11px; height: 11px; color: var(--accent); }
+
+  .card-ft { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; }
+  .card-ft .eff { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .card-ft .moves { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); display: inline-flex; align-items: center; gap: 4px; }
+
+  .empty { font-size: 11.5px; color: var(--prizma-text-tertiary); padding: 18px 12px; font-style: italic; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Доска здоровья</span>
+    <span class="pz-eyebrow">Редизайн 18 · health</span>
+    <span class="spacer"></span>
+    <span class="hint">перетащите карточку, чтобы пере-триажить</span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему" style="margin-left:14px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="board" id="board"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const board = document.getElementById('board');
+  const byId = id => D.epics.find(e => e.id === id);
+
+  // health buckets
+  const BUCKETS = [
+    { key: 'on-course', title: 'По курсу',  sub: 'идёт по плану',          accent: 'var(--prizma-on-course)',  ic: '<path d="M20 6 9 17l-5-5"/>' },
+    { key: 'drift',     title: 'Дрейф',     sub: 'требует внимания',       accent: 'var(--prizma-drift)',      ic: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>' },
+    { key: 'off-course',title: 'Срыв',      sub: 'нужна эскалация',        accent: 'var(--prizma-off-course)', ic: '<circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/>' },
+  ];
+
+  // epic.risk → bucket key (null → on-course)
+  const place = {};
+  D.epics.forEach(e => { place[e.id] = e.risk || 'on-course'; });
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // why + mitigation derived from data (depends on which bucket it's currently in)
+  function diagnose(e, bucket) {
+    const moves = e.moves || 0;
+    const deps = (e.deps || []).map(byId).filter(Boolean);
+    const openDeps = deps.filter(d => D.helpers.doneRatio(d) < 1);
+    const unplanned = e.pills.filter(p => p.state === 'unplanned').length;
+    const ratio = Math.round(D.helpers.doneRatio(e) * 100);
+
+    if (bucket === 'on-course') {
+      return { why: 'Готовность ' + ratio + '%, переносов ' + moves + ', блокеров нет.',
+               mit: 'Держать темп; следить за зависимыми эпиками.' };
+    }
+    let why, mit;
+    if (bucket === 'off-course') {
+      why = 'Перенесён ' + moves + ' ' + plural(moves, 'раз', 'раза', 'раз') +
+            (openDeps.length ? ', блокирован «' + openDeps[0].epic + '»' : '') +
+            (unplanned ? ', есть внеплановые работы' : '') + '.';
+      mit = openDeps.length
+        ? 'Эскалировать зависимость «' + openDeps[0].epic + '» и зафиксировать дату.'
+        : (moves >= 4 ? 'Заморозить scope, пересобрать план на ' + (PZ_DATA.releases.find(r=>r.current)||{}).short + '.'
+                      : 'Вынести на эскалацию, назначить владельца риска.');
+    } else { // drift
+      why = (moves ? 'Перенесён ' + moves + ' ' + plural(moves, 'раз', 'раза', 'раз') : 'Темп ниже плана') +
+            (openDeps.length ? ', ждёт «' + openDeps[0].epic + '»' : '') + ', готовность ' + ratio + '%.';
+      mit = openDeps.length
+        ? 'Синхронизировать с командой по «' + openDeps[0].epic + '».'
+        : 'Перепроверить оценку, добить открытые работы окна.';
+    }
+    return { why, mit };
+  }
+
+  function cardHtml(e, bucket) {
+    const chips = e.pills.map(p => {
+      const st = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : (p.state === 'unplanned' ? ' unplanned' : ''));
+      return '<span class="wtchip' + st + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + (p.who ? ' · ' + esc(p.who) : '') + '">' + esc(p.wt) + '</span>';
+    }).join('');
+    const dg = diagnose(e, bucket);
+    const moves = e.moves || 0;
+    return '<div class="card" draggable="true" data-epic="' + e.id + '">' +
+      '<div class="card-hd"><span class="card-nm">' + esc(e.epic) + '</span>' +
+        '<span class="card-team" title="' + esc(e.team) + '">' + esc(e.team) + '</span></div>' +
+      '<div class="chips">' + chips + '</div>' +
+      '<div class="reason">' +
+        '<div class="row"><span class="rl"><svg class="why-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>почему</span><span class="why">' + esc(dg.why) + '</span></div>' +
+        '<div class="row"><span class="rl"><svg class="mit-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1 1 1.8M12 2a7 7 0 0 1 4 12.7c-.6.5-1 1-1 1.8"/></svg>митигация</span><span class="mit">' + esc(dg.mit) + '</span></div>' +
+      '</div>' +
+      '<div class="card-ft"><span class="moves"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' + moves + ' ' + plural(moves,'перенос','переноса','переносов') + '</span>' +
+        '<span class="eff pz-mono">' + D.helpers.effortOf(e) + ' дн</span></div>' +
+      '</div>';
+  }
+
+  function render() {
+    board.innerHTML = BUCKETS.map(b => {
+      const eps = D.epics.filter(e => place[e.id] === b.key)
+        .sort((a, c) => (c.moves || 0) - (a.moves || 0));
+      const body = eps.length ? eps.map(e => cardHtml(e, b.key)).join('') : '<div class="empty">нет эпиков</div>';
+      return '<div class="col" data-bucket="' + b.key + '" style="--accent:' + b.accent + '">' +
+        '<div class="col-strip"></div>' +
+        '<div class="ch"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + b.ic + '</svg>' +
+        '<div><span class="ct">' + esc(b.title) + '</span><span class="csub">' + esc(b.sub) + '</span></div>' +
+        '<span class="cnt">' + eps.length + '</span></div>' +
+        '<div class="stack">' + body + '</div></div>';
+    }).join('');
+    wire();
+  }
+
+  let drag = null;
+  function wire() {
+    board.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('dragstart', e => {
+        drag = card.dataset.epic;
+        card.classList.add('dragging');
+        try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', drag); } catch (_) {}
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        board.querySelectorAll('.col').forEach(c => c.classList.remove('over'));
+        drag = null;
+      });
+    });
+    board.querySelectorAll('.col').forEach(col => {
+      col.addEventListener('dragover', e => {
+        if (!drag) return;
+        e.preventDefault();
+        try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+        col.classList.add('over');
+      });
+      col.addEventListener('dragleave', e => {
+        if (!col.contains(e.relatedTarget)) col.classList.remove('over');
+      });
+      col.addEventListener('drop', e => {
+        if (!drag) return;
+        e.preventDefault();
+        const to = col.dataset.bucket;
+        if (place[drag] !== to) { place[drag] = to; render(); }
+        else col.classList.remove('over');
+      });
+    });
+  }
+
+  // sync + страховка (не полагаемся только на rAF)
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => {}); // layout стабилен; render не зависит от измерений
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

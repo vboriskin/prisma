@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 14 · Пилюли по весу оценки</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 14px; margin: 18px 0 16px; }
+  .bar .spacer { flex: 1; }
+
+  /* большой переключатель «вес = оценка / равные» */
+  .switch { display: inline-flex; align-items: center; gap: 11px; padding: 8px 14px 8px 12px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); background: var(--prizma-bg-elevated); cursor: pointer; user-select: none; transition: border-color .2s; }
+  .switch:hover { border-color: var(--prizma-information); }
+  .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--prizma-bg-tertiary); position: relative; transition: background .3s var(--ease-calm); flex: none; }
+  .switch .knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--prizma-text-secondary); transition: transform .3s var(--ease-calm), background .3s var(--ease-calm); }
+  .switch.on .track { background: var(--prizma-information-bg); }
+  .switch.on .knob { transform: translateX(18px); background: var(--prizma-information); }
+  .switch .txt { display: flex; flex-direction: column; gap: 2px; }
+  .switch .txt .lab { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .switch .txt .val { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 220px repeat(5, minmax(150px,1fr)); min-width: 980px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 46px; }
+
+  /* шапка колонок — НЕЙТРАЛЬНАЯ серая, с суммой дней */
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .ghead .sum { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; }
+  .ghead .sum .v { font: 600 15px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.01em; }
+  .ghead .sum .v.zero { color: var(--prizma-text-tertiary); font-weight: 400; }
+  .ghead .sum .u { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+
+  /* пилюля: ШИРИНА ∝ оценка дисциплины. Полоса-3px = тип работы (единый категориальный канал). */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 12px;
+    background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); user-select: none; overflow: hidden;
+    box-sizing: border-box; min-width: 0; transition: min-width .42s var(--ease-calm), width .42s var(--ease-calm); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .nm { font: 600 11px/1 var(--font); color: var(--prizma-text-primary); white-space: nowrap; }
+  .pill .est { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .55; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+  /* легенда-рамп ширины (демонстрирует кодировку, не decoration) */
+  .legend { display: flex; align-items: center; gap: 16px; margin-top: 20px; flex-wrap: wrap; }
+  .legend .grp { display: flex; align-items: center; gap: 9px; }
+  .legend .lbl { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .demo { display: inline-flex; align-items: flex-end; gap: 6px; }
+  .legend .demo i { display: block; height: 16px; background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); position: relative; }
+  .legend .demo i::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-text-secondary); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .note { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 700px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 14 · Вес оценки</div>
+      <h1>Объём работы — в форме, а не в числе</h1>
+      <p>Ширина каждой пилюли пропорциональна оценке её дисциплины из <code>epic.est</code> (BE→be, FE→fe…). Большая работа — широкая пилюля; мелкий хотфикс — узкая. Нейтральная шапка каждого релиза показывает сумму человеко-дней в колонке. Переключите «вес = оценка / равные», чтобы увидеть разницу.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="switch on" id="switch" aria-pressed="true">
+      <span class="track"><span class="knob"></span></span>
+      <span class="txt"><span class="lab">Ширина пилюли</span><span class="val" id="swVal">вес = оценка</span></span>
+    </button>
+    <span class="spacer"></span>
+    <span class="legend"><span class="grp"><span class="lbl">меньше дней</span><span class="demo"><i style="width:34px"></i><i style="width:58px"></i><i style="width:96px"></i></span><span class="lbl">больше дней</span></span></span>
+  </div>
+
+  <div class="gantt"><div class="grid" id="grid"></div></div>
+
+  <div class="legend">
+    <span class="lbl">Полоса слева — тип работы (категориальный, единый приглушённый канал). Ширина — оценка в днях. Статус — заливка/зачёркивание.</span>
+  </div>
+
+  <p class="note">Ширина = <code>min-width</code>, линейно отображённая из <code>epic.est[discipline]</code> в диапазон 34–150px (клиппинг). Сумма по колонке = <code>Σ est</code> всех пилюль в релизе. В реальном приложении источник оценок — поля Release 2.0 / Jira story points по дисциплинам.</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases; // нейтральные корзины
+  const grid = document.getElementById('grid');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+
+  // тип работы → ключ оценки в epic.est
+  const wtToEst = { BE:'be', FE:'fe', QA:'qa', AN:'an', BA:'ba', IMPL:'impl', MIG:'mig', STAB:'stab', HF:'hf' };
+  const FALLBACK = 3; // мелкая работа, если оценки нет
+
+  function estOf(epic, p) {
+    const k = wtToEst[p.wt];
+    const v = epic.est && epic.est[k];
+    return (typeof v === 'number' && v > 0) ? v : FALLBACK;
+  }
+
+  // диапазон оценок по всем пилюлям → ширина
+  let lo = Infinity, hi = -Infinity;
+  D.epics.forEach(e => e.pills.forEach(p => { const v = estOf(e, p); if (v < lo) lo = v; if (v > hi) hi = v; }));
+  const MINW = 34, MAXW = 150;
+  function widthFor(v) {
+    if (hi === lo) return (MINW + MAXW) / 2;
+    const t = (v - lo) / (hi - lo);
+    return Math.round(MINW + t * (MAXW - MINW));
+  }
+  const EQUALW = 70; // равная ширина в режиме «равные»
+
+  // сумма дней в колонке (по всем командам/эпикам)
+  function sumDays(colKey) {
+    let s = 0;
+    D.epics.forEach(e => e.pills.forEach(p => { if (p.col === colKey) s += estOf(e, p); }));
+    return s;
+  }
+
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  let html = '';
+  html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+  cols.forEach(c => {
+    const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без даты';
+    const sum = sumDays(c.key);
+    html += '<div class="gcell ghead">' +
+      '<span class="rel' + (c.current ? ' cur' : (c.dated ? '' : ' muted')) + '">' + c.short + '</span>' +
+      (c.current ? '<span class="cur-tag">ТЕК.</span>' : '') +
+      '<span class="dates">' + dates + '</span>' +
+      '<span class="sum"><span class="v' + (sum === 0 ? ' zero' : '') + '">' + sum + '</span><span class="u">чел·дн</span></span>' +
+      '</div>';
+  });
+
+  D.teams.forEach(team => {
+    const eps = D.epics.filter(e => e.team === team);
+    const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+    html += '<div class="teamrow"><span class="mono">'+team.slice(0,2)+'</span><b>'+team+'</b><span class="cnt">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+    eps.forEach(e => {
+      const tot = Object.values(e.est||{}).reduce((a,b)=>a+b,0);
+      html += '<div class="gcell elabel"><span class="nm">'+e.epic+'</span><span class="meta">'+tot+' дн всего</span></div>';
+      cols.forEach(c => {
+        html += '<div class="gcell cell">';
+        e.pills.filter(p=>p.col===c.key).forEach(p => {
+          const v = estOf(e, p);
+          const dotColor = p.state === 'done' ? 'var(--prizma-on-course)' : (p.state === 'progress' ? 'var(--prizma-information)' : (p.state === 'unplanned' ? 'var(--prizma-off-course)' : 'var(--prizma-text-tertiary)'));
+          html += '<div class="pill" data-state="'+p.state+'" data-est="'+v+'" style="--wt:'+wtVar(p.wt)+'">'+
+            '<span class="dot" style="background:'+dotColor+'"></span>'+
+            '<span class="nm">'+p.wt+'</span>'+
+            '<span class="est">'+v+'</span>'+
+            '</div>';
+        });
+        html += '</div>';
+      });
+    });
+  });
+  grid.innerHTML = html;
+
+  // применить ширины
+  let weighted = true;
+  function applyWidths() {
+    grid.querySelectorAll('.pill').forEach(pl => {
+      const v = +pl.dataset.est;
+      pl.style.minWidth = (weighted ? widthFor(v) : EQUALW) + 'px';
+    });
+  }
+  // sync + setTimeout + resize (не полагаемся на rAF)
+  applyWidths();
+  setTimeout(applyWidths, 60);
+  window.addEventListener('resize', applyWidths);
+
+  const sw = document.getElementById('switch'), swVal = document.getElementById('swVal');
+  function applySwitch() {
+    sw.classList.toggle('on', weighted);
+    sw.setAttribute('aria-pressed', weighted ? 'true' : 'false');
+    swVal.textContent = weighted ? 'вес = оценка' : 'равные';
+    applyWidths();
+  }
+  sw.addEventListener('click', () => { weighted = !weighted; applySwitch(); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

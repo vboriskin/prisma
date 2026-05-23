@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 15 · Потоки переносов</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  /* ── сцена потоков ── */
+  .stage { position: relative; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); padding: 0; overflow: hidden; }
+  .cols { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); z-index: 2; }
+  .col { padding: 16px 14px 18px; border-right: 1px solid var(--prizma-border); min-height: 360px; display: flex; flex-direction: column; }
+  .col:last-child { border-right: none; }
+
+  /* шапка релиза — НЕЙТРАЛЬНАЯ серая */
+  .col .rel { font: 300 22px/1 var(--mono); color: var(--prizma-text-secondary); letter-spacing: -.01em; }
+  .col .rel.cur { color: var(--prizma-text-primary); }
+  .col .rel.muted { color: var(--prizma-text-tertiary); font-size: 15px; }
+  .col .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .col .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  /* net +N / −N */
+  .col .net { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--prizma-border); }
+  .col .net .seg { display: inline-flex; align-items: center; gap: 4px; font: 600 12px/1 var(--mono); }
+  .col .net .inb { color: var(--prizma-text-secondary); }
+  .col .net .out { color: var(--prizma-drift); }
+  .col .net .seg svg { width: 12px; height: 12px; }
+  .col .net.flat { color: var(--prizma-text-tertiary); }
+  .col .net.flat .ph { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* список работ-узлов в колонке */
+  .col .nodes { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .col .node { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 7px 4px 9px; background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .col .node::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-border-strong)); }
+  .col .node .wt { font: 600 10px/1 var(--mono); color: var(--prizma-text-primary); }
+  .col .node .ep { font-size: 10.5px; color: var(--prizma-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col .node.shifted { box-shadow: inset 0 0 0 1px var(--prizma-drift); }
+  .col .node.shifted::before { background: var(--prizma-drift); }
+  .col .empty { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 10px; }
+
+  /* SVG-слой лент — поверх фона, под колонками-текстом отключён pointer на путях кроме hit */
+  .ribbons { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .ribbons path.flow { fill: var(--prizma-drift); opacity: .16; transition: opacity .18s var(--ease-calm); }
+  .ribbons path.hit { fill: transparent; stroke: transparent; pointer-events: stroke; cursor: help; }
+  .ribbons.dim path.flow { opacity: .07; }
+  .ribbons path.flow.active { opacity: .42; }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 18px; flex-wrap: wrap; }
+  .legend .grp { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .grp i { width: 22px; height: 10px; border-radius: 2px; background: var(--prizma-drift); opacity: .42; flex: none; }
+  .legend .grp .thin { height: 4px; }
+
+  .note { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 700px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 180px; max-width: 260px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md);
+    box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 11px 12px; opacity: 0; transform: translateY(4px);
+    transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .t { font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
+  .tip .r { font: 600 11.5px/1.4 var(--mono); color: var(--prizma-drift); }
+  .tip .sub { margin-top: 6px; font-size: 11px; color: var(--prizma-text-tertiary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 15 · Потоки переносов</div>
+      <h1>Где план утекает вправо</h1>
+      <p>Пять релизов слева направо. Между соседними датированными окнами — тонкие ленты-потоки, толщина которых пропорциональна числу работ, перенесённых в следующее окно. Все ленты подкрашены амбером — «утекает вправо». Наведите на ленту: «N работ перенесено 1.20 → 1.21». Сверху колонок — нетто <span class="pz-mono">+N / −N</span>.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="stage" id="stage">
+    <svg class="ribbons" id="ribbons" preserveAspectRatio="none"></svg>
+    <div class="cols" id="cols"></div>
+  </div>
+
+  <div class="legend">
+    <span class="grp"><i class="thin"></i><i></i> толщина ленты ∝ числу перенесённых работ</span>
+    <span class="grp">амбер — направление «вправо» (задержка)</span>
+  </div>
+
+  <p class="note">Потоки синтезированы из <code>epic.moves</code> и распределения пилюль: работа считается «утёкшей», если её пилюли смещены к более поздним окнам, а у эпика есть переносы. В реальном приложении источник — история перемещений между релизами (audit-log Release 2.0).</p>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+
+  // порядок колонок и индексы
+  const cols = D.releases; // backlog r120 r121 r122 overtime
+  const order = cols.map(c => c.key);
+  const idxOf = k => order.indexOf(k);
+
+  // ── синтез потоков переноса между СОСЕДНИМИ колонками ──
+  // Идея: у эпика с moves>0 часть работ «дрейфует» вправо. Раскидываем moves эпика
+  // по соседним переходам, отдавая приоритет переходам, где у эпика реально есть
+  // пилюли в обеих колонках (from заполнена/была, to заполнена позже).
+  // Каждый перенос = +1 в поток (fromIdx → fromIdx+1). Также помечаем какие
+  // пилюли в правой колонке выглядят «пришедшими» (shifted) — для подсветки.
+  const flows = {};            // 'i->i+1' => count
+  const shiftedKeys = new Set(); // `${epicId}|${col}|${wt}|${seq}` правые узлы, пришедшие переносом
+  for (let i = 0; i < order.length - 1; i++) flows[i] = 0;
+
+  D.epics.forEach(e => {
+    if (!e.moves) return;
+    // распределение пилюль по индексам колонок
+    const byIdx = {};
+    e.pills.forEach((p, seq) => { const ix = idxOf(p.col); (byIdx[ix] = byIdx[ix] || []).push({ p, seq }); });
+    const present = Object.keys(byIdx).map(Number).sort((a,b)=>a-b);
+    // кандидаты-переходы: между минимальным занятым и максимальным занятым индексом
+    const minIx = present[0], maxIx = present[present.length - 1];
+    let remaining = e.moves;
+    // идём слева направо по переходам внутри занятого диапазона; справа — приоритет
+    const transitions = [];
+    for (let i = maxIx - 1; i >= minIx && i >= 0; i--) {
+      if (i + 1 < order.length) transitions.push(i);
+    }
+    transitions.forEach(i => {
+      if (remaining <= 0) return;
+      // сколько работ «протекло» через переход i → i+1: ограничим числом пилюль справа
+      const rightCount = (byIdx[i + 1] || []).length;
+      const take = Math.max(1, Math.min(remaining, rightCount || 1));
+      flows[i] += take;
+      remaining -= take;
+      // пометить столько правых узлов как shifted
+      (byIdx[i + 1] || []).slice(0, take).forEach(({ p, seq }) => {
+        shiftedKeys.add(e.id + '|' + p.col + '|' + p.wt + '|' + seq);
+      });
+    });
+  });
+
+  // нетто по колонкам: out = поток исходящий вправо; in = поток входящий слева
+  function outOf(ix){ return flows[ix] || 0; }                 // ix → ix+1
+  function inOf(ix){ return ix > 0 ? (flows[ix - 1] || 0) : 0; } // ix-1 → ix
+
+  // узлы каждой колонки (что лежит) — берём первые ~7
+  function nodesOf(colKey) {
+    const out = [];
+    D.epics.forEach(e => {
+      e.pills.forEach((p, seq) => {
+        if (p.col === colKey) out.push({ epicId: e.id, epic: e.epic, wt: p.wt, seq, col: colKey });
+      });
+    });
+    return out;
+  }
+
+  /* ── рендер колонок ── */
+  const colsEl = document.getElementById('cols');
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+  let html = '';
+  cols.forEach((c, ix) => {
+    const dates = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+    const out = outOf(ix), inb = inOf(ix);
+    let netHtml;
+    if (!out && !inb) {
+      netHtml = '<div class="net flat"><span class="ph">нет переносов</span></div>';
+    } else {
+      netHtml = '<div class="net">' +
+        (inb ? '<span class="seg inb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>+'+inb+'</span>' : '') +
+        (out ? '<span class="seg out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>−'+out+'</span>' : '') +
+        '</div>';
+    }
+    const nodes = nodesOf(c.key);
+    let nodesHtml = '<div class="nodes">';
+    if (!nodes.length) nodesHtml += '<span class="empty">пусто</span>';
+    nodes.slice(0, 7).forEach(n => {
+      const sh = shiftedKeys.has(n.epicId + '|' + n.col + '|' + n.wt + '|' + n.seq);
+      nodesHtml += '<div class="node'+(sh?' shifted':'')+'" style="--wt:'+wtVar(n.wt)+'"><span class="wt">'+n.wt+'</span><span class="ep">'+esc(n.epic)+'</span></div>';
+    });
+    if (nodes.length > 7) nodesHtml += '<span class="empty">+ ещё '+(nodes.length-7)+'</span>';
+    nodesHtml += '</div>';
+
+    html += '<div class="col" data-ix="'+ix+'">' +
+      '<span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+
+      '<span class="dates">'+dates+'</span>' + netHtml + nodesHtml + '</div>';
+  });
+  colsEl.innerHTML = html;
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+  /* ── рендер SVG-лент ── */
+  const stage = document.getElementById('stage');
+  const svg = document.getElementById('ribbons');
+  const tip = document.getElementById('tip');
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const maxFlow = Math.max(1, ...Object.values(flows));
+
+  function drawRibbons() {
+    const sr = stage.getBoundingClientRect();
+    if (!sr.width) return;
+    svg.setAttribute('viewBox', '0 0 ' + sr.width + ' ' + sr.height);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    const colEls = Array.from(colsEl.children);
+    const yMid = sr.height * 0.5;
+    const minTh = 3, maxTh = 30;
+
+    Object.keys(flows).forEach(ixStr => {
+      const ix = +ixStr;
+      const count = flows[ix];
+      if (count <= 0) return;
+      // только между датированными соседями (по брифу), но допустим и backlog→r120 если поток есть
+      const a = colEls[ix], b = colEls[ix + 1];
+      if (!a || !b) return;
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const x1 = ra.right - sr.left;   // правый край левой колонки
+      const x2 = rb.left - sr.left;    // левый край правой колонки
+      const th = minTh + (count / maxFlow) * (maxTh - minTh);
+      // лента как замкнутый контур между двумя горизонтальными отрезками толщины th,
+      // плавно соединёнными кубическими безье. Небольшой вертикальный сдвиг → «течение».
+      const yA = yMid - th * 0.3;
+      const yB = yMid + th * 0.3;
+      const cx = (x1 + x2) / 2;
+      const topPath =
+        'M ' + x1 + ' ' + (yA - th/2) +
+        ' C ' + cx + ' ' + (yA - th/2) + ' ' + cx + ' ' + (yB - th/2) + ' ' + x2 + ' ' + (yB - th/2);
+      const botRev =
+        ' L ' + x2 + ' ' + (yB + th/2) +
+        ' C ' + cx + ' ' + (yB + th/2) + ' ' + cx + ' ' + (yA + th/2) + ' ' + x1 + ' ' + (yA + th/2) +
+        ' Z';
+      const d = topPath + botRev;
+
+      const fill = document.createElementNS(SVGNS, 'path');
+      fill.setAttribute('d', d);
+      fill.setAttribute('class', 'flow');
+      svg.appendChild(fill);
+
+      // hit-зона: толстый невидимый stroke по средней линии
+      const mid = 'M ' + x1 + ' ' + yA + ' C ' + cx + ' ' + yA + ' ' + cx + ' ' + yB + ' ' + x2 + ' ' + yB;
+      const hit = document.createElementNS(SVGNS, 'path');
+      hit.setAttribute('d', mid);
+      hit.setAttribute('class', 'hit');
+      hit.setAttribute('stroke-width', Math.max(th, 16));
+      hit.setAttribute('fill', 'none');
+      hit.dataset.from = cols[ix].short;
+      hit.dataset.to = cols[ix + 1].short;
+      hit.dataset.count = count;
+      hit._fill = fill;
+      svg.appendChild(hit);
+
+      hit.addEventListener('mouseenter', () => {
+        svg.classList.add('dim');
+        fill.classList.add('active');
+        tip.innerHTML = '<div class="t">'+count+' '+wordWorks(count)+' перенесено</div>' +
+          '<div class="r">'+cols[ix].short+' → '+cols[ix + 1].short+'</div>' +
+          '<div class="sub">направление «вправо» — задержка плана</div>';
+        positionTip();
+      });
+      hit.addEventListener('mousemove', positionTip);
+      hit.addEventListener('mouseleave', () => {
+        svg.classList.remove('dim');
+        fill.classList.remove('active');
+        tip.classList.remove('show');
+      });
+    });
+  }
+
+  function wordWorks(n){
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'работа';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'работы';
+    return 'работ';
+  }
+
+  let lastEvt = null;
+  function positionTip(e) {
+    if (e) lastEvt = e;
+    tip.style.visibility = 'hidden';
+    tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    const x = lastEvt ? lastEvt.clientX : window.innerWidth/2;
+    const y = lastEvt ? lastEvt.clientY : window.innerHeight/2;
+    let left = x + 14, top = y + 14;
+    if (left + tw > window.innerWidth - 10) left = x - tw - 14;
+    if (top + th > window.innerHeight - 10) top = y - th - 14;
+    tip.style.left = Math.max(10, left).toFixed(0) + 'px';
+    tip.style.top = Math.max(10, top).toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+
+  // sync + setTimeout + resize (не полагаемся только на rAF)
+  drawRibbons();
+  setTimeout(drawRibbons, 60);
+  window.addEventListener('resize', drawRibbons);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

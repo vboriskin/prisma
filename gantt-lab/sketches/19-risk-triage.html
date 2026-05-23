@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 19 · Триаж риска</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 96px; }
+  .head { margin-bottom: 20px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .bar { display: flex; align-items: center; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .bar .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+
+  /* ── список эпиков ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: visible; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 300px repeat(5, 1fr); min-width: 920px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 19px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .ghead.today { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+
+  .elabel { background: var(--prizma-bg-elevated); display: flex; align-items: center; gap: 10px; }
+  .elabel .body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .elabel .nm { font-size: 13px; font-weight: 600; }
+  .elabel .meta { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* риск-точка — кликабельный таргет */
+  .riskdot { flex: none; width: 20px; height: 20px; border-radius: 50%; border: none; padding: 0; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; position: relative; background: transparent;
+    transition: transform .12s var(--ease-spring); }
+  .riskdot:hover { transform: scale(1.12); }
+  .riskdot .core { width: 9px; height: 9px; border-radius: 50%; }
+  .riskdot.drift .core { background: var(--prizma-drift); box-shadow: 0 0 0 4px var(--prizma-drift-bg); }
+  .riskdot.off .core { background: var(--prizma-off-course); box-shadow: 0 0 0 4px var(--prizma-off-course-bg); }
+  .riskdot.none .core { width: 7px; height: 7px; background: var(--prizma-text-tertiary); opacity: .4; box-shadow: none; }
+  .riskdot.resolved .core { background: var(--prizma-on-course); box-shadow: 0 0 0 4px var(--prizma-on-course-bg); }
+  /* галочка при «снят/сохранён с митигацией» */
+  .riskdot .chk { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--prizma-on-course); }
+  .riskdot.resolved .core { display: none; }
+  .riskdot.resolved .chk { display: flex; }
+  .riskdot .chk svg { width: 16px; height: 16px; }
+  .riskdot.open { transform: scale(1.12); }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; }
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill .wt-lbl { font: 500 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .pill[data-done] { opacity: .68; }
+  .pill[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+  /* ── anchored popover ── */
+  .pop { position: fixed; z-index: var(--z-dropdown); width: 320px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); box-shadow: 0 16px 48px rgba(0,0,0,.55);
+    opacity: 0; transform: translateY(4px); transition: opacity .15s var(--ease-calm), transform .15s var(--ease-calm);
+    pointer-events: none; overflow: hidden; }
+  .pop.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  /* stripe-left по типу риска */
+  .pop::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--rcol, var(--prizma-drift)); }
+  .pop .ph { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 15px 11px 17px; border-bottom: 1px solid var(--prizma-border); }
+  .pop .ph .t { font-size: 13px; font-weight: 700; }
+  .pop .ph .e { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; display: block; }
+  .pop .ph .x { background: none; border: none; color: var(--prizma-text-tertiary); cursor: pointer; padding: 2px; line-height: 0; border-radius: var(--r-sm); }
+  .pop .ph .x:hover { color: var(--prizma-text-primary); }
+  .pop .pb { padding: 13px 15px 15px 17px; display: flex; flex-direction: column; gap: 13px; }
+  .fld { display: flex; flex-direction: column; gap: 6px; }
+  .fld > label { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); }
+  .radios { display: flex; flex-direction: column; gap: 6px; }
+  .radios label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--prizma-text-primary); cursor: pointer; }
+  .radios input { accent-color: var(--rcol, var(--prizma-drift)); width: 14px; height: 14px; }
+  .inp, .sel, .ta { width: 100%; background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border); border-radius: var(--r-md);
+    color: var(--prizma-text-primary); font: 400 12.5px/1.4 var(--font); padding: 8px 10px; }
+  .inp { font-family: var(--mono); }
+  .ta { resize: vertical; min-height: 56px; }
+  .inp:focus, .sel:focus, .ta:focus { outline: none; border-color: var(--prizma-information); }
+  .pf { display: flex; align-items: center; gap: 8px; padding: 12px 15px 13px 17px; border-top: 1px solid var(--prizma-border); }
+  .pf .spacer { flex: 1; }
+  .btn-clear { background: none; border: 1px solid var(--prizma-border-strong); color: var(--prizma-on-course);
+    height: 30px; padding: 0 12px; border-radius: var(--r-md); font: 600 12.5px/1 var(--font); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-clear:hover { border-color: var(--prizma-on-course); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 19 · Риск</div>
+      <h1>Триаж риска</h1>
+      <p>Риск живёт в одной точке у эпика. Клик по точке открывает <b>привязанную</b> карточку (не модал по центру): тип риска, дедлайн, владелец из реальных исполнителей, митигация. Сохранение помечает точку галочкой, «снять риск» — гасит её. <kbd>Esc</kbd> или клик мимо — закрыть.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="legend">
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв курса</span>
+      <span><i style="background:var(--prizma-on-course)"></i>отработан</span>
+    </span>
+    <span class="hint">Кликните цветную точку рискового эпика.</span>
+  </div>
+
+  <div class="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<div class="pop" id="pop" role="dialog" aria-modal="false" aria-label="Триаж риска"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const grid = document.getElementById('grid');
+  const pop = document.getElementById('pop');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function relShort(k){ const c = cols.find(r=>r.key===k); return c?c.short:k; }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  // владельцы = уникальные who из всех pills (исключая null)
+  const owners = [...new Set(D.epics.flatMap(e => e.pills.map(p => p.who).filter(Boolean)))].sort((a,b)=>a.localeCompare(b,'ru'));
+
+  // рабочее состояние риска по эпикам (для reset)
+  let triage = {};
+  function seed() {
+    triage = {};
+    D.epics.forEach(e => {
+      triage[e.id] = { risk: e.risk, type: e.risk ? 'open' : 'open', deadline: '', owner: '', mitigation: '', resolved: false };
+    });
+  }
+  seed();
+
+  function dotClass(id) {
+    const t = triage[id];
+    if (t.resolved) return 'resolved';
+    if (t.risk === 'off-course') return 'off';
+    if (t.risk === 'drift') return 'drift';
+    return 'none';
+  }
+  function dotColorVar(id) {
+    const t = triage[id];
+    if (t.resolved) return 'var(--prizma-on-course)';
+    if (t.risk === 'off-course') return 'var(--prizma-off-course)';
+    if (t.risk === 'drift') return 'var(--prizma-drift)';
+    return 'var(--prizma-text-tertiary)';
+  }
+
+  function render() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead'+(c.current?' today':'')+'"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      D.epics.filter(e=>e.team===team).forEach(e => {
+        const cls = dotClass(e.id);
+        const hasRisk = triage[e.id].risk != null;
+        const title = hasRisk ? 'Открыть триаж риска' : 'Эпик без риска';
+        html += '<div class="gcell elabel">'
+          + '<button class="riskdot '+cls+'" data-epic="'+e.id+'" title="'+title+'" aria-label="'+title+': '+esc(e.epic)+'"'+(hasRisk?'':' disabled')+'>'
+          + '<span class="core"></span>'
+          + '<span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>'
+          + '</button>'
+          + '<span class="body"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+esc(team)+'</span></span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell">';
+          e.pills.filter(p=>p.col===c.key).forEach(p => {
+            const doneDot = p.state==='done' ? '<span class="dot6" style="background:var(--prizma-on-course)"></span>' : '';
+            html += '<span class="pill" style="--wt:'+wtVar(p.wt)+'"'+(p.state==='done'?' data-done':'')+'>'+doneDot+'<span class="nm">'+p.wt+'</span></span>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+    grid.querySelectorAll('.riskdot:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); openPop(btn); });
+    });
+  }
+
+  let openEpic = null, openBtn = null;
+  const TYPES = [ ['open','открытый вопрос'], ['suspended','подвешено'], ['hard-deadline','жёсткий дедлайн'] ];
+
+  function openPop(btn) {
+    const id = btn.dataset.epic;
+    const e = D.epics.find(x=>x.id===id);
+    const t = triage[id];
+    openEpic = id; openBtn = btn;
+    grid.querySelectorAll('.riskdot').forEach(b => b.classList.remove('open'));
+    btn.classList.add('open');
+
+    const rcol = t.risk === 'off-course' ? 'var(--prizma-off-course)' : 'var(--prizma-drift)';
+    pop.style.setProperty('--rcol', rcol);
+    const riskName = t.risk === 'off-course' ? 'Срыв курса' : (t.risk === 'drift' ? 'Дрейф' : 'Риск');
+
+    let h = '<div class="ph"><div><span class="t">'+riskName+'</span><span class="e">'+esc(e.epic)+' · '+esc(e.team)+'</span></div>'
+      + '<button class="x" id="popX" aria-label="Закрыть"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>';
+    h += '<div class="pb">';
+    // тип риска
+    h += '<div class="fld"><label>Тип риска</label><div class="radios">';
+    TYPES.forEach(([v,lbl]) => {
+      h += '<label><input type="radio" name="rtype" value="'+v+'"'+(t.type===v?' checked':'')+'>'+lbl+'</label>';
+    });
+    h += '</div></div>';
+    // дедлайн
+    h += '<div class="fld"><label>Дедлайн</label><input class="inp" type="date" id="fDeadline" value="'+esc(t.deadline)+'"></div>';
+    // владелец
+    h += '<div class="fld"><label>Владелец</label><select class="sel" id="fOwner"><option value="">— не назначен —</option>'
+      + owners.map(o => '<option value="'+esc(o)+'"'+(t.owner===o?' selected':'')+'>'+esc(o)+'</option>').join('') + '</select></div>';
+    // митигация
+    h += '<div class="fld"><label>Митигация</label><textarea class="ta" id="fMit" placeholder="Что делаем, чтобы снять риск…">'+esc(t.mitigation)+'</textarea></div>';
+    h += '</div>';
+    // футер
+    h += '<div class="pf">'
+      + '<button class="btn-clear" id="popClear"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Снять риск</button>'
+      + '<span class="spacer"></span>'
+      + '<button class="pz-btn" id="popCancel">Отмена</button>'
+      + '<button class="pz-btn pz-btn-primary" id="popSave">Сохранить</button>'
+      + '</div>';
+    pop.innerHTML = h;
+
+    position(btn);
+    // показать
+    pop.classList.add('show');
+
+    document.getElementById('popX').addEventListener('click', close);
+    document.getElementById('popCancel').addEventListener('click', close);
+    document.getElementById('popSave').addEventListener('click', save);
+    document.getElementById('popClear').addEventListener('click', clearRisk);
+    // фокус на первый контрол
+    setTimeout(() => { const r = pop.querySelector('input[name="rtype"]:checked') || pop.querySelector('input[name="rtype"]'); if (r) r.focus(); }, 40);
+  }
+
+  function position(btn) {
+    const r = btn.getBoundingClientRect();
+    // измерить синхронно (показ через visibility, не rAF)
+    pop.style.visibility = 'hidden';
+    pop.classList.add('show');
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    pop.classList.remove('show');
+    // якорим справа от точки; если не влезает — слева
+    let left = r.right + 10;
+    if (left + pw > window.innerWidth - 12) left = r.left - pw - 10;
+    if (left < 12) left = 12;
+    let top = r.top + r.height/2 - 40;
+    if (top + ph > window.innerHeight - 12) top = window.innerHeight - ph - 12;
+    if (top < 12) top = 12;
+    pop.style.left = left.toFixed(0)+'px';
+    pop.style.top = top.toFixed(0)+'px';
+    pop.style.visibility = '';
+  }
+
+  function readForm() {
+    const t = triage[openEpic];
+    const rt = pop.querySelector('input[name="rtype"]:checked');
+    t.type = rt ? rt.value : t.type;
+    t.deadline = (document.getElementById('fDeadline')||{}).value || '';
+    t.owner = (document.getElementById('fOwner')||{}).value || '';
+    t.mitigation = (document.getElementById('fMit')||{}).value || '';
+  }
+
+  function save() {
+    readForm();
+    const t = triage[openEpic];
+    // сохранение с осмысленной митигацией → точка получает галочку (отработан), но риск остаётся помеченным
+    t.resolved = t.mitigation.trim().length > 0 || !!t.owner;
+    render();
+    reanchorOpenDot();
+    close();
+  }
+
+  function clearRisk() {
+    readForm();
+    const t = triage[openEpic];
+    t.risk = null; t.resolved = false;
+    render();
+    close();
+  }
+
+  function reanchorOpenDot() {
+    // после render() кнопки пересозданы — обновляем визуальное «open» неважно, поп закрывается
+  }
+
+  function close() {
+    pop.classList.remove('show');
+    if (openBtn) openBtn.classList.remove('open');
+    grid.querySelectorAll('.riskdot').forEach(b => b.classList.remove('open'));
+    openEpic = null; openBtn = null;
+  }
+
+  // закрытие по клику мимо / Esc
+  document.addEventListener('mousedown', e => {
+    if (!openEpic) return;
+    if (pop.contains(e.target) || (openBtn && openBtn.contains(e.target))) return;
+    close();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && openEpic) { e.preventDefault(); close(); } });
+  // перепозиционировать при скролле/resize пока открыт
+  function reposition(){ if (openEpic && openBtn) position(openBtn); }
+  window.addEventListener('scroll', reposition, true);
+  window.addEventListener('resize', reposition);
+
+  document.getElementById('reset').addEventListener('click', () => { close(); seed(); render(); });
+  document.getElementById('tt').addEventListener('click', () => { const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+  render();
+})();
+</script>
+</body>
+</html>

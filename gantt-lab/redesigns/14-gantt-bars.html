@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 14 · Классические полосы</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .top .legend i.line { width: 0; height: 13px; border-radius: 0; border-left: 1px dashed var(--prizma-information); }
+  .top .legend i.flag { width: 0; height: 13px; border-radius: 0; border-left: 1px dotted var(--prizma-text-secondary); }
+
+  /* ── layout ── */
+  .body { flex: 1; display: flex; min-height: 0; }
+  .eyebrowbar { padding: 9px 18px 0; flex: none; }
+
+  .chartwrap { flex: 1; overflow: auto; position: relative; }
+  .chart { position: relative; min-width: 1180px; }
+
+  /* левая колонка-лейблы — sticky */
+  .col-lbl { position: sticky; left: 0; z-index: 6; background: var(--prizma-bg); width: 270px; flex: none; }
+
+  /* строка-сетка: лейбл + дорожка */
+  .lane-grid { display: grid; grid-template-columns: 270px 1fr; align-items: stretch; }
+
+  /* шапка оси */
+  .axis-head { position: sticky; top: 0; z-index: 7; background: var(--prizma-bg); border-bottom: 1px solid var(--prizma-border); height: 58px; }
+  .axis-head .corner { position: sticky; left: 0; z-index: 8; background: var(--prizma-bg); display: flex; align-items: flex-end; padding: 0 16px 10px; border-right: 1px solid var(--prizma-border); }
+  .axis-head .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .axis-svg-wrap { position: relative; }
+
+  /* лейбл эпика */
+  .ep-lbl { padding: 0 14px; min-height: 46px; display: flex; flex-direction: column; justify-content: center; border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); gap: 3px; position: relative; }
+  .ep-lbl.risky { padding-left: 14px; }
+  .ep-lbl.risky::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .ep-lbl.r-drift::before { background: var(--prizma-drift); }
+  .ep-lbl.r-off::before { background: var(--prizma-off-course); }
+  .ep-lbl .nm { font-size: 12.5px; font-weight: 500; color: var(--prizma-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ep-lbl .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 8px; }
+
+  /* команда-заголовок */
+  .team-row { display: grid; grid-template-columns: 270px 1fr; }
+  .team-lbl { position: sticky; left: 0; z-index: 6; background: var(--prizma-bg-elevated); padding: 8px 16px 7px; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px; }
+  .team-lbl .cnt { color: var(--prizma-text-secondary); font: 600 9px/1 var(--mono); }
+  .team-band { background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border); }
+
+  /* дорожка с баром */
+  .lane { position: relative; min-height: 46px; border-bottom: 1px solid var(--prizma-border); }
+
+  /* бар эпика */
+  .bar { position: absolute; top: 50%; transform: translateY(-50%); height: 24px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong); overflow: hidden; display: flex; align-items: center; transition: box-shadow .15s; cursor: default; }
+  .bar:hover { box-shadow: 0 0 0 1px var(--prizma-border-strong), 0 6px 18px rgba(0,0,0,.4); z-index: 3; }
+  /* done-fill — нейтральный, чуть светлее */
+  .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--prizma-text-primary) 14%, transparent); }
+  /* work-type accent на левом капе */
+  .bar .cap { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); z-index: 2; }
+  /* риск-стрипа сверху */
+  .bar .topstripe { position: absolute; left: 0; right: 0; top: 0; height: 2px; z-index: 2; }
+  .bar.r-drift .topstripe { background: var(--prizma-drift); }
+  .bar.r-off .topstripe { background: var(--prizma-off-course); }
+  .bar .lab { position: relative; z-index: 2; padding: 0 8px 0 10px; font: 600 10.5px/1 var(--mono); color: var(--prizma-text-secondary); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .bar .lab .pct { color: var(--prizma-text-primary); }
+  .bar.is-done .lab .pct { color: var(--prizma-on-course); }
+
+  /* бар без дат (только бэклог/овертайм) */
+  .lane .nodate { position: absolute; top: 50%; transform: translateY(-50%); left: 12px; font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); font-style: italic; display: flex; align-items: center; gap: 6px; }
+  .lane .nodate .dash { width: 26px; height: 0; border-top: 1px dashed var(--prizma-border-strong); }
+
+  /* фоновые вертикальные полосы релизов (нейтральные) + сетка недель */
+  .gridlayer { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; }
+  .relband { position: absolute; top: 0; bottom: 0; }
+  .relband.cur { background: color-mix(in srgb, var(--prizma-text-primary) 4%, transparent); }
+  .relband.alt { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+  .weektick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-border); }
+
+  /* today + milestone — поверх */
+  .todayline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 5; pointer-events: none; }
+  .mstone { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dotted var(--prizma-text-secondary); z-index: 4; pointer-events: none; }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 200px; max-width: 290px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 11px 13px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tt { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+  .tip .tr { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tip .tr .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .pz-eyebrow { display: block; margin: 9px 0 6px; }
+  .tip .pl-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .tip .pl { position: relative; font: 600 10px/1 var(--mono); padding: 4px 7px 4px 9px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); color: var(--prizma-text-secondary); overflow: hidden; }
+  .tip .pl::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .tip .pl.done { opacity: .55; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Классические полосы</span>
+    <span class="sub">гант-диаграмма по датам</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-bg-tertiary);border:1px solid var(--prizma-border-strong)"></i>выполнено</span>
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="line"></i>сегодня</span>
+      <span><i class="flag"></i>веха</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 14 · Полосы</span></div>
+  <div class="body">
+    <div class="chartwrap" id="wrap">
+      <div class="chart" id="chart"></div>
+    </div>
+  </div>
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+
+  // ── геометрия оси: только датированные релизы дают временной диапазон ──
+  const dated = D.releases.filter(r => r.dated);
+  // глобальное окно: старт самого раннего релиза → конец самого позднего (Date-объекты, gotcha b)
+  const axisStart = parse(dated[0].start);
+  const lastEnd = parse(dated[dated.length - 1].end);
+  // прибавляем день к концу, чтобы последний день попадал внутрь (новый Date из ms)
+  const axisEnd = new Date(lastEnd.getTime() + DAY);
+  const spanMs = axisEnd - axisStart;
+
+  const PX_PER_DAY = 13;                       // плотность оси
+  const trackW = Math.round(spanMs / DAY * PX_PER_DAY);
+  const LBL_W = 270;
+
+  const xOf = d => (d - axisStart) / spanMs * trackW;       // d — Date
+
+  // ── span каждого эпика: по его pills в ДАТИРОВАННЫХ окнах ──
+  function epicSpan(e) {
+    let lo = null, hi = null;
+    e.pills.forEach(p => {
+      const r = D.releases.find(x => x.key === p.col);
+      if (!r || !r.dated) return;
+      const s = parse(r.start), en = parse(r.end);
+      if (lo === null || s < lo) lo = s;
+      if (hi === null || en > hi) hi = en;
+    });
+    if (lo === null) return null;             // только бэклог/овертайм — нет дат
+    return { start: lo, end: new Date(hi.getTime() + DAY) };  // +day для покрытия конца
+  }
+
+  const chart = document.getElementById('chart');
+  const wrap = document.getElementById('wrap');
+
+  // ── фоновый слой: полосы релизов + недельная сетка ──
+  function gridLayerHtml(bodyHeight) {
+    let s = '<div class="gridlayer" style="left:' + LBL_W + 'px;width:' + trackW + 'px;height:' + bodyHeight + 'px">';
+    dated.forEach((r, i) => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cls = r.current ? 'cur' : (i % 2 ? 'alt' : '');
+      s += '<div class="relband ' + cls + '" style="left:' + x1.toFixed(1) + 'px;width:' + (x2 - x1).toFixed(1) + 'px"></div>';
+    });
+    // недельные тики
+    let t = new Date(axisStart.getTime());
+    while (t < axisEnd) {
+      s += '<div class="weektick" style="left:' + xOf(t).toFixed(1) + 'px"></div>';
+      t = new Date(t.getTime() + 7 * DAY);
+    }
+    s += '</div>';
+    return s;
+  }
+
+  // ── шапка оси (SVG: подписи релизов, даты недель, вехи, сегодня) ──
+  function axisHeadHtml() {
+    const W = trackW, Hh = 58;
+    let s = '<div class="axis-head lane-grid">';
+    s += '<div class="corner"><span class="pz-eyebrow">Команда · Эпик</span></div>';
+    s += '<div class="axis-svg-wrap"><svg width="' + W + '" height="' + Hh + '" viewBox="0 0 ' + W + ' ' + Hh + '">';
+    // релиз-подписи (нейтральные)
+    dated.forEach(r => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cx = (x1 + x2) / 2;
+      const fill = r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)';
+      const fw = r.current ? '700' : '700';
+      s += '<text x="' + cx.toFixed(1) + '" y="18" text-anchor="middle" fill="' + fill + '" font-family="var(--mono)" font-size="11" font-weight="' + fw + '" letter-spacing=".5">' + r.short + (r.current ? ' · ТЕК.' : '') + '</text>';
+      // разделитель релиза
+      s += '<line x1="' + x1.toFixed(1) + '" y1="0" x2="' + x1.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    });
+    // финальный разделитель
+    s += '<line x1="' + xOf(new Date(parse(dated[dated.length-1].end).getTime()+DAY)).toFixed(1) + '" y1="0" x2="' + xOf(new Date(parse(dated[dated.length-1].end).getTime()+DAY)).toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    // недельные даты
+    let t = new Date(axisStart.getTime());
+    while (t < axisEnd) {
+      const lab = t.toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+      s += '<text x="' + (xOf(t) + 4).toFixed(1) + '" y="40" fill="var(--prizma-text-tertiary)" font-family="var(--mono)" font-size="9">' + lab + '</text>';
+      t = new Date(t.getTime() + 7 * DAY);
+    }
+    // вехи (флаги)
+    D.milestones.forEach(m => {
+      const x = xOf(parse(m.date));
+      if (x < 0 || x > W) return;
+      s += '<line x1="' + x.toFixed(1) + '" y1="44" x2="' + x.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-text-secondary)" stroke-width="1" stroke-dasharray="1.5 2.5"/>';
+      s += '<path d="M' + x.toFixed(1) + ' 44 h 9 l -2.5 3 l 2.5 3 h -9 z" fill="var(--prizma-bg-tertiary)" stroke="var(--prizma-text-secondary)" stroke-width="1"/>';
+      s += '<title>' + esc(m.label) + ' · ' + parse(m.date).toLocaleDateString('ru', { day: '2-digit', month: 'short' }) + '</title>';
+    });
+    // сегодня-кап
+    const tx = xOf(parse(D.today));
+    s += '<line x1="' + tx.toFixed(1) + '" y1="0" x2="' + tx.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-information)" stroke-width="1" stroke-dasharray="3 3"/>';
+    s += '<rect x="' + (tx - 22).toFixed(1) + '" y="0" width="44" height="13" fill="var(--prizma-bg)"/>';
+    s += '<text x="' + tx.toFixed(1) + '" y="10" text-anchor="middle" fill="var(--prizma-information)" font-family="var(--mono)" font-size="8.5" font-weight="700">СЕГОДНЯ</text>';
+    s += '</svg></div></div>';
+    return s;
+  }
+
+  // ── строки ──
+  function bodyHtml() {
+    let s = '';
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team);
+      const works = eps.reduce((n, e) => n + e.pills.length, 0);
+      s += '<div class="team-row">';
+      s += '<div class="team-lbl">' + team + '<span class="cnt">' + eps.length + ' эп · ' + works + ' раб</span></div>';
+      s += '<div class="team-band"></div></div>';
+      eps.forEach(e => {
+        const span = epicSpan(e);
+        const est = H.effortOf(e);
+        const dr = H.doneRatio(e);
+        const riskCls = e.risk === 'off-course' ? 'r-off' : (e.risk === 'drift' ? 'r-drift' : '');
+        const riskyCls = e.risk ? ' risky ' + riskCls : '';
+        s += '<div class="lane-grid">';
+        s += '<div class="ep-lbl' + riskyCls + '"><span class="nm">' + esc(e.epic) + '</span><span class="meta"><span>' + est + ' дн</span><span>' + e.pills.length + ' раб</span></span></div>';
+        s += '<div class="lane" data-id="' + e.id + '">';
+        if (!span) {
+          s += '<span class="nodate"><span class="dash"></span>нет датированных работ (бэклог / овертайм)</span>';
+        } else {
+          const x1 = xOf(span.start), x2 = xOf(span.end);
+          const w = Math.max(20, x2 - x1);
+          // wt-акцент = первый pill эпика
+          const firstWt = e.pills[0] ? e.pills[0].wt : 'BE';
+          const isDone = dr >= 0.999;
+          let bcls = 'bar';
+          if (e.risk === 'off-course') bcls += ' r-off';
+          else if (e.risk === 'drift') bcls += ' r-drift';
+          if (isDone) bcls += ' is-done';
+          s += '<div class="' + bcls + '" data-id="' + e.id + '" style="left:' + x1.toFixed(1) + 'px;width:' + w.toFixed(1) + 'px;--wt:' + wtVar(firstWt) + '">';
+          s += '<span class="fill" style="width:' + (dr * 100).toFixed(1) + '%"></span>';
+          s += '<span class="cap"></span>';
+          if (e.risk) s += '<span class="topstripe"></span>';
+          s += '<span class="lab"><span class="pct">' + Math.round(dr * 100) + '%</span></span>';
+          s += '</div>';
+        }
+        s += '</div></div>';
+      });
+    });
+    return s;
+  }
+
+  function render() {
+    chart.innerHTML = '';
+    chart.style.width = (LBL_W + trackW) + 'px';
+    // временно соберём тело, чтобы знать высоту для фон-слоя
+    const headEl = document.createElement('div'); headEl.innerHTML = axisHeadHtml();
+    const bodyEl = document.createElement('div'); bodyEl.className = 'chart-body'; bodyEl.style.position = 'relative'; bodyEl.innerHTML = bodyHtml();
+    chart.appendChild(headEl.firstElementChild);
+    chart.appendChild(bodyEl);
+    // измеряем высоту тела (синхронно — layout доступен)
+    placeOverlays();
+    wireTips();
+  }
+
+  // фон-слой + today/milestone линии поверх всего тела (по фактической высоте)
+  function placeOverlays() {
+    const body = chart.querySelector('.chart-body');
+    if (!body) return;
+    body.querySelectorAll('.gridlayer, .todayline, .mstone').forEach(n => n.remove());
+    const h = body.scrollHeight;
+    body.insertAdjacentHTML('afterbegin', gridLayerHtml(h));
+    // today + milestones как абсолютные линии относительно body (с учётом LBL_W)
+    const tx = LBL_W + xOf(parse(D.today));
+    const tl = document.createElement('div'); tl.className = 'todayline';
+    tl.style.left = tx.toFixed(1) + 'px'; tl.style.height = h + 'px';
+    body.appendChild(tl);
+    D.milestones.forEach(m => {
+      const x = xOf(parse(m.date));
+      if (x < 0 || x > trackW) return;
+      const ml = document.createElement('div'); ml.className = 'mstone';
+      ml.style.left = (LBL_W + x).toFixed(1) + 'px'; ml.style.height = h + 'px';
+      ml.title = m.label;
+      body.appendChild(ml);
+    });
+  }
+
+  // ── tooltip ──
+  const tip = document.getElementById('tip');
+  let tipBar = null;
+  function buildTip(e) {
+    const span = epicSpan(e);
+    const fmt = d => d.toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+    let h = '<div class="tt">' + esc(e.epic) + '</div>';
+    h += '<div class="tr"><span>Команда</span><span class="v">' + esc(e.team) + '</span></div>';
+    if (span) h += '<div class="tr"><span>Окно</span><span class="v">' + fmt(span.start) + ' – ' + fmt(new Date(span.end.getTime() - DAY)) + '</span></div>';
+    h += '<div class="tr"><span>Готовность</span><span class="v">' + Math.round(H.doneRatio(e) * 100) + '%</span></div>';
+    h += '<div class="tr"><span>Оценка</span><span class="v">' + H.effortOf(e) + ' дн</span></div>';
+    if (e.risk) h += '<div class="tr"><span>Риск</span><span class="v" style="color:var(--prizma-' + e.risk + ')">' + (e.risk === 'off-course' ? 'срыв' : 'дрейф') + '</span></div>';
+    h += '<span class="pz-eyebrow">Работы · ' + e.pills.length + '</span><div class="pl-list">';
+    e.pills.forEach(p => {
+      h += '<span class="pl' + (p.state === 'done' ? ' done' : '') + '" style="--wt:' + wtVar(p.wt) + '">' + p.wt + '</span>';
+    });
+    h += '</div>';
+    return h;
+  }
+  function positionTip(el) {
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = 'hidden'; tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px'; tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+  function wireTips() {
+    const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+    chart.querySelectorAll('.bar').forEach(bar => {
+      bar.addEventListener('mouseenter', () => {
+        tipBar = bar; tip.innerHTML = buildTip(byId[bar.dataset.id]); positionTip(bar);
+      });
+      bar.addEventListener('mouseleave', () => { if (tipBar === bar) { tip.classList.remove('show'); tipBar = null; } });
+    });
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  // ── init: sync + setTimeout + resize (gotcha a) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => { placeOverlays(); });
+  wrap.addEventListener('scroll', () => { if (tipBar) positionTip(tipBar); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

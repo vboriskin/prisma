@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 13 · Дзен-фокус</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .nav { display: flex; align-items: center; gap: 8px; }
+  .top .nav .pos { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); min-width: 46px; text-align: center; }
+  .top button { color: var(--prizma-text-secondary); }
+
+  /* ── body: left mini-list + stage ── */
+  .body { flex: 1; display: flex; min-height: 0; }
+
+  .picker { width: 230px; flex: none; border-right: 1px solid var(--prizma-border); display: flex; flex-direction: column; min-height: 0; }
+  .picker .ph { padding: 13px 16px 9px; flex: none; }
+  .pscroll { flex: 1; overflow-y: auto; padding-bottom: 16px; }
+  .pgrp { padding: 12px 16px 4px; font: 700 9.5px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .pitem { position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 16px 8px 17px; cursor: pointer; transition: background .12s, opacity .15s; opacity: .5; }
+  .pitem::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+  .pitem:hover { opacity: .85; background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  .pitem.sel { opacity: 1; background: var(--prizma-bg-elevated); }
+  .pitem.sel::before { background: var(--prizma-information); }
+  .pitem .rk { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--prizma-border-strong); }
+  .pitem .rk.drift { background: var(--prizma-drift); } .pitem .rk.off { background: var(--prizma-off-course); }
+  .pitem .pn { font-size: 12px; line-height: 1.25; min-width: 0; }
+  .pitem.sel .pn { font-weight: 600; }
+
+  /* stage */
+  .stage { flex: 1; overflow-y: auto; min-width: 0; position: relative; }
+  .halo { position: absolute; top: -120px; left: 50%; transform: translateX(-50%); width: 720px; height: 420px; pointer-events: none;
+    background: radial-gradient(ellipse at center, color-mix(in srgb, var(--halo, var(--prizma-information)) 9%, transparent), transparent 68%);
+    opacity: .8; }
+  .stage-inner { position: relative; max-width: 960px; margin: 0 auto; padding: 42px 48px 70px; }
+
+  .z-team { display: flex; align-items: center; gap: 9px; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .z-team .rdot { width: 8px; height: 8px; border-radius: 50%; }
+  .z-title { display: flex; align-items: flex-start; gap: 16px; margin-top: 12px; }
+  .z-title h1 { font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.08; margin: 0; flex: 1; }
+  .z-status { flex: none; margin-top: 6px; display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: var(--r-md); font: 700 11px/1 var(--mono); letter-spacing: .3px; border: 1px solid var(--prizma-border-strong); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .z-status .sd { width: 8px; height: 8px; border-radius: 50%; }
+  .z-status.off { border-color: var(--prizma-off-course); color: var(--prizma-off-course); }
+  .z-status.drift { border-color: var(--prizma-drift); color: var(--prizma-drift); }
+  .z-status.ok { border-color: var(--prizma-on-course); color: var(--prizma-on-course); }
+  .z-meta { display: flex; gap: 22px; margin-top: 16px; }
+  .z-meta .mi .mv { font: 700 18px/1 var(--mono); color: var(--prizma-text-primary); }
+  .z-meta .mi .ml { font-size: 9.5px; letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 4px; }
+
+  .zsec { margin-top: 38px; }
+  .zsec > .pz-eyebrow { display: block; margin-bottom: 16px; }
+
+  /* big timeline of pills across releases */
+  .timeline { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .tl-col { display: flex; flex-direction: column; }
+  .tl-cap { text-align: center; margin-bottom: 11px; }
+  .tl-cap .rl { font: 300 24px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .tl-cap.cur .rl { color: var(--prizma-text-primary); }
+  .tl-cap.has .rl { color: var(--prizma-text-secondary); }
+  .tl-cap .dd { display: block; font: 600 9px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 5px; }
+  .tl-cap.cur .dd { color: var(--prizma-information); }
+  .tl-body { flex: 1; min-height: 96px; border-top: 1px solid var(--prizma-border); padding-top: 13px; display: flex; flex-direction: column; gap: 8px; }
+  .tl-body.cur { border-top-color: var(--prizma-information); }
+  .bigpill { position: relative; display: flex; align-items: center; gap: 9px; padding: 11px 13px 11px 15px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); overflow: hidden; }
+  .bigpill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .bigpill .bp-main { flex: 1; min-width: 0; }
+  .bigpill .bp-wt { font-size: 13px; font-weight: 600; }
+  .bigpill .bp-lab { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; display: block; }
+  .bigpill .bp-who { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .bigpill[data-state="done"] { opacity: .6; }
+  .bigpill[data-state="done"] .bp-wt { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .bigpill[data-state="progress"] .pdot { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .bigpill[data-state="unplanned"] { border-style: dashed; border-color: var(--prizma-drift); background: transparent; }
+  .tl-empty { font-size: 11px; color: var(--prizma-text-tertiary); opacity: .5; text-align: center; padding-top: 6px; }
+
+  /* lower grid */
+  .lower { display: grid; grid-template-columns: 1fr 1fr; gap: 38px 44px; margin-top: 38px; }
+  .full { grid-column: 1 / -1; }
+
+  .deps2 { display: flex; flex-direction: column; gap: 16px; }
+  .dep-grp .dl { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .dep-grp .dl svg { width: 12px; height: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .dchip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px 6px 9px; border: 1px solid var(--prizma-border); border-radius: 999px; font-size: 12px; cursor: pointer; transition: border-color .15s; }
+  .dchip:hover { border-color: var(--prizma-information); }
+  .dchip .mono { font: 700 9px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .dchip .rdot { width: 6px; height: 6px; border-radius: 50%; }
+  .empty { font-size: 12px; color: var(--prizma-text-tertiary); font-style: italic; }
+
+  .effort { display: flex; flex-direction: column; gap: 10px; }
+  .erow { display: grid; grid-template-columns: 90px 1fr 40px; align-items: center; gap: 12px; }
+  .erow .el { font: 600 11px/1 var(--font); color: var(--prizma-text-secondary); }
+  .erow .bar { height: 8px; border-radius: 4px; background: var(--prizma-bg-tertiary); overflow: hidden; }
+  .erow .bar i { display: block; height: 100%; border-radius: 4px; background: var(--wt, var(--prizma-information)); }
+  .erow .ev { font: 600 11px/1 var(--mono); color: var(--prizma-text-secondary); text-align: right; }
+  .efoot { margin-top: 13px; display: flex; align-items: baseline; gap: 8px; padding-top: 12px; border-top: 1px solid var(--prizma-border); }
+  .efoot .et { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .efoot .ett { font: 700 15px/1 var(--mono); color: var(--prizma-text-primary); margin-left: auto; }
+
+  .risk-card { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid; border-radius: var(--r-md); }
+  .risk-card svg { width: 17px; height: 17px; flex: none; margin-top: 1px; }
+  .risk-card .rt { font-size: 12.5px; line-height: 1.45; }
+  .risk-card .rt b { display: block; font-weight: 700; margin-bottom: 3px; }
+  .risk-card.off { border-color: var(--prizma-off-course); color: var(--prizma-off-course); }
+  .risk-card.drift { border-color: var(--prizma-drift); color: var(--prizma-drift); }
+  .risk-card.ok { border-color: var(--prizma-border); color: var(--prizma-on-course); }
+  .risk-card .rt span { color: var(--prizma-text-secondary); font-weight: 500; }
+
+  .people { display: flex; flex-wrap: wrap; gap: 8px; }
+  .person { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 7px; border: 1px solid var(--prizma-border); border-radius: 999px; font-size: 12px; }
+  .person .av { width: 22px; height: 22px; border-radius: 50%; background: var(--prizma-bg-tertiary); display: inline-flex; align-items: center; justify-content: center; font: 700 9px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; }
+  .person .pr { font: 500 9px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .moves { display: flex; align-items: flex-start; gap: 11px; padding: 14px 16px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); }
+  .moves svg { width: 17px; height: 17px; flex: none; color: var(--prizma-text-tertiary); margin-top: 1px; }
+  .moves .mt { font-size: 13px; line-height: 1.5; color: var(--prizma-text-secondary); }
+  .moves .mt b { color: var(--prizma-text-primary); font-weight: 700; }
+  .moves.warn svg { color: var(--prizma-drift); }
+
+  .kbd-hint { position: absolute; right: 22px; bottom: 14px; font-size: 11px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 8px; }
+  .kbd-hint kbd { font: 600 10px/1 var(--mono); border: 1px solid var(--prizma-border-strong); border-radius: 4px; padding: 3px 6px; color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Дзен-фокус</span>
+    <span class="pz-eyebrow">Редизайн 13 · single-epic</span>
+    <span class="spacer"></span>
+    <div class="nav">
+      <button class="pz-btn pz-btn-icon" id="prev" title="Предыдущий эпик" aria-label="Предыдущий"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+      <span class="pos pz-mono" id="pos">1 / 16</span>
+      <button class="pz-btn pz-btn-icon" id="next" title="Следующий эпик" aria-label="Следующий"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <aside class="picker">
+      <div class="ph"><span class="pz-eyebrow">Выбор эпика</span></div>
+      <div class="pscroll" id="pscroll"></div>
+    </aside>
+    <main class="stage" id="stage"></main>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+  const relShort = k => { const c = cols.find(c => c.key === k); return c ? c.short : k; };
+
+  const blocks = {}; D.epics.forEach(e => blocks[e.id] = []);
+  D.epics.forEach(e => (e.deps || []).forEach(d => { if (blocks[d]) blocks[d].push(e.id); }));
+
+  const order = D.epics.map(e => e.id); // порядок ←/→
+  const pscroll = document.getElementById('pscroll');
+  const stage = document.getElementById('stage');
+  const posEl = document.getElementById('pos');
+
+  let selId = order[0];
+
+  function statusOf(e) {
+    if (e.risk === 'off-course') return { cls: 'off', dot: 'var(--prizma-off-course)', label: 'РИСК СРЫВА', halo: 'var(--prizma-off-course)' };
+    if (e.risk === 'drift') return { cls: 'drift', dot: 'var(--prizma-drift)', label: 'ДРЕЙФ', halo: 'var(--prizma-drift)' };
+    if (H.doneRatio(e) >= 0.999) return { cls: 'ok', dot: 'var(--prizma-on-course)', label: 'ЗАВЕРШЁН', halo: 'var(--prizma-on-course)' };
+    if (e.pills.some(p => p.state === 'progress')) return { cls: 'ok', dot: 'var(--prizma-on-course)', label: 'ПО КУРСУ', halo: 'var(--prizma-information)' };
+    return { cls: '', dot: 'var(--prizma-text-secondary)', label: 'ЗАПЛАНИРОВАН', halo: 'var(--prizma-information)' };
+  }
+
+  function renderPicker() {
+    let html = '';
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team);
+      html += '<div class="pgrp">' + esc(team) + '</div>';
+      eps.forEach(e => {
+        const rk = e.risk === 'off-course' ? ' off' : (e.risk === 'drift' ? ' drift' : '');
+        html += '<div class="pitem' + (e.id === selId ? ' sel' : '') + '" data-id="' + e.id + '">' +
+          '<span class="rk' + rk + '"></span><span class="pn">' + esc(e.epic) + '</span></div>';
+      });
+    });
+    pscroll.innerHTML = html;
+    pscroll.querySelectorAll('.pitem').forEach(it => it.addEventListener('click', () => select(it.dataset.id)));
+  }
+
+  function timelineHtml(e) {
+    return cols.map(c => {
+      const pills = H.pillsOf(e, c.key);
+      const has = pills.length > 0;
+      const dd = c.dated ? new Date(c.start).toLocaleDateString('ru', {day:'2-digit',month:'short'}) : 'без даты';
+      const body = has ? pills.map(p => {
+        const who = p.who ? '<span class="bp-who">' + esc(p.who) + '</span>' : '';
+        const dot = p.state === 'progress' ? '<span class="pdot"></span>' : '';
+        const lab = D.WT[p.wt] ? D.WT[p.wt].label : p.wt;
+        return '<div class="bigpill" data-state="' + p.state + '" style="--wt:' + wtVar(p.wt) + '">' + dot +
+          '<span class="bp-main"><span class="bp-wt">' + esc(p.wt) + '</span><span class="bp-lab">' + esc(lab) + '</span></span>' + who + '</div>';
+      }).join('') : '<div class="tl-empty">—</div>';
+      const capCls = c.current ? ' cur' : (has ? ' has' : '');
+      return '<div class="tl-col">' +
+        '<div class="tl-cap' + capCls + '"><span class="rl">' + esc(c.short) + '</span><span class="dd">' + esc(dd) + '</span></div>' +
+        '<div class="tl-body' + (c.current ? ' cur' : '') + '">' + body + '</div></div>';
+    }).join('');
+  }
+
+  function chipList(ids) {
+    if (!ids || !ids.length) return '<div class="empty">нет связей</div>';
+    return '<div class="chips">' + ids.map(id => {
+      const e = byId[id]; if (!e) return '';
+      const rd = e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span>' : '';
+      return '<span class="dchip" data-id="' + id + '"><span class="mono">' + esc(e.team.slice(0,2).toUpperCase()) + '</span>' + esc(e.epic) + rd + '</span>';
+    }).join('') + '</div>';
+  }
+
+  const DISC = { be:'backend', fe:'frontend', qa:'тестирование', an:'аналитика', ba:'бизнес-анализ', impl:'внедрение', mig:'миграция', stab:'стабилизация', hf:'хотфикс' };
+  const DISC_WT = { be:'BE', fe:'FE', qa:'QA', an:'AN', ba:'BA', impl:'IMPL', mig:'MIG', stab:'STAB', hf:'HF' };
+  function effortHtml(e) {
+    const est = e.est || {};
+    const entries = Object.keys(est).map(k => [k, est[k]]).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return '<div class="empty">оценка не задана</div>';
+    const max = Math.max.apply(null, entries.map(x => x[1]));
+    const total = entries.reduce((a, x) => a + x[1], 0);
+    const rows = entries.map(([k, v]) =>
+      '<div class="erow"><span class="el">' + esc(DISC[k] || k) + '</span>' +
+      '<span class="bar"><i style="width:' + (max > 0 ? (v / max * 100).toFixed(1) : 0) + '%;--wt:' + wtVar(DISC_WT[k]) + '"></i></span>' +
+      '<span class="ev">' + v + '</span></div>'
+    ).join('');
+    return '<div class="effort">' + rows + '</div><div class="efoot"><span class="et">человеко-дней всего</span><span class="ett">' + total + '</span></div>';
+  }
+
+  function riskHtml(e) {
+    if (e.risk === 'off-course') return '<div class="risk-card off"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><div class="rt"><b>Риск срыва</b><span>Эпик отстаёт от плана — нужен фокус владельца и пересмотр сроков.</span></div></div>';
+    if (e.risk === 'drift') return '<div class="risk-card drift"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 9v4M12 17h.01"/></svg><div class="rt"><b>Дрейф</b><span>Сроки плывут — проверьте нагрузку команды и зависимости.</span></div></div>';
+    return '<div class="risk-card ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div class="rt"><b>По курсу</b><span>Рисков не отмечено — эпик движется по плану.</span></div></div>';
+  }
+
+  function peopleHtml(e) {
+    const seen = {}; const list = [];
+    e.pills.forEach(p => { if (p.who && !seen[p.who]) { seen[p.who] = 1; list.push({ who: p.who, wt: p.wt }); } });
+    if (!list.length) return '<div class="empty">исполнители не назначены</div>';
+    return '<div class="people">' + list.map(x =>
+      '<span class="person"><span class="av">' + esc(x.who.slice(0,2)) + '</span>' + esc(x.who) + '<span class="pr">' + esc(x.wt) + '</span></span>'
+    ).join('') + '</div>';
+  }
+
+  function movesHtml(e) {
+    const n = e.moves || 0;
+    if (n === 0) return '<div class="moves"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg><div class="mt"><b>Без переносов.</b> Эпик стабильно держится в исходных окнах с начала квартала.</div></div>';
+    const word = n === 1 ? 'перенос' : (n < 5 ? 'переноса' : 'переносов');
+    return '<div class="moves warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><div class="mt"><b>' + n + ' ' + word + '</b> между релизами за квартал. Частые переезды — сигнал к разговору о реалистичности плана.</div></div>';
+  }
+
+  function renderStage() {
+    const e = byId[selId];
+    const st = statusOf(e);
+    const eff = H.effortOf(e);
+    const done = e.pills.filter(p => p.state === 'done').length;
+    const prog = e.pills.filter(p => p.state === 'progress').length;
+
+    let h = '<div class="halo" style="--halo:' + st.halo + '"></div>';
+    h += '<div class="stage-inner">';
+    h += '<div class="z-team">' + (e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span>' : '') + esc(e.team) + '</div>';
+    h += '<div class="z-title"><h1>' + esc(e.epic) + '</h1><span class="z-status ' + st.cls + '"><span class="sd" style="background:' + st.dot + '"></span>' + st.label + '</span></div>';
+    h += '<div class="z-meta">' +
+      '<div class="mi"><div class="mv pz-mono">' + e.pills.length + '</div><div class="ml">работ</div></div>' +
+      '<div class="mi"><div class="mv pz-mono">' + done + '</div><div class="ml">готово</div></div>' +
+      '<div class="mi"><div class="mv pz-mono">' + prog + '</div><div class="ml">в работе</div></div>' +
+      '<div class="mi"><div class="mv pz-mono">' + eff + '</div><div class="ml">человеко-дней</div></div>' +
+      '<div class="mi"><div class="mv pz-mono">' + (e.moves || 0) + '</div><div class="ml">переносов</div></div>' +
+      '</div>';
+
+    h += '<div class="zsec"><span class="pz-eyebrow">Дорожка работ по релизам</span><div class="timeline">' + timelineHtml(e) + '</div></div>';
+
+    h += '<div class="lower">';
+    h += '<div><span class="pz-eyebrow" style="display:block;margin-bottom:16px">Зависимости</span><div class="deps2">' +
+      '<div class="dep-grp"><div class="dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>Зависит от</div>' + chipList(e.deps) + '</div>' +
+      '<div class="dep-grp"><div class="dl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>Блокирует</div>' + chipList(blocks[selId]) + '</div>' +
+      '</div></div>';
+    h += '<div><span class="pz-eyebrow" style="display:block;margin-bottom:16px">Оценка по дисциплинам</span>' + effortHtml(e) + '</div>';
+    h += '<div><span class="pz-eyebrow" style="display:block;margin-bottom:16px">Статус и риск</span>' + riskHtml(e) + '</div>';
+    h += '<div><span class="pz-eyebrow" style="display:block;margin-bottom:16px">Исполнители</span>' + peopleHtml(e) + '</div>';
+    h += '<div class="full"><span class="pz-eyebrow" style="display:block;margin-bottom:16px">История · переезды</span>' + movesHtml(e) + '</div>';
+    h += '</div>';
+
+    h += '</div>'; // stage-inner
+    h += '<div class="kbd-hint"><kbd>←</kbd><kbd>→</kbd> листать эпики</div>';
+    stage.innerHTML = h;
+    stage.scrollTop = 0;
+
+    stage.querySelectorAll('.dchip').forEach(c => c.addEventListener('click', () => select(c.dataset.id)));
+    posEl.textContent = (order.indexOf(selId) + 1) + ' / ' + order.length;
+  }
+
+  function select(id) {
+    if (!byId[id]) return;
+    selId = id;
+    renderPicker();
+    renderStage();
+    const it = pscroll.querySelector('.pitem.sel');
+    if (it) it.scrollIntoView({ block: 'nearest' });
+  }
+
+  function step(dir) {
+    let i = order.indexOf(selId) + dir;
+    if (i < 0) i = order.length - 1;
+    if (i >= order.length) i = 0;
+    select(order[i]);
+  }
+
+  document.getElementById('prev').addEventListener('click', () => step(-1));
+  document.getElementById('next').addEventListener('click', () => step(1));
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); step(-1); }
+    else if (ev.key === 'ArrowRight') { ev.preventDefault(); step(1); }
+  });
+
+  // init — по умолчанию рисковый эпик с самой богатой дорожкой
+  const startId = (D.epics.find(e => e.risk === 'off-course') || D.epics[0]).id;
+  select(startId);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

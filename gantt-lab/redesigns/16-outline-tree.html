@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 16 · Структурное дерево</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .hint { font-size: 11px; color: var(--prizma-text-tertiary); display: flex; align-items: center; gap: 6px; }
+  .top .hint kbd { font: 600 10px/1 var(--mono); padding: 3px 5px; border: 1px solid var(--prizma-border-strong); border-radius: 3px; color: var(--prizma-text-secondary); }
+
+  .eyebrowbar { padding: 9px 18px 0; flex: none; }
+
+  /* ── outline ── */
+  .scroll { flex: 1; overflow: auto; }
+  .tree { max-width: 920px; margin: 6px auto 60px; padding: 0 22px; outline: none; }
+
+  /* строка дерева */
+  .node { display: flex; align-items: center; gap: 8px; height: 34px; border-radius: var(--r-sm); padding-right: 12px; cursor: default; position: relative; }
+  .node:hover { background: color-mix(in srgb, var(--prizma-text-primary) 3%, transparent); }
+  .node.cursor { background: color-mix(in srgb, var(--prizma-information) 12%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-information) 35%, transparent); }
+
+  /* disclosure-треугольник (SVG) */
+  .tw { width: 16px; height: 16px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--prizma-text-tertiary); cursor: pointer; transition: transform .15s var(--ease-calm); }
+  .tw.open { transform: rotate(90deg); }
+  .tw.leaf { visibility: hidden; }
+  .node:hover .tw { color: var(--prizma-text-secondary); }
+
+  /* L0 команда */
+  .node.l0 { padding-left: 6px; }
+  .node.l0 .ttl { font: 700 13px/1 var(--font); color: var(--prizma-text-primary); letter-spacing: -.005em; }
+  .node.l0 .cnt { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* L1 эпик */
+  .node.l1 { padding-left: 28px; }
+  .node.l1::before { content: ""; position: absolute; left: 28px; top: 0; bottom: 0; width: 0; }
+  .node.l1.r-off::before, .node.l1.r-drift::before { width: 3px; border-radius: 2px; }
+  .node.l1.r-off::before { background: var(--prizma-off-course); }
+  .node.l1.r-drift::before { background: var(--prizma-drift); }
+  .node.l1 .tw { margin-left: 6px; }
+  .node.l1.risky .tw { margin-left: 6px; }
+  .node.l1 .ttl { font: 500 12.5px/1 var(--font); color: var(--prizma-text-primary); }
+  .node.l1 .cnt { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .node.l1 .risk-tag { font: 700 8.5px/1 var(--mono); letter-spacing: .3px; padding: 2px 5px; border-radius: 3px; }
+  .node.l1.r-off .risk-tag { color: var(--prizma-off-course); border: 1px solid color-mix(in srgb, var(--prizma-off-course) 40%, transparent); }
+  .node.l1.r-drift .risk-tag { color: var(--prizma-drift); border: 1px solid color-mix(in srgb, var(--prizma-drift) 40%, transparent); }
+
+  /* L2 работа (pill row) */
+  .node.l2 { padding-left: 62px; height: 32px; }
+  .node.l2 .wtmark { width: 3px; height: 16px; border-radius: 2px; flex: none; background: var(--wt, var(--prizma-information)); }
+  .node.l2 .wt-name { font: 500 12px/1 var(--font); color: var(--prizma-text-primary); min-width: 96px; }
+  .node.l2 .wt-code { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .node.l2.done .wt-name { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); color: var(--prizma-text-secondary); }
+  .node.l2 .spacer { flex: 1; }
+
+  /* релиз-чип (нейтральный) */
+  .rchip { font: 600 9.5px/1 var(--mono); letter-spacing: .2px; padding: 3px 7px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .rchip.cur { color: var(--prizma-text-primary); border-color: var(--prizma-border-strong); }
+
+  /* state-индикатор */
+  .state { display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px/1 var(--font); color: var(--prizma-text-tertiary); min-width: 92px; }
+  .state .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .state.s-done .dot { background: var(--prizma-on-course); }
+  .state.s-progress .dot { background: var(--prizma-information); }
+  .state.s-planned .dot { background: var(--prizma-text-tertiary); }
+  .state.s-unplanned .dot { background: var(--prizma-drift); }
+  .state.s-progress { color: var(--prizma-text-secondary); }
+
+  /* исполнитель */
+  .who { font: 500 11px/1 var(--font); color: var(--prizma-text-secondary); min-width: 90px; display: inline-flex; align-items: center; gap: 6px; }
+  .who .av { width: 18px; height: 18px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font: 700 8px/1 var(--mono); color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); }
+  .who.none { color: var(--prizma-text-tertiary); font-style: italic; }
+
+  /* оценка */
+  .est { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); min-width: 44px; text-align: right; }
+
+  .hidden { display: none; }
+
+  /* контролы свернуть/развернуть */
+  .toolbar { display: flex; gap: 8px; margin: 4px auto 8px; max-width: 920px; padding: 0 22px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Структурное дерево</span>
+    <span class="sub">WBS · команда › эпик › работа</span>
+    <span class="spacer"></span>
+    <span class="hint"><kbd>↑</kbd><kbd>↓</kbd> навигация <kbd>→</kbd><kbd>←</kbd> раскрыть</span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 16 · Дерево</span></div>
+  <div class="toolbar">
+    <button class="pz-btn" id="expandAll">Развернуть всё</button>
+    <button class="pz-btn" id="collapseAll">Свернуть до команд</button>
+  </div>
+  <div class="scroll"><div class="tree" id="tree" tabindex="0" role="tree" aria-label="Структура портфеля"></div></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const WT = D.WT;
+  const wtVar = wt => (WT[wt] && WT[wt].color) || 'var(--prizma-information)';
+  const relOf = key => D.releases.find(r => r.key === key);
+
+  // ── модель дерева: плоский список узлов с уровнем/родителем/состоянием ──
+  // node: { id, level, parent, expanded(для 0/1), team/epic/work refs }
+  const nodes = [];
+  let uid = 0;
+  D.teams.forEach(team => {
+    const eps = H.teamEpics(team);
+    const teamId = 't' + (uid++);
+    const works = eps.reduce((n, e) => n + e.pills.length, 0);
+    nodes.push({ id: teamId, level: 0, parent: null, expanded: true, kind: 'team', team, epCount: eps.length, workCount: works });
+    eps.forEach(e => {
+      const epId = 'e' + (uid++);
+      nodes.push({ id: epId, level: 1, parent: teamId, expanded: false, kind: 'epic', epic: e });
+      e.pills.forEach((p, i) => {
+        nodes.push({ id: 'w' + (uid++), level: 2, parent: epId, kind: 'work', epic: e, pill: p });
+      });
+    });
+  });
+
+  const nodeById = {}; nodes.forEach(n => nodeById[n.id] = n);
+  const tree = document.getElementById('tree');
+  let cursorId = nodes[0].id;
+
+  // видимость: узел виден если все его предки expanded
+  function isVisible(n) {
+    let p = n.parent;
+    while (p) {
+      const pn = nodeById[p];
+      if (!pn.expanded) return false;
+      p = pn.parent;
+    }
+    return true;
+  }
+  function visibleNodes() { return nodes.filter(isVisible); }
+
+  function triangleSvg() {
+    return '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>';
+  }
+
+  function fmtRel(key) {
+    const r = relOf(key);
+    return r ? r.short : key;
+  }
+
+  function workRow(n) {
+    const p = n.pill, e = n.epic;
+    const wtName = WT[p.wt] ? WT[p.wt].label : p.wt;
+    const r = relOf(p.col);
+    const cur = r && r.current ? ' cur' : '';
+    const stMap = { planned: 'запланировано', progress: 'в работе', done: 'готово', unplanned: 'вне плана' };
+    const whoHtml = p.who
+      ? '<span class="who"><span class="av">' + p.who.slice(0, 2).toUpperCase() + '</span>' + esc(p.who) + '</span>'
+      : '<span class="who none">не назначен</span>';
+    let h = '<div class="node l2' + (p.state === 'done' ? ' done' : '') + '" data-id="' + n.id + '" role="treeitem" tabindex="-1">';
+    h += '<span class="tw leaf"></span>';
+    h += '<span class="wtmark" style="background:' + wtVar(p.wt) + '"></span>';
+    h += '<span class="wt-name">' + esc(wtName) + '</span>';
+    h += '<span class="wt-code">' + p.wt + '</span>';
+    h += '<span class="spacer"></span>';
+    h += '<span class="rchip' + cur + '">' + fmtRel(p.col) + '</span>';
+    h += '<span class="state s-' + p.state + '"><span class="dot"></span>' + (stMap[p.state] || p.state) + '</span>';
+    h += whoHtml;
+    h += '</div>';
+    return h;
+  }
+
+  function epicRow(n) {
+    const e = n.epic;
+    const works = e.pills.length;
+    const est = H.effortOf(e);
+    const riskCls = e.risk === 'off-course' ? ' risky r-off' : (e.risk === 'drift' ? ' risky r-drift' : '');
+    const riskTag = e.risk ? '<span class="risk-tag">' + (e.risk === 'off-course' ? 'СРЫВ' : 'ДРЕЙФ') + '</span>' : '';
+    let h = '<div class="node l1' + riskCls + '" data-id="' + n.id + '" role="treeitem" aria-expanded="' + n.expanded + '" tabindex="-1">';
+    h += '<span class="tw' + (n.expanded ? ' open' : '') + '" data-toggle="' + n.id + '">' + triangleSvg() + '</span>';
+    h += '<span class="ttl">' + esc(e.epic) + '</span>';
+    h += riskTag;
+    h += '<span class="spacer"></span>';
+    h += '<span class="cnt">' + works + ' раб · ' + est + ' дн</span>';
+    h += '</div>';
+    return h;
+  }
+
+  function teamRow(n) {
+    let h = '<div class="node l0" data-id="' + n.id + '" role="treeitem" aria-expanded="' + n.expanded + '" tabindex="-1">';
+    h += '<span class="tw' + (n.expanded ? ' open' : '') + '" data-toggle="' + n.id + '">' + triangleSvg() + '</span>';
+    h += '<span class="ttl">' + esc(n.team) + '</span>';
+    h += '<span class="spacer"></span>';
+    h += '<span class="cnt">' + n.epCount + ' эп · ' + n.workCount + ' раб</span>';
+    h += '</div>';
+    return h;
+  }
+
+  function render() {
+    let html = '';
+    visibleNodes().forEach(n => {
+      if (n.kind === 'team') html += teamRow(n);
+      else if (n.kind === 'epic') html += epicRow(n);
+      else html += workRow(n);
+    });
+    tree.innerHTML = html;
+    applyCursor();
+    wire();
+  }
+
+  function applyCursor() {
+    tree.querySelectorAll('.node').forEach(el => el.classList.remove('cursor'));
+    const el = tree.querySelector('.node[data-id="' + cursorId + '"]');
+    if (el) {
+      el.classList.add('cursor');
+      el.setAttribute('tabindex', '0');
+    }
+  }
+
+  function wire() {
+    tree.querySelectorAll('.tw[data-toggle]').forEach(tw => {
+      tw.addEventListener('click', ev => {
+        ev.stopPropagation();
+        const n = nodeById[tw.dataset.toggle];
+        n.expanded = !n.expanded;
+        cursorId = n.id;
+        render();
+      });
+    });
+    tree.querySelectorAll('.node').forEach(el => {
+      el.addEventListener('click', () => { cursorId = el.dataset.id; applyCursor(); });
+    });
+  }
+
+  // ── клавиатурная навигация (как в файловом дереве) ──
+  function toggle(n, want) {
+    if (n.kind === 'work') return false;
+    if (typeof want === 'boolean') { if (n.expanded === want) return false; n.expanded = want; return true; }
+    n.expanded = !n.expanded; return true;
+  }
+
+  tree.addEventListener('keydown', ev => {
+    const vis = visibleNodes();
+    const idx = vis.findIndex(n => n.id === cursorId);
+    if (idx < 0) return;
+    const cur = vis[idx];
+
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (idx < vis.length - 1) { cursorId = vis[idx + 1].id; applyCursor(); scrollIntoView(); }
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (idx > 0) { cursorId = vis[idx - 1].id; applyCursor(); scrollIntoView(); }
+    } else if (ev.key === 'ArrowRight') {
+      ev.preventDefault();
+      if (cur.kind !== 'work' && !cur.expanded) { toggle(cur, true); render(); scrollIntoView(); }
+      else if (cur.kind !== 'work' && cur.expanded) {
+        // перейти к первому потомку
+        const child = nodes.find(n => n.parent === cur.id);
+        if (child) { cursorId = child.id; applyCursor(); scrollIntoView(); }
+      }
+    } else if (ev.key === 'ArrowLeft') {
+      ev.preventDefault();
+      if (cur.kind !== 'work' && cur.expanded) { toggle(cur, false); render(); scrollIntoView(); }
+      else if (cur.parent) { cursorId = cur.parent; applyCursor(); scrollIntoView(); }
+    } else if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      if (cur.kind !== 'work') { toggle(cur); render(); scrollIntoView(); }
+    } else if (ev.key === 'Home') {
+      ev.preventDefault(); cursorId = vis[0].id; applyCursor(); scrollIntoView();
+    } else if (ev.key === 'End') {
+      ev.preventDefault(); cursorId = vis[vis.length - 1].id; applyCursor(); scrollIntoView();
+    }
+  });
+
+  function scrollIntoView() {
+    const el = tree.querySelector('.node.cursor');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ── toolbar ──
+  document.getElementById('expandAll').addEventListener('click', () => {
+    nodes.forEach(n => { if (n.kind !== 'work') n.expanded = true; });
+    render(); tree.focus();
+  });
+  document.getElementById('collapseAll').addEventListener('click', () => {
+    nodes.forEach(n => { if (n.kind === 'epic') n.expanded = false; if (n.kind === 'team') n.expanded = true; });
+    // если курсор стал невидим — поднять на ближайшего видимого предка
+    if (!isVisible(nodeById[cursorId])) {
+      let p = nodeById[cursorId];
+      while (p && !isVisible(p)) p = nodeById[p.parent];
+      cursorId = p ? p.id : nodes[0].id;
+    }
+    render(); tree.focus();
+  });
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  render();
+  setTimeout(render, 60);
+  // фокус на дерево, чтобы клавиатура работала сразу
+  tree.focus();
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 13 · Diff с момента фиксации</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 14px; margin: 18px 0 16px; }
+  .bar .spacer { flex: 1; }
+
+  /* переключатель «показать изменения» */
+  .switch { display: inline-flex; align-items: center; gap: 11px; padding: 8px 14px 8px 12px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); background: var(--prizma-bg-elevated); cursor: pointer; user-select: none; transition: border-color .2s; }
+  .switch:hover { border-color: var(--prizma-information); }
+  .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--prizma-bg-tertiary); position: relative; transition: background .3s var(--ease-calm); flex: none; }
+  .switch .knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--prizma-text-secondary); transition: transform .3s var(--ease-calm), background .3s var(--ease-calm); }
+  .switch.on .track { background: var(--prizma-drift-bg); }
+  .switch.on .knob { transform: translateX(18px); background: var(--prizma-drift); }
+  .switch .txt { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+  .switch .txt .lab { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .switch .txt .val { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); }
+
+  /* счётчик переездов */
+  .counter { display: inline-flex; align-items: center; gap: 8px; opacity: 0; transition: opacity .3s var(--ease-calm); }
+  .counter.show { opacity: 1; }
+  .counter .n { font: 700 18px/1 var(--mono); color: var(--prizma-drift); }
+  .counter .lab { font-size: 12px; color: var(--prizma-text-secondary); max-width: 150px; line-height: 1.3; }
+
+  /* ── мини-гант ── */
+  .gantt { position: relative; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 620px; background: var(--prizma-bg-elevated); }
+  .stage { position: relative; }
+  .grid { display: grid; grid-template-columns: 220px repeat(5, minmax(135px,1fr)); min-width: 895px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  /* колонки релизов — НЕЙТРАЛЬНЫЙ серый */
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow b { font-size: 12px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; }
+  .elabel .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; position: relative; }
+
+  /* пилюли */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; transition: box-shadow .3s var(--ease-calm), background .3s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); transition: background .3s var(--ease-calm); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  /* перенесённая после фиксации — амбер-полоса (drift), только в diff-режиме */
+  .stage.diff .pill.moved { background: var(--prizma-drift-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-drift) 38%, transparent); }
+  .stage.diff .pill.moved::before { background: var(--prizma-drift); }
+
+  /* ghost-маркер на baseline-позиции (где пилюля была на фиксации) */
+  .ghost { display: none; align-items: center; gap: 5px; padding: 4px 8px 4px 9px; border: 1px dashed color-mix(in srgb, var(--prizma-drift) 55%, var(--prizma-border-strong));
+    border-radius: var(--r-sm); font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); background: transparent; opacity: 0; transition: opacity .3s var(--ease-calm); }
+  .ghost::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; }
+  .stage.diff .ghost { display: inline-flex; opacity: .9; }
+  .ghost svg { width: 11px; height: 11px; color: var(--prizma-drift); }
+
+  /* SVG-слой коннекторов baseline → текущая позиция */
+  .links { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; opacity: 0; transition: opacity .3s var(--ease-calm); }
+  .stage.diff .links { opacity: 1; }
+  .links path { fill: none; stroke: var(--prizma-drift); stroke-width: 1.5; stroke-dasharray: 3 3; opacity: .6; }
+  .links .arrow { fill: var(--prizma-drift); opacity: .8; }
+
+  .legend { display: flex; align-items: center; gap: 18px; margin-top: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: flex; align-items: center; gap: 7px; }
+  .legend .gh { width: 26px; height: 14px; border: 1px dashed color-mix(in srgb, var(--prizma-drift) 55%, var(--prizma-border-strong)); border-radius: 3px; }
+  .legend .mv { width: 26px; height: 14px; border-radius: 3px; background: var(--prizma-drift-bg); box-shadow: inset 2px 0 0 var(--prizma-drift); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 13 · План vs факт</div>
+      <h1>Diff с момента фиксации</h1>
+      <p>План зафиксирован 14.05. С тех пор часть работ переехала. Включите слой изменений — увидите призрачные метки там, где пилюли стояли при фиксации, тонкую стрелку к текущему положению и амбер-подсветку переехавших. Выключите — чистый текущий план без шума.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="switch" id="switch" aria-pressed="false">
+      <span class="track"><span class="knob"></span></span>
+      <span class="txt"><span class="lab">Изменения с фиксации 14.05</span><span class="val" id="swVal">скрыты</span></span>
+    </button>
+    <div class="counter" id="counter">
+      <span class="n" id="cnt">0</span>
+      <span class="lab">переездов с момента lock</span>
+    </div>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="gantt" id="gantt">
+    <div class="stage" id="stage">
+      <div class="grid" id="grid"></div>
+      <svg class="links" id="links" preserveAspectRatio="none"></svg>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="it"><span class="gh"></span>позиция при фиксации</div>
+    <div class="it"><span class="mv"></span>переехало после фиксации</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const colIndex = {}; cols.forEach((c,i) => colIndex[c.key] = i);
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+
+  const grid = document.getElementById('grid');
+  const stage = document.getElementById('stage');
+  const linksSvg = document.getElementById('links');
+  const gantt = document.getElementById('gantt');
+
+  // ── синтез baseline ──
+  // Для эпиков с moves>0: их «самая поздняя» датированная пилюля считается
+  // перенесённой на один датированный релиз раньше (это её позиция при фиксации).
+  // datedKeys — порядок датированных колонок (без backlog/overtime), чтобы
+  // «на релиз раньше» был осмысленным.
+  const datedKeys = cols.filter(c => c.dated).map(c => c.key); // r120, r121, r122
+  let moveCount = 0;
+
+  // moves[]: { epicId, pillIdx, fromCol(baseline), toCol(current) }
+  const moves = [];
+  D.epics.forEach(e => {
+    if (!e.moves || e.moves <= 0) return;
+    // ищем пилюлю в самой поздней датированной колонке
+    let bestIdx = -1, bestRank = -1;
+    e.pills.forEach((p, idx) => {
+      const rank = datedKeys.indexOf(p.col);
+      if (rank > bestRank) { bestRank = rank; bestIdx = idx; }
+    });
+    if (bestIdx < 0 || bestRank <= 0) return; // нечего двигать назад
+    const toCol = e.pills[bestIdx].col;
+    const fromCol = datedKeys[bestRank - 1]; // на один датированный релиз раньше
+    moves.push({ epicId: e.id, pillIdx: bestIdx, fromCol, toCol });
+    moveCount++;
+  });
+  document.getElementById('cnt').textContent = moveCount;
+
+  function movedInfo(epicId, pillIdx) {
+    return moves.find(m => m.epicId === epicId && m.pillIdx === pillIdx) || null;
+  }
+
+  // ── рендер ──
+  function render() {
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b></div>';
+      eps.forEach(e => {
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          // ghost-маркеры: пилюли, чья baseline-колонка == текущая c
+          moves.forEach(m => {
+            if (m.epicId === e.id && m.fromCol === c.key) {
+              const p = e.pills[m.pillIdx];
+              html += '<span class="ghost" data-gid="'+e.id+'-'+m.pillIdx+'" style="position:relative">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>' +
+                p.wt + '</span>';
+            }
+          });
+          // текущие пилюли
+          e.pills.forEach((p, idx) => {
+            if (p.col !== c.key) return;
+            const mv = movedInfo(e.id, idx);
+            const cls = 'pill' + (mv ? ' moved' : '');
+            html += '<div class="'+cls+'" data-pid="'+e.id+'-'+idx+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+    drawLinks();
+  }
+
+  // ── коннекторы ghost → current ──
+  function drawLinks() {
+    const sr = stage.getBoundingClientRect();
+    linksSvg.setAttribute('width', stage.scrollWidth || sr.width);
+    linksSvg.setAttribute('height', stage.scrollHeight || sr.height);
+    let paths = '';
+    moves.forEach(m => {
+      const ghost = grid.querySelector('.ghost[data-gid="'+m.epicId+'-'+m.pillIdx+'"]');
+      const pill = grid.querySelector('.pill[data-pid="'+m.epicId+'-'+m.pillIdx+'"]');
+      if (!ghost || !pill) return;
+      const gr = ghost.getBoundingClientRect();
+      const pr = pill.getBoundingClientRect();
+      // координаты относительно stage (с учётом скролла контента)
+      const x1 = gr.right - sr.left, y1 = gr.top - sr.top + gr.height/2;
+      const x2 = pr.left - sr.left, y2 = pr.top - sr.top + pr.height/2;
+      if (x2 <= x1) return; // защита от вырожденных
+      const mx = (x1 + x2) / 2;
+      paths += '<path d="M'+x1.toFixed(1)+','+y1.toFixed(1)+' C'+mx.toFixed(1)+','+y1.toFixed(1)+' '+mx.toFixed(1)+','+y2.toFixed(1)+' '+(x2-7).toFixed(1)+','+y2.toFixed(1)+'"/>';
+      // стрелка
+      paths += '<path class="arrow" d="M'+(x2-7).toFixed(1)+','+(y2-3.5).toFixed(1)+' L'+x2.toFixed(1)+','+y2.toFixed(1)+' L'+(x2-7).toFixed(1)+','+(y2+3.5).toFixed(1)+' Z" stroke="none"/>';
+    });
+    linksSvg.innerHTML = paths;
+  }
+
+  // ── переключатель ──
+  const sw = document.getElementById('switch'), swVal = document.getElementById('swVal');
+  const counter = document.getElementById('counter');
+  let diff = false;
+  function apply() {
+    stage.classList.toggle('diff', diff);
+    sw.classList.toggle('on', diff);
+    sw.setAttribute('aria-pressed', diff ? 'true' : 'false');
+    swVal.textContent = diff ? 'показаны' : 'скрыты';
+    counter.classList.toggle('show', diff);
+    // пересчёт коннекторов после смены layout (ghost появляются/исчезают)
+    drawLinks();
+    setTimeout(drawLinks, 60);
+  }
+  sw.addEventListener('click', () => { diff = !diff; apply(); });
+
+  // первичный layout — синхронно + страховочный таймер + resize/scroll (GOTCHA a)
+  render();
+  apply();
+  setTimeout(drawLinks, 60);
+  window.addEventListener('resize', drawLinks);
+  gantt.addEventListener('scroll', drawLinks);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+    setTimeout(drawLinks, 60);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 12 · Карта квартала</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+  .top .legend i.ring { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-off-course); }
+  .top button { color: var(--prizma-text-secondary); }
+
+  /* ── main ── */
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 22px 18px; }
+  .head { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 12px; flex: none; }
+  .head h1 { font-size: 17px; font-weight: 800; letter-spacing: -.01em; margin: 0; }
+  .head .hsub { font: 500 11.5px/1.3 var(--mono); color: var(--prizma-text-tertiary); }
+  .head .spacer { flex: 1; }
+  .head .total { display: flex; gap: 18px; }
+  .head .total .tm { text-align: right; }
+  .head .total .tm .tn { font: 700 16px/1 var(--mono); color: var(--prizma-text-primary); }
+  .head .total .tm .tl { font-size: 9.5px; letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 2px; }
+
+  /* matrix */
+  .matrix { flex: 1; min-height: 0; display: grid; gap: 1px;
+    grid-template-columns: 130px repeat(5, 1fr);
+    grid-template-rows: auto repeat(5, 1fr);
+    background: var(--prizma-border); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; }
+
+  .corner { background: var(--prizma-bg); }
+  .colh { background: var(--prizma-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; padding: 9px 6px; position: relative; }
+  .colh .rl { font: 400 16px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .colh.cur .rl { color: var(--prizma-text-primary); }
+  .colh .dd { font: 600 8.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .colh.cur::after { content: "СЕЙЧАС"; position: absolute; bottom: 4px; font: 700 7.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); }
+
+  .rowh { background: var(--prizma-bg); display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 8px 12px; }
+  .rowh b { font-size: 12px; font-weight: 600; }
+  .rowh .rc { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { background: var(--prizma-bg); position: relative; padding: 9px 10px; cursor: pointer; transition: background .15s; display: flex; flex-direction: column; }
+  .cell.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2.2%, transparent); }
+  .cell.cur { background: color-mix(in srgb, var(--prizma-information) 4%, transparent); }
+  .cell:hover { background: color-mix(in srgb, var(--prizma-text-primary) 6%, transparent); }
+  .cell.peek { box-shadow: inset 0 0 0 2px var(--prizma-information); z-index: 3; }
+  .cell.dim { opacity: .28; }
+  .cell.empty-cell { cursor: default; }
+  .cell.empty-cell:hover { background: var(--prizma-bg); }
+
+  .cell .cn { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-bottom: 7px; flex: none; }
+  .cell.cur .cn { color: var(--prizma-information); }
+  .dots { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; position: relative; }
+  /* состояния — семантические токены: done=по курсу (приглушённо), progress=инфо, planned=нейтраль */
+  .dot.done { background: var(--prizma-on-course); opacity: .5; }
+  .dot.progress { background: var(--prizma-information); }
+  .dot.planned { background: var(--prizma-text-tertiary); opacity: .55; }
+  .dot.unplanned { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-drift); }
+  /* рисковый эпик — точки в кольце off-course */
+  .dot.risk { box-shadow: 0 0 0 2px var(--prizma-off-course); }
+  .dot.risk.unplanned { box-shadow: 0 0 0 2px var(--prizma-off-course), inset 0 0 0 1.5px var(--prizma-drift); }
+  .cell .cempty { font-size: 10px; color: var(--prizma-text-tertiary); opacity: .4; }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: 9000; pointer-events: none; opacity: 0; transform: translateY(4px);
+    transition: opacity .12s, transform .12s; min-width: 190px; max-width: 250px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md);
+    box-shadow: 0 10px 36px rgba(0,0,0,.5); padding: 11px 13px; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .th { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  .tip .th .tt { font-size: 12.5px; font-weight: 700; }
+  .tip .th .tr { font: 400 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .tip .tcount { font: 700 11px/1 var(--mono); color: var(--prizma-text-primary); margin-bottom: 9px; }
+  .tip .tbreak { display: flex; flex-direction: column; gap: 5px; }
+  .tip .tb { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--prizma-text-secondary); }
+  .tip .tb .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .tip .tb .tn { margin-left: auto; font: 600 10.5px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .trisk { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--prizma-border); font: 600 10px/1.4 var(--font); color: var(--prizma-off-course); display: flex; align-items: center; gap: 6px; }
+  .tip .trisk svg { width: 12px; height: 12px; flex: none; }
+
+  /* peek strip */
+  .peekbar { flex: none; margin-top: 12px; min-height: 52px; display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: var(--prizma-bg-elevated); }
+  .peekbar.idle { color: var(--prizma-text-tertiary); font-size: 12px; font-style: italic; justify-content: center; }
+  .peekbar .pk-cell { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); flex: none; display: flex; flex-direction: column; gap: 4px; }
+  .peekbar .pk-cell .pkc { font: 600 9px/1 var(--mono); }
+  .peekbar .pk-epics { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+  .pk-ep { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px 4px 10px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); font-size: 11.5px; position: relative; }
+  .pk-ep .pn { width: 14px; display: inline-flex; gap: 2px; }
+  .pk-ep .pdot { width: 6px; height: 6px; border-radius: 50%; }
+  .pk-ep .rdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .peekbar .pk-x { flex: none; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Карта квартала</span>
+    <span class="pz-eyebrow">Редизайн 12 · contact-sheet</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i class="done"></i>готово</span>
+      <span><i style="background:var(--prizma-information)"></i>в работе</span>
+      <span><i class="planned"></i>план</span>
+      <span><i class="ring"></i>в риске</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <main>
+    <div class="head">
+      <div>
+        <h1>Весь квартал с высоты</h1>
+        <div class="hsub">каждая точка — одна работа · команды × релизы · 23 мая</div>
+      </div>
+      <span class="spacer"></span>
+      <div class="total">
+        <div class="tm"><div class="tn pz-mono" id="t-total">—</div><div class="tl">работ всего</div></div>
+        <div class="tm"><div class="tn pz-mono" id="t-prog">—</div><div class="tl">в работе</div></div>
+        <div class="tm"><div class="tn pz-mono" id="t-risk">—</div><div class="tl">в риске</div></div>
+      </div>
+    </div>
+    <div class="matrix" id="matrix"></div>
+    <div class="peekbar idle" id="peek">Наведите на ячейку для разбивки · кликните, чтобы закрепить эпики</div>
+  </main>
+
+  <div class="tip" id="tip" aria-hidden="true"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases, teams = D.teams;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const STATE_LABEL = { done: 'готово', progress: 'в работе', planned: 'план', unplanned: 'вне плана' };
+  const STATE_SW = { done: 'var(--prizma-on-course)', progress: 'var(--prizma-information)', planned: 'var(--prizma-text-tertiary)', unplanned: 'var(--prizma-drift)' };
+  const relShort = k => { const c = cols.find(c => c.key === k); return c ? c.short : k; };
+
+  const matrix = document.getElementById('matrix');
+  const tip = document.getElementById('tip');
+  const peek = document.getElementById('peek');
+
+  // собрать pills по (team, col) с привязкой к эпику и риску
+  function cellData(team, col) {
+    const list = [];
+    H.teamEpics(team).forEach(e => {
+      H.pillsOf(e, col).forEach(p => list.push({ p, e }));
+    });
+    return list;
+  }
+
+  // агрегаты
+  let totAll = 0, totProg = 0, totRisk = 0;
+  D.epics.forEach(e => e.pills.forEach(p => {
+    totAll++;
+    if (p.state === 'progress') totProg++;
+    if (e.risk === 'off-course' || e.risk === 'drift') totRisk++;
+  }));
+  document.getElementById('t-total').textContent = totAll;
+  document.getElementById('t-prog').textContent = totProg;
+  document.getElementById('t-risk').textContent = totRisk;
+
+  function build() {
+    let html = '<div class="corner"></div>';
+    cols.forEach(c => {
+      const dd = c.dated ? new Date(c.start).toLocaleDateString('ru', {day:'2-digit',month:'short'}) : 'без даты';
+      html += '<div class="colh' + (c.current ? ' cur' : '') + '"><span class="rl">' + esc(c.short) + '</span><span class="dd">' + esc(dd) + '</span></div>';
+    });
+    teams.forEach(team => {
+      const cnt = H.teamEpics(team).reduce((n, e) => n + e.pills.length, 0);
+      html += '<div class="rowh"><b>' + esc(team) + '</b><span class="rc">' + H.teamEpics(team).length + ' эпик · ' + cnt + '</span></div>';
+      cols.forEach(c => {
+        const bz = c.key === 'backlog' || c.key === 'overtime';
+        const data = cellData(team, c.key);
+        const n = data.length;
+        const dots = data.map(({ p, e }) => {
+          const risky = e.risk === 'off-course' ? ' risk' : '';
+          return '<span class="dot ' + p.state + risky + '"></span>';
+        }).join('');
+        const body = n ? '<span class="cn">' + n + '</span><div class="dots">' + dots + '</div>'
+                       : '<span class="cempty">—</span>';
+        html += '<div class="cell' + (bz ? ' bz' : '') + (c.current ? ' cur' : '') + (n ? '' : ' empty-cell') + '" data-team="' + esc(team) + '" data-col="' + c.key + '">' + body + '</div>';
+      });
+    });
+    matrix.innerHTML = html;
+    wire();
+  }
+
+  function tipHtml(team, col) {
+    const data = cellData(team, col);
+    const cnt = {};
+    let risky = 0;
+    data.forEach(({ p, e }) => { cnt[p.state] = (cnt[p.state] || 0) + 1; if (e.risk === 'off-course') risky++; });
+    const breaks = ['done', 'progress', 'planned', 'unplanned'].filter(s => cnt[s]).map(s =>
+      '<div class="tb"><span class="swatch" style="background:' + STATE_SW[s] + (s === 'unplanned' ? ';box-shadow:inset 0 0 0 1.5px var(--prizma-drift);background:transparent' : '') + (s==='done'?';opacity:.5':'') + (s==='planned'?';opacity:.55':'') + '"></span>' + STATE_LABEL[s] + '<span class="tn">' + cnt[s] + '</span></div>'
+    ).join('');
+    const riskNote = risky ? '<div class="trisk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>' + risky + ' в рисковых эпиках</div>' : '';
+    return '<div class="th"><span class="tt">' + esc(team) + '</span><span class="tr">' + esc(relShort(col)) + '</span></div>' +
+      '<div class="tcount">' + data.length + ' работ</div>' +
+      (breaks ? '<div class="tbreak">' + breaks + '</div>' : '') + riskNote;
+  }
+
+  function showTip(cell, ev) {
+    tip.innerHTML = tipHtml(cell.dataset.team, cell.dataset.col);
+    tip.classList.add('show');
+    moveTip(ev);
+  }
+  function moveTip(ev) {
+    const pad = 14, tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    if (x + tw > window.innerWidth - 8) x = ev.clientX - tw - pad;
+    if (y + th > window.innerHeight - 8) y = ev.clientY - th - pad;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+  function hideTip() { tip.classList.remove('show'); }
+
+  let peeked = null; // {team,col}
+  function applyPeek() {
+    matrix.querySelectorAll('.cell').forEach(c => {
+      c.classList.remove('peek', 'dim');
+      if (!peeked) return;
+      if (c.dataset.team === peeked.team && c.dataset.col === peeked.col) c.classList.add('peek');
+      else c.classList.add('dim');
+    });
+  }
+
+  function renderPeek() {
+    if (!peeked) {
+      peek.className = 'peekbar idle';
+      peek.textContent = 'Наведите на ячейку для разбивки · кликните, чтобы закрепить эпики';
+      return;
+    }
+    const { team, col } = peeked;
+    const eps = H.teamEpics(team).filter(e => H.pillsOf(e, col).length);
+    peek.className = 'peekbar';
+    let h = '<div class="pk-cell">' + esc(team) + '<span class="pkc">' + esc(relShort(col)) + '</span></div><div class="pk-epics">';
+    if (!eps.length) h += '<span class="cempty" style="font-size:12px;color:var(--prizma-text-tertiary)">нет работ в этой ячейке</span>';
+    eps.forEach(e => {
+      const ps = H.pillsOf(e, col);
+      const dots = ps.map(p => '<span class="pdot" style="background:' + STATE_SW[p.state] + (p.state==='unplanned'?';box-shadow:inset 0 0 0 1.5px var(--prizma-drift);background:transparent':'') + (p.state==='done'?';opacity:.5':'') + (p.state==='planned'?';opacity:.55':'') + '"></span>').join('');
+      const rd = e.risk ? '<span class="rdot" style="background:var(--prizma-' + e.risk + ')"></span>' : '';
+      h += '<span class="pk-ep" title="' + esc(e.epic) + ' · ' + ps.map(p=>p.wt).join(', ') + '"><span class="pn">' + dots + '</span>' + esc(e.epic) + rd + '</span>';
+    });
+    h += '</div><button class="pz-btn pz-btn-icon pk-x" id="pk-close" aria-label="Сбросить"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
+    peek.innerHTML = h;
+    const cl = document.getElementById('pk-close');
+    if (cl) cl.addEventListener('click', () => { peeked = null; applyPeek(); renderPeek(); });
+  }
+
+  function wire() {
+    matrix.querySelectorAll('.cell').forEach(cell => {
+      if (cell.classList.contains('empty-cell')) {
+        cell.addEventListener('click', () => { peeked = null; applyPeek(); renderPeek(); });
+        return;
+      }
+      cell.addEventListener('mouseenter', ev => showTip(cell, ev));
+      cell.addEventListener('mousemove', moveTip);
+      cell.addEventListener('mouseleave', hideTip);
+      cell.addEventListener('click', () => {
+        const same = peeked && peeked.team === cell.dataset.team && peeked.col === cell.dataset.col;
+        peeked = same ? null : { team: cell.dataset.team, col: cell.dataset.col };
+        applyPeek(); renderPeek();
+      });
+    });
+  }
+
+  // build синхронно + страховка к отложенному layout (флекс-высоты)
+  build();
+  setTimeout(build, 60);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

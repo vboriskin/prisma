@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 20 · Режим отчёта</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar (slim) ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+
+  /* ── report canvas ── */
+  .canvas { flex: 1; overflow-y: auto; min-height: 0; padding: 40px 24px 64px; }
+  .page { max-width: 880px; margin: 0 auto; }
+
+  /* report title block */
+  .rt { border-bottom: 1px solid var(--prizma-border-strong); padding-bottom: 22px; margin-bottom: 28px; }
+  .rt .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .rt h1 { font-size: 27px; font-weight: 800; letter-spacing: -.02em; margin: 8px 0 0; }
+  .rt .meta { margin-top: 9px; font: 500 12.5px/1 var(--mono); color: var(--prizma-text-secondary); display: flex; gap: 12px; align-items: center; }
+  .rt .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--prizma-text-tertiary); }
+
+  /* KPI strip */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--prizma-border); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 36px; }
+  .kpi { background: var(--prizma-bg); padding: 18px 18px 16px; }
+  .kpi .k-lbl { font: 700 9.5px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .kpi .k-val { margin-top: 9px; font: 800 26px/1 var(--mono); font-feature-settings: "tnum" 1; letter-spacing: -.01em; }
+  .kpi .k-val small { font-size: 14px; font-weight: 700; color: var(--prizma-text-tertiary); margin-left: 2px; }
+  .kpi .k-sub { margin-top: 5px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .kpi.risk .k-val { color: var(--prizma-off-course); }
+  .kpi.prog .k-val { color: var(--prizma-information); }
+
+  /* section */
+  .sec { margin-bottom: 38px; }
+  .sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+  .sec-h h2 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .sec-h .note { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* milestones timeline */
+  .tl { position: relative; padding: 26px 6px 30px; }
+  .tl .axis { position: absolute; left: 6px; right: 6px; top: 50%; height: 1px; background: var(--prizma-border-strong); }
+  .tl .now { position: absolute; top: 12px; bottom: 12px; width: 0; border-left: 2px solid var(--prizma-information); }
+  .tl .now .cap { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font: 700 8.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); white-space: nowrap; }
+  .tl .ms { position: absolute; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; }
+  .tl .ms .dot { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--prizma-text-secondary); background: var(--prizma-bg); z-index: 2; }
+  .tl .ms.past .dot { border-color: var(--prizma-text-tertiary); background: var(--prizma-text-tertiary); opacity: .6; }
+  .tl .ms.soon .dot { border-color: var(--prizma-information); background: var(--prizma-information); }
+  .tl .ms .lb { position: absolute; bottom: 16px; font: 600 10px/1.3 var(--font); color: var(--prizma-text-secondary); white-space: nowrap; text-align: center; }
+  .tl .ms .dd { position: absolute; top: 16px; font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .tl .ms:nth-child(even) .lb { bottom: auto; top: 16px; }
+  .tl .ms:nth-child(even) .dd { top: auto; bottom: 16px; }
+
+  /* top risks list */
+  .risks { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; }
+  .risk-row { position: relative; display: flex; align-items: center; gap: 13px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--prizma-border); }
+  .risk-row:last-child { border-bottom: 0; }
+  .risk-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-drift); }
+  .risk-row.off::before { background: var(--prizma-off-course); }
+  .risk-row .rdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--prizma-drift); }
+  .risk-row.off .rdot { background: var(--prizma-off-course); }
+  .risk-row .rmain { flex: 1; min-width: 0; }
+  .risk-row .rnm { font-size: 13px; font-weight: 600; }
+  .risk-row .rst { font-size: 11px; color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .risk-row .rteam { font: 600 10px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .risk-row .rmoves { font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; text-align: right; }
+  .risk-row .rmoves small { display: block; font-size: 8.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-top: 3px; }
+
+  /* team capacity */
+  .cap { display: flex; flex-direction: column; gap: 11px; }
+  .cap-row { display: grid; grid-template-columns: 130px 1fr 56px; align-items: center; gap: 14px; }
+  .cap-row .tn { font-size: 12.5px; font-weight: 600; }
+  .cap-row .track { height: 8px; border-radius: 4px; background: var(--prizma-bg-tertiary); overflow: hidden; display: flex; }
+  .cap-row .track i { height: 100%; }
+  .cap-row .track i.b120 { background: var(--prizma-text-tertiary); opacity: .55; }
+  .cap-row .track i.b121 { background: var(--prizma-information); }
+  .cap-row .track i.b122 { background: var(--prizma-text-secondary); }
+  .cap-row .track i.bbo { background: var(--prizma-border-strong); }
+  .cap-row .cv { font: 700 12px/1 var(--mono); color: var(--prizma-text-secondary); text-align: right; }
+  .cap-legend { display: flex; gap: 16px; margin-top: 14px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .cap-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+
+  /* moved summary */
+  .moved { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .moved-row { position: relative; display: flex; align-items: center; gap: 11px; padding: 11px 14px 11px 15px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); }
+  .moved-row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-insight); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .moved-row .mn { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; }
+  .moved-row .mt { font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; }
+  .moved-row .mc { font: 800 17px/1 var(--mono); color: var(--prizma-text-secondary); flex: none; }
+  .moved-row .mc small { font-size: 9px; font-weight: 600; color: var(--prizma-text-tertiary); margin-left: 2px; }
+
+  .rfoot { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--prizma-border); font-size: 10.5px; color: var(--prizma-text-tertiary); display: flex; gap: 8px; align-items: center; }
+
+  @media print {
+    .top { display: none; }
+    .canvas { overflow: visible; height: auto; padding: 0; }
+    body { height: auto; overflow: visible; }
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Режим отчёта</span>
+    <span class="pz-eyebrow">Редизайн 20 · report</span>
+    <span class="spacer"></span>
+    <button class="pz-btn" id="print" title="Печать / PDF"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6M6 18H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-1M6 14h12v7H6z"/></svg>Печать</button>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="canvas">
+    <div class="page">
+      <div class="rt">
+        <div class="pz-eyebrow">Призма · квартальный статус</div>
+        <h1 id="rt-title">Квартал Q2 · статус на 23 мая</h1>
+        <div class="meta" id="rt-meta"></div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <section class="sec">
+        <div class="sec-h"><h2>Вехи</h2><span class="note">ключевые точки квартала</span></div>
+        <div class="tl" id="tl"><div class="axis"></div><div class="now" id="now"><span class="cap">СЕГОДНЯ</span></div></div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>Топ-рисков</h2><span class="note" id="risk-note"></span></div>
+        <div class="risks" id="risks"></div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>Загрузка команд</h2><span class="note">пилюль-работ по релизам</span></div>
+        <div class="cap" id="cap"></div>
+        <div class="cap-legend">
+          <span><i style="background:var(--prizma-text-tertiary);opacity:.55"></i>1.20</span>
+          <span><i style="background:var(--prizma-information)"></i>1.21</span>
+          <span><i style="background:var(--prizma-text-secondary)"></i>1.22</span>
+          <span><i style="background:var(--prizma-border-strong)"></i>бэклог / овертайм</span>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sec-h"><h2>Что переехало за квартал</h2><span class="note" id="moved-note"></span></div>
+        <div class="moved" id="moved"></div>
+      </section>
+
+      <div class="rfoot">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 19h16L12 2z"/></svg>
+        <span id="rfoot-txt"></span>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const now = new Date(D.today);
+  const curRel = cols.find(c => c.current);
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // ── meta ──
+  document.getElementById('rt-meta').innerHTML =
+    '<span>окно ' + esc(curRel.short) + '</span><span class="dot"></span>' +
+    '<span>' + D.teams.length + ' команд</span><span class="dot"></span>' +
+    '<span>' + D.epics.length + ' эпиков</span><span class="dot"></span><span>только чтение</span>';
+
+  // ── KPI strip ──
+  const totEpics = D.epics.length;
+  const inProgress = D.epics.filter(e => e.pills.some(p => p.state === 'progress')).length;
+  const allPills = D.epics.reduce((n, e) => n + e.pills.length, 0);
+  const donePills = D.epics.reduce((n, e) => n + e.pills.filter(p => p.state === 'done').length, 0);
+  const donePct = Math.round(donePills / allPills * 100);
+  const atRisk = D.epics.filter(e => e.risk).length;
+  const totEst = D.epics.reduce((n, e) => n + D.helpers.effortOf(e), 0);
+
+  const KPIS = [
+    { lbl: 'Эпиков', val: totEpics, sub: D.teams.length + ' команд' },
+    { lbl: 'В работе', val: inProgress, sub: 'активные эпики', cls: 'prog' },
+    { lbl: 'Готово', val: donePct, unit: '%', sub: donePills + ' из ' + allPills + ' работ' },
+    { lbl: 'Под риском', val: atRisk, sub: 'дрейф + срыв', cls: 'risk' },
+    { lbl: 'Ёмкость', val: totEst, unit: 'дн', sub: 'оценка квартала' },
+  ];
+  document.getElementById('kpis').innerHTML = KPIS.map(k =>
+    '<div class="kpi ' + (k.cls || '') + '"><div class="k-lbl">' + esc(k.lbl) + '</div>' +
+    '<div class="k-val">' + k.val + (k.unit ? '<small>' + k.unit + '</small>' : '') + '</div>' +
+    '<div class="k-sub">' + esc(k.sub) + '</div></div>').join('');
+
+  // ── milestones timeline ──
+  function renderTimeline() {
+    const tl = document.getElementById('tl');
+    tl.querySelectorAll('.ms').forEach(n => n.remove());
+    const lo = new Date(cols.find(c => c.key === 'r120').start).getTime();
+    const hi = new Date(cols.find(c => c.key === 'r122').end).getTime();
+    const span = hi - lo || 1;
+    const pos = t => Math.max(3, Math.min(97, ((t - lo) / span) * 100));
+    document.getElementById('now').style.left = pos(now.getTime()).toFixed(2) + '%';
+    D.milestones.forEach(m => {
+      const t = new Date(m.date).getTime();
+      const cls = t < now.getTime() ? 'past' : (Math.abs(t - now.getTime()) <= 9 * 864e5 ? 'soon' : '');
+      const dd = new Date(m.date).toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+      const el = document.createElement('div');
+      el.className = 'ms ' + cls;
+      el.style.left = pos(t).toFixed(2) + '%';
+      el.innerHTML = '<span class="lb">' + esc(m.label) + '</span><span class="dot"></span><span class="dd">' + dd + '</span>';
+      tl.appendChild(el);
+    });
+  }
+  renderTimeline();
+  setTimeout(renderTimeline, 60);
+  window.addEventListener('resize', renderTimeline);
+
+  // ── top risks (off-course + drift) ──
+  const risky = D.epics.filter(e => e.risk)
+    .sort((a, b) => {
+      const r = (b.risk === 'off-course' ? 1 : 0) - (a.risk === 'off-course' ? 1 : 0);
+      return r !== 0 ? r : (b.moves || 0) - (a.moves || 0);
+    });
+  const byId = id => D.epics.find(e => e.id === id);
+  document.getElementById('risk-note').textContent = risky.length + ' ' + plural(risky.length, 'эпик', 'эпика', 'эпиков') + ' требуют внимания';
+  document.getElementById('risks').innerHTML = risky.map(e => {
+    const off = e.risk === 'off-course';
+    const deps = (e.deps || []).map(byId).filter(Boolean).filter(d => D.helpers.doneRatio(d) < 1);
+    const ratio = Math.round(D.helpers.doneRatio(e) * 100);
+    const status = (off ? 'Срыв сроков' : 'Дрейф') + ' · ' + e.moves + ' ' + plural(e.moves, 'перенос', 'переноса', 'переносов') +
+      (deps.length ? ' · ждёт «' + deps[0].epic + '»' : '') + ' · готовность ' + ratio + '%';
+    return '<div class="risk-row ' + (off ? 'off' : '') + '">' +
+      '<span class="rdot"></span>' +
+      '<div class="rmain"><div class="rnm">' + esc(e.epic) + ' <span class="rteam">· ' + esc(e.team) + '</span></div>' +
+      '<div class="rst">' + esc(status) + '</div></div>' +
+      '<div class="rmoves">' + e.moves + '<small>переносов</small></div>' +
+      '</div>';
+  }).join('');
+
+  // ── team capacity (load per release) ──
+  const relKeys = ['r120', 'r121', 'r122'];
+  let capMax = 1;
+  const capData = D.teams.map(team => {
+    const r120 = D.helpers.loadByTeamRelease(team, 'r120');
+    const r121 = D.helpers.loadByTeamRelease(team, 'r121');
+    const r122 = D.helpers.loadByTeamRelease(team, 'r122');
+    const bo = D.helpers.loadByTeamRelease(team, 'backlog') + D.helpers.loadByTeamRelease(team, 'overtime');
+    const tot = r120 + r121 + r122 + bo;
+    if (tot > capMax) capMax = tot;
+    return { team, r120, r121, r122, bo, tot };
+  });
+  document.getElementById('cap').innerHTML = capData.map(c => {
+    const seg = (v, cls) => v ? '<i class="' + cls + '" style="width:' + (v / capMax * 100).toFixed(1) + '%" title="' + v + '"></i>' : '';
+    return '<div class="cap-row"><span class="tn">' + esc(c.team) + '</span>' +
+      '<span class="track">' + seg(c.r120, 'b120') + seg(c.r121, 'b121') + seg(c.r122, 'b122') + seg(c.bo, 'bbo') + '</span>' +
+      '<span class="cv">' + c.tot + ' раб</span></div>';
+  }).join('');
+
+  // ── moved summary (moves>0) ──
+  const moved = D.epics.filter(e => (e.moves || 0) > 0).sort((a, b) => b.moves - a.moves);
+  const totMoves = moved.reduce((n, e) => n + e.moves, 0);
+  document.getElementById('moved-note').textContent = totMoves + ' ' + plural(totMoves, 'перенос', 'переноса', 'переносов') + ' в ' + moved.length + ' ' + plural(moved.length, 'эпике', 'эпиках', 'эпиках');
+  document.getElementById('moved').innerHTML = moved.map(e =>
+    '<div class="moved-row"><div class="mn">' + esc(e.epic) + '<div class="mt">' + esc(e.team) + '</div></div>' +
+    '<div class="mc">' + e.moves + '<small>×</small></div></div>').join('');
+
+  // ── footer ──
+  document.getElementById('rfoot-txt').textContent =
+    'Призма · сгенерировано ' + now.toLocaleDateString('ru', { day: '2-digit', month: 'long', year: 'numeric' }) +
+    ' · данные демонстрационные · режим только для чтения';
+
+  // ── interactivity: print + theme only ──
+  document.getElementById('print').addEventListener('click', () => window.print());
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    setTimeout(renderTimeline, 30);
+  });
+})();
+</script>
+</body>
+</html>

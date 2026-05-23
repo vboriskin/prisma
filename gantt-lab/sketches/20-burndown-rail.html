@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 20 · Burndown в шапке колодца</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+  .bar { display: flex; align-items: center; gap: 16px; margin: 16px 0 18px; flex-wrap: wrap; }
+  .legend { display: flex; align-items: center; gap: 16px; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .legend .it { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { width: 22px; height: 10px; overflow: visible; }
+
+  /* ── гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 240px repeat(5, 1fr); min-width: 980px; }
+
+  /* шапка-колодец с burndown-rail */
+  .ghead { border-right: 1px solid var(--prizma-border); border-bottom: 1px solid var(--prizma-border-strong);
+    padding: 0; position: relative; min-height: 116px; display: flex; flex-direction: column; }
+  .ghead:last-child { border-right: 0; }
+  .ghead.corner { padding: 14px 16px; display: flex; align-items: flex-end; }
+  .ghead.corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  .rail-top { padding: 11px 14px 8px; display: flex; align-items: baseline; gap: 8px; }
+  .rail-top .rel { font: 300 20px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .rail-top .rel.cur { color: var(--prizma-text-primary); }
+  .rail-top .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); }
+  .rail-top .spacer { flex: 1; }
+  /* статус-пилюля темпа */
+  .pace { font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; padding: 3px 6px; border-radius: 3px; white-space: nowrap; }
+  .pace.ahead { color: var(--prizma-on-course); background: var(--prizma-on-course-bg); }
+  .pace.behind { color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+  .pace.none { color: var(--prizma-text-tertiary); }
+
+  .spark { padding: 2px 12px 4px; flex: 1; display: flex; align-items: flex-end; }
+  .spark svg { width: 100%; height: 46px; display: block; overflow: visible; }
+  .rail-foot { padding: 4px 14px 11px; }
+  .rail-foot .meta { font: 600 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .rail-foot .meta b { color: var(--prizma-text-secondary); font-weight: 700; }
+  .ghead .nodata { padding: 0 14px 12px; font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  /* тонкий нижний бордюр-семафор внутри rail */
+  .ghead .bottombar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
+  .ghead.tint-ok .bottombar { background: var(--prizma-on-course); }
+  .ghead.tint-behind .bottombar { background: var(--prizma-drift); }
+  /* лёгкий смысловой тон фона rail (semantic — статус темпа, не «релиз-цвет») */
+  .ghead.tint-ok { background: var(--prizma-on-course-bg); }
+  .ghead.tint-behind { background: var(--prizma-drift-bg); }
+  .ghead.today { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+
+  /* ── нейтральная сетка-тело ── */
+  .team { grid-column: 1 / -1; position: sticky; left: 0; padding: 8px 16px 6px; font: 700 10px/1 var(--font);
+    letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .lbl { background: var(--prizma-bg-elevated); padding: 9px 14px; border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); }
+  .lbl .nm { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .lbl .nm .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .lbl .est { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 4px; }
+  .c { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px 10px;
+    display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; min-height: 42px; }
+  .c:last-child { border-right: 0; }
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pill[data-done] { opacity: .66; }
+  .pill[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .dot6 { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+
+  .note { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 700px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 20 · Прогресс</div>
+      <h1>Burndown в шапке колодца</h1>
+      <p>Каждый датированный релиз в шапке несёт мини-burndown: пунктир — идеальное сгорание (всего работ → 0 по дням окна), ступенька — фактическое из доли выполненного. Полоса rail зеленеет, если на сегодня факт не отстаёт от идеала, и янтареет при отставании. Честный семафор, не парадный.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <span class="legend">
+      <span class="it"><svg viewBox="0 0 22 10"><line x1="0" y1="8" x2="22" y2="2" stroke="var(--prizma-text-tertiary)" stroke-width="1.4" stroke-dasharray="3 2"/></svg>идеал</span>
+      <span class="it"><svg viewBox="0 0 22 10"><path d="M0 2 H11 V6 H22" fill="none" stroke="var(--prizma-text-primary)" stroke-width="1.6"/></svg>факт</span>
+      <span class="it"><i style="display:inline-block;width:10px;height:0;border-top:1px dashed var(--prizma-information)"></i>сегодня</span>
+      <span class="it"><i style="display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--prizma-on-course)"></i>в темпе</span>
+      <span class="it"><i style="display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--prizma-drift)"></i>отстаём</span>
+    </span>
+  </div>
+
+  <div class="gantt"><div class="grid" id="grid"></div></div>
+
+  <p class="note">Окно релиза измеряется в днях: <code>(end − start)/сутки + 1</code> (даты — объекты <code>Date</code>, не сырые мс). Идеал — линейное сгорание от суммы работ к нулю; факт синтезируется из <code>helpers.doneRatio</code> эпиков окна и ступенчато спускается к точке «сегодня».</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const grid = document.getElementById('grid');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  const DAY = 86400000;
+  const today = new Date(D.today + 'T00:00:00');
+
+  // дни между датами включительно — через Date-объекты, без сырой арифметики мс в new Date()
+  function dayDiff(a, b) {
+    const ms = new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00');
+    return Math.round(ms / DAY);
+  }
+
+  // какие работы «принадлежат» окну релиза + сколько из них done
+  function workOf(colKey) {
+    let total = 0, done = 0;
+    D.epics.forEach(e => {
+      e.pills.forEach(p => { if (p.col === colKey) { total++; if (p.state === 'done') done++; } });
+    });
+    return { total, done };
+  }
+
+  /* ── строим burndown для датированного релиза ── */
+  function burndown(col) {
+    const windowDays = dayDiff(col.start, col.end) + 1; // включительно
+    const { total, done } = workOf(col.key);
+
+    // позиция «сегодня» в окне (0..windowDays); clamp
+    let elapsed = dayDiff(col.start, D.today); // 0 в день старта
+    elapsed = Math.max(0, Math.min(windowDays - 1, elapsed));
+    const elapsedFrac = (windowDays - 1) > 0 ? elapsed / (windowDays - 1) : 0;
+
+    // ИДЕАЛ: линейно total→0 по дням окна. На сегодня остаток:
+    const idealRemainAtToday = total * (1 - elapsedFrac);
+
+    // ФАКТ: доля выполненного по эпикам окна → остаток. Синтез ступеньками
+    // (work done растёт по дискретным done-пилюлям). Используем helpers.doneRatio
+    // как сглаживающий ориентир, но шаги строим по фактическим done в окне.
+    const ratio = total > 0 ? done / total : 0;
+    const actualRemainAtToday = total * (1 - ratio);
+
+    // семафор: факт не выше идеала на сегодня → в темпе
+    const onPace = total === 0 ? null : (actualRemainAtToday <= idealRemainAtToday + 0.001);
+
+    // точки для ступенчатого факта: от старта (total) до сегодня (actualRemain),
+    // ступеньки = по числу done-работ, распределённых до точки «сегодня».
+    const steps = [];
+    steps.push({ d: 0, r: total });
+    if (done > 0 && elapsed > 0) {
+      for (let i = 1; i <= done; i++) {
+        const dpos = elapsed * (i / done); // равномерно до сегодня
+        steps.push({ d: dpos, r: total - i });
+      }
+    }
+    steps.push({ d: elapsed, r: total - done });
+
+    return { windowDays, total, done, elapsed, elapsedFrac, idealRemainAtToday, actualRemainAtToday, onPace, steps };
+  }
+
+  // SVG-спарклайн в координатах viewBox 100×40 (padding учтён в линиях)
+  function sparkSVG(bd) {
+    const W = 100, H = 40, padT = 3, padB = 4;
+    const maxR = Math.max(bd.total, 1);
+    const x = d => (bd.windowDays - 1) > 0 ? (d / (bd.windowDays - 1)) * W : 0;
+    const y = r => padT + (1 - r / maxR) * (H - padT - padB);
+    // идеал: (0,total)→(windowDays-1, 0)
+    const ideal = 'M0 ' + y(maxR).toFixed(1) + ' L' + W + ' ' + y(0).toFixed(1);
+    // факт: ступенчатая ломаная по steps (H/V сегменты)
+    let act = '';
+    bd.steps.forEach((s, i) => {
+      const px = x(s.d).toFixed(1), py = y(s.r).toFixed(1);
+      if (i === 0) { act = 'M' + px + ' ' + py; }
+      else {
+        const prev = bd.steps[i-1];
+        act += ' H' + px + ' V' + py; // горизонталь до новой даты, затем спуск
+      }
+    });
+    const actCol = bd.onPace ? 'var(--prizma-on-course)' : 'var(--prizma-drift)';
+    const todayX = x(bd.elapsed).toFixed(1);
+    const lastR = bd.steps[bd.steps.length-1].r;
+    const dotY = y(lastR).toFixed(1);
+    return ''
+      + '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'
+      // базовая линия 0
+      + '<line x1="0" y1="'+y(0).toFixed(1)+'" x2="'+W+'" y2="'+y(0).toFixed(1)+'" stroke="var(--prizma-border)" stroke-width="0.6" vector-effect="non-scaling-stroke"/>'
+      // вертикаль «сегодня»
+      + '<line x1="'+todayX+'" y1="0" x2="'+todayX+'" y2="'+H+'" stroke="var(--prizma-information)" stroke-width="0.8" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>'
+      // идеал (пунктир)
+      + '<path d="'+ideal+'" fill="none" stroke="var(--prizma-text-tertiary)" stroke-width="1.1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>'
+      // факт (ступеньки)
+      + '<path d="'+act+'" fill="none" stroke="'+actCol+'" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+      // точка текущего остатка
+      + '<circle cx="'+todayX+'" cy="'+dotY+'" r="2.1" fill="'+actCol+'"/>'
+      + '</svg>';
+  }
+
+  function render() {
+    let html = '';
+    // угол
+    html += '<div class="ghead corner"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    // шапки-колодцы с burndown
+    cols.forEach(c => {
+      let cls = 'ghead';
+      if (c.current) cls += ' today';
+      if (!c.dated) {
+        html += '<div class="'+cls+'"><div class="rail-top"><span class="rel">'+c.short+'</span></div><div class="nodata">без дат — без burndown</div><div class="bottombar"></div></div>';
+        return;
+      }
+      const bd = burndown(c);
+      if (bd.onPace === true) cls += ' tint-ok';
+      else if (bd.onPace === false) cls += ' tint-behind';
+      const paceTxt = bd.onPace === null ? '—' : (bd.onPace ? 'в темпе' : 'отстаём');
+      const paceCls = bd.onPace === null ? 'none' : (bd.onPace ? 'ahead' : 'behind');
+      html += '<div class="'+cls+'">'
+        + '<div class="rail-top"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')
+        + '<span class="spacer"></span><span class="pace '+paceCls+'">'+paceTxt+'</span></div>'
+        + '<div class="spark">'+sparkSVG(bd)+'</div>'
+        + '<div class="rail-foot"><span class="meta">сделано <b>'+(bd.elapsed+1)+'</b> / всего <b>'+bd.windowDays+'</b> дн · '+bd.done+'/'+bd.total+' работ</span></div>'
+        + '<div class="bottombar"></div>'
+        + '</div>';
+    });
+    // тело — нейтральная сетка
+    D.teams.forEach(team => {
+      html += '<div class="team">'+esc(team)+'</div>';
+      D.epics.filter(e=>e.team===team).forEach(e => {
+        const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-'+(e.risk==='off-course'?'off-course':'drift')+')"></span>' : '<span class="risk" style="background:var(--prizma-text-tertiary);opacity:.4"></span>';
+        const est = Object.values(e.est||{}).reduce((a,b)=>a+b,0);
+        html += '<div class="lbl"><span class="nm">'+riskDot+esc(e.epic)+'</span><span class="est">'+est+' дн · '+e.pills.length+' работ</span></div>';
+        cols.forEach(c => {
+          html += '<div class="c">';
+          e.pills.filter(p=>p.col===c.key).forEach(p => {
+            const doneDot = p.state==='done' ? '<span class="dot6" style="background:var(--prizma-on-course)"></span>' : '';
+            html += '<span class="pill" style="--wt:'+wtVar(p.wt)+'"'+(p.state==='done'?' data-done':'')+'>'+doneDot+'<span class="nm">'+p.wt+'</span></span>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  render();
+  // burndown — чистая дата-математика, не зависит от layout; перерисовка по теме не нужна.
+  document.getElementById('tt').addEventListener('click', () => { const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark'); });
+})();
+</script>
+</body>
+</html>

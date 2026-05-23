@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 12 · Peek-превью эпика</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 920px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+
+  .hintbar { display: flex; align-items: center; gap: 8px; margin: 14px 0 18px; font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  kbd { font: 600 11px/1 var(--mono); padding: 3px 7px; border: 1px solid var(--prizma-border-strong); border-bottom-width: 2px; border-radius: var(--r-sm); color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); }
+
+  /* ── список эпиков по командам ── */
+  .list { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .team-h { display: flex; align-items: center; gap: 8px; padding: 9px 16px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .team-h .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .team-h b { font-size: 12.5px; }
+  .team-h .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .epic { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--prizma-border); cursor: default; outline: none; transition: background .12s; }
+  .epic:last-child { border-bottom: 0; }
+  .epic:hover, .epic.peeking { background: var(--prizma-bg-tertiary); }
+  /* риск = 3px stripe-left, semantic */
+  .epic { position: relative; }
+  .epic::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+  .epic[data-risk="drift"]::before { background: var(--prizma-drift); }
+  .epic[data-risk="off-course"]::before { background: var(--prizma-off-course); }
+  .epic .nm { flex: 1; font-size: 13px; font-weight: 600; }
+  .epic .tags { display: flex; align-items: center; gap: 6px; }
+  .epic .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); white-space: nowrap; }
+  .epic .riskchip { font: 700 9px/1 var(--mono); letter-spacing: .3px; padding: 3px 6px; border-radius: var(--r-sm); }
+  .epic .riskchip.drift { color: var(--prizma-drift); border: 1px solid color-mix(in srgb, var(--prizma-drift) 40%, transparent); }
+  .epic .riskchip.off { color: var(--prizma-off-course); border: 1px solid color-mix(in srgb, var(--prizma-off-course) 40%, transparent); }
+  .epic .peekhint { opacity: 0; font: 600 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-information); transition: opacity .12s; }
+  .epic:hover .peekhint, .epic:focus-visible .peekhint { opacity: 1; }
+
+  /* ── Quick-Look карточка ── */
+  .ql { position: fixed; z-index: var(--z-dropdown); width: 320px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg);
+    box-shadow: 0 18px 56px rgba(0,0,0,.55); padding: 0; opacity: 0; transform: scale(.97) translateY(4px);
+    transform-origin: top left; transition: opacity .15s var(--ease-calm), transform .18s var(--ease-spring);
+    pointer-events: none; overflow: hidden; }
+  .ql.show { opacity: 1; transform: scale(1) translateY(0); }
+  .ql .qhead { padding: 14px 15px 11px; border-bottom: 1px solid var(--prizma-border); position: relative; }
+  .ql .qhead::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+  .ql.risk-drift .qhead::before { background: var(--prizma-drift); }
+  .ql.risk-off .qhead::before { background: var(--prizma-off-course); }
+  .ql .qtitle { font-size: 14px; font-weight: 700; line-height: 1.3; margin: 0 0 5px; }
+  .ql .qteam { display: flex; align-items: center; gap: 8px; }
+  .ql .qteam .t { font: 600 11px/1 var(--font); color: var(--prizma-text-secondary); }
+  .ql .qteam .r { font: 700 9px/1 var(--mono); letter-spacing: .3px; }
+  .ql .qteam .r.drift { color: var(--prizma-drift); }
+  .ql .qteam .r.off { color: var(--prizma-off-course); }
+  .ql .qteam .r.ok { color: var(--prizma-on-course); }
+
+  .ql .qbody { padding: 13px 15px 14px; }
+  .ql .label { font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin: 0 0 8px; }
+
+  /* мини-трек релизов */
+  .track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 14px; }
+  .track .col { display: flex; flex-direction: column; gap: 4px; min-height: 30px; }
+  .track .colh { font: 600 8.5px/1 var(--mono); letter-spacing: .2px; color: var(--prizma-text-tertiary); text-align: center; padding-bottom: 2px; }
+  .track .colh.cur { color: var(--prizma-information); }
+  .track .qpill { position: relative; height: 16px; border-radius: 3px; background: var(--prizma-bg-tertiary); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .track .qpill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt, var(--prizma-border-strong)); }
+  .track .qpill span { font: 700 8px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .track .qpill[data-state="done"] { opacity: .55; }
+  .track .qpill[data-state="done"]::before { background: var(--prizma-on-course); }
+  .track .qpill[data-state="progress"]::before { background: var(--prizma-information); }
+  .track .colslot { flex: 1; }
+
+  /* ряд фактов */
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 13px; }
+  .fact .k { font-size: 10px; font-weight: 600; letter-spacing: .3px; color: var(--prizma-text-tertiary); margin-bottom: 3px; }
+  .fact .v { font: 600 14px/1 var(--mono); color: var(--prizma-text-primary); }
+  .fact .v small { font: 500 10px/1 var(--font); color: var(--prizma-text-tertiary); margin-left: 3px; }
+  .fact .v.warn { color: var(--prizma-drift); }
+
+  .who-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .who-chip { display: inline-flex; align-items: center; gap: 5px; font: 500 11px/1 var(--font); color: var(--prizma-text-secondary);
+    padding: 4px 8px 4px 6px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); }
+  .who-chip .av { width: 16px; height: 16px; border-radius: 50%; background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong);
+    display: inline-flex; align-items: center; justify-content: center; font: 700 8px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .who-empty { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+
+  .ql .qfoot { padding: 9px 15px; border-top: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px; }
+  .ql .qfoot .esc { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .ql .qfoot kbd { font-size: 10px; padding: 2px 5px; border-bottom-width: 1px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 12 · Quick-Look</div>
+      <h1>Peek-превью эпика</h1>
+      <p>Не уводя со списка. Наведите на эпик и нажмите пробел — рядом с курсором всплывает карточка-превью: работы по всем релизам, риск, зависимости, трудоёмкость, исполнители. Спокойно, как Quick-Look в macOS. Удержание курсора тоже открывает превью.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="hintbar">
+    <span>Наведите на эпик, затем</span><kbd>Пробел</kbd><span>— или просто задержите курсор. Закрыть —</span><kbd>Esc</kbd><span>/</span><kbd>Пробел</kbd>
+  </div>
+
+  <div class="list" id="list"></div>
+</div>
+
+<div class="ql" id="ql" role="dialog" aria-label="Превью эпика"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const riskLabel = { 'drift':'ДРЕЙФ', 'off-course':'СРЫВ' };
+
+  const list = document.getElementById('list');
+  const ql = document.getElementById('ql');
+
+  // ── рендер списка ──
+  let html = '';
+  D.teams.forEach(team => {
+    const eps = D.helpers.teamEpics(team);
+    const work = eps.reduce((n,e)=>n+e.pills.length,0);
+    html += '<div class="team-h"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="cnt">'+eps.length+' эпик · '+work+' работ</span></div>';
+    eps.forEach(e => {
+      const eff = D.helpers.effortOf(e);
+      const riskCls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : '');
+      html += '<div class="epic" tabindex="0" data-epic="'+e.id+'" data-risk="'+(e.risk||'')+'">' +
+        '<span class="nm">'+esc(e.epic)+'</span>' +
+        '<span class="tags">' +
+          (riskCls ? '<span class="riskchip '+riskCls+'">'+riskLabel[e.risk]+'</span>' : '') +
+          (e.deps.length ? '<span class="meta">'+e.deps.length+' зав.</span>' : '') +
+          '<span class="meta">'+eff+' дн</span>' +
+          '<span class="peekhint">ПРОБЕЛ</span>' +
+        '</span></div>';
+    });
+  });
+  list.innerHTML = html;
+
+  // ── построение карточки ──
+  function buildCard(e) {
+    const eff = D.helpers.effortOf(e);
+    const riskCls = e.risk === 'off-course' ? 'off' : (e.risk === 'drift' ? 'drift' : 'ok');
+    const riskTxt = e.risk ? riskLabel[e.risk] : 'ПО КУРСУ';
+
+    // мини-трек по релизам
+    let track = '<div class="track">';
+    cols.forEach(c => {
+      const pills = D.helpers.pillsOf(e, c.key);
+      track += '<div class="col"><div class="colh'+(c.current?' cur':'')+'">'+c.short+'</div>';
+      if (!pills.length) track += '<div class="colslot"></div>';
+      pills.forEach(p => {
+        track += '<div class="qpill" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'"><span>'+p.wt+'</span></div>';
+      });
+      track += '</div>';
+    });
+    track += '</div>';
+
+    // исполнители (уникальные)
+    const whoSet = [...new Set(e.pills.map(p => p.who).filter(Boolean))];
+    let whoRow;
+    if (whoSet.length) {
+      whoRow = '<div class="who-row">' + whoSet.map(w =>
+        '<span class="who-chip"><span class="av">'+esc(w.slice(0,1))+'</span>'+esc(w)+'</span>'
+      ).join('') + '</div>';
+    } else {
+      whoRow = '<div class="who-empty">Исполнители не назначены</div>';
+    }
+
+    const depsTxt = e.deps.length ? e.deps.length : '—';
+    const movesWarn = e.moves > 2 ? ' warn' : '';
+
+    return '' +
+      '<div class="qhead">' +
+        '<h3 class="qtitle">'+esc(e.epic)+'</h3>' +
+        '<div class="qteam"><span class="t">'+esc(e.team)+'</span><span class="r '+riskCls+'">'+riskTxt+'</span></div>' +
+      '</div>' +
+      '<div class="qbody">' +
+        '<div class="label">Работы по релизам</div>' +
+        track +
+        '<div class="facts">' +
+          '<div class="fact"><div class="k">Трудоёмкость</div><div class="v">'+eff+'<small>дн</small></div></div>' +
+          '<div class="fact"><div class="k">Зависимости</div><div class="v">'+depsTxt+'</div></div>' +
+          '<div class="fact"><div class="k">Переносов</div><div class="v'+movesWarn+'">'+e.moves+'</div></div>' +
+          '<div class="fact"><div class="k">Работ всего</div><div class="v">'+e.pills.length+'</div></div>' +
+        '</div>' +
+        '<div class="label">Исполнители</div>' +
+        whoRow +
+      '</div>' +
+      '<div class="qfoot"><span class="esc">Закрыть — <kbd>Esc</kbd> или <kbd>Пробел</kbd></span></div>';
+  }
+
+  // ── позиционирование рядом с курсором/строкой ──
+  let lastX = 0, lastY = 0, currentEl = null, holdTimer = null;
+
+  function positionNearCursor() {
+    ql.style.visibility = 'hidden';
+    ql.classList.add('show');
+    const w = ql.offsetWidth, h = ql.offsetHeight;
+    let left = lastX + 16, top = lastY + 14;
+    if (left + w > window.innerWidth - 12) left = lastX - w - 16;
+    if (top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+    left = Math.max(12, left);
+    ql.style.left = left.toFixed(0) + 'px';
+    ql.style.top = top.toFixed(0) + 'px';
+    ql.style.visibility = '';
+  }
+
+  function openPeek(el) {
+    const e = D.epics.find(x => x.id === el.dataset.epic);
+    if (!e) return;
+    currentEl = el;
+    el.classList.add('peeking');
+    ql.className = 'ql' + (e.risk === 'off-course' ? ' risk-off' : (e.risk === 'drift' ? ' risk-drift' : ''));
+    ql.innerHTML = buildCard(e);
+    positionNearCursor();
+    requestAnimationFrame(() => ql.classList.add('show'));
+  }
+
+  function closePeek() {
+    ql.classList.remove('show');
+    if (currentEl) currentEl.classList.remove('peeking');
+    currentEl = null;
+  }
+
+  // hover-наведение запоминает «активную» строку + позицию; hover-hold открывает
+  let hoverEl = null;
+  list.querySelectorAll('.epic').forEach(el => {
+    el.addEventListener('pointermove', e => { lastX = e.clientX; lastY = e.clientY; });
+    el.addEventListener('pointerenter', e => {
+      hoverEl = el; lastX = e.clientX; lastY = e.clientY;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => { if (hoverEl === el && currentEl !== el) openPeek(el); }, 520);
+    });
+    el.addEventListener('pointerleave', () => {
+      if (hoverEl === el) hoverEl = null;
+      clearTimeout(holdTimer);
+    });
+    // focus тоже даёт «активную» строку (клавиатурная навигация Tab)
+    el.addEventListener('focus', () => { hoverEl = el; });
+    el.addEventListener('blur', () => { if (hoverEl === el) hoverEl = null; });
+  });
+
+  // Space — toggle превью для активной (hover/focus) строки; Esc — закрыть
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.key === ' ') {
+      const target = hoverEl || (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('epic') ? document.activeElement : null);
+      if (target || currentEl) {
+        e.preventDefault();
+        if (currentEl) closePeek();
+        else if (target) openPeek(target);
+      }
+    } else if (e.key === 'Escape') {
+      if (currentEl) { e.preventDefault(); closePeek(); }
+    }
+  });
+
+  // клик вне карточки/списка — закрыть
+  document.addEventListener('pointerdown', e => {
+    if (currentEl && !ql.contains(e.target) && !e.target.closest('.epic')) closePeek();
+  });
+  window.addEventListener('scroll', () => { if (currentEl) closePeek(); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

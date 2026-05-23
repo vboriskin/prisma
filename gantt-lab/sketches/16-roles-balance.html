@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 16 · Баланс ролей команды</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .bar { display: flex; align-items: center; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
+  .bar .spacer { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .seg button { background: transparent; border: none; border-right: 1px solid var(--prizma-border); color: var(--prizma-text-secondary); font: 600 12px/1 var(--font); padding: 7px 12px; cursor: pointer; transition: background .15s, color .15s; }
+  .seg button:last-child { border-right: none; }
+  .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  /* ── таблица команд ── */
+  .panel { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); background: var(--prizma-bg-elevated); overflow: hidden; }
+  .trow { display: grid; grid-template-columns: 150px 1fr; align-items: stretch; }
+  .trow + .trow { border-top: 1px solid var(--prizma-border); }
+  .tname { padding: 16px 16px; display: flex; flex-direction: column; justify-content: center; gap: 4px; border-right: 1px solid var(--prizma-border); }
+  .tname .nm { font-size: 13px; font-weight: 600; }
+  .tname .sub { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .tname .sub.short { color: var(--prizma-off-course); }
+
+  .tbody { padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; }
+
+  /* стек-бар: спрос по ролям. сегмент = роль (категориальный --wt-* приглушённый).
+     Перегруз роли (спрос>ёмкость) — обводка + амбер/красный сигнальный штрих. */
+  .stack { position: relative; height: 30px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); overflow: hidden; display: flex; }
+  .stack .sgm { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden;
+    transition: width .42s var(--ease-calm); border-right: 1px solid var(--prizma-bg); }
+  .stack .sgm:last-child { border-right: none; }
+  .stack .sgm .ico { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-text-primary); opacity: .92; white-space: nowrap; }
+  .stack .sgm[data-over="1"] { box-shadow: inset 0 0 0 2px var(--prizma-off-course); }
+  .stack .sgm[data-over="1"] .ico { color: var(--prizma-off-course); }
+  /* линия ёмкости — где спрос упёрся бы в стену (на оси спроса показываем суммарную ёмкость) */
+  .stack .cap-mark { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 2px dashed var(--prizma-information); z-index: 3; pointer-events: none; }
+
+  /* строка чисел спрос/ёмкость по ролям */
+  .nums { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+  .nums .cell { display: inline-flex; align-items: center; gap: 6px; padding: 3px 7px 3px 9px; border-radius: var(--r-sm); position: relative; background: var(--prizma-bg-tertiary); }
+  .nums .cell::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt); }
+  .nums .cell .role { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); }
+  .nums .cell .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+  .nums .cell .v .cap { color: var(--prizma-text-tertiary); }
+  .nums .cell[data-over="1"] .v { color: var(--prizma-off-course); }
+  .nums .cell[data-over="1"] .role { color: var(--prizma-off-course); }
+
+  /* легенда ролей */
+  .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 20px; }
+  .legend .li { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--prizma-text-secondary); }
+  .legend .li i { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  .legend .li.over { color: var(--prizma-text-tertiary); }
+  .legend .li.over i { background: transparent; box-shadow: inset 0 0 0 2px var(--prizma-off-course); border-radius: 3px; }
+
+  .note { margin-top: 14px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 720px; }
+  .note code { font-family: var(--mono); color: var(--prizma-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 16 · Баланс ролей</div>
+      <h1>Где не хватает рук по ролям</h1>
+      <p>По каждой команде — горизонтальный стек спроса по ролям (BE / FE / QA / AN / …) против синтетической ёмкости роли. Где спрос превышает ёмкость, сегмент обведён красным <span class="pz-mono">off-course</span>. Пунктир — суммарная ёмкость команды на оси спроса. Числа — <span class="pz-mono">спрос N / ёмкость M</span>.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <span class="pz-eyebrow" style="color:var(--prizma-text-tertiary)">Спрос измеряется в</span>
+    <div class="seg" id="mode">
+      <button data-mode="est" class="on">человеко-днях (est)</button>
+      <button data-mode="pills">числе работ (pills)</button>
+    </div>
+    <span class="spacer"></span>
+  </div>
+
+  <div class="panel" id="panel"></div>
+
+  <div class="legend" id="legend"></div>
+
+  <p class="note">Спрос = сумма <code>est</code> (или число пилюль) по дисциплине во всех эпиках команды. Ёмкость роли — синтетическая константа <code>CAPACITY</code> в этом файле. В реальном приложении источник — <code>state.employees[].roles</code>, агрегированные по команде на окно планирования.</p>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+
+  // роли, которые показываем (порядок = порядок легенды и сегментов)
+  const ROLES = ['BE','FE','QA','AN','BA','IMPL','MIG','STAB','HF'];
+  const wtToEst = { BE:'be', FE:'fe', QA:'qa', AN:'an', BA:'ba', IMPL:'impl', MIG:'mig', STAB:'stab', HF:'hf' };
+
+  // СИНТЕТИЧЕСКАЯ ёмкость роли на команду (чел·дн на окно для режима est;
+  // делится для режима pills). В реальном приложении источник — агрегированные
+  // state.employees[].roles по команде. Значения подобраны так, чтобы были и
+  // дефициты, и запас — иначе сигнал перегруза не читался бы.
+  const CAPACITY = {
+    'Платежи':      { BE: 44, FE: 40, QA: 36, AN: 14 },             // BE в дефиците
+    'Безопасность': { BE: 20, QA: 18, IMPL: 12, BA: 8, STAB: 8 },   // BE в дефиците
+    'Интеграции':   { BE: 30, FE: 10, QA: 26, IMPL: 10, MIG: 14 },  // BE + MIG в дефиците
+    'Аналитика':    { BE: 24, FE: 14, QA: 10, AN: 22, BA: 6 },      // AN в дефиците
+    'Мобайл':       { BE: 30, FE: 36, QA: 30, AN: 8, HF: 4 },       // FE в дефиците
+  };
+  // для режима «числа работ» ёмкость роли ~ дней/8 (1 работа ≈ 8 дн), минимум 1
+  function capFor(team, role, mode) {
+    const days = (CAPACITY[team] || {})[role] || 0;
+    if (mode === 'est') return days;
+    return days > 0 ? Math.max(1, Math.round(days / 8)) : 0;
+  }
+
+  // спрос команды по роли
+  function demandFor(team, role, mode) {
+    const eps = D.epics.filter(e => e.team === team);
+    if (mode === 'pills') {
+      let n = 0; eps.forEach(e => e.pills.forEach(p => { if (p.wt === role) n++; })); return n;
+    }
+    // est: суммируем оценку дисциплины по эпикам (на эпик — один раз)
+    let s = 0; eps.forEach(e => { const v = e.est && e.est[wtToEst[role]]; if (typeof v === 'number') s += v; }); return s;
+  }
+
+  const panel = document.getElementById('panel');
+  let mode = 'est';
+
+  function render() {
+    // общий максимум по строке для согласованной ширины стека на 100%
+    let html = '';
+    D.teams.forEach(team => {
+      // активные роли = те, где есть спрос или ёмкость
+      const rows = ROLES.map(role => ({
+        role,
+        dem: demandFor(team, role, mode),
+        cap: capFor(team, role, mode),
+      })).filter(r => r.dem > 0 || r.cap > 0);
+
+      const totDem = rows.reduce((a, r) => a + r.dem, 0) || 1;
+      const totCap = rows.reduce((a, r) => a + r.cap, 0);
+      const overRoles = rows.filter(r => r.dem > r.cap).length;
+      const unit = mode === 'est' ? ' дн' : '';
+
+      // стек: ширина сегмента ∝ спрос роли / суммарный спрос. cap-mark — на доле totCap/totDem.
+      let stackHtml = '<div class="stack">';
+      rows.forEach(r => {
+        if (r.dem <= 0) return;
+        const w = (r.dem / totDem) * 100;
+        const over = r.dem > r.cap ? 1 : 0;
+        const fill = 'color-mix(in srgb, ' + wtVar(r.role) + ' 78%, transparent)';
+        stackHtml += '<div class="sgm" data-over="'+over+'" style="width:'+w.toFixed(2)+'%;background:'+fill+'" title="'+r.role+' · спрос '+r.dem+unit+' / ёмкость '+r.cap+unit+'">' +
+          (w > 7 ? '<span class="ico">'+r.role+'</span>' : '') + '</div>';
+      });
+      // метка суммарной ёмкости (если меньше суммарного спроса — видно, что не дотягивает)
+      if (totCap > 0 && totCap < totDem) {
+        const cm = (totCap / totDem) * 100;
+        stackHtml += '<div class="cap-mark" style="left:'+cm.toFixed(2)+'%" title="суммарная ёмкость команды"></div>';
+      }
+      stackHtml += '</div>';
+
+      let numsHtml = '<div class="nums">';
+      rows.forEach(r => {
+        const over = r.dem > r.cap ? 1 : 0;
+        numsHtml += '<span class="cell" data-over="'+over+'" style="--wt:'+wtVar(r.role)+'">' +
+          '<span class="role">'+r.role+'</span>' +
+          '<span class="v">'+r.dem+'<span class="cap"> / '+r.cap+'</span></span>' +
+          '</span>';
+      });
+      numsHtml += '</div>';
+
+      const subHtml = overRoles
+        ? '<span class="sub short">дефицит в '+overRoles+' '+wordRole(overRoles)+'</span>'
+        : '<span class="sub">спрос '+totDem+unit+' / ёмкость '+totCap+unit+'</span>';
+
+      html += '<div class="trow"><div class="tname"><span class="nm">'+team+'</span>'+subHtml+'</div>' +
+        '<div class="tbody">'+stackHtml+numsHtml+'</div></div>';
+    });
+    panel.innerHTML = html;
+  }
+
+  function wordRole(n){
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'роли';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'ролях';
+    return 'ролях';
+  }
+
+  // легенда ролей (только встречающиеся)
+  const legend = document.getElementById('legend');
+  const seen = new Set();
+  D.teams.forEach(t => ROLES.forEach(role => { if (demandFor(t, role, 'est') > 0 || capFor(t, role, 'est') > 0) seen.add(role); }));
+  let lh = '';
+  ROLES.filter(r => seen.has(r)).forEach(role => {
+    const fill = 'color-mix(in srgb, ' + wtVar(role) + ' 78%, transparent)';
+    lh += '<span class="li"><i style="background:'+fill+'"></i>'+role+' · '+(D.WT[role]?D.WT[role].label:role)+'</span>';
+  });
+  lh += '<span class="li over"><i></i>спрос &gt; ёмкости</span>';
+  legend.innerHTML = lh;
+
+  // переключатель режима
+  document.getElementById('mode').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.mode;
+    document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+    setTimeout(render, 60); // sync + delayed (не полагаемся на rAF для layout)
+  });
+
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => {/* стек на %, перерисовка не нужна, но держим хук */});
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

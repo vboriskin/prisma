@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 17 · Повестка сегодня</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+
+  /* ── date header ── */
+  .dh { flex: none; padding: 18px 24px 16px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 18px; }
+  .dh .cal { width: 34px; height: 34px; flex: none; color: var(--prizma-information); }
+  .dh h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 0; }
+  .dh .sub { display: flex; align-items: center; gap: 10px; margin-top: 5px; font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .dh .sub .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--prizma-text-tertiary); }
+  .dh .countdown { margin-left: auto; display: inline-flex; align-items: center; gap: 9px; padding: 9px 14px; border: 1px solid var(--prizma-information); border-radius: var(--r-md); color: var(--prizma-information); }
+  .dh .countdown .big { font: 800 18px/1 var(--mono); }
+  .dh .countdown .cd-lbl { font: 700 9px/1.3 var(--mono); letter-spacing: .4px; text-transform: uppercase; opacity: .85; }
+
+  /* ── agenda board ── */
+  .agenda { flex: 1; overflow-y: auto; padding: 18px 24px 32px; display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 18px; align-content: start; }
+  @media (min-width: 1280px) { .agenda { grid-template-columns: repeat(3, 1fr); } }
+
+  .sect { display: flex; flex-direction: column; min-width: 0; }
+  .sect-hd { display: flex; align-items: center; gap: 9px; padding: 0 2px 11px; }
+  .sect-hd .ic { width: 15px; height: 15px; flex: none; color: var(--accent, var(--prizma-text-secondary)); }
+  .sect-hd .t { font-size: 13px; font-weight: 700; }
+  .sect-hd .cnt { font: 700 10px/1 var(--mono); color: var(--prizma-text-tertiary); padding: 3px 6px; border: 1px solid var(--prizma-border); border-radius: var(--r-sm); }
+  .sect-hd .accent-stripe { width: 20px; height: 2px; border-radius: 2px; background: var(--accent, var(--prizma-border-strong)); }
+  .sect-body { display: flex; flex-direction: column; gap: 9px; }
+
+  /* item card (compact) */
+  .it { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-md); padding: 11px 13px 11px 14px; transition: border-color .15s; }
+  .it::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--prizma-border-strong); border-radius: var(--r-md) 0 0 var(--r-md); }
+  .it.r-drift::before { background: var(--prizma-drift); width: 3px; }
+  .it.r-off::before { background: var(--prizma-off-course); width: 3px; }
+  .it.r-info::before { background: var(--prizma-information); width: 3px; }
+  .it:hover { border-color: var(--prizma-border-strong); }
+  .it-hd { display: flex; align-items: flex-start; gap: 8px; }
+  .it-nm { font-size: 12.5px; font-weight: 600; line-height: 1.3; flex: 1; }
+  .it-team { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; flex: none; font: 700 8.5px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); white-space: nowrap; }
+  .it-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .wtchip { position: relative; display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px 3px 9px; font: 600 9.5px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); }
+  .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .wtchip.done { opacity: .5; text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .wtchip.prog::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); }
+  .wtchip.unplanned { border: 1px dashed var(--prizma-border-strong); background: transparent; }
+  .wtchip .who { color: var(--prizma-text-tertiary); font-weight: 500; }
+  .it-why { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; font-size: 11px; line-height: 1.4; color: var(--prizma-text-tertiary); }
+  .it-why .wic { width: 12px; height: 12px; flex: none; margin-top: 1px; color: var(--accent, var(--prizma-text-tertiary)); }
+  .it-why b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  .empty { font-size: 11.5px; color: var(--prizma-text-tertiary); padding: 14px; font-style: italic; border: 1px dashed var(--prizma-border); border-radius: var(--r-md); text-align: center; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Повестка сегодня</span>
+    <span class="pz-eyebrow">Редизайн 17 · agenda</span>
+    <span class="spacer"></span>
+    <span class="legend"><span><i style="background:var(--prizma-information)"></i>в работе</span><span><i style="background:var(--prizma-drift)"></i>дрейф</span><span><i style="background:var(--prizma-off-course)"></i>риск</span></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="dh">
+    <svg class="cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/><circle cx="12" cy="15" r="1.6" fill="currentColor" stroke="none"/></svg>
+    <div>
+      <h1 id="dh-date">23 мая</h1>
+      <div class="sub" id="dh-sub"></div>
+    </div>
+    <div class="countdown" id="cd" title="до релиз-кандидата">
+      <span class="big" id="cd-num">7</span>
+      <span class="cd-lbl">дней до<br>релиз-кандидата</span>
+    </div>
+  </div>
+
+  <div class="agenda" id="agenda"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const now = new Date(D.today);
+  const curRel = cols.find(c => c.current);
+  const byId = id => D.epics.find(e => e.id === id);
+
+  // ── date header ──
+  document.getElementById('dh-date').textContent =
+    now.toLocaleDateString('ru', { day: 'numeric', month: 'long' });
+  document.getElementById('dh-sub').innerHTML =
+    '<span>окно ' + esc(curRel.short) + '</span><span class="dot"></span>' +
+    '<span>' + new Date(curRel.start).toLocaleDateString('ru',{day:'2-digit',month:'short'}) +
+    ' – ' + new Date(curRel.end).toLocaleDateString('ru',{day:'2-digit',month:'short'}) + '</span>';
+  // дни до релиз-кандидата (веха m2)
+  const rc = D.milestones.find(m => /кандидат/i.test(m.label)) || D.milestones[1];
+  const days = Math.round((new Date(rc.date) - now) / 864e5);
+  document.getElementById('cd-num').textContent = days;
+  document.getElementById('cd').title = 'до «' + rc.label + '» ' + new Date(rc.date).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+
+  // ── helpers ──
+  function chipsHtml(pills) {
+    return pills.map(p => {
+      const cls = p.state === 'done' ? ' done' : (p.state === 'progress' ? ' prog' : (p.state === 'unplanned' ? ' unplanned' : ''));
+      const lbl = D.WT[p.wt] ? D.WT[p.wt].label : p.wt;
+      return '<span class="wtchip' + cls + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(lbl) + (p.who ? ' · ' + esc(p.who) : '') + '">' +
+        esc(p.wt) + (p.who ? '<span class="who">' + esc(p.who) + '</span>' : '') + '</span>';
+    }).join('');
+  }
+  function teamBadge(e) { return '<span class="it-team" title="' + esc(e.team) + '">' + esc(e.team) + '</span>'; }
+  function riskCls(e) { return e.risk === 'off-course' ? 'r-off' : (e.risk === 'drift' ? 'r-drift' : ''); }
+
+  function itHtml(e, opts) {
+    opts = opts || {};
+    const cls = opts.cls || riskCls(e);
+    const pills = opts.pills || e.pills;
+    const why = opts.why ? '<div class="it-why"><svg class="wic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + opts.icon + '</svg><span>' + opts.why + '</span></div>' : '';
+    return '<div class="it ' + cls + '">' +
+      '<div class="it-hd"><span class="it-nm">' + esc(e.epic) + '</span>' + teamBadge(e) + '</div>' +
+      '<div class="it-chips">' + chipsHtml(pills) + '</div>' + why + '</div>';
+  }
+
+  // icons (path content only)
+  const IC = {
+    play: '<path d="M16 12 7 5v14l9-7z"/>',
+    flag: '<path d="M5 21V4M5 4h12l-2 4 2 4H5"/>',
+    lock: '<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    move: '<path d="M5 12h14M13 6l6 6-6 6"/><path d="M11 6 5 12l6 6" opacity=".5"/>',
+    alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+  };
+  const WTL = wt => D.WT[wt] ? D.WT[wt].label : wt;
+
+  // ── section builders ──
+  const SECTIONS = [];
+
+  // 1) В работе сейчас — pills state=progress (в текущем окне)
+  (function () {
+    const items = [];
+    D.epics.forEach(e => {
+      const prog = e.pills.filter(p => p.state === 'progress');
+      if (prog.length) {
+        const who = [...new Set(prog.map(p => p.who).filter(Boolean))];
+        items.push(itHtml(e, {
+          cls: 'r-info', pills: prog, icon: IC.play,
+          why: who.length ? '<b>Активно:</b> ' + esc(who.join(', ')) : '<b>Активно</b> в окне ' + esc(curRel.short),
+        }));
+      }
+    });
+    SECTIONS.push({ title: 'В работе сейчас', icon: IC.play, accent: 'var(--prizma-information)', items });
+  })();
+
+  // 2) Дедлайны недели — эпики с пилюлями в текущем окне (что должно закрыться в 1.21)
+  (function () {
+    const items = [];
+    D.epics.forEach(e => {
+      const inWin = D.helpers.pillsOf(e, curRel.key);
+      const openInWin = inWin.filter(p => p.state !== 'done');
+      if (openInWin.length) {
+        const ratio = Math.round(D.helpers.doneRatio(e) * 100);
+        items.push(itHtml(e, {
+          cls: riskCls(e), pills: inWin, icon: IC.flag,
+          why: '<b>' + openInWin.length + '</b> из ' + inWin.length + ' работ в окне ' + esc(curRel.short) + ' ещё открыты · готовность ' + ratio + '%',
+        }));
+      }
+    });
+    SECTIONS.push({ title: 'Дедлайны недели', icon: IC.flag, accent: 'var(--prizma-drift)', items });
+  })();
+
+  // 3) Заблокировано — эпики, чьи зависимости ещё не done
+  (function () {
+    const items = [];
+    D.epics.forEach(e => {
+      if (!e.deps || !e.deps.length) return;
+      const blockers = e.deps.map(byId).filter(Boolean).filter(d => D.helpers.doneRatio(d) < 1);
+      if (blockers.length) {
+        items.push(itHtml(e, {
+          cls: riskCls(e) || 'r-drift', pills: e.pills, icon: IC.lock,
+          why: '<b>Ждёт:</b> ' + blockers.map(b => esc(b.epic) + ' (' + Math.round(D.helpers.doneRatio(b)*100) + '%)').join(', '),
+        }));
+      }
+    });
+    SECTIONS.push({ title: 'Заблокировано', icon: IC.lock, accent: 'var(--prizma-off-course)', items });
+  })();
+
+  // 4) Только что перенесено — moves>0
+  (function () {
+    const moved = D.epics.filter(e => (e.moves || 0) > 0).sort((a, b) => b.moves - a.moves);
+    const items = moved.map(e => itHtml(e, {
+      cls: riskCls(e), pills: e.pills, icon: IC.move,
+      why: '<b>' + e.moves + '</b> ' + plural(e.moves, 'перенос', 'переноса', 'переносов') + ' между релизами',
+    }));
+    SECTIONS.push({ title: 'Только что перенесено', icon: IC.move, accent: 'var(--prizma-insight)', items });
+  })();
+
+  // 5) Риски требуют решения — risk != null
+  (function () {
+    const risky = D.epics.filter(e => e.risk).sort((a, b) =>
+      (a.risk === 'off-course' ? 0 : 1) - (b.risk === 'off-course' ? 0 : 1));
+    const items = risky.map(e => {
+      const label = e.risk === 'off-course' ? 'Срыв' : 'Дрейф';
+      return itHtml(e, {
+        cls: riskCls(e), pills: e.pills, icon: IC.alert,
+        why: '<b>' + label + ':</b> ' + e.moves + ' ' + plural(e.moves, 'перенос', 'переноса', 'переносов') +
+             (e.deps && e.deps.length ? ' · зависит от ' + e.deps.length : '') + ' · требует решения',
+      });
+    });
+    SECTIONS.push({ title: 'Риски требуют решения', icon: IC.alert, accent: 'var(--prizma-off-course)', items });
+  })();
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // ── render ──
+  document.getElementById('agenda').innerHTML = SECTIONS.map(s => {
+    const body = s.items.length ? s.items.join('') : '<div class="empty">пусто — всё спокойно</div>';
+    return '<section class="sect" style="--accent:' + s.accent + '">' +
+      '<div class="sect-hd"><span class="accent-stripe"></span>' +
+      '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + s.icon + '</svg>' +
+      '<span class="t">' + esc(s.title) + '</span><span class="cnt">' + s.items.length + '</span></div>' +
+      '<div class="sect-body">' + body + '</div></section>';
+  }).join('');
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

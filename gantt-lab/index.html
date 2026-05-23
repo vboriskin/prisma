@@ -154,7 +154,7 @@
     const a = document.createElement('a');
     a.className = 'tile'; a.href = base + '/' + p.file; a.target = '_blank'; a.rel = 'noopener';
     a.innerHTML =
-      '<div class="thumb"><iframe loading="eager" src="' + base + '/' + p.file + '" tabindex="-1" aria-hidden="true" scrolling="no"></iframe></div>' +
+      '<div class="thumb"><iframe loading="lazy" src="' + base + '/' + p.file + '" tabindex="-1" aria-hidden="true" scrolling="no"></iframe></div>' +
       '<div class="body"><span class="num">' + p.num + '</span>' +
       '<h4>' + p.title + '</h4><p>' + p.desc + '</p>' +
       (p.tag ? '<span class="tag">' + p.tag + '</span>' : '') + '</div>';
@@ -187,8 +187,8 @@
   fillLenses(); fillVariants(); fillApple();
   fillGrid('sketchGrid', D.sketches, 'sketches');
   fillGrid('redesignGrid', D.redesigns, 'redesigns');
-  const sc = document.getElementById('sketchCount'); if (sc) sc.textContent = D.sketches.length + ' / 10';
-  const rc = document.getElementById('redesignCount'); if (rc) rc.textContent = D.redesigns.length + ' / 10';
+  const sc = document.getElementById('sketchCount'); if (sc) sc.textContent = D.sketches.length + ' · две волны';
+  const rc = document.getElementById('redesignCount'); if (rc) rc.textContent = D.redesigns.length + ' · две волны';
 
   // theme toggle
   document.getElementById('themeToggle').addEventListener('click', function () {

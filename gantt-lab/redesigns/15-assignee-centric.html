@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 15 · По исполнителям</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+  .eyebrowbar { padding: 9px 18px 0; flex: none; }
+
+  /* ── grid ── */
+  .scroll { flex: 1; overflow: auto; position: relative; }
+  .grid { display: grid; grid-template-columns: 230px repeat(5, minmax(180px, 1fr)); min-width: 1180px; position: relative; }
+
+  /* шапка релизов — sticky top, нейтральная */
+  .h { position: sticky; top: 0; z-index: 9; background: var(--prizma-bg); padding: 13px 14px 11px; border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); }
+  .h .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .h .rel.cur { color: var(--prizma-text-primary); }
+  .h .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .h .dt { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  /* угловая ячейка — sticky обе оси */
+  .h.corner { left: 0; z-index: 11; border-left: none; display: flex; align-items: flex-end; }
+  .h.corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  /* колонка-исполнитель — sticky left */
+  .who-cell { position: sticky; left: 0; z-index: 6; background: var(--prizma-bg); padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 10px; min-height: 64px; }
+  .who-cell.unassigned { background: var(--prizma-bg-elevated); }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center; font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); border: 1px solid var(--prizma-border-strong); background: var(--prizma-bg-tertiary); }
+  .avatar.dashed { border-style: dashed; }
+  .who-meta { min-width: 0; }
+  .who-meta .nm { font-size: 13px; font-weight: 600; color: var(--prizma-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who-meta .tally { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+  .who-meta .tally .ov { color: var(--prizma-off-course); font-weight: 700; }
+  .who-meta .tally .dr { color: var(--prizma-drift); font-weight: 700; }
+
+  /* ячейка релиз × исполнитель */
+  .cell { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; min-height: 64px; position: relative; }
+  .cell.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  /* перегруз — тонкая стрипа сверху ячейки */
+  .cell.over-drift::after, .cell.over-off::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; }
+  .cell.over-drift::after { background: var(--prizma-drift); }
+  .cell.over-off::after { background: var(--prizma-off-course); }
+  .cell .loadbar { position: absolute; bottom: 0; left: 0; height: 2px; background: var(--prizma-border-strong); }
+  .cell.over-drift .loadbar { background: var(--prizma-drift); }
+  .cell.over-off .loadbar { background: var(--prizma-off-course); }
+
+  /* мини-чип работы — wt-stripe слева, нейтральный фон */
+  .pchip { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px; font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; cursor: default; }
+  .pchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pchip .wt { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-secondary); }
+  .pchip[data-state="done"] { opacity: .55; }
+  .pchip[data-state="done"] .wt { text-decoration: line-through; }
+  .pchip[data-state="progress"] .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pchip[data-state="unplanned"] { border: 1px dashed var(--prizma-drift); background: transparent; }
+  .pchip:hover { box-shadow: 0 0 0 1px var(--prizma-border-strong); }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: var(--z-dropdown); min-width: 200px; max-width: 280px; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); box-shadow: 0 12px 36px rgba(0,0,0,.5); padding: 11px 13px; opacity: 0; transform: translateY(4px); transition: opacity .14s var(--ease-calm), transform .14s var(--ease-calm); pointer-events: none; }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tt { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+  .tip .tr { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tip .tr .v { font: 600 11px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .tr .v.risk-off { color: var(--prizma-off-course); }
+  .tip .tr .v.risk-drift { color: var(--prizma-drift); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">По исполнителям</span>
+    <span class="sub">кто чем занят · кто перегружен</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-drift)"></i>высокая загрузка</span>
+      <span><i style="background:var(--prizma-off-course)"></i>перегруз</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 15 · Исполнители</span></div>
+  <div class="scroll"><div class="grid" id="grid"></div></div>
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const cols = D.releases;
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+
+  // пороги загрузки на исполнителя в одном релизе (работ)
+  const DRIFT_AT = 2;   // >= 2 → высокая
+  const OVER_AT = 3;    // >= 3 → перегруз
+
+  // ── собрать всех уникальных исполнителей + индекс работ ──
+  // запись работы: { epic, wt, col, state, who }
+  const works = [];
+  D.epics.forEach(e => e.pills.forEach(p => works.push({ epicId: e.id, epic: e.epic, team: e.team, wt: p.wt, col: p.col, state: p.state, who: p.who })));
+
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+
+  // люди в порядке первого появления; null → лейн «без исполнителя»
+  const people = [];
+  works.forEach(w => { if (w.who && !people.includes(w.who)) people.push(w.who); });
+  people.sort((a, b) => a.localeCompare(b, 'ru'));
+
+  // worksFor(who, col)
+  function worksFor(who, col) {
+    return works.filter(w => w.who === who && w.col === col);
+  }
+  function worksForUnassigned(col) {
+    return works.filter(w => !w.who && w.col === col);
+  }
+  function totalFor(who) { return works.filter(w => w.who === who).length; }
+
+  const grid = document.getElementById('grid');
+
+  function fmt(d) { return new Date(d + 'T00:00:00').toLocaleDateString('ru', { day: '2-digit', month: 'short' }); }
+
+  function chipHtml(w) {
+    const e = byId[w.epicId];
+    const dot = w.state === 'progress' ? '<span class="dot"></span>' : '';
+    return '<span class="pchip" data-state="' + w.state + '" data-epic="' + w.epicId + '" data-wt="' + w.wt + '" data-col="' + w.col + '" style="--wt:' + wtVar(w.wt) + '">' + dot + '<span class="wt">' + w.wt + '</span></span>';
+  }
+
+  function cellHtml(list, colKey) {
+    const bz = (colKey === 'backlog' || colKey === 'overtime');
+    const n = list.length;
+    let cls = 'cell' + (bz ? ' bz' : '');
+    if (n >= OVER_AT) cls += ' over-off';
+    else if (n >= DRIFT_AT) cls += ' over-drift';
+    let h = '<div class="' + cls + '">';
+    list.forEach(w => h += chipHtml(w));
+    if (n > 0) {
+      const pct = Math.min(n / OVER_AT, 1) * 100;
+      h += '<span class="loadbar" style="width:' + pct.toFixed(0) + '%"></span>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function render() {
+    let html = '';
+    // шапка
+    html += '<div class="h corner"><span class="pz-eyebrow">Исполнитель / Релиз</span></div>';
+    cols.forEach(c => {
+      const dt = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без дат';
+      html += '<div class="h"><span class="rel' + (c.current ? ' cur' : '') + '">' + c.short + '</span>' + (c.current ? '<span class="cur-tag">ТЕК.</span>' : '') + '<span class="dt">' + dt + '</span></div>';
+    });
+
+    // строки-люди
+    people.forEach(who => {
+      const total = totalFor(who);
+      // флаг перегруза для tally: есть ли релиз где >= OVER_AT
+      let maxInRel = 0;
+      cols.forEach(c => { maxInRel = Math.max(maxInRel, worksFor(who, c.key).length); });
+      let tallyFlag = '';
+      if (maxInRel >= OVER_AT) tallyFlag = '<span class="ov">перегруз</span>';
+      else if (maxInRel >= DRIFT_AT) tallyFlag = '<span class="dr">плотно</span>';
+      const initials = who.slice(0, 2).toUpperCase();
+      html += '<div class="who-cell"><span class="avatar">' + initials + '</span><span class="who-meta"><span class="nm">' + esc(who) + '</span><span class="tally">' + total + ' раб' + (tallyFlag ? ' · ' : '') + tallyFlag + '</span></span></div>';
+      cols.forEach(c => { html += cellHtml(worksFor(who, c.key), c.key); });
+    });
+
+    // лейн «без исполнителя»
+    const unTotal = works.filter(w => !w.who).length;
+    html += '<div class="who-cell unassigned"><span class="avatar dashed">?</span><span class="who-meta"><span class="nm">Без исполнителя</span><span class="tally">' + unTotal + ' раб · не назначены</span></span></div>';
+    cols.forEach(c => { html += cellHtml(worksForUnassigned(c.key), c.key); });
+
+    grid.innerHTML = html;
+    wireTips();
+  }
+
+  // ── tooltip с контекстом эпика ──
+  const tip = document.getElementById('tip');
+  let tipEl = null;
+  function buildTip(chip) {
+    const e = byId[chip.dataset.epic];
+    const col = cols.find(c => c.key === chip.dataset.col);
+    const state = chip.dataset.state;
+    const stMap = { planned: 'запланировано', progress: 'в работе', done: 'готово', unplanned: 'вне плана' };
+    const wtLabel = D.WT[chip.dataset.wt] ? D.WT[chip.dataset.wt].label : chip.dataset.wt;
+    let h = '<div class="tt">' + esc(e.epic) + '</div>';
+    h += '<div class="tr"><span>Команда</span><span class="v">' + esc(e.team) + '</span></div>';
+    h += '<div class="tr"><span>Тип работы</span><span class="v">' + chip.dataset.wt + ' · ' + wtLabel + '</span></div>';
+    h += '<div class="tr"><span>Релиз</span><span class="v">' + col.short + '</span></div>';
+    h += '<div class="tr"><span>Статус</span><span class="v">' + (stMap[state] || state) + '</span></div>';
+    if (e.risk) {
+      const rl = e.risk === 'off-course' ? 'срыв эпика' : 'дрейф эпика';
+      h += '<div class="tr"><span>Риск</span><span class="v risk-' + (e.risk === 'off-course' ? 'off' : 'drift') + '">' + rl + '</span></div>';
+    }
+    return h;
+  }
+  function positionTip(el) {
+    const r = el.getBoundingClientRect();
+    tip.style.visibility = 'hidden'; tip.classList.add('show');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    let top = r.bottom + 8;
+    if (top + th > window.innerHeight - 10) top = r.top - th - 8;
+    left = Math.max(10, Math.min(left, window.innerWidth - tw - 10));
+    tip.style.left = left.toFixed(0) + 'px'; tip.style.top = top.toFixed(0) + 'px';
+    tip.style.visibility = '';
+  }
+  function wireTips() {
+    grid.querySelectorAll('.pchip').forEach(chip => {
+      chip.addEventListener('mouseenter', () => { tipEl = chip; tip.innerHTML = buildTip(chip); positionTip(chip); });
+      chip.addEventListener('mouseleave', () => { if (tipEl === chip) { tip.classList.remove('show'); tipEl = null; } });
+    });
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', () => { if (tipEl) positionTip(tipEl); });
+  document.querySelector('.scroll').addEventListener('scroll', () => { if (tipEl) positionTip(tipEl); }, true);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

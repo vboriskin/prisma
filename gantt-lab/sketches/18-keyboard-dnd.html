@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 18 · Клавиатурный перенос</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 96px; }
+  .head { margin-bottom: 20px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 16px 0; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  kbd { font: 600 11px/1 var(--mono); padding: 2px 6px; border: 1px solid var(--prizma-border-strong);
+    border-bottom-width: 2px; border-radius: var(--r-sm); color: var(--prizma-text-secondary); background: var(--prizma-bg-tertiary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 230px repeat(5, 1fr); min-width: 880px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 8px; min-height: 48px; }
+  .ghead { position: sticky; top: 0; z-index: 10; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+  .ghead.today { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing:.4px; color: var(--prizma-information); margin-left: 6px; }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; }
+  .elabel .nm { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+  .elabel .nm .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .elabel .meta { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .cell { position: relative; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start;
+    transition: background .12s, box-shadow .12s; }
+  /* при «взятии» подсвечиваем валидные ячейки строки (другой релиз того же эпика) */
+  .cell.drop-ok { background: var(--prizma-information-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-information) 60%, transparent); }
+  .cell.drop-target { background: color-mix(in srgb, var(--prizma-information) 22%, transparent); box-shadow: inset 0 0 0 2px var(--prizma-information); }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); cursor: pointer; user-select: none; outline: none;
+    transition: transform .14s var(--ease-spring), box-shadow .12s; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill .wt-lbl { font: 500 10px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill[data-done] { opacity: .7; }
+  .pill[data-done] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  /* сильное фокус-кольцо */
+  .pill:focus-visible { box-shadow: 0 0 0 2px var(--prizma-bg-elevated), 0 0 0 4px var(--prizma-information); transform: translateY(-1px); }
+  /* «взято» — амбер-обводка + приподнят */
+  .pill.grabbed { box-shadow: 0 0 0 2px var(--prizma-bg-elevated), 0 0 0 4px var(--prizma-drift); transform: translateY(-2px) scale(1.03); z-index: 3; }
+  .pill.grabbed::after { content: "взято"; position: absolute; top: -8px; right: -6px; font: 700 8px/1 var(--mono);
+    letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-bg); background: var(--prizma-drift);
+    padding: 2px 4px; border-radius: 3px; }
+
+  /* ── контекстная подсказка (micro-coaching) ── */
+  .hintbar { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(28px);
+    display: flex; align-items: center; gap: 14px; padding: 11px 16px; background: var(--prizma-bg-elevated);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); box-shadow: 0 10px 36px rgba(0,0,0,.45);
+    opacity: 0; transition: opacity .2s var(--ease-calm), transform .2s var(--ease-calm); z-index: 9000; }
+  .hintbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .hintbar .grp { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--prizma-text-secondary); }
+  .hintbar .grp.lead { color: var(--prizma-text-primary); font-weight: 600; }
+  .hintbar .sep { width: 1px; height: 16px; background: var(--prizma-border); }
+  .hintbar .stripe { width: 3px; align-self: stretch; border-radius: 3px; background: var(--prizma-drift); }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 18 · Доступность</div>
+      <h1>Клавиатурный перенос</h1>
+      <p>Тот же перенос без мыши. <kbd>Tab</kbd> — к сетке, стрелки — фокус по работам. <kbd>Enter</kbd> «берёт» работу и подсвечивает валидные релизы; <kbd>←</kbd> <kbd>→</kbd> двигают её между ними; <kbd>Enter</kbd> кладёт, <kbd>Esc</kbd> отменяет. Подсказка-полоса учит следующему шагу — не тур, а контекст.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Наведите фокус на любую работу клавишей <kbd>Tab</kbd>, дальше — стрелками.</span>
+  </div>
+
+  <div class="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<div class="hintbar" id="hintbar" role="status">
+  <span class="stripe"></span>
+  <span class="grp lead"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 20V8"/><path d="M6 14l6 6 6-6"/></svg>работа взята</span>
+  <span class="sep"></span>
+  <span class="grp"><kbd>←</kbd><kbd>→</kbd> перенести между релизами</span>
+  <span class="sep"></span>
+  <span class="grp"><kbd>Enter</kbd> положить</span>
+  <span class="sep"></span>
+  <span class="grp"><kbd>Esc</kbd> отмена</span>
+</div>
+
+<div class="sr-only" id="live" aria-live="assertive"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, cols = D.releases;
+  const grid = document.getElementById('grid');
+  const hintbar = document.getElementById('hintbar');
+  const live = document.getElementById('live');
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function relShort(k){ const c = cols.find(r=>r.key===k); return c?c.short:k; }
+  function fmt(d){ return new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'}); }
+
+  // компактный срез: рисковые эпики из нескольких команд
+  const SHOW = ['e1','e2','e7','e13','e12'];
+  let work = {};
+  function seed(){ work = {}; SHOW.forEach(id => { const e = D.epics.find(x=>x.id===id); work[id] = e.pills.map(p => Object.assign({}, p)); }); }
+  seed();
+
+  // плоский порядок пилюль для roving-tabindex (по строкам, слева-направо по колонкам)
+  let flat = []; // {epic, idx, col}
+  let cursor = -1;     // индекс в flat для фокуса
+  let grabbed = null;  // {epic, idx, fromCol} когда работа «взята»
+
+  function buildFlat() {
+    flat = [];
+    SHOW.forEach(id => {
+      cols.forEach(c => {
+        work[id].forEach((p, idx) => { if (p.col === c.key) flat.push({ epic: id, idx, col: c.key }); });
+      });
+    });
+  }
+
+  function render() {
+    buildFlat();
+    let html = '';
+    html += '<div class="gcell ghead"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead'+(c.current?' today':'')+'"><span class="rel'+(c.current?' cur':'')+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    SHOW.forEach(id => {
+      const e = D.epics.find(x=>x.id===id);
+      const riskDot = e.risk ? '<span class="risk" style="background:var(--prizma-'+(e.risk==='off-course'?'off-course':'drift')+')"></span>' : '<span class="risk" style="background:var(--prizma-text-tertiary);opacity:.4"></span>';
+      html += '<div class="gcell elabel"><span class="nm">'+riskDot+esc(e.epic)+'</span><span class="meta">'+esc(e.team)+'</span></div>';
+      cols.forEach(c => {
+        html += '<div class="gcell cell" data-epic="'+id+'" data-col="'+c.key+'">';
+        work[id].forEach((p, idx) => {
+          if (p.col !== c.key) return;
+          const fi = flat.findIndex(f => f.epic===id && f.idx===idx);
+          const who = p.who ? '<span class="who">'+esc(p.who)+'</span>' : '';
+          const doneDot = p.state==='done' ? '<span class="dot6" style="width:6px;height:6px;border-radius:50%;background:var(--prizma-on-course)"></span>' : '';
+          html += '<span class="pill" role="button" tabindex="-1" data-fi="'+fi+'" data-epic="'+id+'" data-idx="'+idx+'" style="--wt:'+wtVar(p.wt)+'"'+(p.state==='done'?' data-done':'')
+            + ' aria-label="'+esc((D.WT[p.wt]?D.WT[p.wt].label:p.wt))+' эпика '+esc(e.epic)+', релиз '+relShort(c.key)+'">'
+            + doneDot + '<span class="nm">'+(D.WT[p.wt]?D.WT[p.wt].label:p.wt)+'</span><span class="wt-lbl">'+p.wt+'</span>'+who+'</span>';
+        });
+        html += '</div>';
+      });
+    });
+    grid.innerHTML = html;
+    // восстановить фокус/состояние
+    if (cursor >= flat.length) cursor = flat.length - 1;
+    applyRoving();
+    if (grabbed) paintDropzones();
+  }
+
+  function pillEl(fi){ return grid.querySelector('.pill[data-fi="'+fi+'"]'); }
+
+  function applyRoving() {
+    grid.querySelectorAll('.pill').forEach(el => el.tabIndex = -1);
+    if (cursor < 0 && flat.length) cursor = 0;
+    const el = pillEl(cursor);
+    if (el) { el.tabIndex = 0; }
+  }
+
+  function focusCursor() {
+    const el = pillEl(cursor);
+    if (el) { el.tabIndex = 0; el.focus(); }
+  }
+
+  // навигация фокуса стрелками (когда НЕ взято)
+  function moveFocus(d) {
+    if (!flat.length) return;
+    if (cursor < 0) cursor = 0;
+    else cursor = Math.max(0, Math.min(flat.length - 1, cursor + d));
+    grid.querySelectorAll('.pill').forEach(el => el.tabIndex = -1);
+    focusCursor();
+  }
+
+  function paintDropzones() {
+    grid.querySelectorAll('.cell').forEach(c => c.classList.remove('drop-ok','drop-target'));
+    if (!grabbed) return;
+    const p = work[grabbed.epic][grabbed.idx];
+    grid.querySelectorAll('.cell[data-epic="'+grabbed.epic+'"]').forEach(c => {
+      if (c.dataset.col !== p.col) c.classList.add('drop-ok');
+    });
+    const tgt = grid.querySelector('.cell[data-epic="'+grabbed.epic+'"][data-col="'+p.col+'"]');
+    if (tgt) tgt.classList.add('drop-target');
+  }
+
+  function grab() {
+    const f = flat[cursor];
+    if (!f) return;
+    grabbed = { epic: f.epic, idx: f.idx, fromCol: work[f.epic][f.idx].col };
+    const el = pillEl(cursor); if (el) el.classList.add('grabbed');
+    hintbar.classList.add('show');
+    const p = work[grabbed.epic][grabbed.idx];
+    say('Взято: '+(D.WT[p.wt]?D.WT[p.wt].label:p.wt)+'. Стрелками влево-вправо перенесите между релизами, Enter — положить, Esc — отмена.');
+    paintDropzones();
+  }
+
+  // двигаем взятую работу по релизам
+  function shift(d) {
+    if (!grabbed) return;
+    const p = work[grabbed.epic][grabbed.idx];
+    const i = cols.findIndex(c => c.key === p.col);
+    const ni = Math.max(0, Math.min(cols.length - 1, i + d));
+    if (ni === i) return;
+    p.col = cols[ni].key;
+    // перерисуем (индексы pill в массиве не меняются, меняется только колонка)
+    render();
+    // курсор должен следовать за взятой работой
+    cursor = flat.findIndex(f => f.epic===grabbed.epic && f.idx===grabbed.idx);
+    applyRoving();
+    const el = pillEl(cursor); if (el) el.classList.add('grabbed');
+    paintDropzones();
+    say('Релиз '+relShort(p.col));
+  }
+
+  function drop() {
+    if (!grabbed) return;
+    const p = work[grabbed.epic][grabbed.idx];
+    const moved = p.col !== grabbed.fromCol;
+    const el = pillEl(cursor); if (el) el.classList.remove('grabbed');
+    grid.querySelectorAll('.cell').forEach(c => c.classList.remove('drop-ok','drop-target'));
+    hintbar.classList.remove('show');
+    say(moved ? 'Положено в релиз '+relShort(p.col)+'. Перенос с '+relShort(grabbed.fromCol)+'.' : 'Положено без переноса.');
+    grabbed = null;
+    focusCursor();
+  }
+
+  function cancel() {
+    if (!grabbed) return;
+    const p = work[grabbed.epic][grabbed.idx];
+    p.col = grabbed.fromCol; // вернуть
+    const wasEpic = grabbed.epic, wasIdx = grabbed.idx;
+    grabbed = null;
+    render();
+    cursor = flat.findIndex(f => f.epic===wasEpic && f.idx===wasIdx);
+    applyRoving();
+    hintbar.classList.remove('show');
+    say('Отменено, работа осталась в релизе '+relShort(p.col));
+    focusCursor();
+  }
+
+  function say(t){ live.textContent = ''; setTimeout(()=>{ live.textContent = t; }, 30); }
+
+  // делегированный фокус по клику/табу
+  grid.addEventListener('focusin', e => {
+    const pill = e.target.closest('.pill');
+    if (!pill) return;
+    const fi = +pill.dataset.fi;
+    if (!grabbed && fi >= 0) cursor = fi;
+  });
+
+  // клавиатура на уровне сетки
+  grid.addEventListener('keydown', e => {
+    const k = e.key;
+    if (grabbed) {
+      if (k === 'ArrowRight') { e.preventDefault(); shift(1); }
+      else if (k === 'ArrowLeft') { e.preventDefault(); shift(-1); }
+      else if (k === 'Enter' || k === ' ') { e.preventDefault(); drop(); }
+      else if (k === 'Escape') { e.preventDefault(); cancel(); }
+      return;
+    }
+    if (k === 'ArrowRight' || k === 'ArrowDown') { e.preventDefault(); moveFocus(1); }
+    else if (k === 'ArrowLeft' || k === 'ArrowUp') { e.preventDefault(); moveFocus(-1); }
+    else if (k === 'Enter' || k === ' ') { e.preventDefault(); grab(); }
+    else if (k === 'Home') { e.preventDefault(); cursor = 0; grid.querySelectorAll('.pill').forEach(el=>el.tabIndex=-1); focusCursor(); }
+    else if (k === 'End') { e.preventDefault(); cursor = flat.length-1; grid.querySelectorAll('.pill').forEach(el=>el.tabIndex=-1); focusCursor(); }
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    grabbed = null; seed(); cursor = 0; render();
+    hintbar.classList.remove('show'); say('Состояние сброшено');
+  });
+  document.getElementById('tt').addEventListener('click', () => { const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark'); });
+
+  render();
+})();
+</script>
+</body>
+</html>
