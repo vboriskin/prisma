@@ -40,6 +40,10 @@ const _rawState = {
   ganttMode: 'detailedTasks',     // V14: only mode now (B2 retired GanttV2)
   ganttEpicsWell: 'none',
   epicDeps: {},
+  // F2 Milestone'ы — вертикальные контрольные точки на Ганте («код-фриз»,
+  // «релиз-кандидат»). Каждая: { id, date: 'YYYY-MM-DD', label }. Рендерятся
+  // как today-line (дата → позиция внутри окна релиза, год-агностично).
+  milestones: [],
   // V14: gantt2Zoom / gantt2ShowDeps / gantt2Team removed (B2)
   // V14 (B4): plan-lock state. `null` = план редактируется свободно.
   // `{ at: ISO, by: 'user' }` = план зафиксирован — все переносы

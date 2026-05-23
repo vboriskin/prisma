@@ -74,6 +74,12 @@ function formatLongRange(sub) {
   return `${left} – ${right}`;
 }
 
+// F1 Churn-heat — flame-иконка (lucide), inline SVG (без эмодзи по брендбуку).
+// Метит «нестабильные» эпики, переезжающие между релизами 3+ раз.
+const _CHURN_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>';
+
+const CHURN_THRESHOLD = 3;
+
 export const GanttView = {
   // Wave1 P-GR §B4 — приватный фильтр-state `gf` удалён: единственным
   // потребителем был `getRows()`, фильтры жили в `FilterEngine`, а локальный
@@ -315,6 +321,86 @@ export const GanttView = {
    это тень функционально работала как бордер, нарушая Spine no-shadows
    doctrine. Заменено на правильный border (см. G-21 выше) или удалено
    совсем (для pill — оставляем только stripe). */
+
+/* F1 Churn-heat — бейдж «нестабильного» эпика (3+ переносов между релизами).
+   Один сигнал, drift-токен (амбер «внимание»), без заливки всей строки —
+   чтобы не плодить «свет от ёлки». Тот же chip-язык, что и у deps-badge. */
+.v16-epic-churn {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0 4px; height: 14px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--prizma-drift, #B07B1A) 45%, transparent);
+  border-radius: 3px;
+  color: var(--prizma-drift, #B07B1A);
+  vertical-align: middle;
+  cursor: default;
+}
+.v16-epic-churn > svg { display: block; }
+.v16-epic-churn-n {
+  font: 600 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  letter-spacing: .2px;
+}
+
+/* F2 Milestone'ы — вертикальная контрольная точка. Отличается от today-line
+   именованным флажком сверху + точечным (не штриховым) стилем линии и более
+   низким z-index (4 у «сегодня» побеждает). */
+.gdt-milestone-line {
+  position: absolute;
+  top: 0;
+  width: 0;
+  border-left: 1px dotted var(--prizma-text-secondary, var(--text-2, #64748b));
+  pointer-events: none;
+  z-index: 3;
+}
+.gdt-milestone-line[hidden] { display: none; }
+.gdt-milestone-flag {
+  position: absolute;
+  top: 2px; left: 0;
+  transform: translateX(-50%);
+  max-width: 120px;
+  padding: 1px 5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--prizma-surface, var(--surface, #fff));
+  border: 1px solid var(--prizma-border, var(--border, #e2e8f0));
+  border-top: 2px solid var(--prizma-information, #4f46e5);
+  border-radius: 0 0 3px 3px;
+  color: var(--prizma-text-secondary, var(--text-2, #64748b));
+  font: 700 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  pointer-events: auto;
+  z-index: 5;
+}
+
+/* F2 — модалка управления вехами. */
+.ms-add-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.ms-add-row .re-field-input { margin: 0; }
+.ms-add-row #ms-label { flex: 1; }
+.ms-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.ms-empty { padding: 16px; text-align: center; color: var(--prizma-text-tertiary, var(--text-3, #94a3b8)); font-size: 12px; }
+.ms-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--prizma-border, var(--border, #e2e8f0));
+  border-radius: 6px;
+}
+.ms-item-date {
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--prizma-information, #4f46e5);
+  min-width: 58px;
+}
+.ms-item-label { flex: 1; font-size: 13px; color: var(--prizma-text-primary, var(--text-1)); }
+.ms-item-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; border: none; border-radius: 4px;
+  color: var(--prizma-text-tertiary, var(--text-3, #94a3b8));
+  cursor: pointer;
+}
+.ms-item-del:hover { color: var(--prizma-off-course, #C13838); background: var(--prizma-surface-2, rgba(0,0,0,.04)); }
+.ms-count { font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3, #94a3b8)); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt-style';
@@ -364,6 +450,15 @@ export const GanttView = {
       annoBtn.addEventListener('click', async () => {
         const mod = await import('../components/cellAnnotationsBrowser.js');
         mod.openAnnotationsBrowser();
+      });
+    }
+    // F2 — управление вехами/контрольными точками.
+    const msBtn = document.getElementById('btn-gantt-milestones');
+    if (msBtn && !msBtn._gdtMsBound) {
+      msBtn._gdtMsBound = true;
+      msBtn.addEventListener('click', async () => {
+        const mod = await import('../components/milestonesModal.js');
+        mod.openMilestonesModal({ onSaved: () => GanttView.renderChart() });
       });
     }
   },
@@ -1554,6 +1649,16 @@ export const GanttView = {
         const _depsBadge = (_depsOut || _depsIn)
           ? `<button type="button" class="v16-epic-deps-badge" data-epic-key="${esc(_epicKey)}" data-tip="${esc(_depsTooltip)}" aria-label="Зависимости эпика: ${_depsOut ? 'зависит от ' + _depsOut : ''}${_depsOut && _depsIn ? ', ' : ''}${_depsIn ? 'блокирует ' + _depsIn : ''}" title="Открыть граф зависимостей">${_depsOut ? `<span class="v16-epic-deps-in">←${_depsOut}</span>` : ''}${_depsIn ? `<span class="v16-epic-deps-out">→${_depsIn}</span>` : ''}</button>`
           : '';
+        // F1 Churn-heat — эпик с ≥3 зафиксированными переносами «нестабилен»
+        // (переезжает из релиза в релиз). В большом плане такие тонут среди
+        // стабильных — даём компактный flame-бейдж с числом переносов в первой
+        // позиции мета-строки (источник: row.ganttArrows, уже считается).
+        const _churnCount = Array.isArray(row.ganttArrows) ? row.ganttArrows.length : 0;
+        const _isChurny   = _churnCount >= CHURN_THRESHOLD;
+        const _churnTip   = `Нестабильный эпик: ${_churnCount} ${pl(_churnCount, ['перенос', 'переноса', 'переносов'])} между релизами`;
+        const _churnBadge = _isChurny
+          ? `<span class="v16-epic-churn" data-tip="${esc(_churnTip)}" title="${esc(_churnTip)}" aria-label="${esc(_churnTip)}">${_CHURN_SVG}<span class="v16-epic-churn-n">${_churnCount}</span></span>`
+          : '';
         const assignees    = toTags(row.assignee);
         const hasAssignee  = assignees.length > 0;
         const assigneeText = hasAssignee ? assignees.join(', ') : 'без исполнителя';
@@ -1834,7 +1939,7 @@ export const GanttView = {
             <span class="v16-epic-stripe" style="background:${_epicStripeColor}" aria-hidden="true"></span>
             <div class="v16-epic-name gantt-row-label-name">${esc(epicText)}</div>
             <div class="v16-epic-sub gantt-row-label-sub">
-              ${_depsBadge || ''}${_depsBadge ? '<span class="v16-epic-cat-sep">·</span>' : ''}<span class="v16-epic-cats">${catHtml}</span>
+              ${_churnBadge}${_depsBadge || ''}${(_churnBadge || _depsBadge) ? '<span class="v16-epic-cat-sep">·</span>' : ''}<span class="v16-epic-cats">${catHtml}</span>
               <button type="button" class="v16-epic-deps-edit" data-epic-key="${esc(_epicKey)}" title="Зависимости эпика" aria-label="Указать зависимости">
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><line x1="8.2" y1="10.7" x2="15.8" y2="6.3"/><line x1="8.2" y1="13.3" x2="15.8" y2="17.7"/></svg>
               </button>
@@ -2031,6 +2136,17 @@ export const GanttView = {
             </div>`
           : '';
         const todayPctAttr = (todayPct !== null) ? ` data-today-pct="${todayPct.toFixed(2)}" data-today-label="${esc(todayLabel)}"` : '';
+        // F2 — DOY-границы окна колодца для позиционирования milestone-линий
+        // (тот же date→x маппинг, что и today-line; год-агностично, как _bounds).
+        const _winAttr = (() => {
+          if (!_bounds) return '';
+          const yr = today.getFullYear();
+          const toDoy = (mmdd) => {
+            const mm = Math.floor(mmdd / 100), dd = mmdd % 100;
+            return Math.floor((Date.UTC(yr, mm - 1, dd) - Date.UTC(yr, 0, 1)) / 86400000);
+          };
+          return ` data-win-start="${toDoy(_bounds.start)}" data-win-end="${toDoy(_bounds.end)}"`;
+        })();
         // #1 C5 — eye-button: скрыть колодец локально (state.ganttHiddenReleases).
         // Для backlog не показываем (его скрывать смысла нет — наглядность пустых задач).
         // AUDIT-6 — SVG eye-off вместо «×» (× читался как «удалить релиз»).
@@ -2057,7 +2173,7 @@ export const GanttView = {
           }
           return ticks.join('');
         })();
-        return `<div class="gantt-header-col" data-col="${esc(c.key)}"${todayPctAttr} style="position:relative">
+        return `<div class="gantt-header-col" data-col="${esc(c.key)}"${todayPctAttr}${_winAttr} style="position:relative">
           ${distSpark}
           ${weekTicks}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
@@ -2090,7 +2206,20 @@ export const GanttView = {
            <button type="button" class="gdt-hidden-releases-show-all">Показать все</button>
          </div>`
       : '';
-    wrap.innerHTML = `<div class="gantt-container gdt-container">${hiddenBanner}${header}<div class="gantt-body">${body}</div>${legend}<div class="gdt-today-line" hidden></div></div>`;
+    // F2 — milestone-линии: один div на веху, позиционируется в
+    // _positionMilestoneLines после layout (как today-line). Скрыты до
+    // позиционирования, чтобы не мелькать в (0,0).
+    const milestonesHtml = (Array.isArray(state.milestones) ? state.milestones : [])
+      .map(ms => {
+        const d = String(ms.date ?? '');
+        const dm = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        const shortD = dm ? `${dm[3]}.${dm[2]}` : '';
+        const lbl = String(ms.label ?? '').trim() || shortD || 'веха';
+        const tip = [String(ms.label ?? '').trim(), shortD].filter(Boolean).join(' · ') || 'Веха';
+        return `<div class="gdt-milestone-line" data-ms-id="${esc(String(ms.id ?? ''))}" data-ms-date="${esc(d)}" hidden><span class="gdt-milestone-flag" title="${esc(tip)}">${esc(lbl)}</span></div>`;
+      })
+      .join('');
+    wrap.innerHTML = `<div class="gantt-container gdt-container">${hiddenBanner}${header}<div class="gantt-body">${body}</div>${legend}<div class="gdt-today-line" hidden></div>${milestonesHtml}</div>`;
     // #2: do NOT force overflow:visible — that killed the horizontal scrollbar
     //   on #gantt-wrap (defined as overflow-x:auto in styles.css). Let CSS win.
     wrap.style.overflow = '';
@@ -3620,6 +3749,7 @@ export const GanttView = {
     GanttView.bindFastTooltip(wrap);
 
     GanttView._positionTodayLine(wrap);
+    GanttView._positionMilestoneLines(wrap);
     GanttView._bindTodayLineResize(wrap);
 
     // V22 G-03 (audit-experts-2026-05-15 Demin C3) + G-08 (Demin H7) —
@@ -3663,12 +3793,59 @@ export const GanttView = {
     line.title = label ? `Сегодня — ${label}` : 'Сегодня';
     line.hidden = false;
   },
+  /**
+   * F2 Milestone'ы — вертикальные контрольные точки. Та же модель, что и
+   * today-line: дата вехи → DOY → колодец, в чьё окно она попадает → процент
+   * внутри окна → пиксельная позиция. Год — текущий (окна год-агностичны, как
+   * и весь Гант). Веха вне всех окон — скрыта (как today-line вне окон).
+   */
+  _positionMilestoneLines(wrap) {
+    if (!wrap) return;
+    const container = wrap.querySelector('.gantt-container');
+    if (!container) return;
+    const lines = container.querySelectorAll('.gdt-milestone-line');
+    if (!lines.length) return;
+    const headers = [...container.querySelectorAll('.gantt-header-col[data-win-start]')];
+    const ctnRect = container.getBoundingClientRect();
+    const headerEl = container.querySelector('.gantt-header');
+    const headerH = headerEl ? headerEl.offsetHeight : 0;   // флажок ставим под шапкой колодцев
+    const yr = new Date().getFullYear();
+    const isoToDoy = (iso) => {
+      const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return null;
+      return Math.floor((Date.UTC(yr, (+m[2]) - 1, +m[3]) - Date.UTC(yr, 0, 1)) / 86400000);
+    };
+    lines.forEach(line => {
+      const doy = isoToDoy(line.dataset.msDate);
+      if (doy == null || !headers.length) { line.hidden = true; return; }
+      let placed = false;
+      for (const hdr of headers) {
+        const s = parseInt(hdr.dataset.winStart, 10);
+        let e = parseInt(hdr.dataset.winEnd, 10);
+        if (!Number.isFinite(s) || !Number.isFinite(e)) continue;
+        let d = doy;
+        if (e < s) { e += 365; if (d < s) d += 365; }   // окно через год-rollover (28.12–15.01)
+        if (d < s || d > e) continue;
+        const pct = (e === s) ? 50 : ((d - s) / (e - s)) * 100;
+        const hdrRect = hdr.getBoundingClientRect();
+        const leftPx = (hdrRect.left - ctnRect.left) + (hdrRect.width * pct / 100);
+        const flag = line.querySelector('.gdt-milestone-flag');
+        if (flag) flag.style.top = `${headerH + 2}px`;   // под лейблами колодцев (1.20/1.21), не наезжая
+        line.style.left = `${leftPx.toFixed(1)}px`;
+        line.style.height = `${container.scrollHeight}px`;
+        line.hidden = false;
+        placed = true;
+        break;
+      }
+      if (!placed) line.hidden = true;
+    });
+  },
   _todayLineResizeBound: false,
   _todayLineRO: null,
   _bindTodayLineResize(wrap) {
     const reposition = () => {
       const w = document.getElementById('gantt-wrap');
-      if (w) GanttView._positionTodayLine(w);
+      if (w) { GanttView._positionTodayLine(w); GanttView._positionMilestoneLines(w); }
     };
     // window-resize — стабильный таргет, биндим один раз.
     if (!GanttView._todayLineResizeBound) {

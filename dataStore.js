@@ -72,6 +72,9 @@ function _buildSettingsPayload() {
     // overtime/backlog) не редактируются — они в constants.LEGACY_RELEASE_LIST.
     releases:            Array.isArray(state.releases) ? state.releases : [],
     ganttHiddenReleases: Array.isArray(state.ganttHiddenReleases) ? state.ganttHiddenReleases : [],
+    // F2 — контрольные точки/вехи Ганта. Forward+backward-safe: старые payload'ы
+    // без ключа → state-default []; старый код игнорирует незнакомый ключ.
+    milestones:          Array.isArray(state.milestones) ? state.milestones : [],
     // V21 W — settings payload version.
     // 0→1: drop summaryMode. 1→2: notifications. 2→3: meta. 3→4: releases + ganttHiddenReleases + filters.release массив.
     version:          4,
@@ -286,6 +289,7 @@ export const Storage = {
       // #1 — пользовательские релизы + локальный «глаз» Ганта.
       if (Array.isArray(s.releases)) state.releases = s.releases;
       if (Array.isArray(s.ganttHiddenReleases)) state.ganttHiddenReleases = s.ganttHiddenReleases;
+      if (Array.isArray(s.milestones)) state.milestones = s.milestones;   // F2 — вехи
       syncColumnSettings();
     });
   },
