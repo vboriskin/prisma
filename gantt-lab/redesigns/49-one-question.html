@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 49 · Один вопрос</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+
+  /* ── question switch ── */
+  .switchbar { display: flex; justify-content: center; gap: 8px; padding: 18px 22px 4px; flex: none; }
+  .qbtn { height: 40px; padding: 0 20px; font: 600 14px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-lg); cursor: pointer; transition: color .18s var(--ease-calm), border-color .18s, background .18s; }
+  .qbtn:hover { color: var(--prizma-text-primary); }
+  .qbtn.on { color: var(--prizma-text-primary); border-color: var(--prizma-text-primary); background: color-mix(in srgb, var(--prizma-text-primary) 6%, transparent); }
+
+  .eyebrowrow { display: flex; justify-content: center; padding: 8px 0 0; flex: none; }
+
+  /* ── stage: one focal answer ── */
+  .stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 22px 32px; }
+  .view { width: 100%; max-width: 940px; display: none; flex-direction: column; align-items: center; opacity: 0; transform: translateY(8px); }
+  .view.on { display: flex; animation: rise .42s var(--ease-calm) forwards; }
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+
+  .focal { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 26px; text-align: center; }
+  .focal .big { font: 800 132px/0.95 var(--mono); font-feature-settings: "tnum" 1; letter-spacing: -4px; color: var(--prizma-text-primary); }
+  .focal .big .u { font-size: 52px; font-weight: 700; color: var(--prizma-text-tertiary); letter-spacing: -2px; }
+  .focal .big.ok { color: var(--prizma-on-course); }
+  .focal .big.drift { color: var(--prizma-drift); }
+  .focal .big.off { color: var(--prizma-off-course); }
+  .focal .cap { font: 500 15px/1.4 var(--font); color: var(--prizma-text-secondary); max-width: 560px; }
+  .focal .cap b { color: var(--prizma-text-primary); font-weight: 700; }
+
+  /* supporting capacity bars */
+  .support { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 12px; }
+  .crow { display: grid; grid-template-columns: 120px 1fr 96px; align-items: center; gap: 14px; }
+  .crow .nm { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); text-align: right; }
+  .crow .track { position: relative; height: 22px; border-radius: var(--r-sm); background: var(--prizma-bg-tertiary); overflow: hidden; }
+  .crow .track .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-sm); background: var(--prizma-text-secondary); transition: width .5s var(--ease-calm); }
+  .crow .track .fill.over { background: var(--prizma-off-course); }
+  .crow .track .cap-mark { position: absolute; top: -2px; bottom: -2px; width: 0; border-left: 1.5px dashed var(--prizma-text-tertiary); }
+  .crow .val { font: 700 12.5px/1 var(--mono); color: var(--prizma-text-secondary); text-align: left; }
+  .crow .val.over { color: var(--prizma-off-course); }
+
+  /* risk list */
+  .rlist { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 8px; }
+  .ritem { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); background: var(--prizma-bg-elevated); position: relative; overflow: hidden; }
+  .ritem::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .ritem.off::before { background: var(--prizma-off-course); }
+  .ritem.drift::before { background: var(--prizma-drift); }
+  .ritem .team-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; padding: 4px 7px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-secondary); flex: none; }
+  .ritem .enm { font: 600 13.5px/1.3 var(--font); color: var(--prizma-text-primary); flex: 1; }
+  .ritem .rtag { font: 700 9.5px/1 var(--mono); letter-spacing: .3px; padding: 4px 7px; border-radius: var(--r-sm); flex: none; }
+  .ritem.off .rtag { color: var(--prizma-off-course); background: var(--prizma-off-course-bg); }
+  .ritem.drift .rtag { color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+  .ritem .mv { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); flex: none; }
+
+  /* moves list (что движется) */
+  .mlist { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 8px; }
+  .mitem { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--prizma-border); }
+  .mitem .enm { font: 600 13px/1.3 var(--font); color: var(--prizma-text-primary); flex: 1; }
+  .mitem .team-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; padding: 3px 6px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); color: var(--prizma-text-tertiary); flex: none; }
+  .mitem .churn { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+  .mitem .churn .blips { display: inline-flex; gap: 3px; }
+  .mitem .churn .blips i { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-drift); }
+  .mitem .churn .n { font: 700 12px/1 var(--mono); color: var(--prizma-text-secondary); min-width: 56px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Один вопрос</span>
+    <span class="sub">один экран — один ответ</span>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="switchbar" id="switch">
+    <button class="qbtn on" data-q="pace">Успеваем?</button>
+    <button class="qbtn" data-q="risk">Что под риском?</button>
+    <button class="qbtn" data-q="load">Кто перегружен?</button>
+    <button class="qbtn" data-q="move">Что движется?</button>
+  </div>
+  <div class="eyebrowrow"><span class="pz-eyebrow" id="eyebrow">Редизайн 49 · окно 1.21</span></div>
+
+  <div class="stage" id="stage">
+    <div class="view" data-q="pace" id="v-pace"></div>
+    <div class="view" data-q="risk" id="v-risk"></div>
+    <div class="view" data-q="load" id="v-load"></div>
+    <div class="view" data-q="move" id="v-move"></div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const epics = D.epics;
+
+  // ── метрики ──
+  const onCourse = epics.filter(e => !e.risk).length;
+  const drift = epics.filter(e => e.risk === 'drift').length;
+  const off = epics.filter(e => e.risk === 'off-course').length;
+  const pctOnCourse = Math.round(onCourse / epics.length * 100);
+
+  // загрузка команд в текущем окне 1.21 (как в scoreboard)
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  const loads = D.teams.map(t => {
+    const used = H.loadByTeamRelease(t, 'r121');
+    const cap = CAPACITY[t] || 4;
+    return { team: t, used, cap, util: used / cap };
+  }).sort((a, b) => b.util - a.util);
+  const overTeams = loads.filter(l => l.util > 1).length;
+  const maxUtil = Math.max(1.2, ...loads.map(l => l.util));
+
+  // ── view: Успеваем? — большой % + capacity bars ──
+  function vPace() {
+    const cls = pctOnCourse >= 70 ? 'ok' : pctOnCourse >= 50 ? 'drift' : 'off';
+    let bars = loads.slice().sort((a, b) => b.util - a.util).map(l => {
+      const pct = Math.min(100, l.util / maxUtil * 100);
+      const capPct = Math.min(100, 1 / maxUtil * 100);
+      const over = l.util > 1;
+      return '<div class="crow"><span class="nm">' + esc(l.team) + '</span>' +
+        '<span class="track"><span class="fill' + (over ? ' over' : '') + '" style="width:' + pct.toFixed(1) + '%"></span>' +
+        '<span class="cap-mark" style="left:' + capPct.toFixed(1) + '%"></span></span>' +
+        '<span class="val' + (over ? ' over' : '') + '">' + l.used + ' / ' + l.cap + ' раб</span></div>';
+    }).join('');
+    return '<div class="focal"><div class="big ' + cls + '">' + pctOnCourse + '<span class="u">%</span></div>' +
+      '<div class="cap"><b>' + onCourse + ' из ' + epics.length + '</b> эпиков идут по курсу. ' +
+      (off ? '<b>' + off + '</b> — под угрозой срыва, ' : '') + drift + ' дрейфуют.</div></div>' +
+      '<div class="support">' + bars + '</div>';
+  }
+
+  // ── view: Что под риском? — большой count + список ──
+  function vRisk() {
+    const atRisk = epics.filter(e => e.risk)
+      .sort((a, b) => (b.risk === 'off-course' ? 2 : 1) - (a.risk === 'off-course' ? 2 : 1) || (b.moves || 0) - (a.moves || 0));
+    const cls = off > 0 ? 'off' : 'drift';
+    let list = atRisk.map(e => {
+      const k = e.risk === 'off-course' ? 'off' : 'drift';
+      const tag = e.risk === 'off-course' ? 'СРЫВ' : 'ДРЕЙФ';
+      return '<div class="ritem ' + k + '"><span class="team-tag">' + esc(e.team) + '</span>' +
+        '<span class="enm">' + esc(e.epic) + '</span>' +
+        '<span class="mv">' + (e.moves || 0) + ' пер.</span>' +
+        '<span class="rtag">' + tag + '</span></div>';
+    }).join('');
+    return '<div class="focal"><div class="big ' + cls + '">' + atRisk.length + '</div>' +
+      '<div class="cap">эпиков под риском — <b>' + off + '</b> на грани срыва, <b>' + drift + '</b> в дрейфе. Ниже — по приоритету.</div></div>' +
+      '<div class="rlist">' + list + '</div>';
+  }
+
+  // ── view: Кто перегружен? — топ перегруженных ──
+  function vLoad() {
+    const top = loads[0];
+    const cls = top.util > 1 ? 'off' : top.util > 0.85 ? 'drift' : 'ok';
+    let bars = loads.map(l => {
+      const pct = Math.min(100, l.util / maxUtil * 100);
+      const capPct = Math.min(100, 1 / maxUtil * 100);
+      const over = l.util > 1;
+      return '<div class="crow"><span class="nm">' + esc(l.team) + '</span>' +
+        '<span class="track"><span class="fill' + (over ? ' over' : '') + '" style="width:' + pct.toFixed(1) + '%"></span>' +
+        '<span class="cap-mark" style="left:' + capPct.toFixed(1) + '%"></span></span>' +
+        '<span class="val' + (over ? ' over' : '') + '">' + Math.round(l.util * 100) + '%</span></div>';
+    }).join('');
+    return '<div class="focal"><div class="big ' + cls + '">' + esc(top.team) + '</div>' +
+      '<div class="cap">самая загруженная команда — <b>' + Math.round(top.util * 100) + '%</b> ёмкости в окне 1.21 (' + top.used + ' работ при ёмкости ' + top.cap + '). ' +
+      (overTeams ? '<b>' + overTeams + '</b> ' + (overTeams === 1 ? 'команда' : 'команды') + ' в перегрузе.' : 'Перегруза нет.') + '</div></div>' +
+      '<div class="support">' + bars + '</div>';
+  }
+
+  // ── view: Что движется? — churn / moves ──
+  function vMove() {
+    const moved = epics.filter(e => (e.moves || 0) > 0).sort((a, b) => (b.moves || 0) - (a.moves || 0));
+    const totMoves = epics.reduce((a, e) => a + (e.moves || 0), 0);
+    let list = moved.map(e => {
+      const n = e.moves || 0;
+      const blips = Array.from({ length: Math.min(n, 6) }, () => '<i></i>').join('');
+      return '<div class="mitem"><span class="team-tag">' + esc(e.team) + '</span>' +
+        '<span class="enm">' + esc(e.epic) + '</span>' +
+        '<span class="churn"><span class="blips">' + blips + '</span><span class="n">' + n + ' пер.</span></span></div>';
+    }).join('');
+    return '<div class="focal"><div class="big drift">' + totMoves + '</div>' +
+      '<div class="cap">переносов между релизами за квартал у <b>' + moved.length + '</b> эпиков. Чем больше точек — тем нестабильнее план.</div></div>' +
+      '<div class="mlist">' + list + '</div>';
+  }
+
+  const builders = { pace: vPace, risk: vRisk, load: vLoad, move: vMove };
+  const eyebrowTxt = {
+    pace: 'Редизайн 49 · Успеваем · окно 1.21',
+    risk: 'Редизайн 49 · Под риском · портфель',
+    load: 'Редизайн 49 · Перегруз · окно 1.21',
+    move: 'Редизайн 49 · Движение · квартал',
+  };
+
+  let cur = 'pace';
+  function show(q) {
+    cur = q;
+    document.querySelectorAll('#switch .qbtn').forEach(b => b.classList.toggle('on', b.dataset.q === q));
+    document.getElementById('eyebrow').textContent = eyebrowTxt[q];
+    document.querySelectorAll('.view').forEach(v => {
+      const on = v.dataset.q === q;
+      if (on) {
+        v.innerHTML = builders[q]();
+        v.classList.remove('on');         // restart animation
+        void v.offsetWidth;
+        v.classList.add('on');
+      } else {
+        v.classList.remove('on');
+      }
+    });
+  }
+
+  document.getElementById('switch').addEventListener('click', ev => {
+    const b = ev.target.closest('.qbtn'); if (!b) return;
+    if (b.dataset.q === cur) return;
+    show(b.dataset.q);
+  });
+
+  // ── init: sync + setTimeout (gotcha a) ──
+  show('pace');
+  setTimeout(() => show(cur), 60);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

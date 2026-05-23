@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 41 · Группировка</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 700px; }
+
+  /* ── сегментированный переключатель «Группировать по» ── */
+  .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 18px 0 16px; }
+  .bar .lbl { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); }
+  .seg { display: inline-flex; align-items: stretch; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .seg button { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; font: 600 12.5px/1 var(--font);
+    color: var(--prizma-text-secondary); background: transparent; border: none; border-right: 1px solid var(--prizma-border); cursor: pointer;
+    transition: color .2s var(--ease-calm); }
+  .seg button:last-child { border-right: none; }
+  .seg button::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--prizma-information); transition: width .2s var(--ease-calm); }
+  .seg button:hover { color: var(--prizma-text-primary); }
+  .seg button.on { color: var(--prizma-text-primary); padding-left: 16px; }
+  .seg button.on::before { width: 3px; }
+  .seg button svg { width: 14px; height: 14px; flex: none; color: var(--prizma-text-tertiary); }
+  .seg button.on svg { color: var(--prizma-information); }
+  .bar .res { margin-left: auto; font-size: 12px; color: var(--prizma-text-tertiary); }
+  .bar .res b { font: 700 13px/1 var(--mono); color: var(--prizma-text-primary); }
+
+  /* ── мини-гант ── */
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 620px; background: var(--prizma-bg-elevated); }
+  .grid { display: grid; grid-template-columns: 240px repeat(5, minmax(130px,1fr)); min-width: 890px; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 9px 10px; min-height: 50px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 10px 10px; min-height: 0; }
+  .ghead .rel { font: 300 20px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 14px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 10.5px; color: var(--prizma-text-tertiary); }
+
+  /* заголовок группы — занимает всю ширину; 3px stripe-left для семантики риска */
+  .grouprow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); border-left: 3px solid transparent; }
+  .grouprow .gmark { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary);
+    border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; min-width: 24px; text-align: center; }
+  .grouprow b { font-size: 12.5px; }
+  .grouprow .gc { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .grouprow .dotw { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 2; display: flex; flex-direction: column; gap: 3px; justify-content: center; }
+  .elabel .nm { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .elabel .meta { display: flex; align-items: center; gap: 7px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .elabel .riskdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 5px; align-content: center; align-items: center; position: relative; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  /* подсветка пилюли исполнителя в режиме «по Исполнителю» */
+  .pill.hl { box-shadow: inset 0 0 0 1px var(--prizma-information); }
+  .pill.fade { opacity: .3; }
+
+  /* FLIP-перестроение: строка эпика как контейнер-контент с переходом transform/opacity */
+  .erow { display: contents; }
+  .erow .gcell { transition: opacity .26s var(--ease-calm); }
+  /* во время реорганизации применяем transform к липким клеткам-меткам и ячейкам */
+  .grid.flip .gcell, .grid.flip .grouprow { transition: transform .42s var(--ease-calm), opacity .26s var(--ease-calm); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 41 · Группировка</div>
+      <h1>Группировка</h1>
+      <p>Один и тот же набор эпиков перестраивается под разные срезы. Переключатель «Группировать по» меняет секции-заголовки: <b>Команда</b> · <b>Релиз</b> · <b>Исполнитель</b> · <b>Риск</b>. Строки переезжают плавным reflow (FLIP по transform + opacity, <span class="pz-mono">--ease-calm</span>). Активный срез помечен полосой-слева.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <span class="lbl">Группировать по</span>
+    <div class="seg" id="seg">
+      <button data-mode="team" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 4a4 4 0 0 1 0 8M21 20a6 6 0 0 0-5-5.9"/></svg>Команде</button>
+      <button data-mode="release"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>Релизу</button>
+      <button data-mode="who"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>Исполнителю</button>
+      <button data-mode="risk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>Риску</button>
+    </div>
+    <span class="res">срез: <b id="grpCount">0</b> групп</span>
+  </div>
+
+  <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+  const relShort = k => { const c = cols.find(c=>c.key===k); return c ? c.short : k; };
+
+  let mode = 'team';
+  let whoFilter = null; // активный исполнитель для подсветки в режиме «по Исполнителю»
+
+  // ── построение групп для текущего среза ──
+  // Возвращает [{ key, mark, label, color, epics:[epic], who? }]
+  function buildGroups() {
+    if (mode === 'team') {
+      return D.teams.map(t => ({
+        key: 't_'+t, mark: t.slice(0,2), label: t, color: 'transparent',
+        epics: D.helpers.teamEpics(t)
+      }));
+    }
+    if (mode === 'release') {
+      // эпик попадает в самый ранний релиз, где есть его работа (по порядку колонок)
+      return cols.map(c => {
+        const eps = D.epics.filter(e => {
+          const firstCol = cols.find(cc => e.pills.some(p => p.col === cc.key));
+          return firstCol && firstCol.key === c.key;
+        });
+        return { key: 'r_'+c.key, mark: c.short.slice(0,3), label: 'Релиз ' + c.short, color: 'transparent', epics: eps };
+      }).filter(g => g.epics.length);
+    }
+    if (mode === 'who') {
+      // строки на каждого исполнителя; у эпика берём его пилюли этого человека
+      const map = new Map();
+      D.epics.forEach(e => e.pills.forEach(p => {
+        if (!p.who) return;
+        if (!map.has(p.who)) map.set(p.who, new Set());
+        map.get(p.who).add(e);
+      }));
+      const groups = [...map.entries()].sort((a,b)=>b[1].size-a[1].size).map(([who, set]) => ({
+        key: 'w_'+who, mark: who.slice(0,2), label: who, color: 'transparent', who, epics: [...set]
+      }));
+      // эпики вовсе без назначенных исполнителей
+      const unassigned = D.epics.filter(e => !e.pills.some(p => p.who));
+      if (unassigned.length) groups.push({ key: 'w__none', mark: '—', label: 'Без исполнителя', color: 'transparent', who: null, epics: unassigned });
+      return groups;
+    }
+    // risk
+    const order = [
+      { k: 'off-course', mark: 'СР', label: 'Срыв', color: 'var(--prizma-off-course)' },
+      { k: 'drift',      mark: 'ДР', label: 'Дрейф', color: 'var(--prizma-drift)' },
+      { k: null,         mark: 'ОК', label: 'По курсу', color: 'var(--prizma-on-course)' },
+    ];
+    return order.map(o => ({
+      key: 'risk_'+(o.k||'none'), mark: o.mark, label: o.label, color: o.color,
+      epics: D.epics.filter(e => (e.risk || null) === o.k)
+    })).filter(g => g.epics.length);
+  }
+
+  // ── рендер пилюль ячейки эпика ──
+  function cellPills(e, colKey, group) {
+    let html = '';
+    e.pills.forEach(p => {
+      if (p.col !== colKey) return;
+      const isWhoMode = mode === 'who';
+      const matchWho = isWhoMode && group.who && p.who === group.who;
+      const fade = isWhoMode && group.who && p.who && p.who !== group.who;
+      html += '<div class="pill'+(matchWho?' hl':'')+(fade?' fade':'')+'" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+        (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+        '<span class="nm">'+p.wt+'</span>' +
+        (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+    });
+    return html;
+  }
+
+  const grid = document.getElementById('grid');
+
+  function headHtml() {
+    let html = '<div class="gcell ghead"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    return html;
+  }
+
+  function bodyHtml(groups) {
+    let html = '';
+    groups.forEach(g => {
+      const cnt = g.epics.length;
+      const works = g.epics.reduce((n,e)=>n+e.pills.length,0);
+      const dot = g.color !== 'transparent' ? '<span class="dotw" style="background:'+g.color+'"></span>' : '';
+      html += '<div class="grouprow" data-gkey="'+esc(g.key)+'" style="border-left-color:'+g.color+'">' +
+        dot + '<span class="gmark">'+esc(g.mark)+'</span><b>'+esc(g.label)+'</b>' +
+        '<span class="gc">'+cnt+' эпик · '+works+' работ</span></div>';
+      g.epics.forEach(e => {
+        const rdot = e.risk ? '<span class="riskdot" style="background:'+riskColor(e.risk)+'"></span>' : '';
+        html += '<div class="erow">';
+        html += '<div class="gcell elabel" data-epic="'+e.id+'"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+rdot+e.team+' · '+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">'+cellPills(e, c.key, g)+'</div>';
+        });
+        html += '</div>';
+      });
+    });
+    return html;
+  }
+
+  // ── FLIP: запоминаем позиции «вечных» ключей (эпик-метки), перестраиваем, анимируем дельту ──
+  function trackedEls() {
+    // ключ для FLIP — id эпика на липкой метке (одна на эпик, переживает перестроение)
+    return [...grid.querySelectorAll('.elabel[data-epic]')];
+  }
+  function snapshotRects() {
+    const m = new Map();
+    trackedEls().forEach(el => m.set(el.dataset.epic, el.getBoundingClientRect().top));
+    return m;
+  }
+
+  function render(animate) {
+    const groups = buildGroups();
+    document.getElementById('grpCount').textContent = groups.length;
+
+    const firstTops = animate ? snapshotRects() : null;
+    grid.innerHTML = headHtml() + bodyHtml(groups);
+
+    if (!animate) return;
+    // Last: новые позиции; Invert+Play по строкам эпиков (двигаем всю .erow и метку через transform)
+    grid.classList.add('flip');
+    const rows = [...grid.querySelectorAll('.erow')];
+    rows.forEach(row => {
+      const lbl = row.querySelector('.elabel[data-epic]');
+      if (!lbl) return;
+      const id = lbl.dataset.epic;
+      const newTop = lbl.getBoundingClientRect().top;
+      const oldTop = firstTops.has(id) ? firstTops.get(id) : newTop;
+      const dy = oldTop - newTop;
+      const cells = [...row.children];
+      cells.forEach(cell => {
+        cell.style.transition = 'none';
+        cell.style.transform = 'translateY(' + dy + 'px)';
+        cell.style.opacity = Math.abs(dy) > 1 ? '0.5' : '1';
+      });
+    });
+    // принудительный reflow, затем play
+    void grid.offsetWidth;
+    requestAnimationFrame(() => {
+      grid.querySelectorAll('.erow > .gcell').forEach(cell => {
+        cell.style.transition = 'transform .42s var(--ease-calm), opacity .26s var(--ease-calm)';
+        cell.style.transform = '';
+        cell.style.opacity = '';
+      });
+      setTimeout(() => grid.classList.remove('flip'), 460);
+    });
+  }
+
+  // ── управление сегментами ──
+  document.getElementById('seg').addEventListener('click', e => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    const next = btn.dataset.mode;
+    if (next === mode) return;
+    mode = next;
+    [...document.getElementById('seg').children].forEach(b => b.classList.toggle('on', b === btn));
+    render(true);
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  render(false);
+  setTimeout(() => render(false), 60);
+  window.addEventListener('resize', () => { if (!grid.classList.contains('flip')) render(false); });
+})();
+</script>
+</body>
+</html>

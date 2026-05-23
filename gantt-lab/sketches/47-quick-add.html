@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 47 · Быстрое добавление</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1040px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 22px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+
+  .tt { position: fixed; top: 16px; right: 18px; z-index: 50; }
+
+  /* ── omnibox ── */
+  .omni { position: relative; }
+  .omni-row { display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong);
+    border-radius: var(--r-lg); transition: border-color .16s var(--ease-calm), box-shadow .16s var(--ease-calm); }
+  .omni-row.focus { border-color: var(--prizma-information); box-shadow: 0 0 0 3px var(--prizma-information-bg); }
+  .omni-row svg.lead { width: 18px; height: 18px; color: var(--prizma-text-tertiary); flex: none; }
+  .omni-row input { flex: 1; min-width: 0; background: none; border: none; outline: none;
+    color: var(--prizma-text-primary); font: 400 16px/1.3 var(--font); }
+  .omni-row input::placeholder { color: var(--prizma-text-tertiary); }
+  .omni-row .ret { font: 600 10px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-text-tertiary);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-sm); padding: 5px 7px; flex: none; }
+  .omni-row.ready .ret { color: var(--prizma-information); border-color: var(--prizma-information); }
+
+  /* ── token-parse preview ── */
+  .tokens { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+  .tok { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 12px;
+    position: relative; overflow: hidden; border-radius: var(--r-md); border: 1px dashed var(--prizma-border-strong);
+    background: transparent; color: var(--prizma-text-tertiary);
+    font: 500 12.5px/1 var(--font); transition: border-color .18s var(--ease-calm), color .18s, background .18s; }
+  .tok .lab { font: 700 9px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .tok .val { font-weight: 600; }
+  .tok.lit { border-style: solid; border-color: var(--prizma-border-strong); background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+  .tok.lit .lab { color: var(--prizma-text-secondary); }
+  .tok.wt.lit::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .tok.wt.lit { padding-left: 13px; }
+  .tok .mark { width: 12px; height: 12px; flex: none; color: var(--prizma-on-course); opacity: 0; transition: opacity .18s; }
+  .tok.lit .mark { opacity: 1; }
+
+  .examples { margin-top: 18px; display: flex; flex-direction: column; gap: 7px; }
+  .examples .ex-cap { display: flex; align-items: center; gap: 8px; }
+  .ex-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .ex { cursor: pointer; padding: 6px 10px; border: 1px solid var(--prizma-border); border-radius: var(--r-md);
+    background: transparent; color: var(--prizma-text-secondary); font: 500 12px/1 var(--mono);
+    transition: border-color .14s, color .14s; }
+  .ex:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+
+  /* ── мини-гант ── */
+  .preview { margin-top: 30px; }
+  .phead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .phead .ttl { font-size: 14px; font-weight: 700; }
+  .phead .spacer { flex: 1; }
+  .phead .cnt { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .mini { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .mgrid { display: grid; grid-template-columns: 168px repeat(3, 1fr); }
+  .mh { padding: 10px 12px 9px; border-bottom: 1px solid var(--prizma-border-strong); border-left: 1px solid var(--prizma-border); }
+  .mh:first-child { border-left: none; display: flex; align-items: flex-end; }
+  .mh .rel { font: 300 17px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .mh.cur .rel { color: var(--prizma-text-primary); }
+  .mh.cur { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .mh .dt { display: block; margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .ml { padding: 9px 12px; border-bottom: 1px solid var(--prizma-border); font-size: 12.5px; font-weight: 500;
+    display: flex; flex-direction: column; gap: 2px; }
+  .ml .tm { font: 700 9px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .mc { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 9px;
+    display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; min-height: 42px; }
+  .row:last-child .mc, .row:last-child .ml { border-bottom: none; }
+
+  .pp { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); width: fit-content; }
+  .pp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pp .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pp.fresh { animation: spring-in .42s var(--ease-spring) backwards; }
+  @keyframes spring-in { from { opacity: 0; transform: translateY(8px) scale(.86); } to { opacity: 1; transform: none; } }
+
+  .empty-hint { padding: 26px 14px; text-align: center; color: var(--prizma-text-tertiary); font-size: 12.5px; grid-column: 1 / -1; border-left: none; }
+</style>
+</head>
+<body>
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="page">
+    <div class="head">
+      <div class="pz-eyebrow">Скетч 47 · Омнибокс</div>
+      <h1>Быстрое добавление одной строкой</h1>
+      <p>Напишите работу естественно — <span class="pz-mono">BE Платежи 1.21 Сидоров</span>. Парсер на лету распознаёт тип, команду, релиз и исполнителя в любом порядке. Enter — пилюля прилетает в гант.</p>
+    </div>
+
+    <div class="omni">
+      <div class="omni-row" id="omniRow">
+        <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <input id="omni" type="text" placeholder="Напр.: BE Платежи 1.21 Сидоров" autocomplete="off" spellcheck="false" aria-label="Быстрое добавление работы">
+        <span class="ret" id="ret">ENTER</span>
+      </div>
+
+      <div class="tokens" id="tokens">
+        <span class="tok wt" data-slot="wt"><span class="lab">тип</span><span class="val" id="vWt">—</span><svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <span class="tok" data-slot="team"><span class="lab">команда</span><span class="val" id="vTeam">—</span><svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <span class="tok" data-slot="rel"><span class="lab">релиз</span><span class="val" id="vRel">—</span><svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+        <span class="tok" data-slot="who"><span class="lab">кто</span><span class="val" id="vWho">—</span><svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+      </div>
+
+      <div class="examples">
+        <div class="ex-cap"><span class="pz-eyebrow">Примеры — нажмите, чтобы подставить</span></div>
+        <div class="ex-chips" id="exChips"></div>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="phead">
+        <span class="pz-eyebrow">Добавленные работы</span>
+        <span class="ttl">Мини-гант</span>
+        <span class="spacer"></span>
+        <span class="cnt" id="cnt">0 пилюль</span>
+      </div>
+      <div class="mini"><div class="mgrid" id="grid"></div></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtMap = { BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf' };
+  const wtVar = wt => 'var(' + (wtMap[wt] || '--prizma-information') + ')';
+  const fmt = iso => new Date(iso).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const norm = s => (s||'').toLowerCase().replace(/ё/g,'е');
+  function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // дата-релизы для колонок мини-ганта
+  const cols = D.releases.filter(c => c.dated);
+  // словарь известных исполнителей из датасета (для распознавания «кто»)
+  const knownWho = Array.from(new Set(D.epics.flatMap(e => e.pills.map(p => p.who).filter(Boolean))));
+
+  /* ── толерантный парсер: порядок-независимый, нечёткий по команде/релизу ── */
+  function parse(raw) {
+    const out = { wt:null, team:null, rel:null, who:null };
+    const tokens = (raw || '').trim().split(/\s+/).filter(Boolean);
+    const leftover = [];
+    tokens.forEach(tk => {
+      const t = norm(tk);
+      // 1) тип работы — точный ключ WT
+      const wtHit = Object.keys(D.WT).find(k => norm(k) === t || norm(D.WT[k].label) === t);
+      if (!out.wt && wtHit) { out.wt = wtHit; return; }
+      // 2) релиз — цифры вида 1.21 / 121 / r121, либо бэклог/овертайм
+      const relHit = matchRelease(tk);
+      if (!out.rel && relHit) { out.rel = relHit; return; }
+      // 3) команда — нечёткое включение (двусторонний includes)
+      const teamHit = D.teams.find(tm => { const n = norm(tm); return n.includes(t) || (t.length >= 3 && t.includes(n)); });
+      if (!out.team && teamHit) { out.team = teamHit; return; }
+      // 4) исполнитель — известное имя или Слово-с-Заглавной (кириллица), длиннее 2
+      const whoHit = knownWho.find(w => norm(w) === t);
+      if (!out.who && whoHit) { out.who = whoHit; return; }
+      leftover.push(tk);
+    });
+    // если «кто» не распознан, но остался капитализированный кириллический токен — берём его
+    if (!out.who) {
+      const cap = leftover.find(tk => /^[А-ЯЁ][а-яё-]{2,}$/.test(tk));
+      if (cap) out.who = cap;
+    }
+    return out;
+  }
+
+  function matchRelease(tk) {
+    const t = norm(tk);
+    if (/^(бэклог|беклог|backlog)$/.test(t)) return 'backlog';
+    if (/^(овертайм|overtime)$/.test(t)) return 'overtime';
+    // 1.21 → 121, r121 → 121, 121 → 121
+    const digits = t.replace(/^r/,'').replace(/[.\s]/g,'');
+    if (/^\d{2,3}$/.test(digits)) {
+      const hit = D.releases.find(r => r.dated && r.key.replace(/^r/,'') === digits);
+      if (hit) return hit.key;
+      // нечётко: short без точки совпал
+      const fz = D.releases.find(r => r.short.replace('.','') === digits);
+      if (fz) return fz.key;
+    }
+    return null;
+  }
+
+  /* ── token preview ── */
+  const els = {
+    wt: { v: document.getElementById('vWt'), tok: document.querySelector('[data-slot="wt"]') },
+    team: { v: document.getElementById('vTeam'), tok: document.querySelector('[data-slot="team"]') },
+    rel: { v: document.getElementById('vRel'), tok: document.querySelector('[data-slot="rel"]') },
+    who: { v: document.getElementById('vWho'), tok: document.querySelector('[data-slot="who"]') },
+  };
+  const ret = document.getElementById('ret');
+  const omniRow = document.getElementById('omniRow');
+
+  function relShort(k){ const c = D.releases.find(c=>c.key===k); return c?c.short:k; }
+
+  function paintTokens(p) {
+    setSlot('wt', p.wt ? p.wt + (D.WT[p.wt] ? ' · ' + D.WT[p.wt].label : '') : '—', !!p.wt);
+    els.wt.tok.style.setProperty('--wt', p.wt ? wtVar(p.wt) : 'var(--prizma-information)');
+    setSlot('team', p.team || '—', !!p.team);
+    setSlot('rel', p.rel ? relShort(p.rel) : '—', !!p.rel);
+    setSlot('who', p.who || '—', !!p.who);
+    // готовность: минимум тип + релиз
+    const ready = !!p.wt && !!p.rel;
+    omniRow.classList.toggle('ready', ready);
+    ret.textContent = ready ? 'ENTER ↵' : 'ENTER';
+    return ready;
+  }
+  function setSlot(slot, val, lit) {
+    els[slot].v.textContent = val;
+    els[slot].tok.classList.toggle('lit', lit);
+  }
+
+  /* ── мини-гант: команда → строка с пилюлями по релизам ── */
+  const added = []; // { wt, team, rel, who }
+  const grid = document.getElementById('grid');
+  const cntEl = document.getElementById('cnt');
+  let freshKey = null;
+
+  function buildGrid() {
+    let h = '<div class="mh"><span class="pz-eyebrow">Команда</span></div>';
+    cols.forEach(c => {
+      h += '<div class="mh' + (c.current ? ' cur' : '') + '"><span class="rel">' + c.short + '</span><span class="dt">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></div>';
+    });
+    if (!added.length) {
+      h += '<div class="empty-hint" style="grid-column:1 / -1">Пока пусто. Введите работу выше и нажмите Enter — она появится здесь.</div>';
+      grid.innerHTML = h;
+      cntEl.textContent = '0 пилюль';
+      return;
+    }
+    // группируем по командам, сохраняя порядок появления
+    const teamsInUse = [];
+    added.forEach(a => { if (!teamsInUse.includes(a.team)) teamsInUse.push(a.team); });
+    teamsInUse.forEach((team, ti) => {
+      h += '<div class="ml ' + (ti === teamsInUse.length - 1 ? '' : '') + '" style="' + (ti===teamsInUse.length-1?'border-bottom:none':'') + '"><span class="tm">' + esc(team) + '</span>работы команды</div>';
+      cols.forEach(c => {
+        const last = ti === teamsInUse.length - 1;
+        h += '<div class="mc"' + (last ? ' style="border-bottom:none"' : '') + '>';
+        added.filter(a => a.team === team && a.rel === c.key).forEach(a => {
+          const key = a.wt + '|' + a.team + '|' + a.rel + '|' + (a.who||'') + '|' + a._n;
+          const fresh = key === freshKey ? ' fresh' : '';
+          h += '<div class="pp' + fresh + '" style="--wt:' + wtVar(a.wt) + '">' +
+               '<span class="nm">' + esc(a.wt) + '</span>' +
+               (a.who ? '<span class="who">' + esc(a.who) + '</span>' : '') + '</div>';
+        });
+        h += '</div>';
+      });
+    });
+    grid.innerHTML = h;
+    cntEl.textContent = added.length + ' ' + plural(added.length, 'пилюля', 'пилюли', 'пилюль');
+  }
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  /* ── ввод ── */
+  const omni = document.getElementById('omni');
+  let canAdd = false;
+  function onInput() { canAdd = paintTokens(parse(omni.value)); }
+
+  function commit() {
+    const p = parse(omni.value);
+    if (!p.wt || !p.rel) return;
+    const team = p.team || D.teams[0]; // если команда не указана — первая по умолчанию
+    const item = { wt: p.wt, team, rel: p.rel, who: p.who, _n: added.length };
+    added.push(item);
+    freshKey = item.wt + '|' + item.team + '|' + item.rel + '|' + (item.who||'') + '|' + item._n;
+    buildGrid();
+    omni.value = '';
+    onInput();
+  }
+
+  omni.addEventListener('input', onInput);
+  omni.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+  omni.addEventListener('focus', () => omniRow.classList.add('focus'));
+  omni.addEventListener('blur', () => omniRow.classList.remove('focus'));
+
+  /* ── примеры ── */
+  const EXAMPLES = ['BE Платежи 1.21 Сидоров', 'QA Мобайл 1.22', 'Сидоров FE 1.21 Интеграции', 'MIG Интеграции овертайм', 'analytics 1.22 Захарова'];
+  const exChips = document.getElementById('exChips');
+  exChips.innerHTML = EXAMPLES.map((ex,i) => '<button class="ex" data-i="' + i + '">' + esc(ex) + '</button>').join('');
+  exChips.querySelectorAll('.ex').forEach(b => b.addEventListener('click', () => {
+    omni.value = EXAMPLES[+b.dataset.i];
+    omni.focus();
+    onInput();
+  }));
+
+  // тема
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // init (sync + страховка)
+  buildGrid();
+  onInput();
+  setTimeout(() => { buildGrid(); onInput(); }, 60);
+  omni.focus();
+})();
+</script>
+</body>
+</html>

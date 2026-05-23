@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 43 · Drill-down</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; }
+
+  /* ── хлебные крошки ── */
+  .crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 18px 0 16px; min-height: 30px; }
+  .crumb { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; font: 600 12.5px/1 var(--font);
+    color: var(--prizma-text-secondary); background: transparent; border: none; border-radius: var(--r-sm); cursor: pointer;
+    transition: color .15s, background .15s; }
+  .crumb:hover { color: var(--prizma-text-primary); background: var(--prizma-bg-elevated); }
+  .crumb.cur { color: var(--prizma-text-primary); cursor: default; }
+  .crumb.cur:hover { background: transparent; }
+  .crumb .ic { width: 14px; height: 14px; color: var(--prizma-text-tertiary); }
+  .crumbs .chev { color: var(--prizma-text-tertiary); display: inline-flex; }
+  .crumbs .chev svg { width: 13px; height: 13px; }
+
+  /* ── панель-сцена; уровни сменяются плавно ── */
+  .stage { position: relative; }
+  .level { transition: opacity .3s var(--ease-calm), transform .3s var(--ease-calm); }
+  .level.enter { opacity: 0; transform: translateY(8px); }
+
+  /* ── L0 портфель: плитки команд ── */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 14px; }
+  .tile { position: relative; text-align: left; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border);
+    border-left: 3px solid var(--prizma-border-strong); border-radius: var(--r-lg); padding: 16px 16px 14px; cursor: pointer;
+    transition: border-color .18s var(--ease-calm), transform .18s var(--ease-calm), box-shadow .18s; }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(0,0,0,.35); border-left-color: var(--prizma-information); }
+  .tile.risk-off { border-left-color: var(--prizma-off-course); }
+  .tile.risk-drift { border-left-color: var(--prizma-drift); }
+  .tile.risk-ok { border-left-color: var(--prizma-on-course); }
+  .tile .tname { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+  .tile .tmark { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 4px 6px; }
+  .tile .stats { display: flex; gap: 18px; }
+  .tile .stat .v { font: 300 24px/1 var(--mono); letter-spacing: -.02em; color: var(--prizma-text-primary); }
+  .tile .stat .k { display: block; margin-top: 5px; font: 700 9px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .tile .riskline { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--prizma-border); font: 600 10.5px/1 var(--mono); }
+  .tile .riskline .rk { display: inline-flex; align-items: center; gap: 5px; color: var(--prizma-text-secondary); }
+  .tile .riskline .rk .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .tile .go { position: absolute; right: 14px; top: 16px; color: var(--prizma-text-tertiary); transition: transform .18s var(--ease-calm), color .18s; }
+  .tile:hover .go { color: var(--prizma-information); transform: translateX(3px); }
+  .tile .go svg { width: 16px; height: 16px; }
+
+  /* ── L1 эпики команды: карточки ── */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+  .card { position: relative; text-align: left; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border);
+    border-left: 3px solid var(--prizma-border-strong); border-radius: var(--r-lg); padding: 15px 16px 14px; cursor: pointer;
+    transition: border-color .18s var(--ease-calm), transform .18s var(--ease-calm), box-shadow .18s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(0,0,0,.35); border-left-color: var(--prizma-information); }
+  .card.risk-off { border-left-color: var(--prizma-off-course); }
+  .card.risk-drift { border-left-color: var(--prizma-drift); }
+  .card .cname { font-size: 14px; font-weight: 700; margin-bottom: 4px; padding-right: 22px; }
+  .card .cmeta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); margin-bottom: 12px; }
+  .card .cmeta .rsk { display: inline-flex; align-items: center; gap: 5px; }
+  .card .cmeta .rsk .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  /* прогресс-рейка — нейтральная, заполнение on-course */
+  .prog { height: 6px; border-radius: 3px; background: var(--prizma-bg-tertiary); overflow: hidden; }
+  .prog .fill { height: 100%; background: var(--prizma-on-course); border-radius: 3px; transition: width .4s var(--ease-calm); }
+  .card .progrow { display: flex; align-items: center; gap: 10px; }
+  .card .progrow .pct { font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); min-width: 34px; text-align: right; }
+  .card .miniwt { display: flex; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
+  .card .wtchip { font: 700 9px/1 var(--mono); letter-spacing: .3px; padding: 3px 6px 3px 8px; border-radius: 3px; background: var(--prizma-bg-tertiary); color: var(--prizma-text-secondary); position: relative; }
+  .card .wtchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 3px 0 0 3px; background: var(--wt); }
+  .card .go { position: absolute; right: 14px; top: 15px; color: var(--prizma-text-tertiary); transition: transform .18s var(--ease-calm), color .18s; }
+  .card:hover .go { color: var(--prizma-information); transform: translateX(3px); }
+  .card .go svg { width: 15px; height: 15px; }
+
+  /* ── L2 эпик → типы работ по релизам (мини-гант одной строки) ── */
+  .epicHead { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 18px 20px; margin-bottom: 14px; }
+  .epicHead h2 { font-size: 18px; font-weight: 800; letter-spacing: -.01em; margin: 0 0 8px; }
+  .epicHead .row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; font: 600 11.5px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .epicHead .row .rsk { display: inline-flex; align-items: center; gap: 6px; }
+  .epicHead .row .rsk .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .epicHead .row .sep { width: 1px; height: 14px; background: var(--prizma-border-strong); }
+  .epicHead .deps { margin-top: 12px; font: 500 11px/1.4 var(--font); color: var(--prizma-text-tertiary); }
+  .epicHead .deps b { color: var(--prizma-text-secondary); font-weight: 600; }
+
+  .relgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .relcol { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 12px; min-height: 120px; }
+  .relcol.cur { border-color: var(--prizma-border-strong); box-shadow: inset 0 2px 0 var(--prizma-information); }
+  .relcol .rh { display: flex; align-items: baseline; gap: 7px; margin-bottom: 10px; }
+  .relcol .rh .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .relcol .rh .rel.cur { color: var(--prizma-text-primary); }
+  .relcol .rh .rel.muted { font-size: 13px; color: var(--prizma-text-tertiary); }
+  .relcol .rh .dt { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .relcol .stack { display: flex; flex-direction: column; gap: 7px; }
+  .relcol .empty { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); opacity: .6; padding: 4px 0; }
+
+  .pill { position: relative; display: flex; align-items: center; gap: 7px; padding: 7px 10px 7px 12px;
+    font: 600 12px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .lab { color: var(--prizma-text-tertiary); font: 500 10px/1 var(--font); }
+  .pill .who { margin-left: auto; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"] .prog6 { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+  .pill[data-state="unplanned"] { border: 1px dashed var(--prizma-border-strong); background: transparent; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 43 · Drill-down</div>
+      <h1>Drill-down</h1>
+      <p>Прогрессивное раскрытие по клику. Старт — уровень <b>портфеля</b>: плитки команд с агрегатами. Клик по команде → её <b>эпики</b> (карточки). Клик по эпику → его <b>типы работ</b> по релизам. Хлебные крошки «Портфель › Платежи › …» возвращают наверх. Плавные переходы между уровнями.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="crumbs" id="crumbs"></div>
+  <div class="stage"><div class="level" id="level"></div></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'var(--prizma-on-course)');
+  const riskLabel = r => r === 'off-course' ? 'Срыв' : (r === 'drift' ? 'Дрейф' : 'По курсу');
+
+  // навигационное состояние: {level:0|1|2, team?, epicId?}
+  let nav = { level: 0 };
+
+  const CHEV = '<span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></span>';
+  const GO = '<span class="go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></span>';
+
+  // ── агрегаты команды для портфельной плитки ──
+  function teamAgg(team) {
+    const eps = D.helpers.teamEpics(team);
+    const off = eps.filter(e => e.risk === 'off-course').length;
+    const drift = eps.filter(e => e.risk === 'drift').length;
+    const ok = eps.length - off - drift;
+    const works = eps.reduce((n,e)=>n+e.pills.length,0);
+    return { eps, off, drift, ok, works, worst: off ? 'off' : (drift ? 'drift' : 'ok') };
+  }
+
+  // ── хлебные крошки ──
+  const crumbs = document.getElementById('crumbs');
+  function renderCrumbs() {
+    let html = '';
+    const atRoot = nav.level === 0;
+    html += '<button class="crumb'+(atRoot?' cur':'')+'" data-to="0">' +
+      '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg>' +
+      'Портфель</button>';
+    if (nav.level >= 1) {
+      html += CHEV + '<button class="crumb'+(nav.level===1?' cur':'')+'" data-to="1">'+esc(nav.team)+'</button>';
+    }
+    if (nav.level >= 2) {
+      const e = D.epics.find(x => x.id === nav.epicId);
+      html += CHEV + '<button class="crumb cur" data-to="2">'+esc(e ? e.epic : '')+'</button>';
+    }
+    crumbs.innerHTML = html;
+  }
+
+  crumbs.addEventListener('click', e => {
+    const btn = e.target.closest('.crumb'); if (!btn) return;
+    const to = +btn.dataset.to;
+    if (to === 0) go({ level: 0 });
+    else if (to === 1) go({ level: 1, team: nav.team });
+    // to===2 — текущий, no-op
+  });
+
+  // ── L0: портфель ──
+  function viewPortfolio() {
+    let html = '<div class="tiles">';
+    D.teams.forEach(team => {
+      const a = teamAgg(team);
+      html += '<button class="tile risk-'+a.worst+'" data-team="'+esc(team)+'">' + GO +
+        '<div class="tname"><span class="tmark">'+esc(team.slice(0,2))+'</span>'+esc(team)+'</div>' +
+        '<div class="stats">' +
+          '<div class="stat"><span class="v pz-mono">'+a.eps.length+'</span><span class="k">эпиков</span></div>' +
+          '<div class="stat"><span class="v pz-mono">'+a.works+'</span><span class="k">работ</span></div>' +
+          '<div class="stat"><span class="v pz-mono" style="color:'+(a.off?'var(--prizma-off-course)':'var(--prizma-text-tertiary)')+'">'+a.off+'</span><span class="k">срыв</span></div>' +
+        '</div>' +
+        '<div class="riskline">' +
+          '<span class="rk"><span class="dot" style="background:var(--prizma-off-course)"></span>'+a.off+'</span>' +
+          '<span class="rk"><span class="dot" style="background:var(--prizma-drift)"></span>'+a.drift+'</span>' +
+          '<span class="rk"><span class="dot" style="background:var(--prizma-on-course)"></span>'+a.ok+'</span>' +
+        '</div>' +
+      '</button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // ── L1: эпики команды ──
+  function viewTeam(team) {
+    const eps = D.helpers.teamEpics(team);
+    let html = '<div class="cards">';
+    eps.forEach(e => {
+      const ratio = D.helpers.doneRatio(e);
+      const pct = Math.round(ratio * 100);
+      const rc = e.risk === 'off-course' ? ' risk-off' : (e.risk === 'drift' ? ' risk-drift' : '');
+      const rsk = e.risk ? '<span class="rsk"><span class="dot" style="background:'+riskColor(e.risk)+'"></span>'+riskLabel(e.risk)+'</span>' : '<span class="rsk"><span class="dot" style="background:var(--prizma-on-course)"></span>По курсу</span>';
+      // уникальные типы работ эпика для мини-чипов
+      const wts = [...new Set(e.pills.map(p => p.wt))];
+      const chips = wts.map(wt => '<span class="wtchip" style="--wt:'+wtVar(wt)+'">'+wt+'</span>').join('');
+      html += '<button class="card'+rc+'" data-epic="'+e.id+'">' + GO +
+        '<div class="cname">'+esc(e.epic)+'</div>' +
+        '<div class="cmeta">'+rsk+'<span>'+D.helpers.effortOf(e)+' чел-дн</span>'+(e.moves?'<span>'+e.moves+' переноса</span>':'')+'<span>'+e.pills.length+' работ</span></div>' +
+        '<div class="progrow"><div class="prog" style="flex:1"><div class="fill" style="width:'+pct+'%"></div></div><span class="pct">'+pct+'%</span></div>' +
+        '<div class="miniwt">'+chips+'</div>' +
+      '</button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // ── L2: эпик → типы работ по релизам ──
+  function viewEpic(epicId) {
+    const e = D.epics.find(x => x.id === epicId);
+    if (!e) return '';
+    const rsk = '<span class="rsk"><span class="dot" style="background:'+riskColor(e.risk)+'"></span>'+riskLabel(e.risk)+'</span>';
+    const depNames = (e.deps || []).map(id => { const d = D.epics.find(x=>x.id===id); return d ? d.epic : id; });
+    const deps = depNames.length ? '<div class="deps">Зависит от: <b>'+depNames.map(esc).join('</b>, <b>')+'</b></div>' : '';
+    let html = '<div class="epicHead">' +
+      '<h2>'+esc(e.epic)+'</h2>' +
+      '<div class="row">'+rsk+'<span class="sep"></span><span>'+esc(e.team)+'</span><span class="sep"></span><span>'+D.helpers.effortOf(e)+' чел-дн</span><span class="sep"></span><span>'+e.pills.length+' типов работ</span>'+(e.moves?'<span class="sep"></span><span>'+e.moves+' переноса</span>':'')+'</div>' +
+      deps +
+    '</div>';
+
+    html += '<div class="relgrid">';
+    cols.forEach(c => {
+      const ps = D.helpers.pillsOf(e, c.key);
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      let stack = '';
+      if (ps.length) {
+        ps.forEach(p => {
+          const lab = (D.WT[p.wt] && D.WT[p.wt].label) || p.wt;
+          stack += '<div class="pill" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+            (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+            (p.state==='progress'?'<span class="prog6"></span>':'') +
+            '<span class="nm">'+p.wt+'</span><span class="lab">'+esc(lab)+'</span>' +
+            (p.who?'<span class="who">'+esc(p.who)+'</span>':(p.state==='unplanned'?'<span class="who">вне плана</span>':'')) +
+          '</div>';
+        });
+      } else {
+        stack = '<div class="empty">—</div>';
+      }
+      html += '<div class="relcol'+(c.current?' cur':'')+'">' +
+        '<div class="rh"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.dated?'<span class="dt">'+dates+'</span>':'')+'</div>' +
+        '<div class="stack">'+stack+'</div>' +
+      '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  // ── переход с плавной анимацией ──
+  const levelEl = document.getElementById('level');
+  function paint() {
+    let html = '';
+    if (nav.level === 0) html = viewPortfolio();
+    else if (nav.level === 1) html = viewTeam(nav.team);
+    else html = viewEpic(nav.epicId);
+    levelEl.innerHTML = html;
+    wire();
+  }
+
+  function go(next) {
+    nav = next;
+    renderCrumbs();
+    // enter-анимация: уводим, перерисовываем, проявляем
+    levelEl.classList.add('enter');
+    requestAnimationFrame(() => {
+      paint();
+      requestAnimationFrame(() => levelEl.classList.remove('enter'));
+    });
+  }
+
+  function wire() {
+    levelEl.querySelectorAll('.tile[data-team]').forEach(t =>
+      t.addEventListener('click', () => go({ level: 1, team: t.dataset.team })));
+    levelEl.querySelectorAll('.card[data-epic]').forEach(c =>
+      c.addEventListener('click', () => {
+        const e = D.epics.find(x => x.id === c.dataset.epic);
+        go({ level: 2, team: e.team, epicId: c.dataset.epic });
+      }));
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  renderCrumbs();
+  paint();
+  setTimeout(() => { renderCrumbs(); }, 60);
+})();
+</script>
+</body>
+</html>

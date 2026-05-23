@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 49 · Вставка из буфера</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+  .tt { position: fixed; top: 16px; right: 18px; z-index: 50; }
+  .head { margin-bottom: 22px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 680px; }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); gap: 22px; align-items: start; }
+  @media (max-width: 880px) { .cols { grid-template-columns: 1fr; } }
+
+  .panel-cap { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .panel-cap .spacer { flex: 1; }
+
+  /* ── textarea ── */
+  textarea#src { width: 100%; min-height: 230px; resize: vertical; box-sizing: border-box;
+    background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong);
+    border-radius: var(--r-lg); padding: 14px 16px; color: var(--prizma-text-primary);
+    font: 400 12.5px/1.6 var(--mono); outline: none; tab-size: 14;
+    transition: border-color .16s var(--ease-calm), box-shadow .16s var(--ease-calm); }
+  textarea#src:focus { border-color: var(--prizma-information); box-shadow: 0 0 0 3px var(--prizma-information-bg); }
+  textarea#src::placeholder { color: var(--prizma-text-tertiary); }
+
+  .actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .actions .hint { font-size: 12px; color: var(--prizma-text-tertiary); }
+  .pz-btn svg, .pz-btn-primary svg { width: 14px; height: 14px; }
+  .pz-btn-primary[disabled] { opacity: .4; pointer-events: none; }
+
+  .sep-note { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .sep-note b { color: var(--prizma-text-secondary); }
+
+  /* ── preview table ── */
+  .ptable { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; padding: 9px 11px; font: 700 9px/1.2 var(--font); letter-spacing: .6px;
+    text-transform: uppercase; color: var(--prizma-text-tertiary); border-bottom: 1px solid var(--prizma-border-strong);
+    background: var(--prizma-bg-elevated); }
+  thead th.num { text-align: right; }
+  tbody td { padding: 8px 11px; font-size: 12.5px; border-bottom: 1px solid var(--prizma-border); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr.bad { background: var(--prizma-off-course-bg); }
+  td .pp { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); overflow: hidden; }
+  td .pp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  td .rel { font: 600 11.5px/1 var(--mono); color: var(--prizma-text-secondary); }
+  td .epic-nm { font-weight: 500; }
+  td .who { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .status { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--font); }
+  .status svg { width: 13px; height: 13px; flex: none; }
+  .status.ok { color: var(--prizma-on-course); }
+  .status.warn { color: var(--prizma-off-course); }
+  .rownum { font: 600 11px/1 var(--mono); color: var(--prizma-text-tertiary); text-align: right; }
+  .errnote { font-size: 11px; color: var(--prizma-off-course); margin-top: 3px; }
+
+  .summary { display: flex; align-items: center; gap: 14px; margin: 14px 0; flex-wrap: wrap; }
+  .summary .chip-ok, .summary .chip-bad { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+    border-radius: var(--r-sm); font: 600 11.5px/1 var(--font); border: 1px solid var(--prizma-border); }
+  .summary .chip-ok { color: var(--prizma-on-course); border-color: color-mix(in srgb, var(--prizma-on-course) 40%, transparent); }
+  .summary .chip-bad { color: var(--prizma-off-course); border-color: color-mix(in srgb, var(--prizma-off-course) 40%, transparent); }
+  .summary .num { font-family: var(--mono); }
+
+  .placeholder-tbl { padding: 30px 16px; text-align: center; color: var(--prizma-text-tertiary); font-size: 12.5px; }
+
+  /* ── мини-гант (merge target) ── */
+  .preview { margin-top: 30px; }
+  .mini { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: hidden; background: var(--prizma-bg-elevated); }
+  .mgrid { display: grid; grid-template-columns: 200px repeat(3, 1fr); }
+  .mh { padding: 10px 12px 9px; border-bottom: 1px solid var(--prizma-border-strong); border-left: 1px solid var(--prizma-border); }
+  .mh:first-child { border-left: none; display: flex; align-items: flex-end; }
+  .mh .rel { font: 300 17px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .mh.cur .rel { color: var(--prizma-text-primary); }
+  .mh.cur { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .mh .dt { display: block; margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .ml { padding: 9px 12px; border-bottom: 1px solid var(--prizma-border); font-size: 12.5px; font-weight: 500; display: flex; flex-direction: column; gap: 2px; }
+  .ml .tm { font: 700 9px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .mc { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 8px 9px; display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; min-height: 42px; }
+  .row:last-child .mc, .row:last-child .ml { border-bottom: none; }
+  .pp.fresh { animation: spring-in .42s var(--ease-spring) backwards; }
+  @keyframes spring-in { from { opacity: 0; transform: translateY(8px) scale(.86); } to { opacity: 1; transform: none; } }
+  .empty-hint { padding: 24px 14px; text-align: center; color: var(--prizma-text-tertiary); font-size: 12.5px; grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="page">
+    <div class="head">
+      <div class="pz-eyebrow">Скетч 49 · Массовый ввод</div>
+      <h1>Вставка из буфера</h1>
+      <p>Скопируйте таблицу из Excel или Confluence и вставьте сюда. Призма разберёт строки в эпики и пилюли: валидные — зелёные, проблемные — помечены. Один клик — и десятки работ в плане.</p>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="panel-cap">
+          <span class="pz-eyebrow">Источник · TSV / CSV</span>
+          <span class="spacer"></span>
+          <span class="sep-note" id="sepNote">разделитель: <b>—</b></span>
+        </div>
+        <textarea id="src" spellcheck="false" aria-label="Вставьте таблицу"></textarea>
+        <div class="actions">
+          <button class="pz-btn-primary" id="parseBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+            Разобрать
+          </button>
+          <button class="pz-btn" id="clearBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+            Очистить
+          </button>
+          <span class="hint">Парсинг при вставке и по Ctrl/⌘+Enter</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel-cap">
+          <span class="pz-eyebrow">Предпросмотр сопоставления</span>
+        </div>
+        <div class="summary" id="summary" style="display:none">
+          <span class="chip-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span class="num" id="okN">0</span> готовы</span>
+          <span class="chip-bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span class="num" id="badN">0</span> с проблемами</span>
+        </div>
+        <div class="ptable" id="ptable"><div class="placeholder-tbl">Вставьте или нажмите «Разобрать» — здесь появится размеченный предпросмотр.</div></div>
+        <div class="actions">
+          <button class="pz-btn-primary" id="mergeBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span id="mergeLabel">Добавить</span>
+          </button>
+          <span class="hint">В план попадут только валидные строки.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="panel-cap"><span class="pz-eyebrow">Целевой мини-гант</span></div>
+      <div class="mini"><div class="mgrid" id="grid"></div></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtMap = { BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf' };
+  const wtVar = wt => 'var(' + (wtMap[wt] || '--prizma-information') + ')';
+  const fmt = iso => new Date(iso).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const norm = s => (s||'').toLowerCase().replace(/ё/g,'е').trim();
+  function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  const cols = D.releases.filter(c => c.dated);
+
+  // пример с заголовком + табы; одна строка специально «битая» (неизвестный тип) для демонстрации флага
+  const EXAMPLE = [
+    'Эпик\tКоманда\tРелиз\tТип\tКто',
+    'Платёжный шлюз v2\tПлатежи\t1.21\tBE\tСидоров',
+    'Платёжный шлюз v2\tПлатежи\t1.22\tQA\t',
+    'Биометрия 3DS\tМобайл\t1.21\tFE\tКим',
+    'Витрина рисков\tАналитика\t1.22\tAN\tЗахарова',
+    'Шина Kafka\tИнтеграции\t1.21\tDEVOPS\tОрлов',
+    'Push-центр\tМобайл\t1.22\tBE\tСоколов',
+  ].join('\n');
+
+  const srcEl = document.getElementById('src');
+  srcEl.value = EXAMPLE;
+
+  /* ── определить разделитель: таб приоритетнее, затем ; затем , ── */
+  function detectSep(text) {
+    const line = (text.split(/\r?\n/).find(l => l.trim()) || '');
+    if (line.indexOf('\t') >= 0) return { ch: '\t', name: 'таб' };
+    if (line.indexOf(';') >= 0) return { ch: ';', name: 'точка с запятой' };
+    if (line.indexOf(',') >= 0) return { ch: ',', name: 'запятая' };
+    return { ch: '\t', name: 'таб' };
+  }
+
+  /* ── сопоставление колонок по заголовку (или позиционно) ── */
+  const HEAD_MAP = {
+    epic: ['эпик','epic','задача','название'],
+    team: ['команда','team','отдел'],
+    rel:  ['релиз','release','окно','версия'],
+    wt:   ['тип','type','работа','дисциплина'],
+    who:  ['кто','исполнитель','who','assignee','автор'],
+  };
+  function mapHeader(cells) {
+    const idx = { epic:-1, team:-1, rel:-1, wt:-1, who:-1 };
+    let matched = 0;
+    cells.forEach((c, i) => {
+      const n = norm(c);
+      for (const key in HEAD_MAP) {
+        if (idx[key] < 0 && HEAD_MAP[key].some(h => n === h)) { idx[key] = i; matched++; break; }
+      }
+    });
+    return matched >= 2 ? idx : null; // считаем заголовком, если узнали >= 2 колонок
+  }
+
+  function matchWT(raw) {
+    const t = norm(raw);
+    return Object.keys(D.WT).find(k => norm(k) === t || norm(D.WT[k].label) === t) || null;
+  }
+  function matchRelease(raw) {
+    const t = norm(raw);
+    if (/^(бэклог|беклог|backlog)$/.test(t)) return 'backlog';
+    if (/^(овертайм|overtime)$/.test(t)) return 'overtime';
+    const digits = t.replace(/^r/,'').replace(/[.\s]/g,'');
+    let hit = D.releases.find(r => r.dated && r.key.replace(/^r/,'') === digits);
+    if (hit) return hit.key;
+    hit = D.releases.find(r => r.short.replace('.','') === digits);
+    return hit ? hit.key : null;
+  }
+  function matchTeam(raw) {
+    const t = norm(raw);
+    if (!t) return null;
+    return D.teams.find(tm => { const n = norm(tm); return n === t || n.includes(t) || (t.length >= 3 && t.includes(n)); }) || null;
+  }
+
+  /* ── парсинг в строки предпросмотра ── */
+  let parsed = []; // { rowNo, epic, team, relKey, relShort, wt, who, ok, errs[] }
+  function parseAll() {
+    const text = srcEl.value;
+    const sep = detectSep(text);
+    document.getElementById('sepNote').innerHTML = 'разделитель: <b>' + sep.name + '</b>';
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+    parsed = [];
+    if (!lines.length) { renderTable(); renderSummary(); return; }
+
+    const firstCells = lines[0].split(sep.ch).map(s => s.trim());
+    const hdr = mapHeader(firstCells);
+    const idx = hdr || { epic:0, team:1, rel:2, wt:3, who:4 };
+    const dataLines = hdr ? lines.slice(1) : lines;
+
+    dataLines.forEach((ln, i) => {
+      const cells = ln.split(sep.ch).map(s => s.trim());
+      const get = k => idx[k] >= 0 ? (cells[idx[k]] || '') : '';
+      const epicName = get('epic');
+      const teamRaw = get('team');
+      const relRaw = get('rel');
+      const wtRaw = get('wt');
+      const whoRaw = get('who');
+
+      const team = matchTeam(teamRaw);
+      const relKey = matchRelease(relRaw);
+      const wt = matchWT(wtRaw);
+      const errs = [];
+      if (!epicName) errs.push('нет названия эпика');
+      if (!wt) errs.push('тип «' + (wtRaw || '∅') + '» не распознан');
+      if (!relKey) errs.push('релиз «' + (relRaw || '∅') + '» не распознан');
+      if (!team) errs.push('команда «' + (teamRaw || '∅') + '» не найдена');
+
+      parsed.push({
+        rowNo: i + 1, epic: epicName, team, teamRaw, relKey,
+        relShort: relKey ? (D.releases.find(r=>r.key===relKey)||{}).short : relRaw,
+        wt, wtRaw, who: whoRaw || null, ok: errs.length === 0, errs,
+      });
+    });
+    renderTable();
+    renderSummary();
+  }
+
+  function renderTable() {
+    const ptable = document.getElementById('ptable');
+    if (!parsed.length) {
+      ptable.innerHTML = '<div class="placeholder-tbl">Нет строк для разбора. Вставьте таблицу с колонками Эпик / Команда / Релиз / Тип.</div>';
+      return;
+    }
+    let h = '<table><thead><tr><th class="num">#</th><th>Эпик</th><th>Команда</th><th>Релиз</th><th>Тип</th><th>Статус</th></tr></thead><tbody>';
+    parsed.forEach(r => {
+      h += '<tr class="' + (r.ok ? '' : 'bad') + '">';
+      h += '<td class="rownum">' + r.rowNo + '</td>';
+      h += '<td><span class="epic-nm">' + (r.epic ? esc(r.epic) : '<span class="who">∅</span>') + '</span>' +
+           (r.who ? ' <span class="who">· ' + esc(r.who) + '</span>' : '') +
+           (r.ok ? '' : '<div class="errnote">' + esc(r.errs.join('; ')) + '</div>') + '</td>';
+      h += '<td>' + (r.team ? esc(r.team) : '<span class="who">' + esc(r.teamRaw || '∅') + '</span>') + '</td>';
+      h += '<td>' + (r.relKey ? '<span class="rel">' + esc(r.relShort) + '</span>' : '<span class="who">' + esc(r.relShort || '∅') + '</span>') + '</td>';
+      h += '<td>' + (r.wt ? '<span class="pp" style="--wt:' + wtVar(r.wt) + '"><span class="nm">' + esc(r.wt) + '</span></span>' : '<span class="who">' + esc(r.wtRaw || '∅') + '</span>') + '</td>';
+      h += '<td>' + (r.ok
+        ? '<span class="status ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>ок</span>'
+        : '<span class="status warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>проверьте</span>') + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    ptable.innerHTML = h;
+  }
+
+  function renderSummary() {
+    const ok = parsed.filter(r => r.ok).length;
+    const bad = parsed.length - ok;
+    const sum = document.getElementById('summary');
+    sum.style.display = parsed.length ? '' : 'none';
+    document.getElementById('okN').textContent = ok;
+    document.getElementById('badN').textContent = bad;
+    const mb = document.getElementById('mergeBtn');
+    mb.disabled = ok === 0;
+    document.getElementById('mergeLabel').textContent = 'Добавить ' + ok;
+  }
+
+  /* ── мини-гант: добавленные валидные строки ── */
+  const added = []; // { epic, team, relKey, wt, who, _n }
+  const grid = document.getElementById('grid');
+  let freshSet = new Set();
+
+  function buildGrid() {
+    let h = '<div class="mh"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      h += '<div class="mh' + (c.current ? ' cur' : '') + '"><span class="rel">' + c.short + '</span><span class="dt">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></div>';
+    });
+    if (!added.length) {
+      h += '<div class="empty-hint">План пуст. Разберите таблицу слева и нажмите «Добавить».</div>';
+      grid.innerHTML = h;
+      return;
+    }
+    // строки = уникальные эпики (в порядке добавления)
+    const epicsInUse = [];
+    added.forEach(a => { const k = a.epic + '·' + a.team; if (!epicsInUse.find(x => x.k === k)) epicsInUse.push({ k, epic: a.epic, team: a.team }); });
+    epicsInUse.forEach((row, ri) => {
+      const last = ri === epicsInUse.length - 1;
+      h += '<div class="ml"' + (last ? ' style="border-bottom:none"' : '') + '><span class="tm">' + esc(row.team) + '</span>' + esc(row.epic) + '</div>';
+      cols.forEach(c => {
+        h += '<div class="mc"' + (last ? ' style="border-bottom:none"' : '') + '>';
+        added.filter(a => a.epic === row.epic && a.team === row.team && a.relKey === c.key).forEach(a => {
+          const fresh = freshSet.has(a._n) ? ' fresh' : '';
+          h += '<div class="pp' + fresh + '" style="--wt:' + wtVar(a.wt) + '"><span class="nm">' + esc(a.wt) + '</span>' +
+               (a.who ? '<span class="who">' + esc(a.who) + '</span>' : '') + '</div>';
+        });
+        h += '</div>';
+      });
+    });
+    grid.innerHTML = h;
+  }
+
+  function merge() {
+    const valid = parsed.filter(r => r.ok);
+    if (!valid.length) return;
+    freshSet = new Set();
+    valid.forEach(r => {
+      const n = added.length;
+      added.push({ epic: r.epic, team: r.team, relKey: r.relKey, wt: r.wt, who: r.who, _n: n });
+      freshSet.add(n);
+    });
+    buildGrid();
+    // прокрутить к гант-превью
+    document.querySelector('.preview').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  /* ── события ── */
+  document.getElementById('parseBtn').addEventListener('click', parseAll);
+  document.getElementById('mergeBtn').addEventListener('click', merge);
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    srcEl.value = ''; parsed = []; renderTable(); renderSummary();
+  });
+  srcEl.addEventListener('paste', () => setTimeout(parseAll, 0));
+  srcEl.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); parseAll(); }
+  });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // init: разобрать пример сразу (sync + страховка)
+  parseAll();
+  buildGrid();
+  setTimeout(() => { parseAll(); buildGrid(); }, 60);
+})();
+</script>
+</body>
+</html>

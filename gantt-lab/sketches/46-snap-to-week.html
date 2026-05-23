@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 46 · Привязка к неделе</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1140px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; }
+  .bar { display: flex; align-items: center; gap: 12px; margin: 14px 0; flex-wrap: wrap; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+  .bar .spacer { flex: 1; }
+  .kbd { font: 600 10px/1 var(--mono); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 2px 5px; color: var(--prizma-text-secondary); }
+  .readout { display: inline-flex; align-items: center; gap: 9px; padding: 6px 11px; border-radius: var(--r-md);
+    border: 1px solid var(--prizma-border-strong); background: var(--prizma-bg-elevated); font-size: 12.5px;
+    opacity: 0; transform: translateY(-3px); transition: opacity .15s var(--ease-calm), transform .15s var(--ease-calm); }
+  .readout.show { opacity: 1; transform: translateY(0); }
+  .readout .arr { color: var(--prizma-text-tertiary); }
+  .readout .wk { font: 700 12.5px/1 var(--mono); color: var(--prizma-information); }
+  .readout .dt { font: 700 12.5px/1 var(--mono); color: var(--prizma-text-primary); }
+  .readout.free .wk { color: var(--prizma-drift); }
+  .readout .mode { font: 700 9px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border); border-radius: 3px; padding: 2px 4px; }
+  .readout.free .mode { color: var(--prizma-drift); border-color: color-mix(in srgb, var(--prizma-drift) 40%, transparent); }
+
+  /* ── ось ── */
+  .board { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; background: var(--prizma-bg-elevated); }
+  .chart { position: relative; }
+
+  .lane-grid { display: grid; grid-template-columns: 230px 1fr; align-items: stretch; }
+
+  /* шапка-ось */
+  .axis-head { position: sticky; top: 0; z-index: 9; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); }
+  .axis-head .corner { position: sticky; left: 0; z-index: 10; background: var(--prizma-bg-elevated); display: flex; align-items: flex-end; padding: 0 14px 9px; border-right: 1px solid var(--prizma-border); }
+  .axis-head .corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .axis-svg-wrap { position: relative; }
+
+  /* фон-слой: релиз-полосы + недельные тики */
+  .gridlayer { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 0; }
+  .relband { position: absolute; top: 0; bottom: 0; }
+  .relband.cur { background: color-mix(in srgb, var(--prizma-text-primary) 4%, transparent); }
+  .relband.alt { background: color-mix(in srgb, var(--prizma-text-primary) 1.6%, transparent); }
+  .weektick { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid var(--prizma-border); }
+  .weektick.hot { border-left-color: var(--prizma-information); border-left-width: 1px; box-shadow: 0 0 6px var(--prizma-information); }
+
+  .todayline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 5; pointer-events: none; }
+
+  /* строки */
+  .team-row { display: grid; grid-template-columns: 230px 1fr; }
+  .team-lbl { position: sticky; left: 0; z-index: 4; background: var(--prizma-bg-elevated); padding: 8px 14px 7px;
+    font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary);
+    border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); display: flex; align-items: center; gap: 8px; }
+  .team-lbl .cnt { color: var(--prizma-text-secondary); font: 600 9px/1 var(--mono); }
+  .team-band { background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border); }
+
+  .ep-lbl { position: sticky; left: 0; z-index: 4; background: var(--prizma-bg-elevated); padding: 0 14px; min-height: 48px;
+    display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); }
+  .ep-lbl .nm { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ep-lbl .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .lane { position: relative; min-height: 48px; border-bottom: 1px solid var(--prizma-border); }
+
+  /* пилюля на оси — перетаскиваемая */
+  .pill { position: absolute; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 9px 0 11px; background: var(--prizma-bg-tertiary); border: 1px solid var(--prizma-border-strong);
+    border-radius: var(--r-sm); cursor: grab; user-select: none; z-index: 3; white-space: nowrap;
+    transition: box-shadow .12s, transform .14s var(--ease-calm), left .16s var(--ease-spring); }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill .nm { font: 600 11px/1 var(--font); color: var(--prizma-text-primary); }
+  .pill .who { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-on-course); }
+  .pill[data-state="done"] { opacity: .78; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill:hover { box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  .pill.dragging { cursor: grabbing; z-index: 8; transition: box-shadow .12s; box-shadow: 0 8px 22px rgba(0,0,0,.5); border-color: var(--prizma-information); }
+  .pill.snapped { box-shadow: 0 0 0 1px var(--prizma-information), 0 6px 18px rgba(0,0,0,.4); }
+  .pill.free.dragging { border-color: var(--prizma-drift); }
+
+  /* фантом цели-недели под пилюлей при перетаскивании */
+  .snapghost { position: absolute; top: 50%; transform: translateY(-50%); height: 26px; border-radius: var(--r-sm);
+    border: 1px dashed var(--prizma-information); background: var(--prizma-information-bg); z-index: 2; opacity: 0;
+    transition: opacity .12s, left .16s var(--ease-spring), width .16s var(--ease-spring); pointer-events: none; }
+  .snapghost.show { opacity: 1; }
+  .snapghost.free { border-color: var(--prizma-drift); background: var(--prizma-drift-bg); }
+
+  /* всплывающая подпись недели на оси при перетаскивании */
+  .weeklab { position: absolute; top: 4px; z-index: 9; transform: translateX(-50%); padding: 3px 7px; border-radius: var(--r-sm);
+    background: var(--prizma-information); color: var(--prizma-bg); font: 700 10px/1 var(--mono); white-space: nowrap;
+    opacity: 0; transition: opacity .12s, left .16s var(--ease-spring); pointer-events: none; }
+  .weeklab.show { opacity: 1; }
+  .weeklab.free { background: var(--prizma-drift); }
+
+  .legend { margin-top: 12px; display: flex; gap: 18px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; flex-wrap: wrap; }
+  .legend i { display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .legend i.snap { width: 0; height: 13px; border-left: 1px solid var(--prizma-information); box-shadow: 0 0 5px var(--prizma-information); }
+  .legend i.free { width: 14px; height: 8px; border: 1px dashed var(--prizma-drift); border-radius: 2px; }
+  .legend i.today { width: 0; height: 13px; border-left: 1px dashed var(--prizma-information); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 46 · Ось</div>
+      <h1>Привязка к неделе</h1>
+      <p>Ось дат датированных релизов (1.20–1.22) с недельными засечками. Тащите пилюлю вдоль оси — она <b>магнитно</b> притягивается к ближайшей неделе с лёгким доводом и живым счётчиком «→ нед. 19 · 12.05». Отпустили — работа уезжает в релиз этой недели. Зажмите <span class="kbd">Alt</span> для свободного позиционирования без магнита.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+  <div class="bar">
+    <button class="pz-btn" id="reset">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+      Сбросить
+    </button>
+    <span class="hint">Тащите пилюлю по оси. <span class="kbd">Alt</span> — свободно, без привязки.</span>
+    <span class="spacer"></span>
+    <span class="readout" id="readout"><span class="mode" id="roMode">привязка</span><span class="arr">→</span><span class="wk" id="roWk"></span><span class="arr">·</span><span class="dt" id="roDt"></span></span>
+  </div>
+  <div class="board" id="board">
+    <div class="chart" id="chart"></div>
+  </div>
+  <div class="legend">
+    <span><i class="snap"></i>недельная засечка (магнит)</span>
+    <span><i class="free"></i>свободно (Alt)</span>
+    <span><i class="today"></i>сегодня</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');         // gotcha b: Date-объект
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+  // ── геометрия оси: только датированные релизы ──
+  const dated = D.releases.filter(r => r.dated);
+  const axisStart = parse(dated[0].start);
+  const lastEnd = parse(dated[dated.length - 1].end);
+  const axisEnd = new Date(lastEnd.getTime() + DAY);
+  const spanMs = axisEnd - axisStart;
+  const PX_PER_DAY = 15;
+  const trackW = Math.round(spanMs / DAY * PX_PER_DAY);
+  const LBL_W = 230;
+  const xOf = d => (d - axisStart) / spanMs * trackW;   // d — Date → px (внутри дорожки)
+  const dateOfX = px => new Date(axisStart.getTime() + (px / trackW) * spanMs);
+
+  // недельные засечки (ISO-номер недели) — выровнены к axisStart, шаг 7 дней
+  const weeks = [];
+  let t = new Date(axisStart.getTime());
+  while (t <= axisEnd) {
+    weeks.push({ date: new Date(t.getTime()), x: xOf(t), iso: isoWeek(new Date(t.getTime())) });
+    t = new Date(t.getTime() + 7 * DAY);
+  }
+  function isoWeek(d) {
+    const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const day = (dt.getUTCDay() + 6) % 7;
+    dt.setUTCDate(dt.getUTCDate() - day + 3);
+    const firstThu = new Date(Date.UTC(dt.getUTCFullYear(), 0, 4));
+    const fday = (firstThu.getUTCDay() + 6) % 7;
+    firstThu.setUTCDate(firstThu.getUTCDate() - fday + 3);
+    return 1 + Math.round((dt - firstThu) / (7 * DAY));
+  }
+  // релиз, покрывающий дату (для дропа)
+  function releaseAtDate(d) {
+    for (const r of dated) {
+      const s = parse(r.start), e = new Date(parse(r.end).getTime() + DAY);
+      if (d >= s && d < e) return r;
+    }
+    // вне диапазона — ближайший край
+    if (d < parse(dated[0].start)) return dated[0];
+    return dated[dated.length - 1];
+  }
+  const fmt = d => d.toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+
+  // ── рабочая модель: каждая датированная пилюля получает «позицию» (px центра) ──
+  // изначально — центр своего релиза; перетаскивание меняет .x и .col
+  let model = null;
+  function buildModel() {
+    model = [];
+    D.epics.forEach(e => {
+      e.pills.forEach((p, pi) => {
+        const r = D.releases.find(x => x.key === p.col);
+        if (!r || !r.dated) return;
+        const cx = (xOf(parse(r.start)) + xOf(new Date(parse(r.end).getTime() + DAY))) / 2;
+        model.push({ epic: e.id, team: e.team, epicName: e.epic, pidx: pi, wt: p.wt, who: p.who, state: p.state, x: cx, col: p.col });
+      });
+    });
+  }
+
+  const chart = document.getElementById('chart');
+  const board = document.getElementById('board');
+
+  function gridLayerHtml(h) {
+    let s = '<div class="gridlayer" style="left:' + LBL_W + 'px;width:' + trackW + 'px;height:' + h + 'px">';
+    dated.forEach((r, i) => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cls = r.current ? 'cur' : (i % 2 ? 'alt' : '');
+      s += '<div class="relband ' + cls + '" style="left:' + x1.toFixed(1) + 'px;width:' + (x2 - x1).toFixed(1) + 'px"></div>';
+    });
+    weeks.forEach((w, i) => {
+      s += '<div class="weektick" data-wi="' + i + '" style="left:' + w.x.toFixed(1) + 'px"></div>';
+    });
+    s += '</div>';
+    return s;
+  }
+
+  function axisHeadHtml() {
+    const Hh = 60;
+    let s = '<div class="axis-head lane-grid">';
+    s += '<div class="corner"><span class="pz-eyebrow">Команда · Эпик</span></div>';
+    s += '<div class="axis-svg-wrap"><svg width="' + trackW + '" height="' + Hh + '" viewBox="0 0 ' + trackW + ' ' + Hh + '">';
+    dated.forEach(r => {
+      const x1 = xOf(parse(r.start));
+      const x2 = xOf(new Date(parse(r.end).getTime() + DAY));
+      const cx = (x1 + x2) / 2;
+      const fill = r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)';
+      s += '<text x="' + cx.toFixed(1) + '" y="17" text-anchor="middle" fill="' + fill + '" font-family="var(--mono)" font-size="11" font-weight="700" letter-spacing=".5">' + esc(r.short) + (r.current ? ' · ТЕК.' : '') + '</text>';
+      s += '<line x1="' + x1.toFixed(1) + '" y1="0" x2="' + x1.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    });
+    const endX = xOf(new Date(parse(dated[dated.length-1].end).getTime() + DAY));
+    s += '<line x1="' + endX.toFixed(1) + '" y1="0" x2="' + endX.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-border-strong)" stroke-width="1"/>';
+    // недельные подписи: «н19» + дата
+    weeks.forEach(w => {
+      if (w.x > trackW + 1) return;
+      s += '<text x="' + (w.x + 4).toFixed(1) + '" y="36" fill="var(--prizma-text-secondary)" font-family="var(--mono)" font-size="9" font-weight="600">н' + w.iso + '</text>';
+      s += '<text x="' + (w.x + 4).toFixed(1) + '" y="50" fill="var(--prizma-text-tertiary)" font-family="var(--mono)" font-size="8.5">' + fmt(w.date) + '</text>';
+      s += '<line x1="' + w.x.toFixed(1) + '" y1="52" x2="' + w.x.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+    });
+    // сегодня
+    const tx = xOf(parse(D.today));
+    s += '<line x1="' + tx.toFixed(1) + '" y1="0" x2="' + tx.toFixed(1) + '" y2="' + Hh + '" stroke="var(--prizma-information)" stroke-width="1" stroke-dasharray="3 3"/>';
+    s += '<rect x="' + (tx - 22).toFixed(1) + '" y="0" width="44" height="13" fill="var(--prizma-bg-elevated)"/>';
+    s += '<text x="' + tx.toFixed(1) + '" y="10" text-anchor="middle" fill="var(--prizma-information)" font-family="var(--mono)" font-size="8.5" font-weight="700">СЕГОДНЯ</text>';
+    s += '</svg></div></div>';
+    return s;
+  }
+
+  function bodyHtml() {
+    let s = '';
+    D.teams.forEach(team => {
+      const eps = H.teamEpics(team);
+      const works = eps.reduce((n, e) => n + e.pills.length, 0);
+      s += '<div class="team-row"><div class="team-lbl">' + esc(team) + '<span class="cnt">' + eps.length + ' эп · ' + works + ' раб</span></div><div class="team-band"></div></div>';
+      eps.forEach(e => {
+        s += '<div class="lane-grid">';
+        s += '<div class="ep-lbl"><span class="nm">' + esc(e.epic) + '</span><span class="meta">' + H.effortOf(e) + ' дн · ' + e.pills.length + ' раб</span></div>';
+        s += '<div class="lane" data-id="' + e.id + '">';
+        // snapghost + weeklab на каждой дорожке (по одному, переиспользуем активную)
+        s += '<div class="snapghost"></div>';
+        // датированные пилюли этого эпика
+        model.filter(m => m.epic === e.id).forEach(m => {
+          s += pillHtml(m);
+        });
+        s += '</div></div>';
+      });
+    });
+    return s;
+  }
+
+  function pillHtml(m) {
+    const PW = 64; // прибл. ширина для центрирования
+    const who = m.who ? '<span class="who">' + esc(m.who) + '</span>' : '';
+    return '<div class="pill" data-state="' + m.state + '" data-epic="' + m.epic + '" data-pidx="' + m.pidx + '" ' +
+      'style="--wt:' + wtVar(m.wt) + ';left:' + (LBL_W + m.x - PW/2).toFixed(1) + 'px">' +
+      (m.state === 'done' ? '<span class="dot6"></span>' : '') +
+      '<span class="nm">' + m.wt + '</span>' + who + '</div>';
+  }
+
+  function render() {
+    chart.innerHTML = '';
+    chart.style.width = (LBL_W + trackW) + 'px';
+    const headEl = document.createElement('div'); headEl.innerHTML = axisHeadHtml();
+    const bodyEl = document.createElement('div'); bodyEl.className = 'chart-body'; bodyEl.style.position = 'relative'; bodyEl.innerHTML = bodyHtml();
+    chart.appendChild(headEl.firstElementChild);
+    chart.appendChild(bodyEl);
+    placeOverlays();
+    // weeklab — единый плавающий ярлык на ось
+    let wl = document.getElementById('weeklab');
+    if (!wl) { wl = document.createElement('div'); wl.className = 'weeklab'; wl.id = 'weeklab'; chart.appendChild(wl); }
+    wireDrag();
+  }
+
+  function placeOverlays() {
+    const body = chart.querySelector('.chart-body');
+    if (!body) return;
+    body.querySelectorAll('.gridlayer, .todayline').forEach(n => n.remove());
+    const h = body.scrollHeight;
+    body.insertAdjacentHTML('afterbegin', gridLayerHtml(h));
+    const tl = document.createElement('div'); tl.className = 'todayline';
+    tl.style.left = (LBL_W + xOf(parse(D.today))).toFixed(1) + 'px'; tl.style.height = h + 'px';
+    body.appendChild(tl);
+  }
+
+  // ── перетаскивание с магнитом ──
+  let drag = null; // { el, m, lane, pointerOffset, free }
+  const readout = document.getElementById('readout');
+  const PW = 64;
+
+  function nearestWeek(px) { // px — центр пилюли в координатах дорожки
+    let best = weeks[0], bd = Infinity;
+    weeks.forEach(w => { const d = Math.abs(w.x - px); if (d < bd) { bd = d; best = w; } });
+    return best;
+  }
+
+  function wireDrag() {
+    chart.querySelectorAll('.pill').forEach(pill => {
+      pill.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const epic = pill.dataset.epic, pidx = +pill.dataset.pidx;
+        const m = model.find(x => x.epic === epic && x.pidx === pidx);
+        if (!m) return;
+        const lane = pill.closest('.lane');
+        const laneRect = lane.getBoundingClientRect();
+        drag = { el: pill, m, lane, laneRect, free: e.altKey };
+        pill.classList.add('dragging');
+        pill.style.transition = 'box-shadow .12s'; // отключаем left-easing на время drag
+        // ghost для этой дорожки
+        drag.ghost = lane.querySelector('.snapghost');
+        document.getElementById('roMode'); // ensure exists
+        updateDrag(e);
+        window.addEventListener('pointermove', updateDrag);
+        window.addEventListener('pointerup', endDrag, { once: true });
+      });
+    });
+  }
+
+  function updateDrag(e) {
+    if (!drag) return;
+    drag.free = e.altKey;
+    const laneRect = drag.laneRect;
+    // позиция курсора в координатах дорожки (минус лейбл-колонка), клампим к оси
+    let centerTrackX = (e.clientX - laneRect.left) - LBL_W;
+    centerTrackX = Math.max(0, Math.min(trackW, centerTrackX));
+
+    drag.el.classList.toggle('free', drag.free);
+    drag.el.classList.toggle('snapped', !drag.free);
+
+    let targetX = centerTrackX;
+    let wk = null;
+    if (!drag.free) {
+      wk = nearestWeek(centerTrackX);
+      targetX = wk.x; // магнит: довод к неделе
+    }
+    // двигаем пилюлю (left-easing включится через класс)
+    drag.el.style.left = (LBL_W + targetX - PW/2).toFixed(1) + 'px';
+    drag.curX = targetX;
+
+    // ghost + weeklab
+    const ghost = drag.ghost;
+    ghost.classList.add('show');
+    ghost.classList.toggle('free', drag.free);
+    if (drag.free) {
+      ghost.style.left = (LBL_W + targetX - PW/2).toFixed(1) + 'px';
+      ghost.style.width = PW + 'px';
+    } else {
+      ghost.style.left = (LBL_W + wk.x - PW/2).toFixed(1) + 'px';
+      ghost.style.width = PW + 'px';
+    }
+
+    // подсветка hot-тика
+    chart.querySelectorAll('.weektick.hot').forEach(n => n.classList.remove('hot'));
+    if (!drag.free && wk) {
+      const wi = weeks.indexOf(wk);
+      const tick = chart.querySelector('.weektick[data-wi="' + wi + '"]');
+      if (tick) tick.classList.add('hot');
+    }
+
+    // weeklab над осью
+    const wl = document.getElementById('weeklab');
+    wl.classList.add('show');
+    wl.classList.toggle('free', drag.free);
+    const dAt = dateOfX(drag.free ? centerTrackX : wk.x);
+    const isoN = drag.free ? isoWeek(dAt) : wk.iso;
+    wl.style.left = (LBL_W + (drag.free ? centerTrackX : wk.x)).toFixed(1) + 'px';
+    wl.textContent = 'нед. ' + isoN + ' · ' + fmt(drag.free ? dAt : wk.date);
+
+    // readout
+    readout.classList.add('show');
+    readout.classList.toggle('free', drag.free);
+    document.getElementById('roMode').textContent = drag.free ? 'свободно' : 'привязка';
+    document.getElementById('roWk').textContent = 'нед. ' + isoN;
+    document.getElementById('roDt').textContent = fmt(drag.free ? dAt : wk.date);
+  }
+
+  function endDrag(e) {
+    window.removeEventListener('pointermove', updateDrag);
+    if (!drag) return;
+    const m = drag.m;
+    const finalX = (drag.curX != null) ? drag.curX : m.x;
+    const dropDate = dateOfX(finalX);
+    const rel = releaseAtDate(dropDate);
+    // обновляем модель: позиция + релиз
+    m.x = drag.free ? finalX : nearestWeek(finalX).x;
+    m.col = rel.key;
+    // визуально вернуть easing для финального дослайда
+    drag.el.classList.remove('dragging', 'free');
+    drag.el.style.transition = '';
+    drag.el.style.left = (LBL_W + m.x - PW/2).toFixed(1) + 'px';
+    drag.el.classList.add('snapped');
+    setTimeout(() => drag.el && drag.el.classList.remove('snapped'), 400);
+    // прибрать ghost/labels
+    drag.ghost.classList.remove('show', 'free');
+    chart.querySelectorAll('.weektick.hot').forEach(n => n.classList.remove('hot'));
+    document.getElementById('weeklab').classList.remove('show', 'free');
+    setTimeout(() => readout.classList.remove('show'), 1100);
+    drag = null;
+  }
+
+  document.getElementById('reset').addEventListener('click', () => { buildModel(); render(); });
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  // init (gotcha a): sync + setTimeout + resize
+  buildModel();
+  render();
+  setTimeout(() => { if (!drag) { placeOverlays(); } }, 60);
+  window.addEventListener('resize', () => { if (!drag) placeOverlays(); });
+})();
+</script>
+</body>
+</html>

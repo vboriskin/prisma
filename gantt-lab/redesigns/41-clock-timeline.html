@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 41 · Циферблат квартала</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 13px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .top .legend i.r { border-radius: 50%; }
+  .top .legend i.tk { width: 2px; height: 11px; border-radius: 0; }
+
+  /* ── stage ── */
+  .body { flex: 1; min-height: 0; display: flex; }
+  .stagewrap { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .eyebrowbar { position: absolute; top: 14px; left: 22px; z-index: 5; pointer-events: none; }
+  .eyebrowbar .note { display: block; margin-top: 5px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 300px; }
+  svg.clock { display: block; width: 100%; height: 100%; }
+
+  /* rim arcs (release windows — neutral) */
+  .relarc { transition: opacity .18s var(--ease-calm); }
+  .relarc path { stroke: none; transition: fill .2s; }
+  .relarc.dim { opacity: .3; }
+  .relarc:hover path { filter: brightness(1.2); }
+  .relarc.cur path { stroke: var(--prizma-information); stroke-width: 1.4; }
+  .relabel { fill: var(--prizma-text-secondary); font: 700 10px var(--mono); letter-spacing: .4px; pointer-events: none; }
+  .relabel.cur { fill: var(--prizma-information); }
+
+  /* ticks / milestones */
+  .tick { stroke: var(--prizma-border-strong); stroke-width: 1; }
+  .tick.major { stroke: var(--prizma-text-tertiary); stroke-width: 1.4; }
+  .monthlbl { fill: var(--prizma-text-tertiary); font: 700 9px var(--mono); letter-spacing: .4px; pointer-events: none; }
+  .ms { cursor: default; }
+  .ms line { stroke: var(--prizma-text-secondary); stroke-width: 1.4; }
+  .ms .mk { fill: var(--prizma-bg-tertiary); stroke: var(--prizma-text-secondary); stroke-width: 1.2; }
+  .ms .mlbl { fill: var(--prizma-text-secondary); font: 600 9.5px var(--font); pointer-events: none; }
+
+  /* epic dots on rim */
+  .ep { cursor: pointer; transition: opacity .16s; }
+  .ep circle { stroke: var(--prizma-bg); stroke-width: 1.4; transition: r .15s var(--ease-spring); }
+  .ep.dim { opacity: .22; }
+  .ep.lit circle { stroke: var(--prizma-text-primary); }
+
+  /* clock hand → today */
+  .hand { stroke: var(--prizma-information); stroke-width: 2.4; stroke-linecap: round; }
+  .hand-hub { fill: var(--prizma-information); }
+  .hand-hub-ring { fill: none; stroke: var(--prizma-information); stroke-width: 1.2; opacity: .4; }
+
+  /* center readout */
+  .hub { pointer-events: none; }
+  .hub .c-eyebrow { fill: var(--prizma-text-tertiary); font: 700 9.5px var(--font); letter-spacing: .6px; text-transform: uppercase; }
+  .hub .c-date { fill: var(--prizma-text-primary); font: 300 30px var(--mono); letter-spacing: -.01em; }
+  .hub .c-rel { fill: var(--prizma-information); font: 700 13px var(--mono); letter-spacing: .3px; }
+  .hub .c-sub { font: 700 10px var(--mono); letter-spacing: .3px; fill: var(--prizma-text-secondary); }
+
+  /* ── side: legend + readout ── */
+  .side { width: 244px; flex: none; border-left: 1px solid var(--prizma-border); padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+  .now { }
+  .now .pz-eyebrow { display: block; margin-bottom: 9px; }
+  .now .big { font: 300 26px/1 var(--mono); color: var(--prizma-text-primary); }
+  .now .row { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; font-size: 12px; color: var(--prizma-text-secondary); }
+  .now .row b { font: 700 12px var(--mono); color: var(--prizma-text-primary); }
+  .now .row .rc { font: 700 12px var(--mono); color: var(--prizma-information); }
+
+  .lg .pz-eyebrow { display: block; margin-bottom: 11px; }
+  .lgrow { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; color: var(--prizma-text-secondary); }
+  .lgrow .sw { width: 12px; height: 12px; border-radius: 50%; flex: none; border: 1px solid var(--prizma-border); }
+  .lgrow .ct { margin-left: auto; font: 700 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .hint { margin-top: auto; font: 400 11px/1.5 var(--font); color: var(--prizma-text-tertiary); border-top: 1px solid var(--prizma-border); padding-top: 14px; }
+  .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Циферблат квартала</span>
+    <span class="pz-eyebrow">Редизайн 41 · clock</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i class="r" style="background:var(--prizma-on-course)"></i>по курсу</span>
+      <span><i class="r" style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i class="r" style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="tk" style="background:var(--prizma-information)"></i>сегодня</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <div class="stagewrap" id="stage">
+      <div class="eyebrowbar">
+        <span class="pz-eyebrow">Время по кругу</span>
+        <span class="note">Полный круг — квартал апр→июл. Дуги на ободе — окна релизов; стрелка — «сегодня»; ромбы — вехи; точки — эпики у дат релизов (риск = цвет).</span>
+      </div>
+      <svg class="clock" id="clock" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Радиальный таймлайн квартала"></svg>
+    </div>
+
+    <aside class="side">
+      <div class="now">
+        <span class="pz-eyebrow">Сейчас</span>
+        <div class="big" id="nowDate">—</div>
+        <div class="row">релиз <span class="rc" id="nowRel">—</span></div>
+        <div class="row">до РК <b id="nowRc">—</b> <span id="nowRcU"></span></div>
+        <div class="row">пройдено квартала <b id="nowPct">—</b></div>
+      </div>
+      <div class="lg">
+        <span class="pz-eyebrow">Эпики по риску</span>
+        <div id="legend"></div>
+      </div>
+      <div class="hint" id="hint">Наведите на дугу релиза — подсветятся его эпики. <b>Наведите на точку</b> — увидите эпик в центре. Стрелка указывает на сегодняшний день.</div>
+    </aside>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const clock = document.getElementById('clock');
+  const stage = document.getElementById('stage');
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  const relShort = k => { const c = D.releases.find(x => x.key === k); return c ? c.short : k; };
+
+  // ── time window: dated releases span the full circle (Date objects, gotcha b) ──
+  const dated = D.releases.filter(r => r.dated);
+  const t0 = parse(dated[0].start);
+  const t1 = new Date(parse(dated[dated.length - 1].end).getTime() + DAY);
+  const spanMs = (t1 - t0) || 1;
+
+  const TAU = Math.PI * 2;
+  const START = -Math.PI / 2;            // 12 o'clock = quarter start
+  // map a Date to an angle on the circle (clockwise from top)
+  function angOf(date) {
+    const f = Math.max(0, Math.min(1, (date - t0) / spanMs));
+    return START + f * TAU;
+  }
+  function polar(cx, cy, r, a) { return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+
+  // annular sector path r0..r1, a0..a1 (clockwise)
+  function arcPath(cx, cy, r0, r1, a0, a1) {
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    const [x00, y00] = polar(cx, cy, r0, a0);
+    const [x01, y01] = polar(cx, cy, r1, a0);
+    const [x10, y10] = polar(cx, cy, r1, a1);
+    const [x11, y11] = polar(cx, cy, r0, a1);
+    return 'M' + x01.toFixed(2) + ' ' + y01.toFixed(2) +
+      ' A' + r1.toFixed(2) + ' ' + r1.toFixed(2) + ' 0 ' + large + ' 1 ' + x10.toFixed(2) + ' ' + y10.toFixed(2) +
+      ' L' + x11.toFixed(2) + ' ' + y11.toFixed(2) +
+      ' A' + r0.toFixed(2) + ' ' + r0.toFixed(2) + ' 0 ' + large + ' 0 ' + x00.toFixed(2) + ' ' + y00.toFixed(2) + ' Z';
+  }
+
+  // ── status of an epic ──
+  const STATUS = {
+    off:   { lbl: 'срыв сроков', col: 'var(--prizma-off-course)' },
+    drift: { lbl: 'дрейф',       col: 'var(--prizma-drift)' },
+    done:  { lbl: 'готово',      col: 'var(--prizma-on-course)' },
+    prog:  { lbl: 'в работе',    col: 'var(--prizma-information)' },
+    plan:  { lbl: 'план',        col: 'var(--prizma-border-strong)' },
+  };
+  function statusOf(e) {
+    if (e.risk === 'off-course') return 'off';
+    if (e.risk === 'drift') return 'drift';
+    const tot = e.pills.length || 1;
+    const dn = e.pills.filter(p => p.state === 'done').length;
+    const pr = e.pills.filter(p => p.state === 'progress').length;
+    if (dn === tot) return 'done';
+    if (pr > 0 || (dn > 0 && dn < tot)) return 'prog';
+    return 'plan';
+  }
+  // epic anchor date = midpoint of its dominant dated release window
+  function dominantCol(e) {
+    const cnt = {}; e.pills.forEach(p => { cnt[p.col] = (cnt[p.col] || 0) + 1; });
+    let best = null, n = -1;
+    Object.keys(cnt).forEach(k => { const r = D.releases.find(x => x.key === k); if (r && r.dated && cnt[k] > n) { n = cnt[k]; best = k; } });
+    return best;
+  }
+  function epicDate(e) {
+    const col = dominantCol(e);
+    if (!col) return null;
+    const r = D.releases.find(x => x.key === col);
+    const s = parse(r.start), en = new Date(parse(r.end).getTime() + DAY);
+    return new Date((s.getTime() + en.getTime()) / 2);
+  }
+
+  let VB = 720, hoverRel = null, hoverEp = null, hoverEpRel = null;
+
+  function render() {
+    const rect = stage.getBoundingClientRect();
+    const side = Math.max(360, Math.min(rect.width - 28, rect.height - 28));
+    VB = 720;
+    clock.setAttribute('viewBox', '0 0 ' + VB + ' ' + VB);
+    clock.style.maxWidth = side + 'px';
+    clock.style.maxHeight = side + 'px';
+
+    const cx = VB / 2, cy = VB / 2;
+    const rRim1 = 300, rRim0 = 258;        // release arc band
+    const rTick = 252;                     // inner tick base
+    const rDot = 228;                      // epic dot ring
+    const rHand = 200;                     // clock hand length
+
+    let s = '';
+
+    // outer faint circle baseline
+    s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + rRim1 + '" fill="none" stroke="var(--prizma-border)" stroke-width="1"/>';
+
+    // ── release arcs (neutral grey, current = information stroke) ──
+    dated.forEach(r => {
+      const a0 = angOf(parse(r.start));
+      const a1 = angOf(new Date(parse(r.end).getTime() + DAY));
+      const fill = r.current
+        ? 'color-mix(in srgb, var(--prizma-information) 18%, var(--prizma-bg-elevated))'
+        : 'color-mix(in srgb, var(--prizma-text-primary) 7%, var(--prizma-bg-elevated))';
+      s += '<g class="relarc' + (r.current ? ' cur' : '') + '" data-rel="' + esc(r.key) + '">' +
+        '<path d="' + arcPath(cx, cy, rRim0, rRim1, a0, a1) + '" fill="' + fill + '"/></g>';
+      // label centered on arc
+      const mid = (a0 + a1) / 2;
+      const [lx, ly] = polar(cx, cy, (rRim0 + rRim1) / 2, mid);
+      let deg = mid * 180 / Math.PI, nd = (deg + 360) % 360, rot = nd;
+      if (nd > 90 && nd < 270) rot = nd + 180;
+      s += '<text class="relabel' + (r.current ? ' cur' : '') + '" x="' + lx.toFixed(2) + '" y="' + ly.toFixed(2) + '" text-anchor="middle" dominant-baseline="central" transform="rotate(' + rot.toFixed(1) + ' ' + lx.toFixed(2) + ' ' + ly.toFixed(2) + ')">' + esc(r.short) + '</text>';
+    });
+
+    // ── month ticks + labels (1st of each month inside the span) ──
+    const m0 = new Date(t0.getFullYear(), t0.getMonth(), 1);
+    const monthNames = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+    for (let m = new Date(m0); m <= t1; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+      if (m < t0) continue;
+      const a = angOf(m);
+      const [x0, y0] = polar(cx, cy, rTick, a);
+      const [x1, y1] = polar(cx, cy, rTick - 14, a);
+      s += '<line class="tick major" x1="' + x0.toFixed(2) + '" y1="' + y0.toFixed(2) + '" x2="' + x1.toFixed(2) + '" y2="' + y1.toFixed(2) + '"/>';
+      const [mx, my] = polar(cx, cy, rTick - 26, a);
+      s += '<text class="monthlbl" x="' + mx.toFixed(2) + '" y="' + my.toFixed(2) + '" text-anchor="middle" dominant-baseline="central">' + monthNames[m.getMonth()] + '</text>';
+    }
+    // weekly minor ticks
+    for (let t = t0.getTime(); t <= t1.getTime(); t += 7 * DAY) {
+      const a = angOf(new Date(t));
+      const [x0, y0] = polar(cx, cy, rTick, a);
+      const [x1, y1] = polar(cx, cy, rTick - 7, a);
+      s += '<line class="tick" x1="' + x0.toFixed(2) + '" y1="' + y0.toFixed(2) + '" x2="' + x1.toFixed(2) + '" y2="' + y1.toFixed(2) + '"/>';
+    }
+
+    // ── milestones (diamond markers on the rim) ──
+    D.milestones.forEach(m => {
+      const d = parse(m.date);
+      if (d < t0 || d > t1) return;
+      const a = angOf(d);
+      const [ox, oy] = polar(cx, cy, rRim1, a);
+      const [ix, iy] = polar(cx, cy, rRim1 + 16, a);
+      s += '<g class="ms"><line x1="' + ox.toFixed(2) + '" y1="' + oy.toFixed(2) + '" x2="' + ix.toFixed(2) + '" y2="' + iy.toFixed(2) + '"/>';
+      s += '<path class="mk" d="M' + ix.toFixed(2) + ' ' + (iy - 5).toFixed(2) + ' l5 5 l-5 5 l-5 -5 z"/>';
+      // label outside, aligned away from center
+      const [tx, ty] = polar(cx, cy, rRim1 + 28, a);
+      const anchor = Math.cos(a) > 0.15 ? 'start' : (Math.cos(a) < -0.15 ? 'end' : 'middle');
+      s += '<text class="mlbl" x="' + tx.toFixed(2) + '" y="' + ty.toFixed(2) + '" text-anchor="' + anchor + '" dominant-baseline="central">' + esc(m.label) + '</text>';
+      s += '<title>' + esc(m.label) + ' · ' + d.toLocaleDateString('ru', { day: '2-digit', month: 'long' }) + '</title></g>';
+    });
+
+    // ── epic dots on the rim, clustered near their release-date ──
+    // distribute multiple epics sharing a date slightly along radius to avoid overlap
+    const eps = D.epics.map(e => ({ e, d: epicDate(e), st: statusOf(e) })).filter(o => o.d);
+    // group by dominant col to spread radially
+    const byCol = {};
+    eps.forEach(o => { const c = dominantCol(o.e); (byCol[c] = byCol[c] || []).push(o); });
+    Object.keys(byCol).forEach(c => {
+      const arr = byCol[c];
+      arr.forEach((o, i) => {
+        const a = angOf(o.d);
+        // jitter angle a touch + step radius so dots in same window form a small radial fan
+        const ja = a + (i - (arr.length - 1) / 2) * 0.045;
+        const rr = rDot - (i % 3) * 13;
+        const [x, y] = polar(cx, cy, rr, ja);
+        const st = STATUS[o.st];
+        const isRisk = o.st === 'off' || o.st === 'drift';
+        const rad = isRisk ? 6 : 4.5;
+        const fill = isRisk ? st.col : 'color-mix(in srgb, ' + st.col + ' 55%, var(--prizma-bg-tertiary))';
+        s += '<g class="ep" data-id="' + o.e.id + '" data-rel="' + esc(c) + '">' +
+          '<circle cx="' + x.toFixed(2) + '" cy="' + y.toFixed(2) + '" r="' + rad + '" fill="' + fill + '"/>' +
+          '<title>' + esc(o.e.epic) + ' · ' + esc(o.e.team) + ' · ' + esc(st.lbl) + '</title></g>';
+      });
+    });
+
+    // ── clock hand → today ──
+    const today = parse(D.today);
+    const ta = angOf(today);
+    const [hx, hy] = polar(cx, cy, rHand, ta);
+    s += '<line class="hand" x1="' + cx + '" y1="' + cy + '" x2="' + hx.toFixed(2) + '" y2="' + hy.toFixed(2) + '"/>';
+    // hand reaches to rim with a small arrow tip
+    const [tipBx, tipBy] = polar(cx, cy, rTick - 2, ta);
+    s += '<circle class="hand-hub-ring" cx="' + cx + '" cy="' + cy + '" r="9"/>';
+    s += '<circle class="hand-hub" cx="' + cx + '" cy="' + cy + '" r="4.5"/>';
+    // little dot at the tip pointing into the rim
+    s += '<circle cx="' + tipBx.toFixed(2) + '" cy="' + tipBy.toFixed(2) + '" r="3" fill="var(--prizma-information)"/>';
+
+    // hub readout
+    s += '<g class="hub" id="hub"></g>';
+
+    clock.innerHTML = s;
+    wire();
+    setHub(null);
+  }
+
+  // ── center readout ──
+  function curRelease(date) {
+    return dated.find(r => {
+      const s = parse(r.start), en = new Date(parse(r.end).getTime() + DAY);
+      return date >= s && date < en;
+    });
+  }
+  function setHub(epData) {
+    const hub = document.getElementById('hub');
+    if (!hub) return;
+    const cx = VB / 2, cy = VB / 2;
+    let h = '';
+    if (epData) {
+      const e = epData.e, st = STATUS[epData.st];
+      const title = e.epic.length > 20 ? e.epic.slice(0, 19) + '…' : e.epic;
+      h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 36) + '" text-anchor="middle">' + esc(e.team) + '</text>';
+      h += '<text class="c-rel" x="' + cx + '" y="' + (cy - 12) + '" text-anchor="middle" fill="' + st.col + '">' + esc(st.lbl) + '</text>';
+      h += '<text class="c-date" x="' + cx + '" y="' + (cy + 24) + '" text-anchor="middle" style="font-size:17px;fill:var(--prizma-text-primary);font-family:var(--font);font-weight:600">' + esc(title) + '</text>';
+      h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 46) + '" text-anchor="middle">' + relShort(epData.rel) + ' · ' + H.effortOf(e) + ' дн</text>';
+    } else {
+      const today = parse(D.today);
+      const dStr = today.toLocaleDateString('ru', { day: 'numeric', month: 'long' });
+      const cr = curRelease(today);
+      h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 36) + '" text-anchor="middle">сегодня · квартал q2</text>';
+      h += '<text class="c-date" x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle">' + esc(dStr) + '</text>';
+      h += '<text class="c-rel" x="' + cx + '" y="' + (cy + 24) + '" text-anchor="middle">релиз ' + (cr ? cr.short : '—') + '</text>';
+      // days to release-candidate milestone
+      const rc = D.milestones.find(m => /кандидат/i.test(m.label)) || D.milestones[0];
+      const days = Math.round((parse(rc.date) - today) / DAY);
+      const dl = days >= 0 ? ('до РК ' + days + ' ' + plural(days, 'день', 'дня', 'дней')) : ('РК ' + (-days) + ' ' + plural(-days, 'день', 'дня', 'дней') + ' назад');
+      h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 46) + '" text-anchor="middle">' + esc(dl) + '</text>';
+    }
+    hub.innerHTML = h;
+  }
+
+  // ── interactions ──
+  function wire() {
+    clock.querySelectorAll('.relarc').forEach(g => {
+      g.addEventListener('mouseenter', () => { hoverRel = g.dataset.rel; applyHL(); });
+      g.addEventListener('mouseleave', () => { hoverRel = null; applyHL(); });
+    });
+    clock.querySelectorAll('.ep').forEach(g => {
+      g.addEventListener('mouseenter', () => {
+        const id = g.dataset.id;
+        const e = D.epics.find(x => x.id === id);
+        setHub({ e, st: statusOf(e), rel: g.dataset.rel });
+        hoverEp = id; hoverEpRel = g.dataset.rel; applyHL();
+      });
+      g.addEventListener('mouseleave', () => { hoverEp = null; hoverEpRel = null; setHub(null); applyHL(); });
+    });
+  }
+  function applyHL() {
+    const rel = hoverRel || hoverEpRel;
+    clock.querySelectorAll('.relarc').forEach(a => a.classList.toggle('dim', rel ? a.dataset.rel !== rel : false));
+    clock.querySelectorAll('.ep').forEach(g => {
+      const on = !rel || g.dataset.rel === rel;
+      g.classList.toggle('dim', rel ? !on : false);
+      g.classList.toggle('lit', hoverEp ? g.dataset.id === hoverEp : false);
+    });
+  }
+
+  // ── side panel ──
+  function fillSide() {
+    const today = parse(D.today);
+    document.getElementById('nowDate').textContent = today.toLocaleDateString('ru', { day: '2-digit', month: 'long' });
+    const cr = curRelease(today);
+    document.getElementById('nowRel').textContent = cr ? cr.short : '—';
+    const rc = D.milestones.find(m => /кандидат/i.test(m.label)) || D.milestones[0];
+    const days = Math.round((parse(rc.date) - today) / DAY);
+    document.getElementById('nowRc').textContent = Math.abs(days);
+    document.getElementById('nowRcU').textContent = (days >= 0 ? '' : 'назад · ') + plural(Math.abs(days), 'день', 'дня', 'дней');
+    const pct = Math.round((today - t0) / spanMs * 100);
+    document.getElementById('nowPct').textContent = pct + '%';
+
+    const counts = { off: 0, drift: 0, done: 0, prog: 0, plan: 0 };
+    D.epics.forEach(e => counts[statusOf(e)]++);
+    const order = ['off', 'drift', 'prog', 'done', 'plan'];
+    document.getElementById('legend').innerHTML = order.map(k =>
+      '<div class="lgrow"><span class="sw" style="background:' + STATUS[k].col + '"></span>' + STATUS[k].lbl + '<span class="ct">' + counts[k] + '</span></div>').join('');
+  }
+
+  // ── init: sync + 60ms + resize (gotcha a & d) ──
+  fillSide();
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

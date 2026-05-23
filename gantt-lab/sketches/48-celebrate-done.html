@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 48 · Момент завершения</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .tt { position: fixed; top: 16px; right: 18px; z-index: 50; }
+
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 24px 64px; }
+  .wrap { width: 100%; max-width: 560px; }
+
+  .head { margin-bottom: 24px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; }
+
+  /* ── карточка эпика ── */
+  .epic { position: relative; border: 1px solid var(--prizma-border); border-radius: var(--r-xl);
+    background: var(--prizma-bg-elevated); padding: 20px 22px 22px; overflow: hidden;
+    transition: border-color .5s var(--ease-calm), box-shadow .6s var(--ease-calm); }
+  .epic.done { border-color: color-mix(in srgb, var(--prizma-on-course) 55%, var(--prizma-border-strong)); }
+
+  /* spine-stripe слева, семантический по статусу */
+  .epic::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--prizma-drift); transition: background .5s var(--ease-calm); z-index: 3; }
+  .epic.done::before { background: var(--prizma-on-course); }
+
+  .erow { display: flex; align-items: flex-start; gap: 12px; position: relative; z-index: 2; }
+  .erow .meta { flex: 1; min-width: 0; }
+  .erow .tm { font: 700 9px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 5px; }
+  .erow h2 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .erow .prog { font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); margin-top: 6px; }
+  .erow .prog b { color: var(--prizma-text-primary); }
+
+  /* прогресс-кольцо */
+  .ring { flex: none; width: 44px; height: 44px; position: relative; }
+  .ring svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+  .ring .bg { stroke: var(--prizma-bg-tertiary); }
+  .ring .fg { stroke: var(--prizma-drift); stroke-linecap: round; transition: stroke-dashoffset .5s var(--ease-calm), stroke .5s var(--ease-calm); }
+  .epic.done .ring .fg { stroke: var(--prizma-on-course); }
+  .ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .epic.done .ring .pct { color: var(--prizma-on-course); }
+
+  /* пилюли работ */
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; position: relative; z-index: 2; }
+  .pp { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px 7px 13px;
+    font: 600 12px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-md); cursor: pointer; user-select: none; overflow: hidden;
+    transition: opacity .3s var(--ease-calm), transform .14s var(--ease-calm); }
+  .pp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pp:hover { transform: translateY(-1px); }
+  .pp .who { font-size: 10.5px; color: var(--prizma-text-tertiary); font-weight: 500; }
+  .pp .check { width: 15px; height: 15px; flex: none; color: var(--prizma-on-course);
+    opacity: 0; transform: scale(.5); transition: opacity .25s var(--ease-calm), transform .3s var(--ease-spring); }
+  .pp[data-done="1"] { opacity: .72; }
+  .pp[data-done="1"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pp[data-done="1"] .check { opacity: 1; transform: none; }
+  .pp .hint { font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); opacity: 0; transition: opacity .15s; }
+  .pp:not([data-done="1"]):hover .hint { opacity: 1; }
+
+  /* ── момент завершения: prism-ray / north-star ── */
+  .ray { position: absolute; inset: -40% -10%; z-index: 1; pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse 60% 80% at 50% 42%, var(--prizma-on-course-bg) 0%, transparent 64%); }
+  .epic.done .ray { animation: ray-pulse 4.2s var(--ease-calm) .15s; }
+  @keyframes ray-pulse {
+    0% { opacity: 0; transform: scale(.85); }
+    28% { opacity: 1; transform: scale(1.02); }
+    70% { opacity: .55; }
+    100% { opacity: .28; transform: scale(1); }
+  }
+  /* north-star: тонкий 4-лучевой блик над кольцом */
+  .star { position: absolute; top: 14px; right: 18px; width: 56px; height: 56px; z-index: 2; pointer-events: none;
+    opacity: 0; color: var(--prizma-on-course); transform: scale(.4); }
+  .epic.done .star { animation: star-in 1.5s var(--ease-spring) .2s forwards; }
+  @keyframes star-in { 0% { opacity: 0; transform: scale(.3) rotate(-20deg); } 55% { opacity: .95; } 100% { opacity: .5; transform: scale(1) rotate(0); } }
+  .star.twinkle { animation: star-twinkle 3.6s var(--ease-calm) 1.7s infinite; }
+
+  /* «Эпик готов» бейдж */
+  .doneBadge { display: inline-flex; align-items: center; gap: 8px; margin-top: 18px; position: relative; z-index: 2;
+    height: 0; opacity: 0; overflow: hidden; padding: 0 12px;
+    border: 1px solid color-mix(in srgb, var(--prizma-on-course) 45%, transparent); border-radius: var(--r-md);
+    background: var(--prizma-on-course-bg); color: var(--prizma-on-course);
+    font: 600 12.5px/1 var(--font); transition: opacity .4s var(--ease-calm) .35s, height .4s var(--ease-calm) .35s, padding .4s var(--ease-calm) .35s; }
+  .epic.done .doneBadge { height: 34px; opacity: 1; padding: 0 14px; }
+  .doneBadge svg { width: 15px; height: 15px; }
+  .doneBadge .sub { color: var(--prizma-text-secondary); font-weight: 500; }
+
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+  .toolbar .hint { font-size: 12px; color: var(--prizma-text-tertiary); }
+  .pz-btn svg { width: 14px; height: 14px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .epic.done .ray { animation: none; opacity: .3; }
+    .epic.done .star { animation: none; opacity: .5; transform: scale(1); }
+    .star.twinkle { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="stage">
+    <div class="wrap">
+      <div class="head">
+        <div class="pz-eyebrow">Скетч 48 · Дисциплинированный восторг</div>
+        <h1>Момент завершения</h1>
+        <p>Отметьте последнюю работу готовой — эпик закрывается спокойным лучом призмы. Без конфетти, без эмодзи: тихая радость по делу.</p>
+      </div>
+
+      <div class="epic" id="epic">
+        <span class="ray" aria-hidden="true"></span>
+        <svg class="star" id="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2 L13.4 9 L21 12 L13.4 15 L12 22 L10.6 15 L3 12 L10.6 9 Z"/>
+        </svg>
+
+        <div class="erow">
+          <div class="meta">
+            <div class="tm" id="eTeam">Команда</div>
+            <h2 id="eName">Эпик</h2>
+            <div class="prog" id="eProg">0 / 0 готово</div>
+          </div>
+          <div class="ring" aria-hidden="true">
+            <svg viewBox="0 0 44 44"><circle class="bg" cx="22" cy="22" r="18" fill="none" stroke-width="4"/><circle class="fg" id="ringFg" cx="22" cy="22" r="18" fill="none" stroke-width="4"/></svg>
+            <span class="pct" id="ringPct">0%</span>
+          </div>
+        </div>
+
+        <div class="pills" id="pills"></div>
+
+        <div class="doneBadge" id="doneBadge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          <span>Эпик готов</span>
+          <span class="sub" id="badgeSub">все работы закрыты</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button class="pz-btn" id="reset">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          Повторить
+        </button>
+        <span class="hint" id="tHint">Кликайте по незавершённым работам, чтобы отметить готовыми.</span>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtMap = { BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf' };
+  const wtVar = wt => 'var(' + (wtMap[wt] || '--prizma-information') + ')';
+  function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // небольшой эпик: e16 (хотфикс краша) — 2 пилюли, но уже done. Возьмём e14 (Биометрия): BE+FE+QA,
+  // переразметим под демо: одна done, две — открыты, чтобы было что закрывать.
+  const src = D.epics.find(e => e.id === 'e14') || D.epics[0];
+  // локальная модель пилюль (не мутируем PZ_DATA)
+  let model = src.pills.map((p, i) => ({ wt: p.wt, who: p.who, done: i === 0 ? true : false }));
+  // гарантируем минимум одну закрытую и хотя бы одну открытую
+  if (model.every(m => m.done)) model[model.length - 1].done = false;
+
+  const epic = document.getElementById('epic');
+  const pillsEl = document.getElementById('pills');
+  const ringFg = document.getElementById('ringFg');
+  const ringPct = document.getElementById('ringPct');
+  const eProg = document.getElementById('eProg');
+  const star = document.getElementById('star');
+  const badgeSub = document.getElementById('badgeSub');
+  const tHint = document.getElementById('tHint');
+  const C = 2 * Math.PI * 18; // длина окружности r=18
+  ringFg.style.strokeDasharray = C.toFixed(2);
+
+  document.getElementById('eTeam').textContent = src.team;
+  document.getElementById('eName').textContent = src.epic;
+
+  function render() {
+    pillsEl.innerHTML = model.map((m, i) =>
+      '<div class="pp" data-i="' + i + '" data-done="' + (m.done ? 1 : 0) + '" style="--wt:' + wtVar(m.wt) + '">' +
+        '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' +
+        '<span class="nm">' + esc(m.wt) + (D.WT[m.wt] ? ' · ' + D.WT[m.wt].label : '') + '</span>' +
+        (m.who ? '<span class="who">' + esc(m.who) + '</span>' : '') +
+        (m.done ? '' : '<span class="hint">отметить</span>') +
+      '</div>').join('');
+    pillsEl.querySelectorAll('.pp').forEach(el => {
+      el.addEventListener('click', () => toggle(+el.dataset.i));
+    });
+    updateProgress();
+  }
+
+  function updateProgress() {
+    const total = model.length;
+    const done = model.filter(m => m.done).length;
+    const ratio = total ? done / total : 0;
+    ringFg.style.strokeDashoffset = (C * (1 - ratio)).toFixed(2);
+    ringPct.textContent = Math.round(ratio * 100) + '%';
+    eProg.innerHTML = '<b>' + done + '</b> / ' + total + ' работ готово';
+  }
+
+  let celebrated = false;
+  function toggle(i) {
+    if (model[i].done) return; // в этом скетче — только закрываем (момент завершения)
+    model[i].done = true;
+    render();
+    const allDone = model.every(m => m.done);
+    if (allDone && !celebrated) celebrate();
+  }
+
+  function celebrate() {
+    celebrated = true;
+    // ретриггер анимаций: снять/вернуть класс
+    epic.classList.remove('done');
+    void epic.offsetWidth;
+    epic.classList.add('done');
+    star.classList.remove('twinkle');
+    badgeSub.textContent = model.length + ' ' + plural(model.length, 'работа закрыта', 'работы закрыты', 'работ закрыто');
+    tHint.textContent = 'Готово. Нажмите «Повторить», чтобы увидеть момент ещё раз.';
+    // мерцание звезды после входной анимации (если не reduced-motion)
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce) setTimeout(() => star.classList.add('twinkle'), 1700);
+  }
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  function reset() {
+    celebrated = false;
+    epic.classList.remove('done');
+    star.classList.remove('twinkle');
+    model = src.pills.map((p, i) => ({ wt: p.wt, who: p.who, done: i === 0 }));
+    if (model.every(m => m.done)) model[model.length - 1].done = false;
+    tHint.textContent = 'Кликайте по незавершённым работам, чтобы отметить готовыми.';
+    render();
+  }
+
+  document.getElementById('reset').addEventListener('click', reset);
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+  setTimeout(render, 60);
+})();
+</script>
+</body>
+</html>

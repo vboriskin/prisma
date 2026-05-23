@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 46 · Прошлое и будущее</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  .top .legend i.line { width: 0; height: 13px; border-radius: 0; border-left: 1px dashed var(--prizma-information); }
+
+  .eyebrowbar { padding: 9px 22px 0; flex: none; }
+
+  /* ── side summaries ── */
+  .summary { flex: none; display: grid; grid-template-columns: 230px 1fr 1fr; gap: 0; padding: 10px 22px 0; }
+  .sumcell { padding: 10px 16px; border-bottom: 1px solid var(--prizma-border); }
+  .sumcell.corner { border: none; display: flex; align-items: flex-end; padding-left: 0; }
+  .sumcell.past { text-align: right; }
+  .sumcell .eyb { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .sumcell.past .eyb { justify-content: flex-end; }
+  .sumcell .eyb .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .sumcell .eyb .arr { width: 13px; height: 13px; color: var(--prizma-text-tertiary); }
+  .sumcell .stats { display: flex; gap: 20px; }
+  .sumcell.past .stats { justify-content: flex-end; }
+  .sumcell.future .stats { justify-content: flex-start; }
+  .sumcell .k { display: flex; flex-direction: column; gap: 2px; }
+  .sumcell .k .v { font: 600 18px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-primary); }
+  .sumcell .k .l { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .sumcell.past .v { color: var(--prizma-text-secondary); }
+  .sumcell.future .k.risk .v { color: var(--prizma-off-course); }
+
+  /* ── timeline grid ── */
+  .scroll { flex: 1; overflow: auto; position: relative; }
+  .grid { display: grid; grid-template-columns: 230px 1fr 1fr; min-width: 920px; position: relative; }
+
+  /* col headers: window labels, past on left, future on right */
+  .chrow { display: contents; }
+  .colh { position: sticky; top: 0; z-index: 6; background: var(--prizma-bg); padding: 6px 14px 9px; border-bottom: 1px solid var(--prizma-border); }
+  .colh.corner { display: flex; align-items: flex-end; border-right: 1px solid var(--prizma-border); }
+  .colh.corner .pz-eyebrow { color: var(--prizma-text-tertiary); }
+  .colh .wins { display: flex; gap: 14px; }
+  .colh.past .wins { justify-content: flex-end; }
+  .colh .win { display: flex; flex-direction: column; gap: 3px; }
+  .colh.past .win { align-items: flex-end; }
+  .colh .win .rel { font: 300 16px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .colh .win .rel.cur { color: var(--prizma-text-primary); }
+  .colh .win .dt { font-size: 9.5px; color: var(--prizma-text-tertiary); font-family: var(--mono); }
+  .colh.future { border-left: none; }
+
+  /* зоны фона: прошлое — приглушённая «история», будущее — активная */
+  .zoneband { position: absolute; top: 0; bottom: 0; pointer-events: none; z-index: 0; }
+  .zoneband.past { background: color-mix(in srgb, var(--prizma-text-primary) 1.5%, transparent); }
+
+  .team { grid-column: 1 / -1; position: sticky; left: 0; z-index: 3; padding: 9px 16px 5px; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); background: var(--prizma-bg); }
+
+  .lbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); display: flex; flex-direction: column; justify-content: center; gap: 4px; position: relative; }
+  .lbl.risky::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .lbl.r-off::before { background: var(--prizma-off-course); }
+  .lbl.r-drift::before { background: var(--prizma-drift); }
+  .lbl .nm { font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .lbl .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 8px; align-items: center; }
+  .lbl .bar { display: inline-block; width: 40px; height: 4px; border-radius: 2px; background: var(--prizma-bg-tertiary); overflow: hidden; position: relative; }
+  .lbl .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--prizma-on-course); border-radius: 2px; }
+
+  /* side cells: past (dimmed history) | future (active) */
+  .side { border-bottom: 1px solid var(--prizma-border); padding: 9px 14px; display: flex; flex-wrap: wrap; gap: 6px; align-content: center; min-height: 52px; }
+  .side.past { justify-content: flex-end; opacity: .72; }
+  .side.future { justify-content: flex-start; }
+  .side.empty { }
+  .side .none { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); font-style: italic; align-self: center; }
+
+  /* pill */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px 5px 11px; font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pill .wt { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .pill .who { color: var(--prizma-text-secondary); font-weight: 500; font-size: 10.5px; }
+  .pill.done .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill.done .check { width: 11px; height: 11px; color: var(--prizma-on-course); flex: none; }
+  .pill.unplanned { background: transparent; border: 1px dashed var(--prizma-border-strong); }
+  .pill.progress { box-shadow: inset 0 0 0 1px var(--prizma-border-strong); }
+  .pill .nm { white-space: nowrap; }
+
+  /* connector line from past to future, через divider (тонкая нейтральная) */
+  .connector { position: absolute; height: 1px; background: var(--prizma-border); z-index: 1; pointer-events: none; }
+
+  /* today divider — вертикальная линия по центру (между past/future) */
+  .divider { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 7; pointer-events: none; }
+  .divider .cap { position: absolute; top: 4px; left: 0; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 5px; font: 700 9px/1 var(--mono); letter-spacing: .4px; color: #0A0A0F; background: var(--prizma-information); padding: 4px 8px; border-radius: 0 0 var(--r-sm) var(--r-sm); white-space: nowrap; }
+  [data-theme="light"] .divider .cap { color: #FAFAF8; }
+  .divider .dot { position: absolute; left: -3.5px; width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-information); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Прошлое и будущее</span>
+    <span class="sub">водораздел сегодня</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-on-course)"></i>сделано</span>
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+      <span><i class="line"></i>сегодня</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar"><span class="pz-eyebrow">Редизайн 46 · split</span></div>
+
+  <div class="summary" id="summary"></div>
+  <div class="scroll" id="scroll"><div class="grid" id="grid"></div></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases;
+  const grid = document.getElementById('grid');
+  const scroll = document.getElementById('scroll');
+  const summary = document.getElementById('summary');
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = iso => new Date(iso + 'T00:00:00').toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+
+  const today = new Date(D.today + 'T00:00:00');
+
+  // Окно прошлое, если оно датировано и закончилось до сегодня (1.20).
+  // Текущее (1.21) и будущие (1.22), а также бэклог/овертайм → будущее/«впереди».
+  function isPastCol(c) {
+    if (!c.dated) return false; // бэклог/овертайм → справа (впереди)
+    return new Date(c.end + 'T00:00:00') < today;
+  }
+  // Пилюля попадает в прошлое, если её окно — прошлое ИЛИ она уже выполнена (done).
+  function isPastPill(p) {
+    if (p.state === 'done') return true;
+    const c = cols.find(x => x.key === p.col);
+    return c ? isPastCol(c) : false;
+  }
+
+  const pastCols = cols.filter(isPastCol);
+  const futureCols = cols.filter(c => !isPastCol(c));
+
+  const checkSvg = '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+
+  function pillHtml(p) {
+    const st = p.state === 'done' ? ' done' : (p.state === 'unplanned' ? ' unplanned' : (p.state === 'progress' ? ' progress' : ''));
+    const lab = D.WT[p.wt] ? D.WT[p.wt].label : p.wt;
+    return '<span class="pill' + st + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(lab) + (p.who ? ' · ' + esc(p.who) : '') + ' · ' + esc(p.col) + '">' +
+      (p.state === 'done' ? checkSvg : '') +
+      '<span class="wt">' + esc(p.wt) + '</span><span class="nm">' + esc(lab) + '</span>' +
+      (p.who ? '<span class="who">' + esc(p.who) + '</span>' : '') + '</span>';
+  }
+
+  // ── summaries ──
+  function renderSummary() {
+    let donePills = 0, pastWindows = pastCols.map(c => c.short).join(' · ');
+    let futurePills = 0, futureRisk = 0, futureEpics = new Set();
+    D.epics.forEach(e => {
+      e.pills.forEach(p => { if (isPastPill(p)) donePills++; else futurePills++; });
+      if (e.pills.some(p => !isPastPill(p))) { futureEpics.add(e.id); if (e.risk) futureRisk++; }
+    });
+    const doneEpics = D.epics.filter(e => e.pills.every(isPastPill)).length;
+
+    let h = '<div class="sumcell corner"><span class="pz-eyebrow">Эпик</span></div>';
+    h += '<div class="sumcell past">' +
+      '<div class="eyb"><span class="pz-eyebrow">Сделано · история</span>' +
+        '<svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></div>' +
+      '<div class="stats">' +
+        '<div class="k"><span class="v">' + donePills + '</span><span class="l">работ закрыто</span></div>' +
+        '<div class="k"><span class="v">' + doneEpics + '</span><span class="l">эпиков завершено</span></div>' +
+        '<div class="k"><span class="v">' + (pastWindows || '—') + '</span><span class="l">окна позади</span></div>' +
+      '</div></div>';
+    h += '<div class="sumcell future">' +
+      '<div class="eyb"><svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>' +
+        '<span class="pz-eyebrow">Впереди · план</span></div>' +
+      '<div class="stats">' +
+        '<div class="k"><span class="v">' + futurePills + '</span><span class="l">работ в плане</span></div>' +
+        '<div class="k"><span class="v">' + futureEpics.size + '</span><span class="l">эпиков в работе</span></div>' +
+        '<div class="k risk"><span class="v">' + futureRisk + '</span><span class="l">под риском</span></div>' +
+      '</div></div>';
+    summary.innerHTML = h;
+  }
+
+  // ── grid ──
+  function renderGrid() {
+    let h = '';
+    // headers
+    h += '<div class="colh corner"><span class="pz-eyebrow">Команда · Эпик</span></div>';
+    // past header (окна справа налево к разделителю)
+    h += '<div class="colh past"><div class="wins">';
+    pastCols.forEach(c => {
+      h += '<div class="win"><span class="rel">' + esc(c.short) + '</span><span class="dt">' + (c.dated ? fmt(c.start) + '–' + fmt(c.end) : 'без даты') + '</span></div>';
+    });
+    if (!pastCols.length) h += '<span class="dt" style="color:var(--prizma-text-tertiary)">нет закрытых окон</span>';
+    h += '</div></div>';
+    // future header
+    h += '<div class="colh future"><div class="wins">';
+    futureCols.forEach(c => {
+      h += '<div class="win"><span class="rel' + (c.current ? ' cur' : '') + '">' + esc(c.short) + (c.current ? ' · тек.' : '') + '</span><span class="dt">' + (c.dated ? fmt(c.start) + '–' + fmt(c.end) : 'без даты') + '</span></div>';
+    });
+    h += '</div></div>';
+
+    // rows by team
+    D.teams.forEach(team => {
+      h += '<div class="team">' + esc(team) + '</div>';
+      H.teamEpics(team).forEach(e => {
+        const est = H.effortOf(e);
+        const dr = Math.round(H.doneRatio(e) * 100);
+        const riskCls = e.risk === 'off-course' ? ' risky r-off' : (e.risk === 'drift' ? ' risky r-drift' : '');
+        const past = e.pills.filter(isPastPill);
+        const future = e.pills.filter(p => !isPastPill(p));
+
+        h += '<div class="lbl' + riskCls + '"><span class="nm">' + esc(e.epic) + '</span>' +
+          '<span class="meta"><span>' + est + ' дн</span><span class="bar"><i style="width:' + dr + '%"></i></span><span>' + dr + '%</span></span></div>';
+
+        // past side (history, dimmed)
+        h += '<div class="side past' + (past.length ? '' : ' empty') + '" data-id="' + e.id + '">' +
+          (past.length ? past.map(pillHtml).join('') : '<span class="none">не начато</span>') + '</div>';
+        // future side (active)
+        h += '<div class="side future' + (future.length ? '' : ' empty') + '" data-id="' + e.id + '">' +
+          (future.length ? future.map(pillHtml).join('') : '<span class="none">всё сделано</span>') + '</div>';
+      });
+    });
+    grid.innerHTML = h;
+  }
+
+  // ── overlays: zone band + connectors + today divider ──
+  function placeOverlays() {
+    grid.querySelectorAll('.divider, .zoneband, .connector').forEach(n => n.remove());
+    const gr = grid.getBoundingClientRect();
+    const total = grid.scrollHeight;
+    // divider X = граница между past-колонкой и future-колонкой = конец 2-й grid-колонки.
+    // надёжно берём из любой пары side-ячеек: правый край .past = левый край .future.
+    const anyFuture = grid.querySelector('.side.future');
+    const anyPast = grid.querySelector('.side.past');
+    if (!anyFuture) return;
+    const fr = anyFuture.getBoundingClientRect();
+    const dividerX = fr.left - gr.left;
+
+    // фон прошлого (левее divider, начиная от конца колонки-лейбла)
+    const lbl = grid.querySelector('.lbl') || grid.querySelector('.colh.corner');
+    const lblRight = lbl ? (lbl.getBoundingClientRect().right - gr.left) : 230;
+    const band = document.createElement('div');
+    band.className = 'zoneband past';
+    band.style.left = lblRight.toFixed(1) + 'px';
+    band.style.width = Math.max(0, dividerX - lblRight).toFixed(1) + 'px';
+    band.style.height = total + 'px';
+    grid.appendChild(band);
+
+    // тонкие коннекторы поперёк divider для каждой строки (нейтральные), визуально «нить времени»
+    grid.querySelectorAll('.side.future').forEach(f => {
+      const r = f.getBoundingClientRect();
+      const midY = (r.top - gr.top) + r.height / 2;
+      if (isNaN(midY)) return;
+      const con = document.createElement('div');
+      con.className = 'connector';
+      con.style.left = (dividerX - 26).toFixed(1) + 'px';
+      con.style.width = '52px';
+      con.style.top = midY.toFixed(1) + 'px';
+      grid.appendChild(con);
+    });
+
+    // today divider
+    const div = document.createElement('div');
+    div.className = 'divider';
+    div.style.left = dividerX.toFixed(1) + 'px';
+    div.style.height = total + 'px';
+    div.innerHTML = '<span class="dot"></span><span class="cap">СЕГОДНЯ 23.05</span>';
+    grid.appendChild(div);
+  }
+
+  function render() {
+    renderSummary();
+    renderGrid();
+    placeOverlays();
+  }
+
+  // sync + setTimeout + resize (gotcha a)
+  render();
+  setTimeout(placeOverlays, 60);
+  let rt;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(placeOverlays, 80); });
+  scroll.addEventListener('scroll', () => {}, { passive: true });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    setTimeout(placeOverlays, 30);
+  });
+})();
+</script>
+</body>
+</html>

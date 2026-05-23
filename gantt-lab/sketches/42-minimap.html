@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 42 · Мини-карта</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  .head { margin-bottom: 18px; display: flex; align-items: flex-start; gap: 16px; }
+  .head .txt { flex: 1; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 720px; }
+
+  .bar { display: flex; align-items: center; gap: 12px; margin: 16px 0 14px; }
+  .bar .hint { font-size: 12.5px; color: var(--prizma-text-tertiary); }
+
+  /* ── большой (скроллируемый) мини-гант ── */
+  .wrap { position: relative; }
+  .gantt { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: auto; max-height: 560px; background: var(--prizma-bg-elevated); scroll-behavior: smooth; }
+  /* намеренно крупная сетка: широкие колонки + много строк → нужен обзор */
+  .grid { display: grid; grid-template-columns: 260px repeat(5, 300px); width: max-content; }
+  .gcell { border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); padding: 10px 12px; min-height: 64px; }
+  .ghead { position: sticky; top: 0; z-index: 12; background: var(--prizma-bg-elevated); border-bottom: 1px solid var(--prizma-border-strong); padding: 12px 12px 10px; min-height: 0; }
+  .ghead .rel { font: 300 22px/1 var(--mono); letter-spacing: -.01em; color: var(--prizma-text-secondary); }
+  .ghead .rel.cur { color: var(--prizma-text-primary); }
+  .ghead .rel.muted { color: var(--prizma-text-tertiary); font-size: 15px; }
+  .ghead .cur-tag { font: 700 9px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); margin-left: 6px; }
+  .ghead .dates { display: block; margin-top: 4px; font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; position: sticky; left: 0; display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); z-index: 6; }
+  .teamrow b { font-size: 12.5px; }
+  .teamrow .mono { font: 700 9px/1 var(--mono); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); border: 1px solid var(--prizma-border-strong); border-radius: 3px; padding: 3px 5px; }
+  .teamrow .tc { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .elabel { position: sticky; left: 0; background: var(--prizma-bg-elevated); z-index: 4; display: flex; flex-direction: column; gap: 4px; justify-content: center; }
+  .elabel .nm { font-size: 13px; font-weight: 600; }
+  .elabel .meta { display: flex; align-items: center; gap: 7px; font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .elabel .riskdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+  .cell { display: flex; flex-wrap: wrap; gap: 6px; align-content: center; align-items: center; position: relative; }
+
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px;
+    font: 600 11.5px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); user-select: none; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); background: var(--wt, var(--prizma-border-strong)); }
+  .pill .who { font: 500 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill .dot6 { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pill[data-state="done"] { opacity: .72; }
+  .pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+
+  /* ── мини-карта в углу (фиксированная относительно обёртки) ── */
+  .minimap { position: absolute; right: 14px; bottom: 14px; z-index: 40; width: 168px;
+    background: color-mix(in srgb, var(--prizma-bg-elevated) 92%, transparent);
+    border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); padding: 8px;
+    box-shadow: 0 10px 34px rgba(0,0,0,.45); backdrop-filter: blur(8px); user-select: none; }
+  .minimap .mm-cap { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .minimap .mm-cap .t { font: 700 9px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); }
+  .minimap .mm-cap svg { width: 12px; height: 12px; color: var(--prizma-text-tertiary); }
+  .mm-canvas { position: relative; width: 100%; cursor: pointer; border-radius: var(--r-sm); overflow: hidden; }
+  .mm-svg { display: block; width: 100%; height: auto; }
+  /* колонка-метка релиза в мини-карте — нейтральная заливка */
+  .mm-col { fill: var(--prizma-bg-tertiary); }
+  .mm-col.cur { fill: color-mix(in srgb, var(--prizma-information) 16%, var(--prizma-bg-tertiary)); }
+  .mm-pill { rx: 1; }
+  .mm-team { fill: var(--prizma-border-strong); }
+  .mm-today { stroke: var(--prizma-information); stroke-width: 1; stroke-dasharray: 2 2; }
+  /* viewport-прямоугольник */
+  .mm-view { position: absolute; border: 1.5px solid var(--prizma-information); background: color-mix(in srgb, var(--prizma-information) 12%, transparent);
+    border-radius: 2px; cursor: grab; box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--prizma-bg) 38%, transparent); }
+  .mm-view:active { cursor: grabbing; }
+  .mm-view::after { content: ""; position: absolute; inset: 0; }
+  .minimap .mm-foot { margin-top: 6px; font: 600 9.5px/1 var(--mono); color: var(--prizma-text-tertiary); text-align: center; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="txt">
+      <div class="pz-eyebrow">Скетч 42 · Мини-карта</div>
+      <h1>Мини-карта</h1>
+      <p>Для крупного плана — навигатор в углу. Мини-карта рендерит весь план в миниатюре; рамка-вьюпорт показывает видимую область. Тащите рамку — большая сетка скроллится; скролл сетки двигает рамку. Клик по карте — прыжок в точку. Двусторонняя синхронизация.</p>
+    </div>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Переключить тему">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+    </button>
+  </div>
+
+  <div class="bar">
+    <span class="hint">Большой план не влезает в экран — мини-карта снизу справа держит весь обзор. Тащите рамку или кликайте по карте.</span>
+  </div>
+
+  <div class="wrap">
+    <div class="gantt" id="gantt"><div class="grid" id="grid"></div></div>
+
+    <div class="minimap" id="minimap">
+      <div class="mm-cap">
+        <span class="t">Обзор плана</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3 4 5v16l5-2 6 2 5-2V3l-5 2-6-2Z"/><path d="M9 3v16M15 5v16"/></svg>
+      </div>
+      <div class="mm-canvas" id="mmCanvas">
+        <svg class="mm-svg" id="mmSvg" preserveAspectRatio="none"></svg>
+        <div class="mm-view" id="mmView"></div>
+      </div>
+      <div class="mm-foot" id="mmFoot"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-border-strong') + ')';
+  const wtHex = { BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf' };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = d => new Date(d).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  const riskColor = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+
+  const gantt = document.getElementById('gantt');
+  const grid = document.getElementById('grid');
+
+  // ── рендер большой сетки ──
+  // плоский список «строк» (teamrow + epic-row) для соответствия мини-карте
+  const rowModel = []; // {type:'team'|'epic', team?, epic?}
+  function renderGrid() {
+    rowModel.length = 0;
+    let html = '<div class="gcell ghead"><span class="pz-eyebrow">Эпик / Команда</span></div>';
+    cols.forEach(c => {
+      const dates = c.dated ? fmt(c.start)+' – '+fmt(c.end) : 'без дат';
+      html += '<div class="gcell ghead"><span class="rel'+(c.current?' cur':(c.dated?'':' muted'))+'">'+c.short+'</span>'+(c.current?'<span class="cur-tag">ТЕК.</span>':'')+'<span class="dates">'+dates+'</span></div>';
+    });
+    D.teams.forEach(team => {
+      const eps = D.helpers.teamEpics(team);
+      const cnt = eps.reduce((n,e)=>n+e.pills.length,0);
+      rowModel.push({ type:'team', team });
+      html += '<div class="teamrow"><span class="mono">'+esc(team.slice(0,2))+'</span><b>'+esc(team)+'</b><span class="tc">'+eps.length+' эпик · '+cnt+' работ</span></div>';
+      eps.forEach(e => {
+        rowModel.push({ type:'epic', epic:e });
+        const rdot = e.risk ? '<span class="riskdot" style="background:'+riskColor(e.risk)+'"></span>' : '';
+        html += '<div class="gcell elabel"><span class="nm">'+esc(e.epic)+'</span><span class="meta">'+rdot+D.helpers.effortOf(e)+' дн</span></div>';
+        cols.forEach(c => {
+          html += '<div class="gcell cell" data-epic="'+e.id+'" data-col="'+c.key+'">';
+          e.pills.forEach(p => {
+            if (p.col !== c.key) return;
+            html += '<div class="pill" data-state="'+p.state+'" style="--wt:'+wtVar(p.wt)+'">' +
+              (p.state==='done'?'<span class="dot6" style="background:var(--prizma-on-course)"></span>':'') +
+              '<span class="nm">'+p.wt+'</span>' +
+              (p.who?'<span class="who">'+esc(p.who)+'</span>':'') + '</div>';
+          });
+          html += '</div>';
+        });
+      });
+    });
+    grid.innerHTML = html;
+  }
+
+  // ── рендер мини-карты как SVG в координатах большой сетки ──
+  const mmSvg = document.getElementById('mmSvg');
+  const mmView = document.getElementById('mmView');
+  const mmCanvas = document.getElementById('mmCanvas');
+  const mmFoot = document.getElementById('mmFoot');
+  // геометрия большой сетки (модель координат)
+  const LBL_W = 260, COL_W = 300, HEAD_H = 56, TEAM_H = 32, EPIC_H = 64;
+  let planW = 0, planH = 0;
+
+  function buildMinimap() {
+    // вычисляем виртуальные размеры из модели
+    planW = LBL_W + COL_W * cols.length;
+    let y = HEAD_H;
+    const segs = [];
+    rowModel.forEach(r => {
+      if (r.type === 'team') { segs.push({ y, h: TEAM_H, kind:'team' }); y += TEAM_H; }
+      else { segs.push({ y, h: EPIC_H, kind:'epic', epic:r.epic }); y += EPIC_H; }
+    });
+    planH = y;
+    mmSvg.setAttribute('viewBox', '0 0 ' + planW + ' ' + planH);
+
+    let s = '';
+    // фон-колонки (нейтральные); текущая — лёгкий info-намёк
+    cols.forEach((c, i) => {
+      const x = LBL_W + i * COL_W;
+      s += '<rect class="mm-col'+(c.current?' cur':'')+'" x="'+x+'" y="'+HEAD_H+'" width="'+COL_W+'" height="'+(planH-HEAD_H)+'"/>';
+    });
+    // строки + пилюли
+    segs.forEach(seg => {
+      if (seg.kind === 'team') {
+        s += '<rect class="mm-team" x="0" y="'+seg.y+'" width="'+planW+'" height="'+seg.h+'" opacity="0.5"/>';
+        return;
+      }
+      const e = seg.epic;
+      cols.forEach((c, i) => {
+        const colX = LBL_W + i * COL_W;
+        let px = colX + 14;
+        e.pills.filter(p => p.col === c.key).forEach(p => {
+          const col = 'var(' + (wtHex[p.wt] || '--prizma-border-strong') + ')';
+          const op = p.state === 'done' ? 0.55 : 0.95;
+          s += '<rect class="mm-pill" x="'+px+'" y="'+(seg.y+seg.h/2-7)+'" width="40" height="14" rx="3" fill="'+col+'" opacity="'+op+'"/>';
+          px += 50;
+        });
+      });
+    });
+    // линия «сегодня» в текущем релизе
+    const curIdx = cols.findIndex(c => c.current);
+    if (curIdx >= 0) {
+      const tx = LBL_W + curIdx * COL_W + COL_W * 0.18; // приблиз. положение 23.05 в окне
+      s += '<line class="mm-today" x1="'+tx+'" y1="'+HEAD_H+'" x2="'+tx+'" y2="'+planH+'"/>';
+    }
+    mmSvg.innerHTML = s;
+  }
+
+  // ── двусторонняя синхронизация рамки ↔ скролла ──
+  // отображение модель-координат → пиксели мини-карты (canvas)
+  function mmScale() {
+    const cw = mmCanvas.clientWidth || 1;
+    const ch = mmSvg.clientHeight || (cw * planH / planW);
+    return { sx: cw / planW, sy: ch / planH, cw, ch };
+  }
+
+  let syncing = false;
+  function updateViewFromScroll() {
+    if (syncing) return;
+    const { sx, sy } = mmScale();
+    // видимая область большой сетки в её собственных координатах
+    const vw = gantt.clientWidth, vh = gantt.clientHeight;
+    const sl = gantt.scrollLeft, st = gantt.scrollTop;
+    mmView.style.left   = (sl * sx) + 'px';
+    mmView.style.top    = (st * sy) + 'px';
+    mmView.style.width  = Math.min(planW - sl, vw) * sx + 'px';
+    mmView.style.height = Math.min(planH - st, vh) * sy + 'px';
+    // подпись: какой релиз по центру вьюпорта
+    const centerX = sl + vw / 2;
+    const idx = Math.max(0, Math.min(cols.length - 1, Math.floor((centerX - LBL_W) / COL_W)));
+    mmFoot.textContent = 'центр: ' + (centerX < LBL_W ? 'эпики' : cols[idx].short);
+  }
+
+  function scrollToModel(mx, my, center) {
+    const vw = gantt.clientWidth, vh = gantt.clientHeight;
+    let sl = center ? mx - vw / 2 : mx;
+    let st = center ? my - vh / 2 : my;
+    sl = Math.max(0, Math.min(planW - vw, sl));
+    st = Math.max(0, Math.min(planH - vh, st));
+    syncing = true;
+    gantt.scrollLeft = sl;
+    gantt.scrollTop = st;
+    // позицию рамки двигаем сразу (без ожидания smooth-scroll)
+    const { sx, sy } = mmScale();
+    mmView.style.left = (sl * sx) + 'px';
+    mmView.style.top  = (st * sy) + 'px';
+    requestAnimationFrame(() => { syncing = false; updateViewFromScroll(); });
+  }
+
+  // клик по карте → прыжок (модель-координаты из пикселей canvas)
+  mmCanvas.addEventListener('pointerdown', e => {
+    if (e.target === mmView || mmView.contains(e.target)) return; // обрабатывает draggable рамка
+    const rect = mmCanvas.getBoundingClientRect();
+    const { sx, sy } = mmScale();
+    const mx = (e.clientX - rect.left) / sx;
+    const my = (e.clientY - rect.top) / sy;
+    scrollToModel(mx, my, true);
+  });
+
+  // перетаскивание рамки
+  let drag = null;
+  mmView.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const vr = mmView.getBoundingClientRect();
+    drag = { offX: e.clientX - vr.left, offY: e.clientY - vr.top };
+    mmView.setPointerCapture(e.pointerId);
+  });
+  mmView.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const rect = mmCanvas.getBoundingClientRect();
+    const { sx, sy } = mmScale();
+    // левый-верх рамки в пикселях canvas → модель-координаты
+    const px = e.clientX - rect.left - drag.offX;
+    const py = e.clientY - rect.top - drag.offY;
+    scrollToModel(px / sx, py / sy, false);
+  });
+  const endDrag = e => { if (drag) { drag = null; try { mmView.releasePointerCapture(e.pointerId); } catch(_){} } };
+  mmView.addEventListener('pointerup', endDrag);
+  mmView.addEventListener('pointercancel', endDrag);
+
+  // скролл большой сетки → двигает рамку
+  gantt.addEventListener('scroll', updateViewFromScroll, { passive: true });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+
+  // init (синхронно + страховочный таймер — GOTCHA a)
+  function init() { renderGrid(); buildMinimap(); updateViewFromScroll(); }
+  init();
+  setTimeout(updateViewFromScroll, 60);
+  window.addEventListener('resize', () => { buildMinimap(); updateViewFromScroll(); });
+})();
+</script>
+</body>
+</html>

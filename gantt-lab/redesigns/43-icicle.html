@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 43 · Каскад</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 13px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* ── stage ── */
+  .body { flex: 1; min-height: 0; display: flex; }
+  .stagewrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; padding: 14px 22px 18px; }
+  .crumbbar { display: flex; align-items: center; gap: 10px; flex: none; margin-bottom: 10px; }
+  .crumbbar .back { display: none; }
+  .crumbbar .back.show { display: inline-flex; }
+  .crumbbar .path { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--prizma-text-tertiary); flex-wrap: wrap; }
+  .crumbbar .path .seg { color: var(--prizma-text-secondary); cursor: pointer; transition: color .14s; }
+  .crumbbar .path .seg:hover { color: var(--prizma-text-primary); }
+  .crumbbar .path .seg.here { color: var(--prizma-text-primary); font-weight: 600; cursor: default; }
+  .crumbbar .path .sepi { color: var(--prizma-border-strong); }
+  .crumbbar .note { margin-left: auto; font-size: 11.5px; color: var(--prizma-text-tertiary); }
+
+  .chartwrap { flex: 1; min-height: 0; position: relative; }
+  svg.ice { display: block; width: 100%; height: 100%; }
+
+  /* column header labels (top axis) */
+  .collbl { fill: var(--prizma-text-tertiary); font: 700 10px var(--font); letter-spacing: .6px; text-transform: uppercase; pointer-events: none; }
+
+  /* cells */
+  .cell { cursor: pointer; }
+  .cell rect.bg { transition: filter .14s var(--ease-calm); }
+  .cell rect.stripe { transition: opacity .14s; }
+  .cell:hover rect.bg { filter: brightness(1.18); }
+  .cell.hl rect.bg { stroke: var(--prizma-text-primary); stroke-width: 1.4; }
+  .cell.dim { opacity: .32; }
+  .clabel { pointer-events: none; }
+  .clabel .nm { fill: var(--prizma-text-primary); font: 600 12px var(--font); }
+  .clabel .nm.sm { font-size: 10.5px; }
+  .clabel .meta { fill: var(--prizma-text-secondary); font: 700 10px var(--mono); }
+
+  /* tooltip */
+  .tip { position: fixed; z-index: 9000; pointer-events: none; opacity: 0; transform: translateY(3px); transition: opacity .12s, transform .12s; max-width: 280px;
+    background: var(--prizma-bg); border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); padding: 10px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+  .tip.show { opacity: 1; transform: translateY(0); }
+  .tip .tn { font: 600 13px/1.3 var(--font); color: var(--prizma-text-primary); }
+  .tip .tt { margin-top: 4px; font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); letter-spacing: .3px; text-transform: uppercase; }
+  .tip .tm { margin-top: 8px; display: flex; align-items: baseline; gap: 8px; }
+  .tip .tm .v { font: 800 18px/1 var(--mono); color: var(--prizma-text-primary); }
+  .tip .tm .u { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .tip .ts { margin-top: 8px; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--prizma-text-secondary); }
+  .tip .ts .d { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+
+  /* ── side ── */
+  .side { width: 232px; flex: none; border-left: 1px solid var(--prizma-border); padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+  .lg .pz-eyebrow { display: block; margin-bottom: 11px; }
+  .lgrow { display: flex; align-items: center; gap: 9px; padding: 6px 0; font-size: 12px; color: var(--prizma-text-secondary); }
+  .lgrow .sw { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid var(--prizma-border); }
+  .lgrow .ct { margin-left: auto; font: 700 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .hint { margin-top: auto; font: 400 11px/1.5 var(--font); color: var(--prizma-text-tertiary); border-top: 1px solid var(--prizma-border); padding-top: 14px; }
+  .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Каскад</span>
+    <span class="pz-eyebrow">Редизайн 43 · icicle</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-on-course)"></i>готово</span>
+      <span><i style="background:var(--prizma-information)"></i>в работе</span>
+      <span><i style="background:var(--prizma-border-strong)"></i>план</span>
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <div class="stagewrap">
+      <div class="crumbbar">
+        <button class="pz-btn pz-btn-icon back" id="back" aria-label="Назад"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+        <div class="path" id="crumb"></div>
+        <span class="note">Глубина — уровень: квартал → команды → релизы → эпики. Высота ∝ трудоёмкость. Клик — раскрыть ветку.</span>
+      </div>
+      <div class="chartwrap" id="chartwrap"><svg class="ice" id="ice" preserveAspectRatio="none" role="img" aria-label="Каскадная диаграмма (icicle)"></svg></div>
+    </div>
+
+    <aside class="side">
+      <div class="lg">
+        <span class="pz-eyebrow">Статусы эпиков</span>
+        <div id="legend"></div>
+      </div>
+      <div class="hint" id="hint">Каждый столбец — уровень вложенности. <b>Клик по команде или релизу</b> раскроет ветку на всю высоту. Наведите на эпик — детали во всплывашке.</div>
+    </aside>
+  </div>
+
+  <div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const ice = document.getElementById('ice');
+  const wrap = document.getElementById('chartwrap');
+  const tip = document.getElementById('tip');
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+  const relShort = k => { const c = D.releases.find(x => x.key === k); return c ? c.short : k; };
+  const relOrder = { backlog: 0, r120: 1, r121: 2, r122: 3, overtime: 4 };
+
+  // ── status ──
+  const STATUS = {
+    off:   { lbl: 'срыв сроков', col: 'var(--prizma-off-course)', fill: 'color-mix(in srgb, var(--prizma-off-course) 60%, var(--prizma-bg-tertiary))' },
+    drift: { lbl: 'дрейф',       col: 'var(--prizma-drift)',      fill: 'color-mix(in srgb, var(--prizma-drift) 56%, var(--prizma-bg-tertiary))' },
+    done:  { lbl: 'готово',      col: 'var(--prizma-on-course)',  fill: 'color-mix(in srgb, var(--prizma-on-course) 26%, var(--prizma-bg-tertiary))' },
+    prog:  { lbl: 'в работе',    col: 'var(--prizma-information)',fill: 'color-mix(in srgb, var(--prizma-information) 24%, var(--prizma-bg-tertiary))' },
+    plan:  { lbl: 'план',        col: 'var(--prizma-border-strong)', fill: 'var(--prizma-bg-tertiary)' },
+  };
+  function statusOf(e) {
+    if (e.risk === 'off-course') return 'off';
+    if (e.risk === 'drift') return 'drift';
+    const tot = e.pills.length || 1;
+    const dn = e.pills.filter(p => p.state === 'done').length;
+    const pr = e.pills.filter(p => p.state === 'progress').length;
+    if (dn === tot) return 'done';
+    if (pr > 0 || (dn > 0 && dn < tot)) return 'prog';
+    return 'plan';
+  }
+  // dominant dated/any release for an epic (for grouping into col2)
+  function dominantCol(e) {
+    const cnt = {}; e.pills.forEach(p => { cnt[p.col] = (cnt[p.col] || 0) + 1; });
+    let best = e.pills[0] ? e.pills[0].col : 'backlog', n = -1;
+    Object.keys(cnt).forEach(k => { if (cnt[k] > n) { n = cnt[k]; best = k; } });
+    return best;
+  }
+  // aggregate status for a group of epics (worst-risk wins, else weighted)
+  function groupStatus(eps) {
+    if (eps.some(e => e.risk === 'off-course')) return 'off';
+    if (eps.some(e => e.risk === 'drift')) return 'drift';
+    const sts = eps.map(statusOf);
+    if (sts.length && sts.every(s => s === 'done')) return 'done';
+    if (sts.some(s => s === 'prog' || s === 'done')) return 'prog';
+    return 'plan';
+  }
+
+  // ── build hierarchy tree ──
+  // root(quarter) → teams → releases(in team) → epics
+  function buildTree() {
+    const teams = D.teams.map(team => {
+      const eps = H.teamEpics(team);
+      const relMap = {};
+      eps.forEach(e => { const c = dominantCol(e); (relMap[c] = relMap[c] || []).push(e); });
+      const rels = Object.keys(relMap).sort((a, b) => (relOrder[a] ?? 9) - (relOrder[b] ?? 9)).map(col => {
+        const items = relMap[col].slice().sort((a, b) => H.effortOf(b) - H.effortOf(a));
+        const children = items.map(e => ({
+          kind: 'epic', id: e.id, name: e.epic, value: Math.max(1, H.effortOf(e)),
+          st: statusOf(e), team, col, e,
+        }));
+        return { kind: 'rel', id: team + '::' + col, name: relShort(col), col, team,
+          value: children.reduce((s, c) => s + c.value, 0) || 1, st: groupStatus(items), children };
+      });
+      return { kind: 'team', id: team, name: team, team,
+        value: rels.reduce((s, r) => s + r.value, 0) || 1, st: groupStatus(eps), children: rels };
+    });
+    return { kind: 'root', id: '__root__', name: 'Квартал Q2', value: teams.reduce((s, t) => s + t.value, 0) || 1,
+      st: 'plan', children: teams };
+  }
+  const TREE = buildTree();
+  const nodeById = {};
+  (function index(n) { nodeById[n.id] = n; (n.children || []).forEach(index); })(TREE);
+
+  // depth labels per column
+  const COL_LBL = ['Квартал', 'Команды', 'Релизы', 'Эпики'];
+
+  // ── zoom state: focus node id + its depth ──
+  let focusId = '__root__';
+
+  function depthOf(n) {
+    if (n.kind === 'root') return 0;
+    if (n.kind === 'team') return 1;
+    if (n.kind === 'rel') return 2;
+    return 3;
+  }
+
+  // ── layout: assign x,y,w,h to focus subtree, partitioned by columns ──
+  // Columns from focus depth .. 3 fill the width equally. Height ∝ value within parent.
+  let VB_W = 1200, VB_H = 560;
+  const PAD_T = 26, GAPX = 4, GAPY = 2.5;
+
+  function layout(focus) {
+    const startD = depthOf(focus);
+    const nCols = 4 - startD;
+    const colW = (VB_W - GAPX * (nCols - 1)) / Math.max(1, nCols);
+    const cells = [];
+
+    // recursive partition: node occupies [y0,y1] in its column (= depth - startD)
+    function place(node, y0, y1) {
+      const col = depthOf(node) - startD;
+      const x = col * (colW + GAPX);
+      cells.push({ node, x, y: y0, w: colW, h: Math.max(0, y1 - y0), col });
+      const kids = node.children || [];
+      if (!kids.length) return;
+      const span = (y1 - y0) - GAPY * (kids.length - 1);
+      const tot = kids.reduce((s, k) => s + k.value, 0) || 1;
+      let cy = y0;
+      kids.forEach(k => {
+        const h = Math.max(0, (k.value / tot) * span);
+        place(k, cy, cy + h);
+        cy += h + GAPY;
+      });
+    }
+    place(focus, PAD_T, VB_H);
+    return { cells, colW, startD, nCols };
+  }
+
+  function render() {
+    const W = wrap.clientWidth, Hh = wrap.clientHeight;
+    if (W < 40 || Hh < 40) return;
+    VB_W = W; VB_H = Hh;
+    ice.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+
+    const focus = nodeById[focusId] || TREE;
+    const { cells, colW, startD, nCols } = layout(focus);
+
+    let s = '';
+
+    // column header labels
+    for (let c = 0; c < nCols; c++) {
+      const x = c * (colW + GAPX) + colW / 2;
+      s += '<text class="collbl" x="' + x.toFixed(1) + '" y="14" text-anchor="middle">' + esc(COL_LBL[startD + c]) + '</text>';
+    }
+
+    cells.forEach(c => {
+      const n = c.node;
+      const st = STATUS[n.st] || STATUS.plan;
+      // root/team/rel use neutral-ish; epics use status fill. Group cells get a faint status tint.
+      let fill, stripe;
+      if (n.kind === 'epic') { fill = st.fill; stripe = st.col; }
+      else if (n.kind === 'root') { fill = 'color-mix(in srgb, var(--prizma-text-primary) 5%, var(--prizma-bg-elevated))'; stripe = 'var(--prizma-border-strong)'; }
+      else {
+        // team/rel: neutral surface with status stripe-left (3px accent, no fill gradient)
+        fill = 'color-mix(in srgb, var(--prizma-text-primary) ' + (n.kind === 'team' ? 8 : 6) + '%, var(--prizma-bg-elevated))';
+        stripe = st.col;
+      }
+      const interactive = n.kind === 'team' || n.kind === 'rel' || n.kind === 'root';
+      s += '<g class="cell" data-id="' + esc(n.id) + '" data-kind="' + n.kind + '" data-interactive="' + (interactive ? '1' : '0') + '">';
+      s += '<rect class="bg" x="' + c.x.toFixed(1) + '" y="' + c.y.toFixed(1) + '" width="' + c.w.toFixed(1) + '" height="' + c.h.toFixed(1) + '" rx="3" fill="' + fill + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+      // 3px stripe-left semantic accent
+      if (c.h > 6) s += '<rect class="stripe" x="' + c.x.toFixed(1) + '" y="' + c.y.toFixed(1) + '" width="3" height="' + c.h.toFixed(1) + '" rx="1.5" fill="' + stripe + '"/>';
+
+      // labels if tall enough
+      if (c.h >= 17) {
+        const lx = c.x + 11;
+        const small = c.w < 150;
+        let meta = '';
+        if (n.kind === 'root') meta = D.teams.length + ' команд · ' + n.value + ' дн';
+        else if (n.kind === 'team') meta = (n.children.length) + ' ' + plural(n.children.length, 'релиз', 'релиза', 'релизов') + ' · ' + n.value + ' дн';
+        else if (n.kind === 'rel') meta = n.children.length + ' ' + plural(n.children.length, 'эпик', 'эпика', 'эпиков') + ' · ' + n.value + ' дн';
+        else meta = n.value + ' дн · ' + n.e.pills.length + ' раб';
+        const nm = n.name.length > (small ? 16 : 26) ? n.name.slice(0, (small ? 15 : 25)) + '…' : n.name;
+        s += '<g class="clabel">';
+        s += '<text class="nm' + (small ? ' sm' : '') + '" x="' + lx.toFixed(1) + '" y="' + (c.y + (c.h >= 32 ? 18 : 14)).toFixed(1) + '">' + esc(nm) + '</text>';
+        if (c.h >= 32) s += '<text class="meta" x="' + lx.toFixed(1) + '" y="' + (c.y + 34).toFixed(1) + '">' + esc(meta) + '</text>';
+        s += '</g>';
+      }
+      s += '</g>';
+    });
+
+    ice.innerHTML = s;
+    wire();
+    renderCrumb();
+  }
+
+  // ── interactions ──
+  function wire() {
+    ice.querySelectorAll('.cell').forEach(g => {
+      const id = g.dataset.id, kind = g.dataset.kind;
+      const node = nodeById[id];
+      g.addEventListener('mouseenter', e => { showTip(node, e); highlight(id); });
+      g.addEventListener('mousemove', e => { if (tip.classList.contains('show')) moveTip(e); });
+      g.addEventListener('mouseleave', () => { tip.classList.remove('show'); clearHL(); });
+      if (g.dataset.interactive === '1') {
+        g.addEventListener('click', () => {
+          // zoom into this node if it has children and isn't already focus
+          if ((node.children || []).length && id !== focusId) { focusId = id; tip.classList.remove('show'); render(); }
+          else if (id === focusId && kind !== 'root') { /* clicking focus root does nothing */ }
+        });
+      }
+    });
+  }
+
+  function highlight(id) {
+    // dim siblings outside the hovered cell's lineage (ancestors + descendants lit)
+    const lineage = new Set([id]);
+    let n = nodeById[id];
+    // descendants
+    (function down(x) { (x.children || []).forEach(c => { lineage.add(c.id); down(c); }); })(n);
+    // ancestors
+    (function up(x) {
+      const par = findParent(x.id);
+      if (par) { lineage.add(par.id); up(par); }
+    })(n);
+    ice.querySelectorAll('.cell').forEach(g => {
+      g.classList.toggle('hl', g.dataset.id === id);
+      g.classList.toggle('dim', !lineage.has(g.dataset.id));
+    });
+  }
+  function clearHL() {
+    ice.querySelectorAll('.cell').forEach(g => g.classList.remove('hl', 'dim'));
+  }
+  function findParent(id) {
+    let found = null;
+    (function walk(n) { (n.children || []).forEach(c => { if (c.id === id) found = n; else walk(c); }); })(TREE);
+    return found;
+  }
+
+  // ── tooltip ──
+  function showTip(n, ev) {
+    const st = STATUS[n.st] || STATUS.plan;
+    let tt, ts;
+    if (n.kind === 'root') { tt = 'весь квартал'; ts = ''; }
+    else if (n.kind === 'team') { tt = 'команда'; ts = '<div class="ts"><span class="d" style="background:' + st.col + '"></span>' + st.lbl + ' (сводно)</div>'; }
+    else if (n.kind === 'rel') { tt = n.team + ' · релиз'; ts = '<div class="ts"><span class="d" style="background:' + st.col + '"></span>' + st.lbl + ' (сводно)</div>'; }
+    else { tt = n.team + ' · ' + relShort(n.col); ts = '<div class="ts"><span class="d" style="background:' + st.col + '"></span>' + st.lbl + '</div>'; }
+    const unit = n.kind === 'epic' ? ('человеко-дней · ' + n.e.pills.length + ' работ') : ('человеко-дней суммарно');
+    tip.innerHTML = '<div class="tn">' + esc(n.name) + '</div>' +
+      '<div class="tt">' + esc(tt) + '</div>' +
+      '<div class="tm"><span class="v">' + n.value + '</span><span class="u">' + unit + '</span></div>' + ts;
+    tip.classList.add('show');
+    moveTip(ev);
+  }
+  function moveTip(ev) {
+    const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  }
+
+  // ── breadcrumb ──
+  function renderCrumb() {
+    const back = document.getElementById('back');
+    const crumb = document.getElementById('crumb');
+    // build path root..focus
+    const path = [];
+    let n = nodeById[focusId];
+    while (n) { path.unshift(n); n = findParent(n.id); }
+    back.classList.toggle('show', focusId !== '__root__');
+    let h = '';
+    path.forEach((p, i) => {
+      const last = i === path.length - 1;
+      const label = p.kind === 'rel' ? (p.name + ' · ' + p.team) : p.name;
+      h += '<span class="seg' + (last ? ' here' : '') + '" data-id="' + esc(p.id) + '">' + esc(label) + '</span>';
+      if (!last) h += '<span class="sepi">/</span>';
+    });
+    crumb.innerHTML = h;
+    crumb.querySelectorAll('.seg').forEach(el => {
+      if (el.classList.contains('here')) return;
+      el.addEventListener('click', () => { focusId = el.dataset.id; render(); });
+    });
+  }
+  document.getElementById('back').addEventListener('click', () => {
+    const par = findParent(focusId);
+    focusId = par ? par.id : '__root__';
+    render();
+  });
+
+  // ── legend (live counts) ──
+  (function legend() {
+    const counts = { off: 0, drift: 0, done: 0, prog: 0, plan: 0 };
+    D.epics.forEach(e => counts[statusOf(e)]++);
+    const order = ['off', 'drift', 'prog', 'done', 'plan'];
+    document.getElementById('legend').innerHTML = order.map(k =>
+      '<div class="lgrow"><span class="sw" style="background:' + STATUS[k].col + '"></span>' + STATUS[k].lbl + '<span class="ct">' + counts[k] + '</span></div>').join('');
+  })();
+
+  // ── init: sync + 60ms + resize (gotcha a & d) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

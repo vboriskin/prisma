@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 45 · Карусель команд</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .legend { display: flex; gap: 14px; font-size: 11px; color: var(--prizma-text-tertiary); align-items: center; }
+  .top .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+
+  .eyebrowbar { padding: 9px 22px 0; flex: none; display: flex; align-items: center; gap: 10px; }
+  .eyebrowbar .counter { margin-left: auto; font: 600 12px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .eyebrowbar .counter b { color: var(--prizma-text-primary); }
+
+  /* ── carousel frame ── */
+  .frame { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+  .track { display: flex; height: 100%; transition: transform .5s var(--ease-calm); will-change: transform; }
+  .page { flex: 0 0 100%; height: 100%; display: flex; flex-direction: column; min-width: 0; padding: 14px 22px 8px; }
+
+  /* nav arrows */
+  .nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; z-index: 6; display: inline-flex; align-items: center; justify-content: center; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong); border-radius: 50%; color: var(--prizma-text-secondary); cursor: pointer; transition: border-color .15s, color .15s, opacity .2s, background .15s; }
+  .nav:hover { border-color: var(--prizma-information); color: var(--prizma-information); }
+  .nav.prev { left: 14px; }
+  .nav.next { right: 14px; }
+  .nav svg { width: 18px; height: 18px; }
+
+  /* ── team header ── */
+  .thead { flex: none; display: flex; align-items: center; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--prizma-border); margin-bottom: 12px; }
+  .thead .mono { flex: none; width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center; font: 700 13px/1 var(--mono); letter-spacing: .4px; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); color: var(--prizma-text-secondary); }
+  .thead .nm { font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+  .thead .counts { display: flex; gap: 18px; }
+  .thead .counts .k { display: flex; flex-direction: column; gap: 3px; }
+  .thead .counts .k .v { font: 600 17px/1 var(--mono); color: var(--prizma-text-primary); letter-spacing: -.01em; }
+  .thead .counts .k .l { font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .thead .spacer { flex: 1; }
+  .risksum { display: flex; gap: 8px; align-items: center; }
+  .rchip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-sm); font: 600 11px/1 var(--mono); border: 1px solid var(--prizma-border); color: var(--prizma-text-secondary); position: relative; }
+  .rchip::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .rchip.off::before { background: var(--prizma-off-course); } .rchip.off { color: var(--prizma-off-course); }
+  .rchip.drift::before { background: var(--prizma-drift); } .rchip.drift { color: var(--prizma-drift); }
+  .rchip.ok::before { background: var(--prizma-on-course); } .rchip.ok { color: var(--prizma-on-course); }
+
+  /* ── board: epic rows × release columns ── */
+  .board { flex: 1; overflow: auto; }
+  .bgrid { display: grid; grid-template-columns: 230px repeat(5, minmax(130px, 1fr)); min-width: 860px; position: relative; }
+  .colh { position: sticky; top: 0; z-index: 4; background: var(--prizma-bg); padding: 4px 12px 10px; border-bottom: 1px solid var(--prizma-border); }
+  .colh .rel { font: 300 17px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .colh .rel.cur { color: var(--prizma-text-primary); }
+  .colh .dt { display: block; margin-top: 4px; font-size: 10px; color: var(--prizma-text-tertiary); }
+  .colh.first { display: flex; align-items: flex-end; }
+  .colh.first .pz-eyebrow { color: var(--prizma-text-tertiary); }
+
+  .lbl { position: sticky; left: 0; z-index: 2; background: var(--prizma-bg); padding: 10px 14px; border-bottom: 1px solid var(--prizma-border); border-right: 1px solid var(--prizma-border); display: flex; flex-direction: column; justify-content: center; gap: 4px; position: relative; }
+  .lbl.risky::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+  .lbl.r-off::before { background: var(--prizma-off-course); }
+  .lbl.r-drift::before { background: var(--prizma-drift); }
+  .lbl .nm { font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .lbl .meta { font: 500 10.5px/1 var(--mono); color: var(--prizma-text-tertiary); display: flex; gap: 8px; }
+
+  .cell { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 9px 9px; display: flex; flex-direction: column; gap: 6px; min-height: 54px; }
+  .cell.bz { background: color-mix(in srgb, var(--prizma-text-primary) 2%, transparent); }
+  .cell.cur { background: color-mix(in srgb, var(--prizma-text-primary) 3.5%, transparent); }
+
+  /* pill — work-type 3px stripe-left, no fill */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px 5px 11px; font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); overflow: hidden; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); }
+  .pill .wt { font: 700 9px/1 var(--mono); letter-spacing: .3px; color: var(--prizma-text-tertiary); }
+  .pill .who { color: var(--prizma-text-secondary); font-weight: 500; font-size: 10.5px; }
+  .pill.done { opacity: .55; } .pill.done .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+  .pill.unplanned { background: transparent; border: 1px dashed var(--prizma-border-strong); }
+  .pill .nm { white-space: nowrap; }
+
+  .today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--prizma-information); z-index: 5; pointer-events: none; }
+  .today .cap { position: absolute; top: 4px; left: -1px; transform: translateX(-50%); font: 700 8.5px/1 var(--mono); letter-spacing: .4px; color: var(--prizma-information); background: var(--prizma-bg); padding: 2px 5px; border-radius: 0 0 3px 3px; white-space: nowrap; }
+
+  /* ── dots ── */
+  .dots { flex: none; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 12px 0 14px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; background: var(--prizma-border-strong); cursor: pointer; transition: background .2s, width .25s var(--ease-calm), transform .2s; }
+  .dot:hover { background: var(--prizma-text-tertiary); }
+  .dot.on { background: var(--prizma-information); width: 22px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Карусель команд</span>
+    <span class="sub">по одной команде</span>
+    <span class="spacer"></span>
+    <span class="legend">
+      <span><i style="background:var(--prizma-on-course)"></i>по курсу</span>
+      <span><i style="background:var(--prizma-drift)"></i>дрейф</span>
+      <span><i style="background:var(--prizma-off-course)"></i>срыв</span>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 45 · carousel</span>
+    <span class="counter"><b id="cur">1</b> / <span id="tot">5</span></span>
+  </div>
+  <div class="frame" id="frame">
+    <button class="nav prev" id="prev" aria-label="Предыдущая команда"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <button class="nav next" id="next" aria-label="Следующая команда"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+    <div class="track" id="track"></div>
+  </div>
+  <div class="dots" id="dots"></div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers, cols = D.releases;
+  const track = document.getElementById('track');
+  const dotsEl = document.getElementById('dots');
+  const wtVar = wt => (D.WT[wt] && D.WT[wt].color) || 'var(--prizma-information)';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const fmt = iso => new Date(iso + 'T00:00:00').toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+
+  const teams = D.teams;
+  let idx = 0;
+
+  function pillHtml(e, p) {
+    const st = p.state === 'done' ? ' done' : (p.state === 'unplanned' ? ' unplanned' : '');
+    const lab = D.WT[p.wt] ? D.WT[p.wt].label : p.wt;
+    return '<span class="pill' + st + '" style="--wt:' + wtVar(p.wt) + '" title="' + esc(lab) + (p.who ? ' · ' + esc(p.who) : '') + '">' +
+      '<span class="wt">' + esc(p.wt) + '</span><span class="nm">' + esc(lab) + '</span>' +
+      (p.who ? '<span class="who">' + esc(p.who) + '</span>' : '') + '</span>';
+  }
+
+  function pageHtml(team) {
+    const eps = H.teamEpics(team);
+    const works = eps.reduce((n, e) => n + e.pills.length, 0);
+    const off = eps.filter(e => e.risk === 'off-course').length;
+    const drift = eps.filter(e => e.risk === 'drift').length;
+    const ok = eps.filter(e => !e.risk).length;
+
+    // header
+    let risksum = '';
+    if (off) risksum += '<span class="rchip off">' + off + ' срыв</span>';
+    if (drift) risksum += '<span class="rchip drift">' + drift + ' дрейф</span>';
+    risksum += '<span class="rchip ok">' + ok + ' по курсу</span>';
+
+    let h = '<div class="page" data-team="' + esc(team) + '">';
+    h += '<div class="thead">' +
+      '<span class="mono">' + esc(team.slice(0, 2)) + '</span>' +
+      '<span class="nm">' + esc(team) + '</span>' +
+      '<div class="counts">' +
+        '<div class="k"><span class="v">' + eps.length + '</span><span class="l">эпиков</span></div>' +
+        '<div class="k"><span class="v">' + works + '</span><span class="l">работ</span></div>' +
+      '</div>' +
+      '<span class="spacer"></span>' +
+      '<div class="risksum">' + risksum + '</div>' +
+    '</div>';
+
+    // board
+    h += '<div class="board"><div class="bgrid">';
+    h += '<div class="colh first"><span class="pz-eyebrow">Эпик</span></div>';
+    cols.forEach(c => {
+      const dt = c.dated ? fmt(c.start) + ' – ' + fmt(c.end) : 'без даты';
+      h += '<div class="colh"><span class="rel' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</span><span class="dt">' + dt + '</span></div>';
+    });
+    eps.forEach(e => {
+      const est = H.effortOf(e);
+      const riskCls = e.risk === 'off-course' ? ' risky r-off' : (e.risk === 'drift' ? ' risky r-drift' : '');
+      h += '<div class="lbl' + riskCls + '"><span class="nm">' + esc(e.epic) + '</span><span class="meta"><span>' + est + ' дн</span><span>' + e.pills.length + ' раб</span></span></div>';
+      cols.forEach(c => {
+        const bz = !c.dated;
+        h += '<div class="cell' + (bz ? ' bz' : '') + (c.current ? ' cur' : '') + '">';
+        H.pillsOf(e, c.key).forEach(p => { h += pillHtml(e, p); });
+        h += '</div>';
+      });
+    });
+    h += '</div></div></div>';
+    return h;
+  }
+
+  function render() {
+    track.innerHTML = teams.map(pageHtml).join('');
+    dotsEl.innerHTML = teams.map((t, i) => '<button class="dot' + (i === idx ? ' on' : '') + '" data-i="' + i + '" title="' + esc(t) + '" aria-label="' + esc(t) + '"></button>').join('');
+    document.getElementById('tot').textContent = teams.length;
+    update();
+    placeToday();
+    wireDots();
+  }
+
+  function update() {
+    track.style.transform = 'translateX(' + (-idx * 100) + '%)';
+    document.getElementById('cur').textContent = (idx + 1);
+    [...dotsEl.children].forEach((d, i) => d.classList.toggle('on', i === idx));
+  }
+
+  function go(n) {
+    idx = (n + teams.length) % teams.length;
+    update();
+    // today-line привязан к видимой странице — перепозиционируем после слайда
+    setTimeout(placeToday, 60);
+  }
+
+  // ── today-line внутри активной страницы ──
+  function placeToday() {
+    const page = track.children[idx];
+    if (!page) return;
+    track.querySelectorAll('.today').forEach(n => n.remove());
+    const grid = page.querySelector('.bgrid');
+    const heads = [...page.querySelectorAll('.colh')];
+    const curIdx = cols.findIndex(c => c.current);
+    const cur = heads[curIdx + 1];
+    if (!grid || !cur) return;
+    const c = cols[curIdx];
+    const s = new Date(c.start + 'T00:00:00'), en = new Date(c.end + 'T00:00:00'), td = new Date(D.today + 'T00:00:00');
+    const total = en - s;
+    let pct = total > 0 ? (td - s) / total : 0.5;
+    if (isNaN(pct)) pct = 0.5;
+    pct = Math.max(0, Math.min(1, pct));
+    const gr = grid.getBoundingClientRect(), hr = cur.getBoundingClientRect();
+    const left = (hr.left - gr.left) + hr.width * pct;
+    if (isNaN(left)) return;
+    const line = document.createElement('div'); line.className = 'today';
+    line.style.left = left.toFixed(1) + 'px';
+    line.style.height = grid.scrollHeight + 'px';
+    line.innerHTML = '<span class="cap">СЕГОДНЯ 23.05</span>';
+    grid.appendChild(line);
+  }
+
+  function wireDots() {
+    dotsEl.querySelectorAll('.dot').forEach(d => {
+      d.addEventListener('click', () => go(+d.dataset.i));
+    });
+  }
+
+  document.getElementById('prev').addEventListener('click', () => go(idx - 1));
+  document.getElementById('next').addEventListener('click', () => go(idx + 1));
+
+  // клавиши ←/→
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { go(idx - 1); }
+    else if (e.key === 'ArrowRight') { go(idx + 1); }
+  });
+
+  // swipe (touch + pointer)
+  const frame = document.getElementById('frame');
+  let downX = null, downT = 0;
+  frame.addEventListener('pointerdown', e => { downX = e.clientX; downT = Date.now(); });
+  window.addEventListener('pointerup', e => {
+    if (downX === null) return;
+    const dx = e.clientX - downX, dt = Date.now() - downT;
+    if (Math.abs(dx) > 60 && dt < 700) { go(idx + (dx < 0 ? 1 : -1)); }
+    downX = null;
+  });
+
+  // sync + setTimeout + resize (gotcha a)
+  render();
+  setTimeout(render, 60);
+  let rt;
+  window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(placeToday, 80); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    setTimeout(placeToday, 30);
+  });
+})();
+</script>
+</body>
+</html>

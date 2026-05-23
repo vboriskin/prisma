@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 50 · Прогноз срыва</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
+  .tt { position: fixed; top: 16px; right: 18px; z-index: 50; }
+  .head { margin-bottom: 20px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 700px; }
+
+  .legend { display: flex; align-items: center; gap: 16px; margin: 14px 0 18px; flex-wrap: wrap; }
+  .legend .lg { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--prizma-text-secondary); }
+  .legend .sw { width: 22px; height: 3px; border-radius: 2px; }
+
+  /* ── мини-гант ── */
+  .mini { border: 1px solid var(--prizma-border); border-radius: var(--r-lg); overflow: visible; background: var(--prizma-bg-elevated); position: relative; }
+  .mgrid { display: grid; grid-template-columns: 256px repeat(3, 1fr); }
+  .mh { padding: 11px 12px 10px; border-bottom: 1px solid var(--prizma-border-strong); border-left: 1px solid var(--prizma-border); }
+  .mh:first-child { border-left: none; display: flex; align-items: flex-end; }
+  .mh .rel { font: 300 18px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .mh.cur .rel { color: var(--prizma-text-primary); }
+  .mh.cur { box-shadow: inset 0 -2px 0 var(--prizma-information); }
+  .mh .dt { display: block; margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .teamrow { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+    background: var(--prizma-bg-tertiary); border-bottom: 1px solid var(--prizma-border); }
+  .teamrow .mono { width: 22px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 var(--mono); letter-spacing: .6px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: 4px; color: var(--prizma-text-secondary); }
+  .teamrow b { font-size: 12.5px; }
+
+  .ml { position: relative; padding: 11px 12px 11px 15px; border-bottom: 1px solid var(--prizma-border);
+    display: flex; flex-direction: column; gap: 4px; cursor: pointer; overflow: hidden;
+    transition: background .14s var(--ease-calm); }
+  .ml::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; transition: background .16s; }
+  .ml[data-risk="off-course"]::before { background: var(--prizma-off-course); }
+  .ml[data-risk="drift"]::before { background: var(--prizma-drift); }
+  .ml[data-risk="ok"]::before { background: var(--prizma-on-course); }
+  .ml:hover, .ml.active { background: var(--prizma-bg-tertiary); }
+  .ml .nm { font-size: 13px; font-weight: 600; }
+  .ml .sub { display: flex; align-items: center; gap: 8px; font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .ml .verdict { display: inline-flex; align-items: center; gap: 5px; font: 600 11px/1 var(--font); }
+  .ml .verdict svg { width: 12px; height: 12px; }
+  .ml .verdict.late { color: var(--prizma-off-course); }
+  .ml .verdict.tight { color: var(--prizma-drift); }
+  .ml .verdict.ontrack { color: var(--prizma-on-course); }
+
+  .mc { border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); padding: 9px 9px;
+    display: flex; flex-wrap: wrap; gap: 5px; align-content: flex-start; min-height: 46px; }
+  .row:last-child .mc, .row:last-child .ml { border-bottom: none; }
+
+  .pp { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px;
+    font: 600 11px/1 var(--font); color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary);
+    border-radius: var(--r-sm); width: fit-content; overflow: hidden; }
+  .pp::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); }
+  .pp .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .pp[data-done="1"] { opacity: .7; }
+  .pp[data-done="1"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary); }
+
+  /* проекция-стрелка «уедет в …» в колонке-цели */
+  .projarrow { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: var(--r-sm);
+    font: 600 10px/1 var(--mono); border: 1px dashed; }
+  .projarrow.late { color: var(--prizma-off-course); border-color: color-mix(in srgb, var(--prizma-off-course) 50%, transparent); }
+  .projarrow.tight { color: var(--prizma-drift); border-color: color-mix(in srgb, var(--prizma-drift) 50%, transparent); }
+  .projarrow svg { width: 11px; height: 11px; }
+
+  /* ── forecast-карточка (insight) ── */
+  .fc { position: fixed; z-index: 80; width: 320px; pointer-events: none; opacity: 0; transform: translateY(6px);
+    transition: opacity .16s var(--ease-calm), transform .16s var(--ease-calm); }
+  .fc.show { opacity: 1; transform: none; }
+  .fc-inner { position: relative; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border-strong);
+    border-radius: var(--r-lg); box-shadow: 0 18px 50px rgba(0,0,0,.5); padding: 14px 16px 16px; overflow: hidden; }
+  .fc-inner::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--prizma-insight); }
+  .fc.late .fc-inner::before { background: var(--prizma-off-course); }
+  .fc.tight .fc-inner::before { background: var(--prizma-drift); }
+  .fc.ontrack .fc-inner::before { background: var(--prizma-on-course); }
+
+  .fc-cap { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  .fc-cap .pz-eyebrow { color: var(--prizma-insight); }
+  .fc-cap svg { width: 13px; height: 13px; color: var(--prizma-insight); }
+  .fc h3 { font-size: 14px; font-weight: 700; margin: 0 0 3px; letter-spacing: -.01em; }
+  .fc .team { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); margin-bottom: 12px; }
+
+  /* большой вердикт */
+  .fc .big { display: flex; align-items: center; gap: 9px; padding: 10px 0 12px; }
+  .fc .big svg { width: 20px; height: 20px; flex: none; }
+  .fc .big .txt { font-size: 14px; font-weight: 700; line-height: 1.3; }
+  .fc.late .big { color: var(--prizma-off-course); }
+  .fc.tight .big { color: var(--prizma-drift); }
+  .fc.ontrack .big { color: var(--prizma-on-course); }
+
+  /* sparkline planned vs projected */
+  .spark { margin: 6px 0 12px; }
+  .spark svg { width: 100%; height: 64px; display: block; overflow: visible; }
+  .spark .axis { stroke: var(--prizma-border-strong); stroke-width: 1; }
+  .spark .plan { fill: none; stroke: var(--prizma-text-tertiary); stroke-width: 1.6; stroke-dasharray: 3 3; }
+  .spark .proj { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .spark .nowline { stroke: var(--prizma-information); stroke-width: 1; stroke-dasharray: 2 2; }
+  .spark .deadline { stroke: var(--prizma-text-secondary); stroke-width: 1; }
+  .spark .dot { r: 2.6; }
+  .spark-leg { display: flex; gap: 14px; margin-top: 4px; font: 500 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .spark-leg span { display: inline-flex; align-items: center; gap: 5px; }
+  .spark-leg .l { width: 16px; height: 0; border-top: 2px solid; }
+
+  /* метрики */
+  .fc-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; border-top: 1px solid var(--prizma-border); padding-top: 11px; }
+  .met .k { font: 700 9px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 3px; }
+  .met .v { font: 600 13px/1 var(--mono); color: var(--prizma-text-primary); }
+  .met .v small { font-size: 10px; color: var(--prizma-text-tertiary); font-weight: 500; }
+
+  @media (max-width: 760px) { .fc { display: none; } }
+</style>
+</head>
+<body>
+  <button class="pz-btn pz-btn-icon tt" id="tt" title="Тема" aria-label="Переключить тему">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg>
+  </button>
+
+  <div class="page">
+    <div class="head">
+      <div class="pz-eyebrow">Скетч 50 · Предиктивно и спокойно</div>
+      <h1>Прогноз срыва</h1>
+      <p>Наведите на эпик — Призма сопоставит долю готового с остатком времени в окне релиза и спроецирует траекторию: «при текущем темпе уедет в 1.22» или «успевает». Сигнальный цвет — только там, где есть смысл.</p>
+    </div>
+
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:var(--prizma-on-course)"></span>успевает</span>
+      <span class="lg"><span class="sw" style="background:var(--prizma-drift)"></span>впритык / дрейф</span>
+      <span class="lg"><span class="sw" style="background:var(--prizma-off-course)"></span>не успевает</span>
+      <span class="lg"><span class="sw" style="background:var(--prizma-insight)"></span>прогноз (инсайт)</span>
+    </div>
+
+    <div class="mini"><div class="mgrid" id="grid"></div></div>
+  </div>
+
+  <div class="fc" id="fc">
+    <div class="fc-inner">
+      <div class="fc-cap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 7-8"/><path d="M21 7v5h-5"/></svg>
+        <span class="pz-eyebrow">Прогноз темпа</span>
+      </div>
+      <h3 id="fcName">—</h3>
+      <div class="team" id="fcTeam">—</div>
+
+      <div class="big" id="fcBig">
+        <svg id="fcIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"></svg>
+        <span class="txt" id="fcVerdict">—</span>
+      </div>
+
+      <div class="spark">
+        <svg id="fcSpark" viewBox="0 0 280 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="spark-leg">
+          <span><span class="l" style="border-color:var(--prizma-text-tertiary);border-top-style:dashed"></span>план</span>
+          <span><span class="l" id="legProj"></span>прогноз</span>
+        </div>
+      </div>
+
+      <div class="fc-metrics">
+        <div class="met"><div class="k">Готово</div><div class="v" id="mDone">—</div></div>
+        <div class="met"><div class="k">Темп</div><div class="v" id="mPace">—</div></div>
+        <div class="met"><div class="k">Осталось в окне</div><div class="v" id="mLeft">—</div></div>
+        <div class="met"><div class="k">Прогноз финиша</div><div class="v" id="mFinish">—</div></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const wtMap = { BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf' };
+  const wtVar = wt => 'var(' + (wtMap[wt] || '--prizma-information') + ')';
+  const fmt = iso => new Date(iso).toLocaleDateString('ru',{day:'2-digit',month:'short'});
+  function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  const DAY = 86400000;
+  const cols = D.releases.filter(c => c.dated); // r120 r121 r122
+  const today = new Date(D.today + 'T00:00:00');
+
+  // Окно эпика = от первого до последнего датированного релиза, где у него есть пилюли.
+  // Прогноз строим относительно «текущего» окна, в котором живёт незавершённая работа.
+  function epicWindow(e) {
+    const keys = Array.from(new Set(e.pills.map(p => p.col)));
+    const dated = cols.filter(c => keys.includes(c.key));
+    if (!dated.length) return null;
+    // целимся в самый поздний релиз эпика как дедлайн
+    const start = new Date(dated[0].start + 'T00:00:00');
+    const end = new Date(dated[dated.length - 1].end + 'T00:00:00');
+    return { start, end, lastKey: dated[dated.length - 1].key, dated };
+  }
+
+  /* ── ядро прогноза: doneRatio vs доля прошедшего времени ── */
+  function forecast(e) {
+    const win = epicWindow(e);
+    const ratio = D.helpers.doneRatio(e); // 0..1
+    const total = e.pills.length || 1;
+    const done = e.pills.filter(p => p.state === 'done').length;
+    if (!win) {
+      return { state: 'ontrack', verdict: 'Вне датированного окна', win:null, ratio, done, total,
+        pace: 0, timeFrac: 0, projFrac: 0, finish: null, slipKey: null };
+    }
+    const spanDays = Math.max(1, Math.round((win.end - win.start) / DAY));
+    const elapsedDays = Math.min(spanDays, Math.max(0, Math.round((today - win.start) / DAY)));
+    const timeFrac = elapsedDays / spanDays; // сколько времени окна прошло
+    // темп = сделано-долей за прошедшее время; проекция = ratio / timeFrac
+    const pace = timeFrac > 0 ? ratio / timeFrac : (ratio > 0 ? 2 : 0);
+    // прогноз доли к концу окна (линейная экстраполяция текущего темпа)
+    const projFrac = timeFrac > 0 ? Math.min(1.4, ratio / timeFrac) : (ratio >= 1 ? 1 : 0);
+    // дата прогнозируемого 100%: t такое, что ratio + pace*(t-elapsed)/span = 1
+    let finish = null, slipKey = null;
+    if (ratio >= 1) {
+      finish = new Date(today.getTime());
+    } else if (pace > 0) {
+      const remainFrac = 1 - ratio;
+      const daysNeededFromNow = (remainFrac / Math.max(pace, 0.0001)) * spanDays;
+      finish = new Date(today.getTime() + daysNeededFromNow * DAY);
+    }
+    if (finish && finish > win.end) {
+      // в какой релиз «уедет» хвост
+      const slip = cols.find(c => { const cs = new Date(c.start+'T00:00:00'), ce = new Date(c.end+'T00:00:00'); return finish >= cs && finish <= ce; })
+        || (finish > new Date(cols[cols.length-1].end+'T00:00:00') ? { key:'overtime', short:'овертайм' } : null);
+      slipKey = slip ? slip.key : 'overtime';
+    }
+
+    // вердикт: сравниваем проекцию и/или риск из датасета
+    let state, verdict;
+    const slipShort = slipKey ? (D.releases.find(r=>r.key===slipKey)||{short:'овертайм'}).short : null;
+    const notStarted = today < win.start; // окно релиза ещё впереди — это не «отставание»
+    if (ratio >= 1) { state = 'ontrack'; verdict = 'Эпик завершён'; }
+    else if (notStarted) { state = 'ontrack'; verdict = 'Окно ещё не началось — в плане'; }
+    else if (projFrac >= 0.98) { state = 'ontrack'; verdict = 'Успевает в окно ' + win.dated[win.dated.length-1].short; }
+    else if (projFrac >= 0.82 && !slipKey) { state = 'tight'; verdict = 'Впритык — без запаса'; }
+    else if (slipKey) { state = (projFrac < 0.6 || e.risk === 'off-course') ? 'late' : 'tight';
+      verdict = 'При текущем темпе уедет в ' + slipShort; }
+    else { state = 'tight'; verdict = 'Отстаёт от графика'; }
+    // риск из датасета усиливает (не ослабляет) сигнал
+    if (e.risk === 'off-course' && state !== 'late' && ratio < 1) { state = 'late'; }
+
+    return { state, verdict, win, ratio, done, total, pace, timeFrac, projFrac, finish, slipKey, slipShort,
+      spanDays, elapsedDays };
+  }
+
+  /* ── рендер мини-ганта ── */
+  const grid = document.getElementById('grid');
+  // выбираем команды/эпики с интересной смесью статусов
+  const showTeams = ['Платежи', 'Интеграции', 'Мобайл'];
+
+  function build() {
+    let h = '<div class="mh"><span class="pz-eyebrow">Эпик · прогноз</span></div>';
+    cols.forEach(c => {
+      h += '<div class="mh' + (c.current ? ' cur' : '') + '"><span class="rel">' + c.short + '</span><span class="dt">' + fmt(c.start) + ' – ' + fmt(c.end) + '</span></div>';
+    });
+    showTeams.forEach(team => {
+      h += '<div class="teamrow"><span class="mono">' + esc(team.slice(0,2)) + '</span><b>' + esc(team) + '</b></div>';
+      const eps = D.helpers.teamEpics(team);
+      eps.forEach((e, ei) => {
+        const f = forecast(e);
+        const last = ei === eps.length - 1;
+        const riskAttr = f.state === 'late' ? 'off-course' : (f.state === 'tight' ? 'drift' : 'ok');
+        const vClass = f.state === 'late' ? 'late' : (f.state === 'tight' ? 'tight' : 'ontrack');
+        const vIcon = f.state === 'late'
+          ? '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'
+          : f.state === 'tight'
+            ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+            : '<path d="M20 6 9 17l-5-5"/>';
+        h += '<div class="row" style="display:contents">';
+        h += '<div class="ml" data-eid="' + e.id + '" data-risk="' + riskAttr + '"' + (last ? ' style="border-bottom:none"' : '') + '>' +
+             '<span class="nm">' + esc(e.epic) + '</span>' +
+             '<span class="sub"><span class="verdict ' + vClass + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + vIcon + '</svg>' + esc(f.verdict) + '</span></span>' +
+             '</div>';
+        cols.forEach(c => {
+          h += '<div class="mc"' + (last ? ' style="border-bottom:none"' : '') + '>';
+          D.helpers.pillsOf(e, c.key).forEach(p => {
+            const dn = p.state === 'done';
+            h += '<div class="pp" data-done="' + (dn?1:0) + '" style="--wt:' + wtVar(p.wt) + '">' +
+                 (dn ? '<span class="dot" style="background:var(--prizma-on-course)"></span>' : '') +
+                 '<span class="nm">' + esc(p.wt) + '</span></div>';
+          });
+          // если эпик «уедет» именно в этот релиз — показываем проекцию-стрелку
+          if (f.slipKey === c.key && f.state !== 'ontrack') {
+            const cls = f.state === 'late' ? 'late' : 'tight';
+            h += '<span class="projarrow ' + cls + '" title="прогноз финиша"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>прогноз</span>';
+          }
+          h += '</div>';
+        });
+        h += '</div>';
+      });
+    });
+    grid.innerHTML = h;
+    wire();
+  }
+
+  /* ── карточка прогноза ── */
+  const fc = document.getElementById('fc');
+  let activeEl = null;
+
+  function wire() {
+    grid.querySelectorAll('.ml[data-eid]').forEach(el => {
+      el.addEventListener('mouseenter', () => showCard(el));
+      el.addEventListener('mousemove', () => positionCard(el));
+      el.addEventListener('mouseleave', () => hideCard(el));
+    });
+  }
+
+  function showCard(el) {
+    const e = D.epics.find(x => x.id === el.dataset.eid);
+    if (!e) return;
+    if (activeEl) activeEl.classList.remove('active');
+    activeEl = el; el.classList.add('active');
+    const f = forecast(e);
+
+    document.getElementById('fcName').textContent = e.epic;
+    document.getElementById('fcTeam').textContent = e.team + (f.win ? ' · окно ' + fmt(f.win.start.toISOString()) + ' – ' + fmt(f.win.end.toISOString()) : '');
+    document.getElementById('fcVerdict').textContent = f.verdict;
+
+    fc.classList.remove('late','tight','ontrack');
+    fc.classList.add(f.state);
+    document.getElementById('legProj').style.borderColor = signalColor(f.state);
+
+    const icon = document.getElementById('fcIcon');
+    icon.innerHTML = f.state === 'late'
+      ? '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'
+      : f.state === 'tight'
+        ? '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
+        : '<path d="M20 6 9 17l-5-5"/>';
+
+    // метрики
+    document.getElementById('mDone').innerHTML = Math.round(f.ratio * 100) + '% <small>' + f.done + '/' + f.total + '</small>';
+    document.getElementById('mPace').innerHTML = f.win
+      ? (f.pace >= 0.98 ? '×' + f.pace.toFixed(2) + ' <small>в графике</small>' : '×' + f.pace.toFixed(2) + ' <small>от нужного</small>')
+      : '—';
+    document.getElementById('mLeft').innerHTML = f.win
+      ? Math.max(0, f.spanDays - f.elapsedDays) + ' <small>из ' + f.spanDays + ' дн</small>'
+      : '—';
+    document.getElementById('mFinish').innerHTML = f.finish
+      ? fmt(f.finish.toISOString()) + (f.slipShort ? ' <small>→ ' + esc(f.slipShort) + '</small>' : '')
+      : '—';
+
+    drawSpark(f);
+    fc.classList.add('show');
+    positionCard(el);
+  }
+
+  function positionCard(el) {
+    const r = el.getBoundingClientRect();
+    const W = 320, gap = 12;
+    let left = r.right + gap;
+    if (left + W > window.innerWidth - 12) left = r.left - W - gap;
+    if (left < 12) left = 12;
+    let top = r.top;
+    const h = fc.offsetHeight || 280;
+    if (top + h > window.innerHeight - 12) top = Math.max(12, window.innerHeight - h - 12);
+    fc.style.left = left + 'px';
+    fc.style.top = top + 'px';
+  }
+
+  function hideCard(el) {
+    el.classList.remove('active');
+    if (activeEl === el) activeEl = null;
+    fc.classList.remove('show');
+  }
+
+  function signalColor(state) {
+    return state === 'late' ? 'var(--prizma-off-course)' : state === 'tight' ? 'var(--prizma-drift)' : 'var(--prizma-on-course)';
+  }
+
+  /* ── sparkline: planned (линейный 0→100% по окну) vs projected (текущий темп) ── */
+  function drawSpark(f) {
+    const svg = document.getElementById('fcSpark');
+    const W = 280, H = 64, padL = 4, padR = 4, padT = 6, padB = 10;
+    const x0 = padL, x1 = W - padR, y0 = H - padB, y1 = padT;
+    const X = t => x0 + (x1 - x0) * t;        // t: 0..1 доля окна
+    const Y = v => y0 + (y1 - y0) * v;        // v: 0..1 доля готовности
+    let h = '';
+    // оси
+    h += '<line class="axis" x1="' + x0 + '" y1="' + y0 + '" x2="' + x1 + '" y2="' + y0 + '"/>';
+    // дедлайн (конец окна) — вертикаль на t=1
+    h += '<line class="deadline" x1="' + x1 + '" y1="' + y1 + '" x2="' + x1 + '" y2="' + y0 + '"/>';
+    // планируемая траектория: ровная 0→100% к концу окна
+    h += '<path class="plan" d="M' + X(0).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L' + X(1).toFixed(1) + ' ' + Y(1).toFixed(1) + '"/>';
+
+    if (f.win) {
+      const tNow = Math.max(0, Math.min(1, f.timeFrac));
+      const vNow = Math.max(0, Math.min(1, f.ratio));
+      // линия «сейчас»
+      h += '<line class="nowline" x1="' + X(tNow).toFixed(1) + '" y1="' + y1 + '" x2="' + X(tNow).toFixed(1) + '" y2="' + y0 + '"/>';
+      // проекция: от старта через текущую точку, экстраполируем до t=1 (clamp по высоте графика, но позволяем «перелёт» вправо за дедлайн концептуально показываем точкой на t=1)
+      const projAt1 = Math.min(1, Math.max(0, f.projFrac));
+      const col = signalColor(f.state);
+      // фактическая часть (сплошная, до now)
+      h += '<path class="proj" style="stroke:' + col + '" d="M' + X(0).toFixed(1) + ' ' + Y(0).toFixed(1) + ' L' + X(tNow).toFixed(1) + ' ' + Y(vNow).toFixed(1) + '"/>';
+      // прогнозная часть (та же линия, продолжение) — пунктир тем же цветом
+      h += '<path class="proj" style="stroke:' + col + ';stroke-dasharray:3 3;opacity:.85" d="M' + X(tNow).toFixed(1) + ' ' + Y(vNow).toFixed(1) + ' L' + X(1).toFixed(1) + ' ' + Y(projAt1).toFixed(1) + '"/>';
+      // точки
+      h += '<circle class="dot" cx="' + X(tNow).toFixed(1) + '" cy="' + Y(vNow).toFixed(1) + '" style="fill:' + col + '"/>';
+      h += '<circle class="dot" cx="' + X(1).toFixed(1) + '" cy="' + Y(1).toFixed(1) + '" style="fill:var(--prizma-text-tertiary)"/>';
+      // если прогноз < 100% к дедлайну — отметить разрыв
+      if (projAt1 < 0.98) {
+        h += '<circle class="dot" cx="' + X(1).toFixed(1) + '" cy="' + Y(projAt1).toFixed(1) + '" style="fill:' + col + '"/>';
+      }
+    }
+    svg.innerHTML = h;
+  }
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+  window.addEventListener('resize', () => { if (activeEl) positionCard(activeEl); });
+
+  build();
+  setTimeout(build, 60);
+})();
+</script>
+</body>
+</html>

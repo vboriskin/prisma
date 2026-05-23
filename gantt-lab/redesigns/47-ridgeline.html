@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 47 · Хребты нагрузки</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .top .seg button { height: 28px; padding: 0 12px; font: 600 11px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: 0; border-right: 1px solid var(--prizma-border-strong); cursor: pointer; transition: background .14s, color .14s; }
+  .top .seg button:last-child { border-right: 0; }
+  .top .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  /* ── layout ── */
+  .eyebrowbar { padding: 10px 22px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .stage { flex: 1; min-height: 0; position: relative; padding: 4px 22px 14px; }
+  .stage svg { width: 100%; height: 100%; display: block; }
+
+  .ridge { transition: opacity .16s var(--ease-calm); cursor: default; }
+  .stage.hovering .ridge { opacity: .3; }
+  .stage.hovering .ridge.active { opacity: 1; }
+  .ridge .rfill { transition: fill .16s; }
+
+  /* readout */
+  .readout { position: absolute; left: 22px; top: 6px; display: flex; align-items: center; gap: 16px; pointer-events: none; opacity: 0; transition: opacity .14s var(--ease-calm); }
+  .readout.show { opacity: 1; }
+  .readout .ro-date { font: 700 13px/1 var(--mono); color: var(--prizma-information); letter-spacing: .3px; }
+  .readout .ro-peak { font: 500 11.5px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .readout .ro-peak b { color: var(--prizma-text-primary); font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Хребты нагрузки</span>
+    <span class="sub">joyplot · ритм команд</span>
+    <span class="spacer"></span>
+    <span class="seg" id="seg">
+      <button data-mode="overlap" class="on">Внахлёст</button>
+      <button data-mode="sep">Раздельно</button>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 47 · Хребты</span>
+    <span class="hint">по строке-хребту на команду — где гребень выше, там пик нагрузки. Совпадение гребней = конкуренция за людей.</span>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="readout" id="readout"><span class="ro-date" id="roDate"></span><span class="ro-peak" id="roPeak"></span></div>
+    <svg id="svg" preserveAspectRatio="none" aria-label="Ридж-лайн нагрузки команд"></svg>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const DAY = 86400000;
+  const parse = s => new Date(s + 'T00:00:00');
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ── ось времени: датированные релизы → окно квартала (Date-объекты, gotcha b) ──
+  const dated = D.releases.filter(r => r.dated);
+  const t0 = parse(dated[0].start);
+  const t1 = new Date(parse(dated[dated.length - 1].end).getTime() + DAY);
+  const spanMs = t1 - t0 || 1;
+
+  // ── дискретизация: одна выборка в день ──
+  const samples = [];
+  for (let t = t0.getTime(); t <= t1.getTime(); t += DAY) samples.push(new Date(t));
+  const N = samples.length;
+
+  // окно эпика по его датированным пилюлям
+  function epicWindow(e) {
+    let lo = null, hi = null;
+    e.pills.forEach(p => {
+      const r = D.releases.find(x => x.key === p.col);
+      if (!r || !r.dated) return;
+      const s = parse(r.start), en = new Date(parse(r.end).getTime() + DAY);
+      if (lo === null || s < lo) lo = s;
+      if (hi === null || en > hi) hi = en;
+    });
+    return lo === null ? null : { start: lo, end: hi };
+  }
+
+  // плотность вклада эпика в момент t — колокол по окну × масштаб effort
+  function epicDensity(e, win, t) {
+    if (!win) return 0;
+    const tm = t.getTime();
+    if (tm < win.start.getTime() || tm > win.end.getTime()) return 0;
+    const L = win.end - win.start || 1;
+    const x = (tm - win.start.getTime()) / L;     // 0..1
+    const bell = Math.sin(Math.PI * x);           // 0→1→0
+    const eased = 0.3 + 0.7 * bell;
+    return eased * (H.effortOf(e) / 10);
+  }
+
+  // ── на каждую команду: дневной ряд нагрузки ──
+  function teamSeries(team) {
+    const eps = H.teamEpics(team).map(e => ({ e, win: epicWindow(e) }));
+    return samples.map(t => eps.reduce((acc, m) => acc + epicDensity(m.e, m.win, t), 0));
+  }
+
+  const series = D.teams.map(tm => {
+    const values = teamSeries(tm);
+    let peak = 0, peakIdx = 0;
+    values.forEach((v, i) => { if (v > peak) { peak = v; peakIdx = i; } });
+    return { team: tm, values, peak, peakIdx };
+  });
+
+  // глобальный максимум — единая высотная шкала, чтобы гребни были сопоставимы
+  let gMax = 0; series.forEach(s => { if (s.peak > gMax) gMax = s.peak; });
+  gMax = gMax || 1;
+
+  const svg = document.getElementById('svg');
+  const stage = document.getElementById('stage');
+  const VB_W = 1000, VB_H = 540;
+  const PAD_T = 26, PAD_B = 34, PAD_L = 132, PAD_R = 18;
+  const plotW = VB_W - PAD_L - PAD_R;
+
+  let MODE = 'overlap';
+
+  function xOf(i) { return PAD_L + i / (N - 1) * plotW; }
+  function dateX(d) { return PAD_L + (d - t0) / spanMs * plotW; }
+
+  // Catmull-Rom → кубический сплайн
+  function spline(pts) {
+    if (!pts.length) return '';
+    let d = 'M ' + pts[0][0].toFixed(1) + ' ' + pts[0][1].toFixed(1);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+      const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+      d += ' C ' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) + ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) + ' ' + p2[0].toFixed(1) + ' ' + p2[1].toFixed(1);
+    }
+    return d;
+  }
+
+  function render() {
+    svg.setAttribute('viewBox', '0 0 ' + VB_W + ' ' + VB_H);
+    const lanes = series.length;
+    const laneH = (VB_H - PAD_T - PAD_B) / lanes;     // вертикальный шаг базовых линий
+    // высота гребня: внахлёст → выше базы лейна (перекрытие), раздельно → в пределах лейна
+    const ridgeH = MODE === 'overlap' ? laneH * 1.85 : laneH * 0.82;
+
+    let s = '';
+
+    // фоновые границы релизов (нейтральные) + подписи внизу
+    dated.forEach(r => {
+      const x0 = dateX(parse(r.start));
+      s += '<line x1="' + x0.toFixed(1) + '" y1="' + PAD_T + '" x2="' + x0.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+      const xc = (dateX(parse(r.start)) + dateX(new Date(parse(r.end).getTime() + DAY))) / 2;
+      s += '<text x="' + xc.toFixed(1) + '" y="' + (VB_H - 12) + '" text-anchor="middle" fill="' + (r.current ? 'var(--prizma-text-secondary)' : 'var(--prizma-text-tertiary)') + '" font-family="var(--mono)" font-size="11" font-weight="700">' + esc(r.short) + (r.current ? ' · ТЕК.' : '') + '</text>';
+    });
+    // правая граница окна
+    s += '<line x1="' + (PAD_L + plotW).toFixed(1) + '" y1="' + PAD_T + '" x2="' + (PAD_L + plotW).toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+
+    // вехи — нейтральные пунктиры
+    D.milestones.forEach(m => {
+      const xi = dateX(parse(m.date));
+      if (xi < PAD_L || xi > PAD_L + plotW) return;
+      s += '<line x1="' + xi.toFixed(1) + '" y1="' + PAD_T + '" x2="' + xi.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-text-secondary)" stroke-width="1" stroke-dasharray="1.5 3" opacity=".5"><title>' + esc(m.label) + '</title></line>';
+    });
+
+    // ── ридж per команда (рисуем сверху вниз, чтобы нижние перекрывали — joyplot) ──
+    // baseline лейна i (равномерно), пик уходит ВВЕРХ от базы
+    series.forEach((sObj, i) => {
+      const baseY = PAD_T + (i + 0.92) * laneH;
+      const top = sObj.values.map((v, k) => [xOf(k), baseY - (v / gMax) * ridgeH]);
+      // путь заливки: верхний контур, затем вдоль базовой линии назад
+      const fillD = spline(top) + ' L ' + xOf(N - 1).toFixed(1) + ' ' + baseY.toFixed(1) + ' L ' + xOf(0).toFixed(1) + ' ' + baseY.toFixed(1) + ' Z';
+      const strokeD = spline(top);
+      const active = sObj.peak > gMax * 0.66;          // самые загруженные — чуть ярче тон
+      const tone = active ? 16 : 11;
+      const stTone = active ? 40 : 30;
+
+      s += '<g class="ridge" data-i="' + i + '">';
+      // базовая тонкая линия лейна
+      s += '<line x1="' + PAD_L + '" y1="' + baseY.toFixed(1) + '" x2="' + (PAD_L + plotW).toFixed(1) + '" y2="' + baseY.toFixed(1) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+      s += '<path class="rfill" d="' + fillD + '" fill="color-mix(in srgb, var(--prizma-text-primary) ' + tone + '%, var(--prizma-bg))" />';
+      s += '<path d="' + strokeD + '" fill="none" stroke="color-mix(in srgb, var(--prizma-text-primary) ' + stTone + '%, transparent)" stroke-width="1.4" stroke-linejoin="round"/>';
+      s += '</g>';
+    });
+
+    // ── today-line через все хребты (семантический голубой) ──
+    const tx = dateX(parse(D.today));
+    s += '<line x1="' + tx.toFixed(1) + '" y1="' + (PAD_T - 12) + '" x2="' + tx.toFixed(1) + '" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-information)" stroke-width="1.4" stroke-dasharray="4 3"/>';
+    s += '<rect x="' + (tx - 24).toFixed(1) + '" y="' + (PAD_T - 24) + '" width="48" height="14" rx="3" fill="var(--prizma-information-bg)"/>';
+    s += '<text x="' + tx.toFixed(1) + '" y="' + (PAD_T - 14) + '" text-anchor="middle" fill="var(--prizma-information)" font-family="var(--mono)" font-size="8.5" font-weight="700">СЕГОДНЯ</text>';
+
+    // ── подписи команд слева (на базовой линии каждого хребта) ──
+    series.forEach((sObj, i) => {
+      const baseY = PAD_T + (i + 0.92) * laneH;
+      s += '<text x="' + (PAD_L - 14) + '" y="' + (baseY - 4).toFixed(1) + '" text-anchor="end" fill="var(--prizma-text-primary)" font-family="var(--font)" font-size="13" font-weight="700">' + esc(sObj.team) + '</text>';
+      const peakDate = samples[sObj.peakIdx].toLocaleDateString('ru', { day: '2-digit', month: 'short' });
+      s += '<text x="' + (PAD_L - 14) + '" y="' + (baseY + 11).toFixed(1) + '" text-anchor="end" fill="var(--prizma-text-tertiary)" font-family="var(--mono)" font-size="9.5" font-weight="600">пик ' + esc(peakDate) + '</text>';
+    });
+
+    // hit-layer
+    s += '<line class="guide" id="guide" x1="0" y1="' + PAD_T + '" x2="0" y2="' + (VB_H - PAD_B) + '" stroke="var(--prizma-text-primary)" stroke-width="1" opacity=".3" style="display:none"/>';
+    s += '<rect id="hit" x="' + PAD_L + '" y="0" width="' + plotW + '" height="' + VB_H + '" fill="transparent"/>';
+
+    svg.innerHTML = s;
+    wireHover();
+  }
+
+  // ── hover: вертикальная направляющая + дата + кто на пике ──
+  const readout = document.getElementById('readout');
+  const roDate = document.getElementById('roDate');
+  const roPeak = document.getElementById('roPeak');
+
+  function wireHover() {
+    const hit = svg.getElementById('hit');
+    const guide = svg.getElementById('guide');
+    hit.addEventListener('mousemove', ev => {
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) / r.width * VB_W;
+      const frac = (px - PAD_L) / plotW;
+      const i = Math.max(0, Math.min(N - 1, Math.round(frac * (N - 1))));
+      const x = xOf(i);
+      guide.style.display = '';
+      guide.setAttribute('x1', x.toFixed(1)); guide.setAttribute('x2', x.toFixed(1));
+
+      // команда с макс. нагрузкой в этот день
+      let top = null;
+      series.forEach(sObj => {
+        const v = sObj.values[i];
+        if (!top || v > top.v) top = { team: sObj.team, v };
+      });
+      readout.classList.add('show');
+      roDate.textContent = samples[i].toLocaleDateString('ru', { day: '2-digit', month: 'long' });
+      roPeak.innerHTML = top && top.v > 0.3 ? 'пик нагрузки — <b>' + esc(top.team) + '</b>' : 'спокойный день';
+    });
+    hit.addEventListener('mouseleave', () => {
+      guide.style.display = 'none';
+      readout.classList.remove('show');
+    });
+
+    // подсветка хребта при наведении на его область
+    svg.querySelectorAll('.ridge').forEach(g => {
+      g.addEventListener('mouseenter', () => {
+        stage.classList.add('hovering');
+        svg.querySelectorAll('.ridge').forEach(r => r.classList.toggle('active', r === g));
+      });
+      g.addEventListener('mouseleave', () => {
+        stage.classList.remove('hovering');
+        svg.querySelectorAll('.ridge').forEach(r => r.classList.remove('active'));
+      });
+    });
+  }
+
+  // ── mode switch ──
+  document.getElementById('seg').addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    MODE = b.dataset.mode;
+    document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+
+  // ── init: sync + setTimeout + resize (gotcha a) ──
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

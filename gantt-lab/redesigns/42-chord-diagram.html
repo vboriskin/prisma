@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 42 · Хорды зависимостей</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .spacer { flex: 1; }
+  .top .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .top .seg button { height: 28px; padding: 0 12px; font: 600 11px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: 0; border-right: 1px solid var(--prizma-border-strong); cursor: pointer; transition: background .14s, color .14s; }
+  .top .seg button:last-child { border-right: 0; }
+  .top .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  /* ── stage ── */
+  .body { flex: 1; min-height: 0; display: flex; }
+  .stagewrap { flex: 1; min-height: 0; position: relative; display: flex; align-items: center; justify-content: center; padding: 14px; }
+  .eyebrowbar { position: absolute; top: 14px; left: 22px; z-index: 5; pointer-events: none; }
+  .eyebrowbar .note { display: block; margin-top: 5px; font-size: 11.5px; color: var(--prizma-text-tertiary); max-width: 300px; }
+  svg.chord { display: block; width: 100%; height: 100%; }
+
+  /* node arcs */
+  .narc { cursor: pointer; transition: opacity .18s var(--ease-calm); }
+  .narc path { stroke: var(--prizma-bg); stroke-width: 1.4; transition: filter .2s; }
+  .narc.dim { opacity: .26; }
+  .narc:hover path { filter: brightness(1.2); }
+  .narc.sel path { stroke: var(--prizma-text-primary); stroke-width: 2; }
+  .nlabel { font: 600 10px var(--font); pointer-events: none; }
+  .nlabel.mono { font: 700 9px var(--mono); }
+  .nlabel.dim { opacity: .26; }
+
+  /* group (team) outer band labels */
+  .glabel { fill: var(--prizma-text-secondary); font: 700 10px var(--font); letter-spacing: .5px; text-transform: uppercase; pointer-events: none; }
+  .gband path { stroke: none; }
+
+  /* ribbons */
+  .ribbon { transition: opacity .2s var(--ease-calm); mix-blend-mode: screen; }
+  [data-theme="light"] .ribbon { mix-blend-mode: multiply; }
+  .ribbon.dim { opacity: .05; }
+  .ribbon.lit { opacity: .85; }
+
+  /* center readout */
+  .hub { pointer-events: none; }
+  .hub .c-eyebrow { fill: var(--prizma-text-tertiary); font: 700 9.5px var(--font); letter-spacing: .6px; text-transform: uppercase; }
+  .hub .c-title { fill: var(--prizma-text-primary); font: 600 15px var(--font); }
+  .hub .c-num { fill: var(--prizma-text-primary); font: 200 34px var(--mono); letter-spacing: -.02em; }
+  .hub .c-num tspan.u { font: 700 12px var(--mono); fill: var(--prizma-text-tertiary); }
+  .hub .c-sub { font: 700 10px var(--mono); letter-spacing: .3px; }
+
+  /* ── side ── */
+  .side { width: 244px; flex: none; border-left: 1px solid var(--prizma-border); padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+  .lg .pz-eyebrow { display: block; margin-bottom: 11px; }
+  .lgrow { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; color: var(--prizma-text-secondary); }
+  .lgrow .sw { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid var(--prizma-border); }
+  .lgrow .ct { margin-left: auto; font: 700 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .stat { display: flex; flex-direction: column; gap: 4px; }
+  .stat .pz-eyebrow { margin-bottom: 6px; }
+  .stat .v { font: 300 26px/1 var(--mono); color: var(--prizma-text-primary); }
+  .stat .s { font-size: 11.5px; color: var(--prizma-text-tertiary); }
+  .hint { margin-top: auto; font: 400 11px/1.5 var(--font); color: var(--prizma-text-tertiary); border-top: 1px solid var(--prizma-border); padding-top: 14px; }
+  .hint b { color: var(--prizma-text-secondary); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Хорды зависимостей</span>
+    <span class="pz-eyebrow">Редизайн 42 · chord</span>
+    <span class="spacer"></span>
+    <span class="seg" id="seg">
+      <button data-mode="epic" class="on">Эпики</button>
+      <button data-mode="team">Команды</button>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="body">
+    <div class="stagewrap" id="stage">
+      <div class="eyebrowbar">
+        <span class="pz-eyebrow">Кто с кем сцеплен</span>
+        <span class="note">Дуги по кругу — эпики (сгруппированы по командам); ленты — зависимости. Цвет ленты — команда-источник. Наведите на дугу — её связи подсветятся.</span>
+      </div>
+      <svg class="chord" id="chord" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Хордовая диаграмма зависимостей"></svg>
+    </div>
+
+    <aside class="side">
+      <div class="stat">
+        <span class="pz-eyebrow">Связей в квартале</span>
+        <div class="v" id="depCount">—</div>
+        <div class="s" id="depSub"></div>
+      </div>
+      <div class="lg">
+        <span class="pz-eyebrow">Команды-источники</span>
+        <div id="legend"></div>
+      </div>
+      <div class="hint" id="hint">Лента идёт от зависящего эпика к тому, <b>от чего он зависит</b>. Наведите на дугу — увидите её зависимости в центре. Переключите на «Команды», чтобы свернуть в межкомандные потоки.</div>
+    </aside>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const chord = document.getElementById('chord');
+  const stage = document.getElementById('stage');
+  const byId = {}; D.epics.forEach(e => byId[e.id] = e);
+
+  function plural(n, one, few, many) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  // ── team color palette (single hue each — restrained, semantic-free identity) ──
+  // teams get muted distinct tones built from work-type-ish hues; NOT status colors.
+  const TEAM_COL = {
+    'Платежи':      'var(--wt-be)',
+    'Безопасность': 'var(--wt-hf)',
+    'Интеграции':   'var(--wt-mig)',
+    'Аналитика':    'var(--wt-an)',
+    'Мобайл':       'var(--wt-fe)',
+  };
+  const teamColor = t => TEAM_COL[t] || 'var(--prizma-information)';
+
+  // ── directed dependency edges: epic --depends-on--> dep ──
+  const edges = [];
+  D.epics.forEach(e => (e.deps || []).forEach(d => { if (byId[d]) edges.push({ src: e.id, dst: d }); }));
+
+  const TAU = Math.PI * 2;
+  function polar(cx, cy, r, a) { return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+  function arcPath(cx, cy, r0, r1, a0, a1) {
+    const large = (a1 - a0) > Math.PI ? 1 : 0;
+    const [x00, y00] = polar(cx, cy, r0, a0);
+    const [x01, y01] = polar(cx, cy, r1, a0);
+    const [x10, y10] = polar(cx, cy, r1, a1);
+    const [x11, y11] = polar(cx, cy, r0, a1);
+    return 'M' + x01.toFixed(2) + ' ' + y01.toFixed(2) +
+      ' A' + r1.toFixed(2) + ' ' + r1.toFixed(2) + ' 0 ' + large + ' 1 ' + x10.toFixed(2) + ' ' + y10.toFixed(2) +
+      ' L' + x11.toFixed(2) + ' ' + y11.toFixed(2) +
+      ' A' + r0.toFixed(2) + ' ' + r0.toFixed(2) + ' 0 ' + large + ' 0 ' + x00.toFixed(2) + ' ' + y00.toFixed(2) + ' Z';
+  }
+
+  let VB = 720, MODE = 'epic', selKey = null, hoverKey = null;
+
+  // ── build node layout around circle ──
+  // EPIC mode: nodes = epics, grouped contiguously by team, equal-ish angular size weighted by degree+1.
+  // TEAM mode: nodes = teams, size weighted by epic count.
+  function buildNodes() {
+    const GAP_GROUP = 0.05, GAP_NODE = 0.012;
+    if (MODE === 'team') {
+      const items = D.teams.map(t => ({ key: t, team: t, label: t, weight: H.teamEpics(t).length }));
+      return layoutFlat(items, GAP_NODE * 2);
+    }
+    // epic mode — group by team
+    const groups = D.teams.map(t => ({ team: t, epics: H.teamEpics(t) }));
+    // degree (in+out) per epic for weighting
+    const deg = {}; D.epics.forEach(e => deg[e.id] = 0);
+    edges.forEach(e => { deg[e.src]++; deg[e.dst]++; });
+    const items = [];
+    groups.forEach(g => g.epics.forEach(e => items.push({ key: e.id, team: g.team, label: e.epic, weight: 1 + deg[e.id] * 0.6, group: g.team })));
+    return layoutGrouped(items, groups.map(g => g.team), GAP_GROUP, GAP_NODE);
+  }
+
+  function layoutFlat(items, gap) {
+    const totW = items.reduce((a, it) => a + it.weight, 0) || 1;
+    const totGap = gap * items.length;
+    const usable = TAU - totGap;
+    let cur = -Math.PI / 2;
+    return items.map(it => {
+      const span = (it.weight / totW) * usable;
+      const a0 = cur + gap / 2, a1 = cur + gap / 2 + span;
+      cur += span + gap;
+      return Object.assign({}, it, { a0, a1, mid: (a0 + a1) / 2 });
+    });
+  }
+  function layoutGrouped(items, groupOrder, gapG, gapN) {
+    const totW = items.reduce((a, it) => a + it.weight, 0) || 1;
+    // total fixed angular budget consumed by gaps: one group-gap per group +
+    // (count-1) node-gaps within each group. Remainder is shared by weight.
+    const totGroupGap = gapG * groupOrder.length;
+    let nodeGapTotal = 0;
+    groupOrder.forEach(g => { const c = items.filter(it => it.group === g).length; nodeGapTotal += gapN * Math.max(0, c - 1); });
+    const usable = Math.max(0.01, TAU - totGroupGap - nodeGapTotal);
+
+    let cur = -Math.PI / 2;
+    const out = [];
+    const groupBounds = {};
+    groupOrder.forEach(g => {
+      const gi = items.filter(it => it.group === g);
+      cur += gapG / 2;                     // half group-gap before
+      const gStart = cur;
+      gi.forEach((it, idx) => {
+        if (idx > 0) cur += gapN;          // node-gap between siblings
+        const span = (it.weight / totW) * usable;
+        const a0 = cur, a1 = cur + span;
+        out.push(Object.assign({}, it, { a0, a1, mid: (a0 + a1) / 2 }));
+        cur = a1;
+      });
+      const gEnd = cur;
+      cur += gapG / 2;                      // half group-gap after
+      groupBounds[g] = { a0: gStart, a1: gEnd };
+    });
+    out._groups = groupBounds;
+    return out;
+  }
+
+  function render() {
+    const rect = stage.getBoundingClientRect();
+    const side = Math.max(360, Math.min(rect.width - 28, rect.height - 28));
+    VB = 720;
+    chord.setAttribute('viewBox', '0 0 ' + VB + ' ' + VB);
+    chord.style.maxWidth = side + 'px';
+    chord.style.maxHeight = side + 'px';
+
+    const cx = VB / 2, cy = VB / 2;
+    const rArc0 = 268, rArc1 = 292;        // node arc band
+    const rRib = 262;                       // ribbon endpoints (inner edge of arcs)
+    const rGroup0 = 296, rGroup1 = 302;     // outer team band (epic mode)
+    const rLabel = 312;                     // node labels outside
+
+    const nodes = buildNodes();
+    const nodeByKey = {}; nodes.forEach(n => nodeByKey[n.key] = n);
+
+    let s = '';
+
+    // ── ribbons first (behind arcs) ──
+    // each edge connects two nodes; in TEAM mode collapse epic→team.
+    const ribs = [];
+    edges.forEach(e => {
+      let aKey, bKey;
+      if (MODE === 'team') { aKey = byId[e.src].team; bKey = byId[e.dst].team; if (aKey === bKey) return; }
+      else { aKey = e.src; bKey = e.dst; }
+      const na = nodeByKey[aKey], nb = nodeByKey[bKey];
+      if (!na || !nb) return;
+      ribs.push({ na, nb, srcTeam: byId[e.src].team, src: e.src, dst: e.dst, aKey, bKey });
+    });
+
+    ribs.forEach((r, i) => {
+      // anchor points slightly inside each arc; thin ribbon between two angular points
+      const aSpread = MODE === 'team' ? 0.05 : 0.02;
+      const a0 = r.na.mid - aSpread, a1 = r.na.mid + aSpread;
+      const b0 = r.nb.mid - aSpread, b1 = r.nb.mid + aSpread;
+      const [p0x, p0y] = polar(cx, cy, rRib, a0);
+      const [p1x, p1y] = polar(cx, cy, rRib, a1);
+      const [q0x, q0y] = polar(cx, cy, rRib, b0);
+      const [q1x, q1y] = polar(cx, cy, rRib, b1);
+      // quadratic bezier through center pull → ribbon as two curves sharing center control
+      const col = teamColor(r.srcTeam);
+      // path: arc a0->a1, curve to b1, arc b1->b0, curve back to a0 (control = center)
+      const d =
+        'M' + p0x.toFixed(2) + ' ' + p0y.toFixed(2) +
+        ' A' + rRib + ' ' + rRib + ' 0 0 1 ' + p1x.toFixed(2) + ' ' + p1y.toFixed(2) +
+        ' Q' + cx + ' ' + cy + ' ' + q1x.toFixed(2) + ' ' + q1y.toFixed(2) +
+        ' A' + rRib + ' ' + rRib + ' 0 0 1 ' + q0x.toFixed(2) + ' ' + q0y.toFixed(2) +
+        ' Q' + cx + ' ' + cy + ' ' + p0x.toFixed(2) + ' ' + p0y.toFixed(2) + ' Z';
+      s += '<path class="ribbon" data-i="' + i + '" data-a="' + esc(r.aKey) + '" data-b="' + esc(r.bKey) + '" data-src="' + esc(r.src) + '" data-dst="' + esc(r.dst) + '" d="' + d + '" fill="' + col + '" fill-opacity="0.42"/>';
+    });
+
+    // ── outer team band (epic mode only) ──
+    if (MODE === 'epic' && nodes._groups) {
+      Object.keys(nodes._groups).forEach(g => {
+        const b = nodes._groups[g];
+        s += '<g class="gband"><path d="' + arcPath(cx, cy, rGroup0, rGroup1, b.a0, b.a1) + '" fill="' + teamColor(g) + '" fill-opacity="0.55"/></g>';
+        const mid = (b.a0 + b.a1) / 2;
+        const [gx, gy] = polar(cx, cy, rLabel + 14, mid);
+        let deg = mid * 180 / Math.PI, nd = (deg + 360) % 360, rot = nd;
+        if (nd > 90 && nd < 270) rot = nd + 180;
+        s += '<text class="glabel" x="' + gx.toFixed(2) + '" y="' + gy.toFixed(2) + '" text-anchor="middle" dominant-baseline="central" transform="rotate(' + rot.toFixed(1) + ' ' + gx.toFixed(2) + ' ' + gy.toFixed(2) + ')">' + esc(g) + '</text>';
+      });
+    }
+
+    // ── node arcs ──
+    nodes.forEach(n => {
+      const col = teamColor(n.team);
+      const fill = 'color-mix(in srgb, ' + col + ' 70%, var(--prizma-bg-tertiary))';
+      s += '<g class="narc" data-key="' + esc(n.key) + '" data-team="' + esc(n.team) + '">' +
+        '<path d="' + arcPath(cx, cy, rArc0, rArc1, n.a0, n.a1) + '" fill="' + fill + '"/></g>';
+      // label outside, radial
+      const wide = (n.a1 - n.a0) > 0.055;
+      if (wide || MODE === 'team') {
+        const [lx, ly] = polar(cx, cy, rLabel, n.mid);
+        let deg = n.mid * 180 / Math.PI, nd = (deg + 360) % 360;
+        let rot = nd, anchor = 'start';
+        if (nd > 90 && nd < 270) { rot = nd + 180; anchor = 'end'; }
+        const raw = MODE === 'team' ? n.label : (n.label.length > 22 ? n.label.slice(0, 21) + '…' : n.label);
+        s += '<text class="nlabel" data-key="' + esc(n.key) + '" x="' + lx.toFixed(2) + '" y="' + ly.toFixed(2) + '" text-anchor="' + anchor + '" dominant-baseline="central" fill="var(--prizma-text-secondary)" transform="rotate(' + rot.toFixed(1) + ' ' + lx.toFixed(2) + ' ' + ly.toFixed(2) + ')">' + esc(raw) + '</text>';
+      }
+    });
+
+    // hub
+    s += '<g class="hub" id="hub"></g>';
+
+    chord.innerHTML = s;
+    wire(nodeByKey);
+    setHub(null);
+    applyHL();
+  }
+
+  // ── center readout ──
+  function setHub(key) {
+    const hub = document.getElementById('hub');
+    if (!hub) return;
+    const cx = VB / 2, cy = VB / 2;
+    let h = '';
+    if (key == null) {
+      const total = MODE === 'team'
+        ? edges.filter(e => byId[e.src].team !== byId[e.dst].team).length
+        : edges.length;
+      h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 30) + '" text-anchor="middle">квартал q2</text>';
+      h += '<text class="c-num" x="' + cx + '" y="' + (cy + 12) + '" text-anchor="middle">' + total + '<tspan class="u" dx="3">связей</tspan></text>';
+      h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 36) + '" text-anchor="middle" fill="var(--prizma-text-tertiary)">' + (MODE === 'team' ? 'между командами' : D.epics.length + ' эпиков') + '</text>';
+    } else if (MODE === 'team') {
+      const out = edges.filter(e => byId[e.src].team === key && byId[e.dst].team !== key).length;
+      const inc = edges.filter(e => byId[e.dst].team === key && byId[e.src].team !== key).length;
+      h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 30) + '" text-anchor="middle">команда</text>';
+      h += '<text class="c-title" x="' + cx + '" y="' + (cy - 8) + '" text-anchor="middle">' + esc(key) + '</text>';
+      h += '<text class="c-num" x="' + cx + '" y="' + (cy + 26) + '" text-anchor="middle" style="font-size:26px">' + (out + inc) + '<tspan class="u" dx="3">связей</tspan></text>';
+      h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 46) + '" text-anchor="middle" fill="var(--prizma-text-tertiary)">' + out + ' исходящих · ' + inc + ' входящих</text>';
+    } else {
+      const e = byId[key]; if (!e) return;
+      const out = (e.deps || []).filter(d => byId[d]).length;
+      const inc = edges.filter(x => x.dst === key).length;
+      const title = e.epic.length > 19 ? e.epic.slice(0, 18) + '…' : e.epic;
+      h += '<text class="c-eyebrow" x="' + cx + '" y="' + (cy - 30) + '" text-anchor="middle">' + esc(e.team) + '</text>';
+      h += '<text class="c-title" x="' + cx + '" y="' + (cy - 6) + '" text-anchor="middle">' + esc(title) + '</text>';
+      h += '<text class="c-num" x="' + cx + '" y="' + (cy + 28) + '" text-anchor="middle" style="font-size:26px">' + (out + inc) + '<tspan class="u" dx="3">связей</tspan></text>';
+      h += '<text class="c-sub" x="' + cx + '" y="' + (cy + 48) + '" text-anchor="middle" fill="var(--prizma-text-tertiary)">зависит от ' + out + ' · блокирует ' + inc + '</text>';
+    }
+    hub.innerHTML = h;
+  }
+
+  // ── interactions ──
+  function wire(nodeByKey) {
+    chord.querySelectorAll('.narc').forEach(g => {
+      const key = g.dataset.key;
+      g.addEventListener('mouseenter', () => { hoverKey = key; setHub(key); applyHL(); });
+      g.addEventListener('mouseleave', () => { hoverKey = null; setHub(selKey); applyHL(); });
+      g.addEventListener('click', () => { selKey = (selKey === key) ? null : key; setHub(selKey); applyHL(); });
+    });
+  }
+  function relatedKeys(key) {
+    const set = new Set([key]);
+    chord.querySelectorAll('.ribbon').forEach(rb => {
+      if (rb.dataset.a === key) set.add(rb.dataset.b);
+      if (rb.dataset.b === key) set.add(rb.dataset.a);
+    });
+    return set;
+  }
+  function applyHL() {
+    const focus = hoverKey || selKey;
+    chord.querySelectorAll('.narc').forEach(g => {
+      g.classList.toggle('sel', selKey === g.dataset.key);
+    });
+    if (!focus) {
+      chord.querySelectorAll('.narc').forEach(g => g.classList.remove('dim'));
+      chord.querySelectorAll('.nlabel').forEach(t => t.classList.remove('dim'));
+      chord.querySelectorAll('.ribbon').forEach(rb => rb.classList.remove('dim', 'lit'));
+      return;
+    }
+    const rel = relatedKeys(focus);
+    chord.querySelectorAll('.narc').forEach(g => g.classList.toggle('dim', !rel.has(g.dataset.key)));
+    chord.querySelectorAll('.nlabel').forEach(t => t.classList.toggle('dim', !rel.has(t.dataset.key)));
+    chord.querySelectorAll('.ribbon').forEach(rb => {
+      const on = rb.dataset.a === focus || rb.dataset.b === focus;
+      rb.classList.toggle('lit', on);
+      rb.classList.toggle('dim', !on);
+    });
+  }
+
+  // ── side panel ──
+  function fillSide() {
+    const total = edges.length;
+    const cross = edges.filter(e => byId[e.src].team !== byId[e.dst].team).length;
+    document.getElementById('depCount').textContent = total;
+    document.getElementById('depSub').textContent = cross + ' ' + plural(cross, 'межкомандная', 'межкомандных', 'межкомандных') + ' из ' + total;
+
+    // count outgoing edges per source team
+    const counts = {}; D.teams.forEach(t => counts[t] = 0);
+    edges.forEach(e => counts[byId[e.src].team]++);
+    document.getElementById('legend').innerHTML = D.teams.map(t =>
+      '<div class="lgrow"><span class="sw" style="background:' + teamColor(t) + '"></span>' + esc(t) + '<span class="ct">' + counts[t] + '</span></div>').join('');
+  }
+
+  // ── mode switch ──
+  document.getElementById('seg').addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    MODE = b.dataset.mode;
+    selKey = null; hoverKey = null;
+    document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+    render();
+  });
+
+  // ── init: sync + 60ms + resize (gotcha a & d) ──
+  fillSide();
+  render();
+  setTimeout(render, 60);
+  window.addEventListener('resize', render);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

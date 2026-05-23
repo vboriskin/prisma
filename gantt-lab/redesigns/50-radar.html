@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 50 · Радар команд</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+  .top .seg { display: inline-flex; border: 1px solid var(--prizma-border-strong); border-radius: var(--r-md); overflow: hidden; }
+  .top .seg button { height: 28px; padding: 0 12px; font: 600 11px/1 var(--font); background: transparent; color: var(--prizma-text-secondary); border: 0; border-right: 1px solid var(--prizma-border-strong); cursor: pointer; transition: background .14s, color .14s; }
+  .top .seg button:last-child { border-right: 0; }
+  .top .seg button.on { background: var(--prizma-bg-tertiary); color: var(--prizma-text-primary); }
+
+  .eyebrowbar { padding: 10px 22px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+
+  /* ── main ── */
+  .main { flex: 1; min-height: 0; display: flex; }
+  .stage { flex: 1; min-height: 0; min-width: 0; position: relative; padding: 8px 18px 16px; display: flex; align-items: center; justify-content: center; }
+  .stage svg { width: 100%; height: 100%; display: block; }
+
+  /* legend / toggles */
+  .side { width: 248px; flex: none; border-left: 1px solid var(--prizma-border); padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .side .lbl { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .tg { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--prizma-border); border-radius: var(--r-md); cursor: pointer; transition: border-color .14s, background .14s; background: transparent; text-align: left; }
+  .tg:hover { border-color: var(--prizma-border-strong); }
+  .tg.on { border-color: var(--prizma-border-strong); background: color-mix(in srgb, var(--prizma-text-primary) 4%, transparent); }
+  .tg.sel { border-color: var(--prizma-information); background: var(--prizma-information-bg); }
+  .tg .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; border: 1.5px solid var(--prizma-text-tertiary); }
+  .tg.on .sw { background: var(--prizma-text-secondary); border-color: var(--prizma-text-secondary); }
+  .tg.sel .sw { background: var(--prizma-information); border-color: var(--prizma-information); }
+  .tg .nm { font: 600 13px/1 var(--font); color: var(--prizma-text-primary); flex: 1; }
+  .tg.off .nm { color: var(--prizma-text-tertiary); }
+  .tg .mini { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); }
+
+  .side .axes { margin-top: 14px; border-top: 1px solid var(--prizma-border); padding-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+  .side .axes .ax { display: flex; align-items: baseline; gap: 6px; font-size: 11px; color: var(--prizma-text-tertiary); }
+  .side .axes .ax b { color: var(--prizma-text-secondary); font-weight: 700; }
+
+  /* small-multiples grid */
+  .grid { display: none; flex: 1; min-height: 0; overflow-y: auto; padding: 14px 22px 28px; }
+  .grid.on { display: block; }
+  .smwrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 1180px; margin: 0 auto; }
+  .sm { background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border); border-radius: var(--r-lg); padding: 12px 12px 8px; position: relative; }
+  .sm::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 2px 2px 0; background: var(--prizma-border-strong); }
+  .sm.off::before { background: var(--prizma-off-course); }
+  .sm.drift::before { background: var(--prizma-drift); }
+  .sm.ok::before { background: var(--prizma-on-course); }
+  .sm .smh { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px 4px 8px; }
+  .sm .smh .nm { font: 700 13px/1 var(--font); color: var(--prizma-text-primary); }
+  .sm .smh .sc { font: 700 11px/1 var(--mono); color: var(--prizma-text-secondary); }
+  .sm svg { width: 100%; height: auto; display: block; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Радар команд</span>
+    <span class="sub">spider · силуэт здоровья</span>
+    <span class="spacer"></span>
+    <span class="seg" id="seg">
+      <button data-mode="overlay" class="on">Наложение</button>
+      <button data-mode="small">5 мини-радаров</button>
+    </span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 50 · Радар</span>
+    <span class="hint">пять осей здоровья на команду. Включайте команды флажком; выбранная подсвечивается голубым — сравните силуэты.</span>
+  </div>
+
+  <div class="main">
+    <div class="stage" id="stage"><svg id="svg" aria-label="Радар команд"></svg></div>
+    <div class="grid" id="grid"><div class="smwrap" id="smwrap"></div></div>
+    <div class="side" id="side"></div>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ── оси: 5 нормализованных 0..1 метрик. Семантика «больше = лучше» унифицирована. ──
+  // объём(эффорт), готовность(doneRatio), риск(инверт), переносы(инверт churn), ёмкость(запас)
+  const CAPACITY = { 'Платежи': 3, 'Безопасность': 2, 'Интеграции': 3, 'Аналитика': 2, 'Мобайл': 3 };
+  const AXES = [
+    { key: 'vol',  label: 'объём' },
+    { key: 'done', label: 'готовность' },
+    { key: 'risk', label: 'риск' },
+    { key: 'move', label: 'переносы' },
+    { key: 'cap',  label: 'ёмкость' },
+  ];
+
+  // сырьё по команде
+  const raw = D.teams.map(team => {
+    const eps = H.teamEpics(team);
+    const effort = eps.reduce((a, e) => a + H.effortOf(e), 0);
+    const done = eps.length ? eps.reduce((a, e) => a + H.doneRatio(e), 0) / eps.length : 0;
+    const off = eps.filter(e => e.risk === 'off-course').length;
+    const drift = eps.filter(e => e.risk === 'drift').length;
+    const riskScore = eps.length ? (off * 2 + drift) / (eps.length * 2) : 0;       // 0 хор → 1 плохо
+    const moves = eps.reduce((a, e) => a + (e.moves || 0), 0);
+    const churn = eps.length ? moves / eps.length : 0;                              // ср. переносов/эпик
+    const used = H.loadByTeamRelease(team, 'r121');
+    const util = used / (CAPACITY[team] || 4);                                      // загрузка 1.21
+    return { team, effort, done, off, drift, riskScore, moves, churn, util, eps: eps.length };
+  });
+
+  const maxEffort = Math.max(1, ...raw.map(r => r.effort));
+
+  // нормализация в 0..1 (1 = «здорово»)
+  const data = raw.map(r => {
+    const vol = r.effort / maxEffort;                          // объём как есть (больше = крупнее портфель)
+    const done = r.done;                                       // готовность
+    const risk = 1 - Math.min(1, r.riskScore);                 // инверт: мало риска = высоко
+    const move = 1 - Math.min(1, r.churn / 3);                 // инверт: мало переносов = высоко
+    const cap = 1 - Math.min(1, Math.max(0, r.util - 0.4) / 0.8); // запас ёмкости: недогруз=высоко, перегруз=низко
+    const vals = { vol, done, risk, move, cap };
+    const score = Math.round((done + risk + move + cap) / 4 * 100);     // «здоровье» (без объёма — он размер)
+    const worst = r.off ? 'off' : r.drift ? 'drift' : 'ok';
+    return { team: r.team, vals, score, worst, raw: r };
+  });
+
+  // состояние: какие команды видимы + какая выбрана (accent)
+  const visible = {}; D.teams.forEach((t, i) => visible[t] = i < 3);   // по умолчанию первые 3
+  let selected = D.teams[0];
+  let MODE = 'overlay';
+
+  const svg = document.getElementById('svg');
+  const VB = 560, CX = 280, CY = 268, R = 196;
+
+  // координата вершины оси a (0..n) на радиусе frac*R
+  function vertex(aIdx, frac, cx, cy, r) {
+    const ang = -Math.PI / 2 + aIdx / AXES.length * Math.PI * 2;     // старт сверху, по часовой
+    return [cx + Math.cos(ang) * frac * r, cy + Math.sin(ang) * frac * r];
+  }
+
+  function gridRings(cx, cy, r, rings) {
+    let s = '';
+    for (let k = rings; k >= 1; k--) {
+      const fr = k / rings;
+      const pts = AXES.map((_, i) => vertex(i, fr, cx, cy, r).map(v => v.toFixed(1)).join(','));
+      s += '<polygon points="' + pts.join(' ') + '" fill="none" stroke="var(--prizma-border)" stroke-width="1"/>';
+    }
+    // спицы
+    AXES.forEach((_, i) => {
+      const [x, y] = vertex(i, 1, cx, cy, r);
+      s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+    });
+    return s;
+  }
+
+  function polyFor(d, cx, cy, r) {
+    return AXES.map((ax, i) => vertex(i, Math.max(0.02, d.vals[ax.key]), cx, cy, r).map(v => v.toFixed(1)).join(',')).join(' ');
+  }
+
+  // ── overlay-радар ──
+  function renderOverlay() {
+    svg.setAttribute('viewBox', '0 0 ' + VB + ' ' + (VB - 20));
+    let s = '';
+    s += gridRings(CX, CY, R, 4);
+
+    // подписи осей
+    AXES.forEach((ax, i) => {
+      const [lx, ly] = vertex(i, 1.14, CX, CY, R);
+      const anchor = Math.abs(lx - CX) < 6 ? 'middle' : (lx > CX ? 'start' : 'end');
+      s += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 4).toFixed(1) + '" text-anchor="' + anchor + '" fill="var(--prizma-text-secondary)" font-family="var(--font)" font-size="12" font-weight="700">' + esc(ax.label) + '</text>';
+    });
+
+    // полигоны: невыбранные нейтральные, выбранный — голубой акцент (рисуем выбранный последним)
+    const order = data.filter(d => visible[d.team]).sort((a, b) => (a.team === selected ? 1 : 0) - (b.team === selected ? 1 : 0));
+    order.forEach(d => {
+      const sel = d.team === selected;
+      const pts = polyFor(d, CX, CY, R);
+      const stroke = sel ? 'var(--prizma-information)' : 'color-mix(in srgb, var(--prizma-text-primary) 40%, transparent)';
+      const fill = sel ? 'color-mix(in srgb, var(--prizma-information) 16%, transparent)' : 'color-mix(in srgb, var(--prizma-text-primary) 5%, transparent)';
+      s += '<polygon points="' + pts + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + (sel ? 2.2 : 1.3) + '" stroke-linejoin="round"/>';
+      // вершины-точки только у выбранного
+      if (sel) {
+        AXES.forEach((ax, i) => {
+          const [x, y] = vertex(i, Math.max(0.02, d.vals[ax.key]), CX, CY, R);
+          s += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="var(--prizma-bg)" stroke="var(--prizma-information)" stroke-width="1.8"/>';
+        });
+      }
+    });
+
+    svg.innerHTML = s;
+  }
+
+  // ── small-multiples ──
+  function renderSmall() {
+    const SVB = 200, scx = 100, scy = 96, sr = 66;
+    document.getElementById('smwrap').innerHTML = data.map(d => {
+      let g = '';
+      // локальный grid
+      for (let k = 3; k >= 1; k--) {
+        const fr = k / 3;
+        const pts = AXES.map((_, i) => vertex(i, fr, scx, scy, sr).map(v => v.toFixed(1)).join(',')).join(' ');
+        g += '<polygon points="' + pts + '" fill="none" stroke="var(--prizma-border)" stroke-width="1"/>';
+      }
+      AXES.forEach((ax, i) => {
+        const [x, y] = vertex(i, 1, scx, scy, sr);
+        g += '<line x1="' + scx + '" y1="' + scy + '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) + '" stroke="var(--prizma-border)" stroke-width="1"/>';
+        const [lx, ly] = vertex(i, 1.2, scx, scy, sr);
+        const anchor = Math.abs(lx - scx) < 6 ? 'middle' : (lx > scx ? 'start' : 'end');
+        g += '<text x="' + lx.toFixed(1) + '" y="' + (ly + 3).toFixed(1) + '" text-anchor="' + anchor + '" fill="var(--prizma-text-tertiary)" font-family="var(--font)" font-size="8.5" font-weight="600">' + esc(ax.label) + '</text>';
+      });
+      const pts = polyFor(d, scx, scy, sr);
+      // каждый окрашен своим риск-статусом stripe; полигон нейтральный + точки
+      g += '<polygon points="' + pts + '" fill="color-mix(in srgb, var(--prizma-text-primary) 10%, transparent)" stroke="color-mix(in srgb, var(--prizma-text-primary) 50%, transparent)" stroke-width="1.6" stroke-linejoin="round"/>';
+      AXES.forEach((ax, i) => {
+        const [x, y] = vertex(i, Math.max(0.02, d.vals[ax.key]), scx, scy, sr);
+        g += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="2.2" fill="var(--prizma-bg-elevated)" stroke="var(--prizma-text-secondary)" stroke-width="1.4"/>';
+      });
+      return '<div class="sm ' + d.worst + '">' +
+        '<div class="smh"><span class="nm">' + esc(d.team) + '</span><span class="sc">здоровье ' + d.score + '%</span></div>' +
+        '<svg viewBox="0 0 ' + SVB + ' ' + (SVB - 4) + '" role="img" aria-label="Радар ' + esc(d.team) + '">' + g + '</svg>' +
+        '</div>';
+    }).join('');
+  }
+
+  // ── боковая панель (toggles) ──
+  function renderSide() {
+    const side = document.getElementById('side');
+    let h = '<div class="lbl">Команды</div>';
+    h += data.map(d => {
+      const on = visible[d.team], sel = d.team === selected;
+      return '<button class="tg' + (on ? ' on' : ' off') + (sel && on ? ' sel' : '') + '" data-team="' + esc(d.team) + '">' +
+        '<span class="sw"></span><span class="nm">' + esc(d.team) + '</span><span class="mini">' + d.score + '%</span></button>';
+    }).join('');
+    h += '<div class="axes"><div class="lbl" style="margin-bottom:2px">Оси (0–1, выше = здоровее)</div>' +
+      '<div class="ax"><b>объём</b> — суммарный эффорт команды</div>' +
+      '<div class="ax"><b>готовность</b> — доля сделанных работ</div>' +
+      '<div class="ax"><b>риск</b> — инверсия рисковой массы</div>' +
+      '<div class="ax"><b>переносы</b> — инверсия churn</div>' +
+      '<div class="ax"><b>ёмкость</b> — запас по загрузке 1.21</div></div>';
+    side.innerHTML = h;
+    side.querySelectorAll('.tg').forEach(b => {
+      b.addEventListener('click', () => {
+        const t = b.dataset.team;
+        if (selected === t && visible[t]) {
+          // повторный клик по выбранной — выключить
+          visible[t] = false;
+          // переназначить selected на ближайшую видимую
+          const nextSel = data.find(d => visible[d.team]);
+          selected = nextSel ? nextSel.team : t;
+        } else {
+          visible[t] = true;
+          selected = t;
+        }
+        renderSide();
+        renderOverlay();
+      });
+    });
+  }
+
+  function applyMode() {
+    document.getElementById('stage').style.display = MODE === 'overlay' ? 'flex' : 'none';
+    document.getElementById('grid').classList.toggle('on', MODE === 'small');
+    document.getElementById('side').style.display = MODE === 'overlay' ? 'flex' : 'none';
+    if (MODE === 'overlay') renderOverlay(); else renderSmall();
+  }
+
+  document.getElementById('seg').addEventListener('click', ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    MODE = b.dataset.mode;
+    document.querySelectorAll('#seg button').forEach(x => x.classList.toggle('on', x === b));
+    applyMode();
+  });
+
+  // ── init: sync + setTimeout + resize (gotcha a; SVG viewBox self-scales) ──
+  renderSide();
+  applyMode();
+  setTimeout(applyMode, 60);
+  window.addEventListener('resize', () => { if (MODE === 'overlay') renderOverlay(); else renderSmall(); });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редизайн 48 · Свод портфеля</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* ── topbar ── */
+  .top { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-bottom: 1px solid var(--prizma-border); flex: none; }
+  .top .mark { width: 18px; height: 18px; color: var(--prizma-mark); }
+  .top .title { font-weight: 700; font-size: 14px; }
+  .top .sub { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .top .spacer { flex: 1; }
+
+  .eyebrowbar { padding: 10px 22px 0; flex: none; display: flex; align-items: baseline; gap: 12px; }
+  .eyebrowbar .hint { font-size: 11px; color: var(--prizma-text-tertiary); }
+  .toolbar { display: flex; gap: 8px; padding: 8px 22px 6px; flex: none; }
+
+  /* ── table ── */
+  .scroll { flex: 1; overflow: auto; min-height: 0; padding: 0 22px 40px; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 880px; font-size: 12.5px; }
+
+  thead th { position: sticky; top: 0; z-index: 6; background: var(--prizma-bg); border-bottom: 1px solid var(--prizma-border-strong); padding: 11px 14px 10px; white-space: nowrap; font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary); text-align: right; }
+  thead th.lbl { text-align: left; }
+
+  tbody td { border-bottom: 1px solid var(--prizma-border); padding: 0; vertical-align: middle; height: 38px; }
+  td.num { text-align: right; font-family: var(--mono); font-feature-settings: "tnum" 1, "lnum" 1; color: var(--prizma-text-secondary); padding: 0 14px; }
+  td.num.zero { color: var(--prizma-text-tertiary); opacity: .5; }
+
+  /* name cell w/ disclosure */
+  .nm { display: flex; align-items: center; gap: 8px; padding: 0 14px; height: 100%; }
+  .tw { width: 15px; height: 15px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--prizma-text-tertiary); cursor: pointer; transition: transform .15s var(--ease-calm), color .12s; }
+  .tw.open { transform: rotate(90deg); }
+  .tw.leaf { visibility: hidden; }
+  .nm:hover .tw { color: var(--prizma-text-secondary); }
+
+  /* ── уровни ── */
+  /* L0 портфель — grand total (sticky bottom) */
+  tfoot td { position: sticky; bottom: 0; z-index: 6; background: var(--prizma-bg-elevated); border-top: 1px solid var(--prizma-border-strong); padding: 0; height: 46px; }
+  tfoot td.num { font-family: var(--mono); font-feature-settings: "tnum" 1; color: var(--prizma-text-primary); font-weight: 800; padding: 0 14px; text-align: right; }
+  tfoot .nm { font: 800 13px/1 var(--font); color: var(--prizma-text-primary); }
+  tfoot .pf-mark { width: 14px; height: 14px; color: var(--prizma-mark); }
+
+  /* L1 команда — subtotal row */
+  tr.team { cursor: pointer; }
+  tr.team > td { background: color-mix(in srgb, var(--prizma-text-primary) 3.5%, var(--prizma-bg)); }
+  tr.team:hover > td { background: color-mix(in srgb, var(--prizma-text-primary) 6%, var(--prizma-bg)); }
+  tr.team .nm .lab { font: 700 13px/1 var(--font); color: var(--prizma-text-primary); }
+  tr.team td.num { color: var(--prizma-text-primary); font-weight: 700; }
+  tr.team .nm { position: relative; }
+  tr.team .nm::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 0 2px 2px 0; background: var(--prizma-border-strong); }
+  tr.team.r-off .nm::before { background: var(--prizma-off-course); }
+  tr.team.r-drift .nm::before { background: var(--prizma-drift); }
+  tr.team .sub-n { font: 600 10px/1 var(--mono); color: var(--prizma-text-tertiary); margin-left: 4px; }
+
+  /* L2 эпик — leaf */
+  tr.epic > td { background: transparent; }
+  tr.epic:hover > td { background: color-mix(in srgb, var(--prizma-text-primary) 2.5%, transparent); }
+  tr.epic .nm { padding-left: 36px; }
+  tr.epic .lab { font: 500 12.5px/1.25 var(--font); color: var(--prizma-text-primary); }
+  tr.epic.hidden { display: none; }
+
+  /* progress bar (готово%) */
+  .ratio { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .ratio .bar { width: 52px; height: 5px; border-radius: 3px; background: var(--prizma-bg-tertiary); overflow: hidden; flex: none; }
+  .ratio .bar i { display: block; height: 100%; background: var(--prizma-text-secondary); border-radius: 3px; }
+  tr.team .ratio .bar i { background: var(--prizma-text-primary); }
+  tfoot .ratio .bar i { background: var(--prizma-information); }
+  .ratio .v { min-width: 34px; text-align: right; }
+
+  /* risk dot for «под риском» col */
+  .rk { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+  .rk .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-text-tertiary); opacity: .4; }
+  .rk.has .dot { background: var(--prizma-off-course); opacity: 1; }
+  .rk .v { font-family: var(--mono); }
+
+  .risk-tag { font: 700 8.5px/1 var(--mono); letter-spacing: .3px; padding: 2px 5px; border-radius: 3px; margin-left: 2px; }
+  .epic.r-off .risk-tag { color: var(--prizma-off-course); border: 1px solid color-mix(in srgb, var(--prizma-off-course) 40%, transparent); }
+  .epic.r-drift .risk-tag { color: var(--prizma-drift); border: 1px solid color-mix(in srgb, var(--prizma-drift) 40%, transparent); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <svg class="mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L4 19h16L12 2z"/><path d="M12 2v17" opacity=".4"/></svg>
+    <span class="title">Свод портфеля</span>
+    <span class="sub">портфель › команда › эпик</span>
+    <span class="spacer"></span>
+    <button class="pz-btn pz-btn-icon" id="tt" title="Тема" aria-label="Сменить тему"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="eyebrowbar">
+    <span class="pz-eyebrow">Редизайн 48 · Roll-up</span>
+    <span class="hint">иерархический свод с подытогами по командам и общим итогом портфеля. Разверните команду — увидите её эпики.</span>
+  </div>
+  <div class="toolbar">
+    <button class="pz-btn" id="expandAll">Развернуть всё</button>
+    <button class="pz-btn" id="collapseAll">Свернуть до команд</button>
+  </div>
+
+  <div class="scroll">
+    <table id="tbl">
+      <thead><tr>
+        <th class="lbl">Узел</th>
+        <th>Эффорт, дн</th>
+        <th>Готово, %</th>
+        <th>Работ</th>
+        <th>Переносов</th>
+        <th>Под риском</th>
+      </tr></thead>
+      <tbody id="body"></tbody>
+      <tfoot id="foot"></tfoot>
+    </table>
+  </div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA, H = D.helpers;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  // ── агрегаты по эпику ──
+  function epicStat(e) {
+    return {
+      effort: H.effortOf(e),
+      done: H.doneRatio(e),                 // 0..1
+      works: e.pills.length,
+      moves: e.moves || 0,
+      risk: e.risk || null,
+      atRisk: e.risk ? 1 : 0,
+    };
+  }
+
+  // ── подытог по команде: суммируем дочерние эпики (recompute) ──
+  function rollup(stats) {
+    const effort = stats.reduce((a, s) => a + s.effort, 0);
+    const works = stats.reduce((a, s) => a + s.works, 0);
+    const moves = stats.reduce((a, s) => a + s.moves, 0);
+    const atRisk = stats.reduce((a, s) => a + s.atRisk, 0);
+    // готово% свода = взвешенно по числу работ (done-доля × works), иначе пустой портфель искажает
+    const doneWorks = stats.reduce((a, s) => a + s.done * s.works, 0);
+    const done = works ? doneWorks / works : 0;
+    return { effort, works, moves, atRisk, done };
+  }
+
+  // модель: команды с их эпиками
+  const model = D.teams.map(team => {
+    const eps = H.teamEpics(team).map(e => ({ e, st: epicStat(e) }));
+    const sub = rollup(eps.map(x => x.st));
+    // ранг риска команды для stripe
+    const worst = eps.reduce((m, x) => Math.max(m, x.st.risk === 'off-course' ? 2 : x.st.risk === 'drift' ? 1 : 0), 0);
+    return { team, eps, sub, worst, expanded: true };
+  });
+
+  const grand = rollup(model.map(m => m.sub).map(s => ({ effort: s.effort, works: s.works, moves: s.moves, atRisk: s.atRisk, done: s.done })));
+  // grand готово% — взвешенно по работам всего портфеля
+  grand.done = (function () {
+    const dw = model.reduce((a, m) => a + m.sub.done * m.sub.works, 0);
+    const w = model.reduce((a, m) => a + m.sub.works, 0);
+    return w ? dw / w : 0;
+  })();
+
+  const body = document.getElementById('body');
+
+  function ratioCell(d, cls) {
+    const pct = Math.round(d * 100);
+    return '<span class="ratio"><span class="bar"><i style="width:' + pct + '%"></i></span><span class="v">' + pct + '%</span></span>';
+  }
+  function chevron() {
+    return '<svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg>';
+  }
+
+  function teamRow(m) {
+    const riskCls = m.worst === 2 ? ' r-off' : m.worst === 1 ? ' r-drift' : '';
+    const s = m.sub;
+    return '<tr class="team' + riskCls + '" data-team="' + esc(m.team) + '">' +
+      '<td><div class="nm"><span class="tw' + (m.expanded ? ' open' : '') + '">' + chevron() + '</span>' +
+        '<span class="lab">' + esc(m.team) + '</span><span class="sub-n">' + m.eps.length + ' эп</span></div></td>' +
+      '<td class="num">' + s.effort + '</td>' +
+      '<td class="num">' + ratioCell(s.done) + '</td>' +
+      '<td class="num">' + s.works + '</td>' +
+      '<td class="num' + (s.moves ? '' : ' zero') + '">' + s.moves + '</td>' +
+      '<td class="num"><span class="rk' + (s.atRisk ? ' has' : '') + '"><span class="dot"></span><span class="v">' + s.atRisk + '</span></span></td>' +
+      '</tr>';
+  }
+
+  function epicRow(m, x) {
+    const e = x.e, s = x.st;
+    const riskCls = s.risk === 'off-course' ? ' r-off' : s.risk === 'drift' ? ' r-drift' : '';
+    const riskTag = s.risk ? '<span class="risk-tag">' + (s.risk === 'off-course' ? 'СРЫВ' : 'ДРЕЙФ') + '</span>' : '';
+    return '<tr class="epic' + riskCls + (m.expanded ? '' : ' hidden') + '" data-parent="' + esc(m.team) + '">' +
+      '<td><div class="nm"><span class="tw leaf"></span><span class="lab">' + esc(e.epic) + '</span>' + riskTag + '</div></td>' +
+      '<td class="num">' + s.effort + '</td>' +
+      '<td class="num">' + ratioCell(s.done) + '</td>' +
+      '<td class="num">' + s.works + '</td>' +
+      '<td class="num' + (s.moves ? '' : ' zero') + '">' + s.moves + '</td>' +
+      '<td class="num"><span class="rk' + (s.atRisk ? ' has' : '') + '"><span class="dot"></span><span class="v">' + s.atRisk + '</span></span></td>' +
+      '</tr>';
+  }
+
+  function render() {
+    let html = '';
+    model.forEach(m => {
+      html += teamRow(m);
+      m.eps.forEach(x => { html += epicRow(m, x); });
+    });
+    body.innerHTML = html;
+
+    // grand total
+    document.getElementById('foot').innerHTML = '<tr>' +
+      '<td><div class="nm"><svg class="pf-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2L4 19h16L12 2z"/></svg>Портфель · ' + D.epics.length + ' эпиков</div></td>' +
+      '<td class="num">' + grand.effort + '</td>' +
+      '<td class="num">' + ratioCell(grand.done) + '</td>' +
+      '<td class="num">' + grand.works + '</td>' +
+      '<td class="num">' + grand.moves + '</td>' +
+      '<td class="num"><span class="rk' + (grand.atRisk ? ' has' : '') + '"><span class="dot"></span><span class="v">' + grand.atRisk + '</span></span></td>' +
+      '</tr>';
+
+    wire();
+  }
+
+  function wire() {
+    body.querySelectorAll('tr.team').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const m = model.find(x => x.team === tr.dataset.team);
+        m.expanded = !m.expanded;
+        tr.querySelector('.tw').classList.toggle('open', m.expanded);
+        body.querySelectorAll('tr.epic[data-parent="' + cssEsc(m.team) + '"]').forEach(er => er.classList.toggle('hidden', !m.expanded));
+      });
+    });
+  }
+  // экранирование для attribute-селектора
+  function cssEsc(s) { return String(s).replace(/(["\\])/g, '\\$1'); }
+
+  document.getElementById('expandAll').addEventListener('click', () => {
+    model.forEach(m => m.expanded = true); render();
+  });
+  document.getElementById('collapseAll').addEventListener('click', () => {
+    model.forEach(m => m.expanded = false); render();
+  });
+
+  render();
+  setTimeout(render, 60);
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement;
+    r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>
