@@ -11,6 +11,8 @@ import { state } from '../state.js';
 import { Utils } from '../utils.js';
 import { buildReleaseList } from '../constants.js';
 import { GanttView } from '../views/gantt.js';
+import { FilterEngine } from '../filters.js';
+import { Reactive } from '../reactiveStore.js';
 
 const RISK_KIND_LABELS = {
   'open-question':  'Открытый вопрос',
@@ -137,6 +139,26 @@ function _scrollAndHighlight(rowId, col) {
     const tk = String(row.team || '').replace(/[^a-zA-Zа-яА-ЯёЁъЪ0-9]/g, '_');
     if (GanttView._dtHiddenTeams.has(tk)) { GanttView._dtHiddenTeams.delete(tk); needRerender = true; }
   }
+  // bug #10 — Гант рендерит только FilterEngine.getFiltered(); если активный
+  // фильтр прячет целевую строку, ячейки нет в DOM и scrollIntoView/highlight
+  // молча не срабатывают (раскрытие колодца/команды это не лечит). Когда строка
+  // отфильтрована — сбрасываем фильтры (и синхроним UI Реестра), чтобы ячейка
+  // гарантированно отрисовалась перед скроллом.
+  let filtersWereReset = false;
+  if (row && FilterEngine.getActiveCount() > 0 &&
+      !FilterEngine.getFiltered().some(r => r.id === rowId)) {
+    Reactive.silent(() => {
+      state.filters = {
+        search: '', team: '', scope: '', release: [], workType: '',
+        role: '', assignee: '', tag: '', onlyBlocking: false,
+        onlyRisky: false, onlyDone: false, preset: null,
+      };
+    });
+    FilterEngine.invalidate();
+    try { window.FiltersUI?.syncUI?.(); window.FiltersUI?.populateDropdowns?.(); } catch (_) {}
+    needRerender = true;
+    filtersWereReset = true;
+  }
   const doScroll = () => {
     const cell = document.querySelector(`.gantt-cell[data-row-id="${esc(rowId)}"][data-col="${esc(col)}"]`);
     if (!cell) {
@@ -147,6 +169,9 @@ function _scrollAndHighlight(rowId, col) {
     cell.classList.add('gdt-cell-highlight');
     setTimeout(() => cell.classList.remove('gdt-cell-highlight'), 1800);
   };
+  if (filtersWereReset) {
+    window.showToast?.('Фильтры сброшены, чтобы показать ячейку', 'info', 2400);
+  }
   if (needRerender) {
     try { GanttView._renderChartImmediate?.(); } catch (_) {}
     requestAnimationFrame(() => requestAnimationFrame(doScroll));

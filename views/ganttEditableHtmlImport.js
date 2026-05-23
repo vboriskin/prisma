@@ -94,6 +94,10 @@ export function computeDiff(meta) {
   const exportedAt = meta.exportedAt || '';
   const changes = [];
   let cId = 0;
+  // bug #4 — допустимые кастомные релиз-ключи = существующие сейчас сущности.
+  // Снапшот несёт только row-данные (не state.releases), поэтому импорт pills
+  // для ключа, которого больше нет, воскресил бы орфан-колодец удалённого релиза.
+  const validReleaseKeys = new Set((state.releases || []).map(r => r.key).filter(Boolean));
 
   for (const impRow of importedRows) {
     const local = localById[impRow.id];
@@ -187,6 +191,7 @@ export function computeDiff(meta) {
     const impCustom = impRow.customReleaseTypes || {};
     const locCustom = local.customReleaseTypes || {};
     for (const key of new Set([...Object.keys(impCustom), ...Object.keys(locCustom)])) {
+      if (!validReleaseKeys.has(key)) continue;   // bug #4 — не воскрешаем орфан-колодец удалённого релиза
       const impArr = Array.isArray(impCustom[key]) ? impCustom[key] : [];
       const locArr = Array.isArray(locCustom[key]) ? locCustom[key] : [];
       for (const wt of impArr) if (!locArr.includes(wt)) pushRt(key, wt, 'add');

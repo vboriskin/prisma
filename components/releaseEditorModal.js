@@ -196,7 +196,11 @@ export function openReleaseEditor(opts = {}) {
     const dates = (startISO && endISO)
       ? `${_isoToShort(startISO)}–${_isoToShort(endISO)}`
       : '';
-    const key = editKey || ('r' + short.replace(/[^\w]/g, '').toLowerCase());
+    // bug #12 — Unicode-aware slug: \w выбрасывал кириллицу, поэтому «Релиз А»
+    // и «Релиз Б» оба давали ключ «r» (коллизия). Сохраняем буквы/цифры любых
+    // алфавитов; пустой slug (только пунктуация/эмодзи) → уникальный суффикс.
+    const slug = short.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    const key = editKey || ('r' + (slug || Date.now().toString(36)));
     if (!editKey) {
       if (LEGACY_RELEASE_LIST.some(l => l.key === key) || (state.releases || []).some(r => r.key === key)) {
         window.showToast?.('Релиз с таким ярлыком уже есть', 'warning', 2200);

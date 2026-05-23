@@ -2881,10 +2881,27 @@ export const GanttView = {
       }, { capture: false });
     }
 
-    wrap.addEventListener('contextmenu', e => {
+    // AUDIT — bug #1: #gantt-wrap переживает renderChart() (сбрасывается
+    // innerHTML, сам элемент сохраняется). 5 делегирующих хендлеров ниже
+    // раньше добавлялись на КАЖДЫЙ render → после N рендеров N копий (стопка
+    // ctx-меню, двойная мутация на drop). Снимаем предыдущий набор (хранится
+    // на элементе) перед повторной привязкой со свежими closure-данными
+    // (COL_LABEL/cols пересобираются каждый render).
+    if (wrap._gdtDelegated) {
+      for (const [type, fn] of Object.entries(wrap._gdtDelegated)) {
+        wrap.removeEventListener(type, fn);
+      }
+    }
+    wrap._gdtDelegated = {};
+
+    wrap.addEventListener('contextmenu', wrap._gdtDelegated.contextmenu = e => {
       const pill = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!pill) return;
       e.preventDefault();
+      // AUDIT — bug #8: снять предыдущее меню вместе с его document-listener
+      // (через transient-registry), а не только DOM-node — иначе onOutside от
+      // прошлого меню остаётся на document и закрывает уже это, новое меню.
+      GanttView._clearTransientInteractions();
       removeCtxMenu();
       const rowId  = pill.dataset.rowId;
       const wt     = pill.dataset.wt;
@@ -3462,6 +3479,7 @@ export const GanttView = {
         if (!menu.contains(ev.target)) {
           removeCtxMenu();
           document.removeEventListener('click', onOutside, true);
+          GanttView._cancelTransientInteractions = null;
           // Wave3 P-GR — если outside-click был по другому focusable
           // (например, чтобы открыть другое меню) — не воруем focus.
           // Возвращаем на pill только если active элемент потерян (body).
@@ -3470,12 +3488,21 @@ export const GanttView = {
           }
         }
       };
+      // AUDIT — bug #8: регистрируем teardown меню в transient-registry, чтобы
+      // renderChart() (зовёт _clearTransientInteractions в начале) и повторный
+      // right-click сняли и detached-node, и capture-listener с document.
+      // Раньше onOutside жил на document до следующего клика → leak + закрывал
+      // чужое меню (menu.contains на отсоединённой ноде всегда false).
+      GanttView._cancelTransientInteractions = () => {
+        removeCtxMenu();
+        document.removeEventListener('click', onOutside, true);
+      };
       setTimeout(() => document.addEventListener('click', onOutside, true), 0);
     });
 
     /* ── Drag-and-drop reorder within the same well ─────── */
     let _dragData = null;
-    wrap.addEventListener('dragstart', e => {
+    wrap.addEventListener('dragstart', wrap._gdtDelegated.dragstart = e => {
       const pill = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!pill || pill.classList.contains('gantt-pill-ghost')) return;
       _dragData = {
@@ -3502,7 +3529,7 @@ export const GanttView = {
         }
       });
     });
-    wrap.addEventListener('dragend', e => {
+    wrap.addEventListener('dragend', wrap._gdtDelegated.dragend = e => {
       const pill = e.target.closest('.gantt-type-pill');
       if (pill) pill.classList.remove('gantt-pill-dragging');
       wrap.querySelectorAll('.gantt-pill-drop-target,.gantt-cell-drop-target,.gdt-drop-valid,.gdt-drop-invalid')
@@ -3514,7 +3541,7 @@ export const GanttView = {
     // routes through moveWtBetweenCols so a ghost trail is recorded). If we
     // also handled cross-cell here, both handlers would fire on bubble and
     // double-mutate the row.
-    wrap.addEventListener('dragover', e => {
+    wrap.addEventListener('dragover', wrap._gdtDelegated.dragover = e => {
       if (!_dragData) return;
       const pillTarget = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!pillTarget) return;
@@ -3525,7 +3552,7 @@ export const GanttView = {
       wrap.querySelectorAll('.gantt-pill-drop-target').forEach(el => el.classList.remove('gantt-pill-drop-target'));
       pillTarget.classList.add('gantt-pill-drop-target');
     });
-    wrap.addEventListener('drop', e => {
+    wrap.addEventListener('drop', wrap._gdtDelegated.drop = e => {
       if (!_dragData) return;
       const target = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!target) return;

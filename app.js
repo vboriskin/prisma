@@ -2327,6 +2327,7 @@ Services.register('ActionLayer',    ActionLayer);
 // подумает как унифицировать lowercase API через Services).
 
 window.App            = App;
+window.FiltersUI      = FiltersUI;
 window.LLMAssistant   = LLMAssistant;
 // `PromptsEditor` is now imported from ./app/promptsEditor.js (audit #18 decomposition)
 // — the module also self-registers on window for backward compat. Keep the explicit
