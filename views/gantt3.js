@@ -108,6 +108,8 @@ export const Gantt3View = {
   _anatomy: { pop: null, onDoc: null, anchor: null },
   // Гант 3.0 п.6 — «Нарратив»: оверлей-документ квартала (кнопка). el = оверлей.
   _narrative: { el: null, onKey: null },
+  // Гант 3.0 п.8 — «Курс» (north-star): toggle компактной оси квартала.
+  _northstar: { on: false },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -646,6 +648,23 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
 #gdt-narrative .gn-trk.has { color: var(--prizma-text-secondary, var(--text-2)); border-color: var(--prizma-border-strong, var(--border)); background: var(--prizma-bg-elevated, transparent); }
 #gdt-narrative .gn-trk.cur { border-color: var(--prizma-information); color: var(--prizma-information); }
 html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !important; }
+
+/* === ГАНТ 3.0 · п.8 «North-star» — только таймлайн (lab redesign 10) =======
+   Toggle «Курс» → компактная ось квартала над чартом: сегменты релизов, вехи
+   точками с подписями, маркер «сейчас». Позиции по DOY% (как milestone-lines). */
+#btn-gantt3-northstar.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+#gdt-northstar { padding: 8px 26px 2px; }
+#gdt-northstar .ns-track { position: relative; height: 54px; }
+#gdt-northstar .ns-line { position: absolute; left: 0; right: 0; top: 30px; height: 2px; background: var(--prizma-border-strong, var(--border)); border-radius: 2px; }
+#gdt-northstar .ns-bnd { position: absolute; top: 24px; width: 1px; height: 13px; background: var(--prizma-border, var(--border)); }
+#gdt-northstar .ns-seg { position: absolute; top: 40px; transform: translateX(-50%); font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); white-space: nowrap; }
+#gdt-northstar .ns-seg.cur { color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-northstar .ns-ms { position: absolute; top: 30px; transform: translate(-50%, -50%); width: 10px; height: 10px; }
+#gdt-northstar .ns-ms .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--prizma-drift); box-shadow: 0 0 0 2px var(--prizma-bg, #0A0A0F); }
+#gdt-northstar .ns-ms .lbl { position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%); font: 600 10px/1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; background: var(--prizma-bg, #0A0A0F); padding: 0 4px; }
+#gdt-northstar .ns-now { position: absolute; top: 12px; bottom: 4px; width: 0; border-left: 2px solid var(--prizma-information); }
+#gdt-northstar .ns-now span { position: absolute; top: -2px; left: 4px; font: 700 9px/1 var(--mono, ui-monospace, monospace); letter-spacing: .4px; color: var(--prizma-information); white-space: nowrap; }
+#gdt-northstar .ns-empty { font-size: 11.5px; color: var(--prizma-text-tertiary, var(--text-3)); padding: 8px 0; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1289,6 +1308,12 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     if (narrBtn && !narrBtn._gdtNarrBound) {
       narrBtn._gdtNarrBound = true;
       narrBtn.addEventListener('click', () => Gantt3View._narrativeToggle());
+    }
+    // Гант 3.0 п.8 — «Курс» (north-star ось).
+    const nsBtn = document.getElementById('btn-gantt3-northstar');
+    if (nsBtn && !nsBtn._gdtNsBound) {
+      nsBtn._gdtNsBound = true;
+      nsBtn.addEventListener('click', () => Gantt3View._northstarToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2130,6 +2155,79 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     if (N.el) { N.el.remove(); N.el = null; }
     const btn = document.getElementById('btn-gantt3-narrative');
     if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.8 — «КУРС» / north-star (порт lab redesign 10, только таймлайн).
+     Toggle → компактная ось квартала над чартом: сегменты релизов, вехи точками
+     с подписями, вертикальный маркер «сейчас». Позиции по DOY% (день года) из
+     header[data-win-start/end] — та же модель, что у milestone-lines.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _northstarToggle() {
+    if (Gantt3View._northstar.on) Gantt3View._northstarHide();
+    else                          Gantt3View._northstarShow();
+  },
+  _northstarShow() {
+    Gantt3View._northstar.on = true;
+    const btn = document.getElementById('btn-gantt3-northstar');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    Gantt3View._northstarBuild();
+  },
+  _northstarHide() {
+    Gantt3View._northstar.on = false;
+    const btn = document.getElementById('btn-gantt3-northstar');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+    document.getElementById('gdt-northstar')?.remove();
+  },
+  _northstarBuild() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    document.getElementById('gdt-northstar')?.remove();
+    const esc = Utils.escapeHtml;
+    const yr = new Date().getFullYear();
+    const isoToDoy = (iso) => { const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Math.floor((Date.UTC(yr, (+m[2]) - 1, +m[3]) - Date.UTC(yr, 0, 1)) / 86400000) : null; };
+    const headers = [...wrap.querySelectorAll('.gantt-header-col[data-win-start]')];
+    const strip = document.createElement('div');
+    strip.id = 'gdt-northstar';
+    const wins = headers.map(h => {
+      const s = parseInt(h.dataset.winStart, 10), e = parseInt(h.dataset.winEnd, 10);
+      return { s, e, key: h.dataset.col };
+    }).filter(w => Number.isFinite(w.s) && Number.isFinite(w.e));
+    if (!wins.length) {
+      strip.innerHTML = '<div class="ns-empty">Нет датированных релизов для оси.</div>';
+      wrap.parentNode.insertBefore(strip, wrap);
+      return;
+    }
+    let minS = Infinity, maxE = -Infinity;
+    wins.forEach(w => { const s = w.s; let e = w.e; if (e < s) e += 365; minS = Math.min(minS, s); maxE = Math.max(maxE, e); });
+    const span = Math.max(1, maxE - minS);
+    const pctOf = (doy) => { let d = doy; if (d < minS) d += 365; return Math.max(0, Math.min(100, ((d - minS) / span) * 100)); };
+    let html = '<div class="ns-track"><div class="ns-line"></div>';
+    // сегменты релизов + границы
+    const curKey = (wins.find(w => { const today = new Date(); const td = Math.floor((Date.UTC(yr, today.getMonth(), today.getDate()) - Date.UTC(yr, 0, 1)) / 86400000); let s = w.s, e = w.e < w.s ? w.e + 365 : w.e, d = td < s ? td + 365 : td; return d >= s && d <= e; }) || {}).key;
+    wins.forEach(w => {
+      const e = w.e < w.s ? w.e + 365 : w.e;
+      const cpct = pctOf((w.s + e) / 2);
+      const lbl = GANTT_COL_LABELS[w.key] || w.key;
+      html += '<div class="ns-bnd" style="left:' + pctOf(w.s).toFixed(2) + '%"></div>';
+      html += '<div class="ns-seg' + (w.key === curKey ? ' cur' : '') + '" style="left:' + cpct.toFixed(2) + '%">' + esc(lbl) + '</div>';
+    });
+    // вехи
+    (Array.isArray(state.milestones) ? state.milestones : []).forEach(ms => {
+      const doy = isoToDoy(ms.date);
+      if (doy == null) return;
+      const d = String(ms.date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const shortD = d ? d[3] + '.' + d[2] : '';
+      const lbl = String(ms.label || '').trim() || shortD || 'веха';
+      html += '<div class="ns-ms" style="left:' + pctOf(doy).toFixed(2) + '%" title="' + esc(lbl + (shortD ? ' · ' + shortD : '')) + '"><span class="lbl">' + esc(lbl) + '</span><span class="dot"></span></div>';
+    });
+    // сейчас
+    const today = new Date();
+    const todayDoy = Math.floor((Date.UTC(yr, today.getMonth(), today.getDate()) - Date.UTC(yr, 0, 1)) / 86400000);
+    html += '<div class="ns-now" style="left:' + pctOf(todayDoy).toFixed(2) + '%"><span>сейчас</span></div>';
+    html += '</div>';
+    strip.innerHTML = html;
+    wrap.parentNode.insertBefore(strip, wrap);
   },
 
   bindFullscreen() {
@@ -3426,6 +3524,8 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     Gantt3View._anatomyClose();
     // Гант 3.0 п.7 — Адаптивная плотность: пересчитать по новому числу эпиков.
     if (Gantt3View._densityAuto) Gantt3View._densityApplyAuto();
+    // Гант 3.0 п.8 — «Курс»: headers пересозданы → пересобрать ось.
+    if (Gantt3View._northstar && Gantt3View._northstar.on) Gantt3View._northstarBuild();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
