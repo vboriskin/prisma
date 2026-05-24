@@ -257,26 +257,37 @@ export const DependencyGraphView = {
         return { anc, desc, all: new Set([start, ...anc, ...desc]) };
       };
       const clearFocus = () => {
+        canvas._depEpic = null;
         canvas.classList.remove('dep-focusing');
         root.querySelectorAll('.dep-node-wrap').forEach(w => w.classList.remove('dep-chain', 'dep-chain-focus', 'dep-chain-anc', 'dep-chain-desc'));
         edgeEls.forEach(p => p.classList.remove('dep-edge-active'));
       };
-      root.querySelectorAll('.dep-node').forEach(node => {
-        node.addEventListener('mouseenter', () => {
-          const epic = node.dataset.epic;
-          const { anc, desc, all } = chainOf(epic);
-          canvas.classList.add('dep-focusing');
-          root.querySelectorAll('.dep-node-wrap').forEach(w => {
-            const nm = w.querySelector('.dep-node')?.dataset.epic;
-            w.classList.toggle('dep-chain', all.has(nm));
-            w.classList.toggle('dep-chain-focus', nm === epic);
-            w.classList.toggle('dep-chain-anc', anc.has(nm));
-            w.classList.toggle('dep-chain-desc', desc.has(nm));
-          });
-          edgeEls.forEach(p => p.classList.toggle('dep-edge-active', all.has(p.dataset.from) && all.has(p.dataset.to)));
+      const applyFocus = (epic) => {
+        const { anc, desc, all } = chainOf(epic);
+        canvas.classList.add('dep-focusing');
+        root.querySelectorAll('.dep-node-wrap').forEach(w => {
+          const nm = w.querySelector('.dep-node')?.dataset.epic;
+          w.classList.toggle('dep-chain', all.has(nm));
+          w.classList.toggle('dep-chain-focus', nm === epic);
+          w.classList.toggle('dep-chain-anc', anc.has(nm));
+          w.classList.toggle('dep-chain-desc', desc.has(nm));
         });
-        node.addEventListener('mouseleave', clearFocus);
+        edgeEls.forEach(p => p.classList.toggle('dep-edge-active', all.has(p.dataset.from) && all.has(p.dataset.to)));
+      };
+      // Делегирование через mouseover (всплывает, в отличие от mouseenter) +
+      // «липкий» сброс: фокус ДЕРЖИТСЯ пока курсор внутри канвы, переключается
+      // только при наведении на другой узел, снимается лишь при выходе за канву.
+      // Раньше mouseenter/mouseleave на узлах мигали: фокус слетал, как только
+      // курсор пересекал пустой зазор между узлами.
+      canvas.addEventListener('mouseover', (e) => {
+        const node = e.target.closest?.('.dep-node');
+        if (!node) return;
+        const epic = node.dataset.epic;
+        if (canvas._depEpic === epic) return;   // уже сфокусирован этот узел
+        canvas._depEpic = epic;
+        applyFocus(epic);
       });
+      canvas.addEventListener('mouseleave', clearFocus);
     }
   },
 };
