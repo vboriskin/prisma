@@ -878,12 +878,30 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-deck .dk-nav { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; }
 .gdt-deck .dk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--prizma-border-strong, var(--border)); border: none; cursor: pointer; padding: 0; }
 .gdt-deck .dk-dot.on { width: 22px; border-radius: 4px; background: var(--prizma-information); }
-.gdt-mission { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding: 14px; height: 100%; grid-auto-rows: minmax(0, 1fr); }
+.gdt-mission { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 14px; height: 100%; }
 .gdt-pan { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); padding: 13px 15px; overflow: auto; }
 .gdt-pan .ph { font: 700 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 10px; }
 .gdt-heat { display: grid; gap: 3px; }
 .gdt-heat .hr { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; align-items: center; }
 .gdt-heat .hc { height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font: 600 9px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-mission .mg-gantt { display: flex; flex-direction: column; gap: 4px; }
+.gdt-mission .mgg-head .mgg-track { align-items: end; }
+.gdt-mission .mgg-hc { font: 600 8.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gdt-mission .mgg-row, .gdt-mission .mgg-head { display: flex; align-items: center; gap: 8px; }
+.gdt-mission .mgg-nm { width: 148px; flex: none; font-size: 11px; color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gdt-mission .mgg-track { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
+.gdt-mission .mgg-cell { height: 12px; border-radius: 3px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+.gdt-mission .mgg-cell.on { background: var(--c, var(--prizma-information)); }
+.gdt-mission .mg-feed { display: flex; flex-direction: column; }
+.gdt-mission .mgf-row { padding: 6px 0; border-bottom: 1px solid var(--prizma-border, var(--border)); font-size: 11.5px; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-mission .mgf-wt { font-weight: 700; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-mission .mgf-ep { font: 500 10px/1.3 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 2px; }
+.gdt-mission .mg-ms { display: flex; flex-direction: column; gap: 6px; }
+.gdt-mission .mgm-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 11px; border-radius: 6px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.04)); font-size: 12px; }
+.gdt-mission .mgm-l { color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-mission .mgm-d { font: 700 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-primary, var(--text-1)); white-space: nowrap; }
+.gdt-mission .mgm-row.soon .mgm-d { color: var(--prizma-drift); }
+.gdt-mission .mgm-row.past { opacity: .5; }
 .gdt-scrub { padding: 18px 26px; border-bottom: 1px solid var(--prizma-border, var(--border)); }
 .gdt-scrub input[type=range] { width: 100%; accent-color: var(--prizma-information); }
 .gdt-scrub .sc-lbl { font: 600 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); margin-bottom: 10px; }
@@ -3195,16 +3213,40 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     const esc = Utils.escapeHtml;
     const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
     const doneWork = data.epics.reduce((n, e) => n + e.done, 0);
+    const activeWork = data.epics.reduce((n, e) => n + e.active, 0);
+    const totalMoves = data.epics.reduce((n, e) => n + (e.moves || 0), 0);
     const pct = totalWork ? Math.round(doneWork / totalWork * 100) : 0;
     const risks = data.epics.filter(e => e.risk);
+    // ёмкость команд × релизы (тепловая)
     let heat = '<div class="gdt-heat"><div class="hr"><span></span>' + data.cols.map(c => '<span class="hc" style="background:none;color:var(--prizma-text-tertiary)">' + esc(data.colLabel[c]) + '</span>').join('') + '</div>';
     data.teams.forEach(t => { heat += '<div class="hr"><span style="font:600 9px/1 var(--mono);color:var(--prizma-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(t.name) + '</span>' +
       data.cols.map(c => { const n = data.epics.filter(e => e.teamKey === t.key).reduce((s, e) => s + ((e.cells[c] || []).length), 0); const tint = n === 0 ? 'transparent' : 'color-mix(in srgb, var(--prizma-information) ' + Math.min(64, n * 12) + '%, transparent)'; return '<span class="hc" style="background:' + tint + '">' + (n || '') + '</span>'; }).join('') + '</div>'; });
     heat += '</div>';
+    // мини-гант: строка на эпик, ячейка-бар если в окне есть работы
+    const mgEpics = [...data.epics].sort((a, b) => ((b.risk ? 2 : b.churn ? 1 : 0) - (a.risk ? 2 : a.churn ? 1 : 0)) || (b.total - a.total)).slice(0, 16);
+    const miniG = '<div class="mg-gantt"><div class="mgg-head"><span class="mgg-nm"></span><span class="mgg-track">' + data.cols.map(c => '<span class="mgg-hc">' + esc(data.colLabel[c]) + '</span>').join('') + '</span></div>' +
+      mgEpics.map(e => { const col = e.risk ? 'var(--prizma-off-course)' : e.churn ? 'var(--prizma-drift)' : 'var(--prizma-information)';
+        return '<div class="mgg-row"><span class="mgg-nm">' + esc(e.epic) + '</span><span class="mgg-track">' +
+          data.cols.map(c => '<span class="mgg-cell' + ((e.cells[c] || []).length ? ' on' : '') + '" style="--c:' + col + '"></span>').join('') + '</span></div>'; }).join('') + '</div>';
+    // лента изменений (последние переносы)
+    const moves = [];
+    (state.rows || []).forEach(r => { (Array.isArray(r.ganttArrows) ? r.ganttArrows : []).forEach(a => moves.push({ epic: String(r.epic || r.tasks || '').trim(), wt: a.wt, from: a.srcCol, to: a.dstCol, at: a.at })); });
+    moves.sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
+    const fmt = (at) => { const m = String(at).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '.' + m[2] : ''; };
+    const feed = moves.length ? '<div class="mg-feed">' + moves.slice(0, 9).map(mv => '<div class="mgf-row"><span class="mgf-wt">' + esc(mv.wt || '') + '</span> ' + esc(GANTT_COL_LABELS[mv.from] || mv.from || '?') + ' → ' + esc(GANTT_COL_LABELS[mv.to] || mv.to || '?') + '<div class="mgf-ep">' + esc(mv.epic) + ' · ' + fmt(mv.at) + '</div></div>').join('') + '</div>' : '<div class="dc-muted">Переносов нет</div>';
+    // вехи · обратный отсчёт
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+    const ms = (Array.isArray(state.milestones) ? state.milestones : []).map(m => { const d = new Date(m.date + 'T00:00:00'); return { label: m.label, days: Math.round((d - today0) / 86400000) }; }).sort((a, b) => a.days - b.days);
+    const msHtml = ms.length ? '<div class="mg-ms">' + ms.map(m => { const lbl = m.days < 0 ? 'прошло' : m.days === 0 ? 'сегодня' : m.days + ' дн'; const cls = m.days < 0 ? ' past' : m.days <= 7 ? ' soon' : ''; return '<div class="mgm-row' + cls + '"><span class="mgm-l">' + esc(m.label) + '</span><span class="mgm-d">' + lbl + '</span></div>'; }).join('') + '</div>' : '<div class="dc-muted">Вех нет</div>';
+    const kpi = (v, k) => '<div class="gdt-kpi"><div class="kv">' + v + '</div><div class="kk">' + k + '</div></div>';
     body.innerHTML = '<div class="gdt-mission">' +
-      '<div class="gdt-pan" style="grid-column:1/-1"><div class="ph">Сводка квартала</div><div class="gdt-kpis"><div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div><div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div><div class="gdt-kpi"><div class="kv">' + risks.length + '</div><div class="kk">рисков</div></div><div class="gdt-kpi"><div class="kv">' + totalWork + '</div><div class="kk">работ</div></div></div></div>' +
-      '<div class="gdt-pan" style="grid-column:1/3"><div class="ph">Нагрузка: команды × релизы</div>' + heat + '</div>' +
-      '<div class="gdt-pan"><div class="ph">Риски</div>' + (risks.length ? risks.map(e => '<div style="padding:7px 0 7px 10px;border-left:3px solid var(--prizma-off-course);margin-bottom:7px;font-size:12.5px">' + esc(e.epic) + '<div style="color:var(--prizma-text-tertiary);font-size:11px;margin-top:2px">' + esc(e.team) + '</div></div>').join('') : '<div style="color:var(--prizma-text-tertiary);font-size:12px">Рисков нет</div>') + '</div>' +
+      '<div class="gdt-pan" style="grid-column:1/-1"><div class="ph">Сводка квартала</div><div class="gdt-kpis">' +
+        kpi(data.epics.length, 'эпиков') + kpi(activeWork, 'в работе') + kpi(pct + '%', 'готово') + kpi(risks.length, 'под риском') + kpi(totalMoves, 'переносов') + kpi(totalWork, 'работ') + '</div></div>' +
+      '<div class="gdt-pan" style="grid-column:1/3"><div class="ph">Мини-гант · окна по релизам</div>' + miniG + '</div>' +
+      '<div class="gdt-pan"><div class="ph">Риски</div>' + (risks.length ? risks.map(e => '<div style="padding:7px 0 7px 10px;border-left:3px solid var(--prizma-off-course);margin-bottom:7px;font-size:12.5px">' + esc(e.epic) + '<div style="color:var(--prizma-text-tertiary);font-size:11px;margin-top:2px">' + esc(e.team) + '</div></div>').join('') : '<div class="dc-muted">Рисков нет</div>') + '</div>' +
+      '<div class="gdt-pan"><div class="ph">Ёмкость команд</div>' + heat + '</div>' +
+      '<div class="gdt-pan"><div class="ph">Лента изменений</div>' + feed + '</div>' +
+      '<div class="gdt-pan"><div class="ph">Вехи · обратный отсчёт</div>' + msHtml + '</div>' +
       '</div>';
   },
   _mode_scrubber(body, data) {
