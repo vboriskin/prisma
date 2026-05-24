@@ -99,6 +99,10 @@ export const Gantt3View = {
   // Гант 3.0 п.3 — состояние «Фокус-дорожки» (sketch redesign 02). on = режим
   // включён; team = teamKey раскрытой команды (остальные свёрнуты в сводку).
   _focusLane: { on: false, team: null },
+  // Гант 3.0 п.4 — состояние «Командного режима» (sketch redesign 04). on =
+  // режим включён; filter = активный фильтр { kind,label,test } или null;
+  // sel = индекс выбранного пункта меню; opts = плоский список текущих опций.
+  _cmd: { on: false, filter: null, sel: 0, opts: [], bar: null, onKey: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -524,6 +528,56 @@ body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-tea
 body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-team-name {
   color: var(--prizma-information);
 }
+
+/* === ГАНТ 3.0 · п.4 «Командный режим» (lab redesign 04-command-driven) =====
+   Командная строка над чартом фильтрует/подсвечивает Гант как тихий backdrop.
+   Префиксы team:/release:/risk: + свободный текст, grouped-dropdown подсказок,
+   клавнавигация. Scoped под #section-gantt3 / собственные id — оригинал не
+   затронут. */
+#btn-gantt3-cmd.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+#gdt-cmd-bar { padding: 12px 16px 4px; display: flex; flex-direction: column; align-items: center; }
+.gdt-cmd-box { width: 100%; max-width: 680px; position: relative; }
+.gdt-cmd-field {
+  display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px;
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-lg, 12px); transition: border-color .18s var(--ease-calm, ease), box-shadow .18s;
+}
+.gdt-cmd-field.focus { border-color: var(--prizma-information); box-shadow: 0 0 0 3px var(--prizma-information-bg); }
+.gdt-cmd-field .gdt-cmd-ic { color: var(--prizma-text-tertiary, var(--text-3)); flex: none; display: inline-flex; }
+.gdt-cmd-field input { flex: 1; background: none; border: none; outline: none; color: var(--prizma-text-primary, var(--text-1)); font: 400 15px/1 var(--font, inherit); letter-spacing: -.01em; }
+.gdt-cmd-field input::placeholder { color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-cmd-clear { display: none; background: none; border: none; cursor: pointer; color: var(--prizma-text-tertiary, var(--text-3)); padding: 4px; border-radius: 4px; }
+.gdt-cmd-clear:hover { color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-cmd-clear.on { display: inline-flex; }
+#gdt-cmd-menu {
+  position: absolute; top: 52px; left: 0; right: 0; z-index: 1000;
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-lg, 12px); box-shadow: 0 16px 48px rgba(0,0,0,.42);
+  max-height: 50vh; overflow-y: auto; padding: 6px; display: none;
+}
+#gdt-cmd-menu.open { display: block; }
+.gdt-cmd-grp { padding: 9px 12px 4px; font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-cmd-opt { display: flex; align-items: center; gap: 11px; padding: 8px 12px; border-radius: var(--r-md, 8px); cursor: pointer; }
+.gdt-cmd-opt.sel { background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+.gdt-cmd-opt .oic { width: 24px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-sm, 6px); border: 1px solid var(--prizma-border, var(--border)); color: var(--prizma-text-secondary, var(--text-2)); font: 700 9px/1 var(--mono, ui-monospace, monospace); }
+.gdt-cmd-opt .otext { flex: 1; min-width: 0; }
+.gdt-cmd-opt .ot { font-size: 13px; font-weight: 500; color: var(--prizma-text-primary, var(--text-1)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gdt-cmd-opt .os { font: 500 10.5px/1.3 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gdt-cmd-opt .okind { font: 600 9px/1 var(--mono, ui-monospace, monospace); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); border: 1px solid var(--prizma-border, var(--border)); border-radius: 4px; padding: 3px 6px; flex: none; }
+#gdt-cmd-menu .gdt-cmd-empty { padding: 16px 12px; text-align: center; font-size: 12.5px; color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-cmd-status { width: 100%; max-width: 680px; margin-top: 9px; display: flex; align-items: center; gap: 12px; min-height: 20px; }
+.gdt-cmd-chip { display: none; align-items: center; gap: 7px; font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-information); }
+.gdt-cmd-chip.on { display: inline-flex; }
+.gdt-cmd-chip button { background: none; border: none; color: var(--prizma-text-tertiary, var(--text-3)); cursor: pointer; padding: 2px; display: inline-flex; }
+.gdt-cmd-chip button:hover { color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-cmd-stat { margin-left: auto; font: 500 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+/* backdrop: dim/highlight Ганта при активном фильтре */
+body.gdt-cmd-filtering #section-gantt3 .gantt-row.gdt-cmd-dim,
+body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
+  opacity: .16; transition: opacity .25s var(--ease-calm, ease);
+}
+#section-gantt3 .gantt-row.gdt-cmd-hit .v16-epic-name { color: var(--prizma-text-primary, var(--text-1)); font-weight: 600; }
+#section-gantt3 .gantt-cell.gdt-cmd-hl { background: var(--prizma-information-bg) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-information) 45%, transparent); transition: background .2s; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1134,6 +1188,12 @@ body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-tea
       laneBtn._gdtLaneBound = true;
       laneBtn.addEventListener('click', () => Gantt3View._focusLaneToggleMode());
     }
+    // Гант 3.0 п.4 — «Командный режим» (toggle командной строки-фильтра).
+    const cmdBtn = document.getElementById('btn-gantt3-cmd');
+    if (cmdBtn && !cmdBtn._gdtCmdBound) {
+      cmdBtn._gdtCmdBound = true;
+      cmdBtn.addEventListener('click', () => Gantt3View._cmdToggleMode());
+    }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
    *  state.actionLog (наполняется HistoryLog.data/.gantt + HistoryManager). */
@@ -1528,6 +1588,264 @@ body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-tea
       e.stopPropagation(); e.preventDefault();
       Gantt3View._focusLaneSetFocus(hd.dataset.teamKey);
     }, true);
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.4 — «КОМАНДНЫЙ РЕЖИМ» (порт lab redesign 04-command-driven)
+     Командная строка над чартом фильтрует/подсвечивает Гант как тихий backdrop.
+     Каталог подсказок строится DOM-скан'ом текущего #gantt3-wrap (team-key /
+     epic-key / pill[data-wt] / cell[data-col] / risk-glyph) — без связки с
+     внутренней моделью, естественно отражает текущие фильтры/видимые данные.
+     Фильтры — closures над строковыми ключами (не над DOM-нодами), поэтому
+     переживают ре-рендер. Клавиатура: / фокус, ↑↓ выбор, ↵ применить, esc
+     сброс/выход. Повторный клик кнопки = выход.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _cmdToggleMode() {
+    if (Gantt3View._cmd.on) Gantt3View._cmdExit();
+    else                    Gantt3View._cmdEnter();
+  },
+  _cmdEnter() {
+    const C = Gantt3View._cmd;
+    C.on = true;
+    const btn = document.getElementById('btn-gantt3-cmd');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    document.body.classList.add('gdt-cmd-on');
+    Gantt3View._cmdEnsureBar();
+    // глобальный «/» — фокус строки (только когда вкладка Гант 3.0 активна и
+    // мы не печатаем уже в каком-то поле).
+    C.onKey = (e) => {
+      if (e.key !== '/') return;
+      if (document.documentElement.dataset.activeSection !== 'gantt3') return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      e.preventDefault();
+      document.getElementById('gdt-cmd-input')?.focus();
+    };
+    document.addEventListener('keydown', C.onKey, true);
+    const inp = document.getElementById('gdt-cmd-input');
+    if (inp) inp.focus();
+    Gantt3View._cmdRenderMenu();
+    try { Services.Toast?.info?.('Командный режим: фильтруйте Гант — team:, release:, risk: или текст. «/» — фокус строки, Esc — выход.', { ms: 3000 }); } catch (_) {}
+  },
+  _cmdExit() {
+    const C = Gantt3View._cmd;
+    C.on = false;
+    const btn = document.getElementById('btn-gantt3-cmd');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+    Gantt3View._cmdSetFilter(null);              // снять dim/highlight + gdt-cmd-filtering
+    document.body.classList.remove('gdt-cmd-on');
+    if (C.onKey) { document.removeEventListener('keydown', C.onKey, true); C.onKey = null; }
+    if (C.bar) { C.bar.remove(); C.bar = null; }
+  },
+  _cmdEnsureBar() {
+    const C = Gantt3View._cmd;
+    if (C.bar && document.body.contains(C.bar)) return C.bar;
+    const host = document.getElementById('gantt3-pill-legend') || document.getElementById('gantt3-wrap');
+    if (!host || !host.parentNode) return null;
+    const bar = document.createElement('div');
+    bar.id = 'gdt-cmd-bar';
+    bar.innerHTML =
+      '<div class="gdt-cmd-box">' +
+        '<div class="gdt-cmd-field" id="gdt-cmd-field">' +
+          '<span class="gdt-cmd-ic"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>' +
+          '<input id="gdt-cmd-input" type="text" autocomplete="off" spellcheck="false" placeholder="Команда или фильтр — team:, release:, risk: или просто текст" aria-label="Командная строка Ганта">' +
+          '<button class="gdt-cmd-clear" id="gdt-cmd-clear" aria-label="Очистить"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>' +
+        '</div>' +
+        '<div id="gdt-cmd-menu"></div>' +
+      '</div>' +
+      '<div id="gdt-cmd-status">' +
+        '<span class="gdt-cmd-chip" id="gdt-cmd-chip">фильтр: <b id="gdt-cmd-chip-label"></b><button id="gdt-cmd-chip-clear" aria-label="Снять фильтр"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>' +
+        '<span class="gdt-cmd-stat" id="gdt-cmd-stat"></span>' +
+      '</div>';
+    host.parentNode.insertBefore(bar, host);
+    C.bar = bar;
+    const inp   = bar.querySelector('#gdt-cmd-input');
+    const field = bar.querySelector('#gdt-cmd-field');
+    const menu  = bar.querySelector('#gdt-cmd-menu');
+    inp.addEventListener('focus', () => { field.classList.add('focus'); menu.classList.add('open'); Gantt3View._cmdRenderMenu(); });
+    inp.addEventListener('blur',  () => { field.classList.remove('focus'); setTimeout(() => menu.classList.remove('open'), 140); });
+    inp.addEventListener('input', () => { Gantt3View._cmd.sel = 0; menu.classList.add('open'); Gantt3View._cmdRenderMenu(); Gantt3View._cmdSyncClear(); });
+    inp.addEventListener('keydown', (e) => Gantt3View._cmdOnKeydown(e));
+    bar.querySelector('#gdt-cmd-clear').addEventListener('click', () => { inp.value = ''; inp.focus(); Gantt3View._cmdRenderMenu(); Gantt3View._cmdSyncClear(); });
+    bar.querySelector('#gdt-cmd-chip-clear').addEventListener('click', () => Gantt3View._cmdSetFilter(null));
+    Gantt3View._cmdSyncStat();
+    return bar;
+  },
+  _cmdSyncClear() {
+    const inp = document.getElementById('gdt-cmd-input');
+    const clr = document.getElementById('gdt-cmd-clear');
+    if (inp && clr) clr.classList.toggle('on', !!inp.value);
+  },
+  // Каталог подсказок из DOM. cssEsc — для attr-селекторов в test-closures.
+  _cmdCatalog() {
+    const wrap = document.getElementById('gantt3-wrap');
+    const cat = { actions: [], teams: [], epics: [], wts: [], rels: [], risks: [] };
+    if (!wrap) return cat;
+    const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    cat.actions = [
+      { kind: 'действие', icon: '×', label: 'Сбросить фильтр', sub: 'показать весь квартал', run: () => Gantt3View._cmdSetFilter(null) },
+      { kind: 'действие', icon: '+', label: 'Новый эпик', sub: 'создать эпик', run: () => Gantt3View._openAddEpicModal() },
+      { kind: 'действие', icon: '◆', label: 'Вехи', sub: 'контрольные точки на оси', run: () => document.getElementById('btn-gantt3-milestones')?.click() },
+    ];
+    const seenT = new Set();
+    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => {
+      const key = h.dataset.teamKey; if (!key || seenT.has(key)) return; seenT.add(key);
+      const name = (h.querySelector('.gdt-team-name')?.textContent || key).trim();
+      const cnt = wrap.querySelectorAll('.gantt-row[data-team-key="' + cssEsc(key) + '"]').length;
+      cat.teams.push({ kind: 'команда', icon: 'TM', label: name, sub: cnt + ' эпиков', rowTest: (row) => row.dataset.teamKey === key });
+    });
+    const seenE = new Set();
+    wrap.querySelectorAll('.gantt-row[data-epic-key]').forEach(r => {
+      const key = r.dataset.epicKey; if (!key || seenE.has(key)) return; seenE.add(key);
+      cat.epics.push({ kind: 'эпик', icon: 'EP', label: key, sub: '', rowTest: (row) => row.dataset.epicKey === key });
+    });
+    const seenW = new Set();
+    wrap.querySelectorAll('.gantt-type-pill[data-wt]').forEach(p => {
+      const wt = p.dataset.wt; if (!wt || seenW.has(wt)) return; seenW.add(wt);
+      cat.wts.push({ kind: 'работа', icon: 'WT', label: wt, sub: 'пилюли типа «' + wt + '»',
+        rowTest: (row) => !!row.querySelector('.gantt-type-pill[data-wt="' + cssEsc(wt) + '"]'),
+        cellTest: (cell) => !!cell.querySelector('.gantt-type-pill[data-wt="' + cssEsc(wt) + '"]') });
+    });
+    const seenR = new Set();
+    wrap.querySelectorAll('.gantt-cell[data-col]').forEach(c => {
+      const key = c.dataset.col; if (!key || seenR.has(key)) return; seenR.add(key);
+      const rel = (state.releases || []).find(r => r.key === key);
+      const label = rel?.short || rel?.label || key;
+      cat.rels.push({ kind: 'релиз', icon: 'RL', label: 'release:' + label, sub: 'подсветить колонку ' + label,
+        rowTest: (row) => !!row.querySelector('.gantt-cell[data-col="' + cssEsc(key) + '"] .gantt-type-pill'),
+        cellTest: (cell) => cell.dataset.col === key });
+    });
+    cat.risks = [
+      { kind: 'риск', icon: '!', label: 'risk:есть', sub: 'эпики с риск-метками',
+        rowTest: (row) => !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)') },
+    ];
+    return cat;
+  },
+  _cmdComputeOpts(q) {
+    const cat = Gantt3View._cmdCatalog();
+    q = String(q || '').trim();
+    const low = q.toLowerCase();
+    let groups = [];
+    const m = low.match(/^(team|release|risk)\s*:\s*(.*)$/);
+    if (m) {
+      const pre = m[1], rest = m[2];
+      if (pre === 'team')         groups.push(['Команды', cat.teams.filter(o => o.label.toLowerCase().includes(rest))]);
+      else if (pre === 'release') groups.push(['Релизы', cat.rels.filter(o => o.label.toLowerCase().includes(rest))]);
+      else if (pre === 'risk')    groups.push(['Риск', cat.risks.filter(o => !rest || o.label.toLowerCase().includes(rest))]);
+    } else if (!q) {
+      groups = [['Действия', cat.actions], ['Команды', cat.teams], ['Работы', cat.wts.slice(0, 5)], ['Релизы', cat.rels]];
+    } else {
+      const f = (arr) => arr.filter(o => o.label.toLowerCase().includes(low) || (o.sub && o.sub.toLowerCase().includes(low)));
+      groups = [['Действия', f(cat.actions)], ['Эпики', f(cat.epics)], ['Команды', f(cat.teams)], ['Работы', f(cat.wts)], ['Релизы', f(cat.rels)], ['Риск', f(cat.risks)]];
+    }
+    groups = groups.filter(g => g[1] && g[1].length);
+    const flat = [];
+    groups.forEach(g => g[1].forEach(o => flat.push(o)));
+    return { groups, flat };
+  },
+  _cmdRenderMenu() {
+    const C = Gantt3View._cmd;
+    const menu = document.getElementById('gdt-cmd-menu');
+    const inp  = document.getElementById('gdt-cmd-input');
+    if (!menu || !inp) return;
+    const r = Gantt3View._cmdComputeOpts(inp.value);
+    C.opts = r.flat;
+    if (C.sel >= C.opts.length) C.sel = Math.max(0, C.opts.length - 1);
+    const esc = Utils.escapeHtml;
+    if (!C.opts.length) { menu.innerHTML = '<div class="gdt-cmd-empty">Ничего не найдено</div>'; return; }
+    let h = '', idx = 0;
+    r.groups.forEach(([title, arr]) => {
+      h += '<div class="gdt-cmd-grp">' + esc(title) + '</div>';
+      arr.forEach(o => {
+        h += '<div class="gdt-cmd-opt' + (idx === C.sel ? ' sel' : '') + '" data-idx="' + idx + '">' +
+          '<span class="oic">' + esc(o.icon || '·') + '</span>' +
+          '<span class="otext"><span class="ot">' + esc(o.label) + '</span>' + (o.sub ? '<span class="os">' + esc(o.sub) + '</span>' : '') + '</span>' +
+          '<span class="okind">' + esc(o.kind) + '</span></div>';
+        idx++;
+      });
+    });
+    menu.innerHTML = h;
+    menu.querySelectorAll('.gdt-cmd-opt').forEach(el => {
+      el.addEventListener('mouseenter', () => { C.sel = +el.dataset.idx; Gantt3View._cmdMarkSel(); });
+      el.addEventListener('mousedown', (ev) => { ev.preventDefault(); Gantt3View._cmdApplyOpt(C.opts[+el.dataset.idx]); });
+    });
+  },
+  _cmdMarkSel() {
+    const menu = document.getElementById('gdt-cmd-menu');
+    if (!menu) return;
+    menu.querySelectorAll('.gdt-cmd-opt').forEach(el => el.classList.toggle('sel', +el.dataset.idx === Gantt3View._cmd.sel));
+    menu.querySelector('.gdt-cmd-opt.sel')?.scrollIntoView({ block: 'nearest' });
+  },
+  _cmdOnKeydown(e) {
+    const C = Gantt3View._cmd;
+    if (e.key === 'ArrowDown')      { e.preventDefault(); if (C.opts.length) { C.sel = (C.sel + 1) % C.opts.length; Gantt3View._cmdMarkSel(); } }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); if (C.opts.length) { C.sel = (C.sel - 1 + C.opts.length) % C.opts.length; Gantt3View._cmdMarkSel(); } }
+    else if (e.key === 'Enter')     { e.preventDefault(); Gantt3View._cmdApplyOpt(C.opts[C.sel]); }
+    else if (e.key === 'Escape')    {
+      e.preventDefault();
+      const inp = document.getElementById('gdt-cmd-input');
+      if (inp && inp.value) { inp.value = ''; Gantt3View._cmdRenderMenu(); Gantt3View._cmdSyncClear(); }
+      else if (C.filter)    { Gantt3View._cmdSetFilter(null); }
+      else                  { Gantt3View._cmdExit(); }
+    }
+  },
+  _cmdApplyOpt(o) {
+    if (!o) return;
+    if (o.run) o.run();
+    else Gantt3View._cmdSetFilter({ kind: o.kind, label: o.label, rowTest: o.rowTest, cellTest: o.cellTest });
+    const inp = document.getElementById('gdt-cmd-input');
+    if (inp) inp.value = '';
+    Gantt3View._cmdSyncClear();
+    document.getElementById('gdt-cmd-menu')?.classList.remove('open');
+  },
+  _cmdSetFilter(f) {
+    const C = Gantt3View._cmd;
+    C.filter = f;
+    const chip = document.getElementById('gdt-cmd-chip');
+    const chipLabel = document.getElementById('gdt-cmd-chip-label');
+    if (chip) chip.classList.toggle('on', !!f);
+    if (chipLabel && f) chipLabel.textContent = f.label;
+    Gantt3View._cmdApplyFilter();
+    if (f) { try { Services.Toast?.info?.('Фильтр: ' + f.label, { ms: 1800 }); } catch (_) {} }
+  },
+  _cmdApplyFilter() {
+    const C = Gantt3View._cmd, f = C.filter;
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    // снять прошлую подсветку
+    wrap.querySelectorAll('.gdt-cmd-dim').forEach(el => el.classList.remove('gdt-cmd-dim'));
+    wrap.querySelectorAll('.gdt-cmd-hit').forEach(el => el.classList.remove('gdt-cmd-hit'));
+    wrap.querySelectorAll('.gdt-cmd-hl').forEach(el => el.classList.remove('gdt-cmd-hl'));
+    document.body.classList.toggle('gdt-cmd-filtering', !!f);
+    const epicRows = [...wrap.querySelectorAll('.gantt-row[data-epic-key]')];
+    if (!f) { Gantt3View._cmdSyncStat(epicRows.length, epicRows.length); return; }
+    let shown = 0;
+    const teamHasHit = Object.create(null);
+    epicRows.forEach(row => {
+      let hit = false;
+      try { hit = !!f.rowTest(row); } catch (_) { hit = false; }
+      row.classList.toggle('gdt-cmd-dim', !hit);
+      row.classList.toggle('gdt-cmd-hit', hit);
+      if (hit) {
+        shown++;
+        teamHasHit[row.dataset.teamKey] = true;
+        if (f.cellTest) row.querySelectorAll('.gantt-cell').forEach(cell => { try { if (f.cellTest(cell)) cell.classList.add('gdt-cmd-hl'); } catch (_) {} });
+      }
+    });
+    // team-header'ы без попаданий — тоже гаснут
+    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => {
+      h.classList.toggle('gdt-cmd-dim', !teamHasHit[h.dataset.teamKey]);
+    });
+    Gantt3View._cmdSyncStat(shown, epicRows.length);
+  },
+  _cmdSyncStat(shown, total) {
+    const stat = document.getElementById('gdt-cmd-stat');
+    if (!stat) return;
+    const wrap = document.getElementById('gantt3-wrap');
+    const totalEpics = (total != null) ? total : (wrap ? wrap.querySelectorAll('.gantt-row[data-epic-key]').length : 0);
+    stat.textContent = Gantt3View._cmd.filter
+      ? ((shown != null ? shown : 0) + ' из ' + totalEpics + ' эпиков')
+      : (totalEpics + ' эпиков');
   },
 
   bindFullscreen() {
@@ -2810,6 +3128,13 @@ body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-tea
     // из _dtHiddenTeams, остаётся только (идемпотентно) переустановить делегата.
     if (Gantt3View._focusLane && Gantt3View._focusLane.on) {
       Gantt3View._focusLaneBind();
+    }
+    // Гант 3.0 п.4 — Командный режим: строки пересозданы → dim/highlight слетели.
+    // Бар (sibling до #gantt3-wrap) переживает innerHTML; фильтр-closures держат
+    // строковые ключи, поэтому просто пере-применяем подсветку к новым строкам.
+    if (Gantt3View._cmd && Gantt3View._cmd.on) {
+      Gantt3View._cmdEnsureBar();
+      if (Gantt3View._cmd.filter) Gantt3View._cmdApplyFilter();
     }
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
