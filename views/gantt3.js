@@ -966,6 +966,12 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .sc-gantt .scg-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.5px; border-radius: 4px 0 0 4px; background: var(--wt, var(--prizma-information)); }
 .sc-gantt .scg-pill.done { opacity: .45; text-decoration: line-through; }
 .sc-gantt .scg-pill.moved { background: color-mix(in srgb, var(--prizma-drift) 16%, transparent); box-shadow: 0 0 0 1px var(--prizma-drift); color: var(--prizma-text-primary, var(--text-1)); }
+/* «Обзор · текстура» плотность — пилюли в тонкие цветные полоски. ТОЛЬКО Гант 3.0. */
+body.gdt-g3-texture #section-gantt3 .gantt-type-pill { height: 12px !important; min-height: 12px !important; max-height: 12px; padding: 0 5px !important; gap: 0 !important; font-size: 0 !important; line-height: 12px !important; overflow: hidden; }
+body.gdt-g3-texture #section-gantt3 .gantt-type-pill .gdt-pill-meta,
+body.gdt-g3-texture #section-gantt3 .gantt-type-pill .gdt-pill-row-2,
+body.gdt-g3-texture #section-gantt3 .gantt-type-pill .gdt-pill-initials { display: none !important; }
+body.gdt-g3-texture #section-gantt3 .gantt-cell { row-gap: 3px !important; }
 
 /* === ГАНТ 3.0 · п.20 «Filter-chips» (lab sketch 25) ======================= */
 #btn-gantt3-chips.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
@@ -1408,9 +1414,13 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
     let mode = 'regular';
     try {
       const saved = localStorage.getItem('q2_gantt3_density_v16');
-      if (saved === 'compact' || saved === 'regular' || saved === 'minimal') mode = saved;
+      if (saved === 'compact' || saved === 'regular' || saved === 'minimal' || saved === 'overview') mode = saved;
     } catch (_) {}
-    document.body.dataset.gdtDensity = mode;
+    // «Обзор · текстура» (порт redesign 09): плотные строки + пилюли-текстура.
+    // Текстура — отдельный класс, ОГРАНИЧЕННЫЙ #section-gantt3 (оригинальный Гант не трогаем).
+    const texture = mode === 'overview';
+    document.body.dataset.gdtDensity = texture ? 'minimal' : mode;
+    document.body.classList.toggle('gdt-g3-texture', texture);
   },
   bindDensity() {
     const btn = document.getElementById('btn-gantt3-density');
@@ -1419,8 +1429,8 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
     // Гант 3.0 п.7 — добавлен «Адаптивная» (auto) шаг в цикл: плотность
     // выбирается по числу видимых эпиков. _densityChoice хранит ВЫБОР юзера
     // (включая 'auto'), data-gdt-density — фактически применённое значение.
-    const NEXT = { regular: 'compact', compact: 'minimal', minimal: 'auto', auto: 'regular' };
-    const LABEL = { regular: 'Regular', compact: 'Compact', minimal: 'Minimal', auto: 'Адаптивная' };
+    const NEXT = { regular: 'compact', compact: 'minimal', minimal: 'overview', overview: 'auto', auto: 'regular' };
+    const LABEL = { regular: 'Regular', compact: 'Compact', minimal: 'Minimal', overview: 'Обзор · текстура', auto: 'Адаптивная' };
     btn.addEventListener('click', () => {
       // V16 roadmap-2 (B4) — preserve scroll anchor: density attribute
       // change reflows row heights, but our anchor read still works
@@ -1431,13 +1441,16 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
         Gantt3View._densityChoice = next;
         if (next === 'auto') {
           Gantt3View._densityAuto = true;
+          document.body.classList.remove('gdt-g3-texture');
           const applied = Gantt3View._densityApplyAuto();
           btn.title = `Плотность: Адаптивная → ${LABEL[applied]} (клик → Regular)`;
           btn.setAttribute('aria-label', `Плотность строк: Адаптивная (${LABEL[applied]})`);
           window.showToast?.(`Плотность: Адаптивная → ${LABEL[applied]}`, 'info', 1600);
         } else {
           Gantt3View._densityAuto = false;
-          document.body.dataset.gdtDensity = next;
+          const texture = next === 'overview';
+          document.body.dataset.gdtDensity = texture ? 'minimal' : next;
+          document.body.classList.toggle('gdt-g3-texture', texture);
           try { localStorage.setItem('q2_gantt3_density_v16', next); } catch (_) {}
           btn.title = `Плотность: ${LABEL[next]} (клик → ${LABEL[NEXT[next]]})`;
           // V21 — sync aria-label с current density для screen-reader.
@@ -1461,6 +1474,7 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
    *  числу видимых эпиков (мало → свободно, много → плотно). Возвращает
    *  применённое значение. Пере-вызывается из post-render hook, пока выбран auto. */
   _densityApplyAuto() {
+    document.body.classList.remove('gdt-g3-texture');
     const wrap = document.getElementById('gantt3-wrap');
     const n = wrap ? wrap.querySelectorAll('.gantt-row[data-epic-key]').length : 0;
     const applied = n < 12 ? 'regular' : n < 28 ? 'compact' : 'minimal';
