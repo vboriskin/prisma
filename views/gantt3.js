@@ -110,6 +110,8 @@ export const Gantt3View = {
   _narrative: { el: null, onKey: null },
   // Гант 3.0 п.8 — «Курс» (north-star): toggle компактной оси квартала.
   _northstar: { on: false },
+  // Гант 3.0 п.9 — «Marquee-bulk»: Shift+тяни рамку → выделение пилюль.
+  _marquee: { box: null, bar: null, start: null, dragging: false },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -665,6 +667,27 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
 #gdt-northstar .ns-now { position: absolute; top: 12px; bottom: 4px; width: 0; border-left: 2px solid var(--prizma-information); }
 #gdt-northstar .ns-now span { position: absolute; top: -2px; left: 4px; font: 700 9px/1 var(--mono, ui-monospace, monospace); letter-spacing: .4px; color: var(--prizma-information); white-space: nowrap; }
 #gdt-northstar .ns-empty { font-size: 11.5px; color: var(--prizma-text-tertiary, var(--text-3)); padding: 8px 0; }
+
+/* === ГАНТ 3.0 · п.9 «Marquee-bulk» (lab sketch 11) ========================
+   Shift+тяни рамку по чарту → выделяет пилюли; плавающая панель: счётчик +
+   снять + копировать сводку. Scoped. (Bulk-мутации опущены: move-helper —
+   render-closure, безопасно не переиспользуется.) */
+#gdt-marquee { position: fixed; z-index: 66; pointer-events: none; border: 1px solid var(--prizma-information); background: color-mix(in srgb, var(--prizma-information) 12%, transparent); border-radius: 3px; }
+#section-gantt3 .gantt-type-pill.gdt-mq-sel { box-shadow: inset 0 0 0 1.5px var(--prizma-information); background: var(--prizma-information-bg) !important; }
+#gdt-mq-bar {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 67;
+  display: none; align-items: center; gap: 14px; padding: 10px 14px;
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-md, 10px); box-shadow: 0 10px 30px rgba(0,0,0,.34); font: 12px/1 var(--font, inherit);
+  animation: gdtMqIn .16s var(--ease-calm, ease);
+}
+#gdt-mq-bar.on { display: flex; }
+@keyframes gdtMqIn { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+#gdt-mq-bar .mq-count { font-weight: 700; }
+#gdt-mq-bar .mq-count b { color: var(--prizma-information); font-feature-settings: "tnum"; }
+#gdt-mq-bar button { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 10px; font-size: 12px; }
+#gdt-mq-bar button:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-border-strong, var(--border)); }
+#gdt-mq-bar .mq-hint { font: 500 10.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -2230,6 +2253,104 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     wrap.parentNode.insertBefore(strip, wrap);
   },
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.9 — «MARQUEE-BULK» (порт lab sketch 11). Shift+тяни рамку по
+     чарту → выделяет пилюли (AABB-пересечение в client-координатах); плавающая
+     панель: счётчик, «Копировать сводку», «Снять». Делегат pointerdown на
+     #gantt3-wrap. Bulk-мутации опущены (move-helper — render-closure).
+     ═══════════════════════════════════════════════════════════════════════ */
+  _marqueeBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtMqBound) return;
+    wrap._gdtMqBound = true;
+    wrap.addEventListener('pointerdown', (e) => {
+      if (!e.shiftKey || e.button !== 0) return;
+      e.preventDefault();                         // отменяет native pill-drag + text-select
+      Gantt3View._marqueeStart(e);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.documentElement.dataset.activeSection === 'gantt3'
+          && document.getElementById('gdt-mq-bar')?.classList.contains('on')) {
+        e.preventDefault(); Gantt3View._marqueeReset();
+      }
+    }, true);
+  },
+  _marqueeStart(e) {
+    const M = Gantt3View._marquee;
+    M.start = { x: e.clientX, y: e.clientY };
+    M.dragging = true;
+    Gantt3View._marqueeClearSel();
+    const box = document.createElement('div'); box.id = 'gdt-marquee';
+    document.body.appendChild(box); M.box = box;
+    const onMove = (ev) => Gantt3View._marqueeMove(ev);
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      Gantt3View._marqueeEnd();
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+  },
+  _marqueeMove(e) {
+    const M = Gantt3View._marquee;
+    if (!M.dragging || !M.box) return;
+    const x1 = Math.min(M.start.x, e.clientX), y1 = Math.min(M.start.y, e.clientY);
+    const x2 = Math.max(M.start.x, e.clientX), y2 = Math.max(M.start.y, e.clientY);
+    M.box.style.left = x1 + 'px'; M.box.style.top = y1 + 'px';
+    M.box.style.width = (x2 - x1) + 'px'; M.box.style.height = (y2 - y1) + 'px';
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    wrap.querySelectorAll('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)').forEach(p => {
+      const r = p.getBoundingClientRect();
+      p.classList.toggle('gdt-mq-sel', r.left < x2 && r.right > x1 && r.top < y2 && r.bottom > y1);
+    });
+  },
+  _marqueeEnd() {
+    const M = Gantt3View._marquee;
+    M.dragging = false;
+    if (M.box) { M.box.remove(); M.box = null; }
+    const n = Gantt3View._marqueeSelected().length;
+    if (n) Gantt3View._marqueeShowBar(n); else Gantt3View._marqueeHideBar();
+  },
+  _marqueeSelected() {
+    const wrap = document.getElementById('gantt3-wrap');
+    return wrap ? [...wrap.querySelectorAll('.gantt-type-pill.gdt-mq-sel')] : [];
+  },
+  _marqueeClearSel() {
+    document.querySelectorAll('#gantt3-wrap .gantt-type-pill.gdt-mq-sel').forEach(p => p.classList.remove('gdt-mq-sel'));
+  },
+  _marqueeShowBar(n) {
+    let bar = document.getElementById('gdt-mq-bar');
+    if (!bar) {
+      bar = document.createElement('div'); bar.id = 'gdt-mq-bar';
+      bar.innerHTML = '<span class="mq-count"><b id="mq-n">0</b> <span id="mq-word">работ</span> выбрано</span>' +
+        '<button id="mq-copy">Копировать сводку</button><button id="mq-clear">Снять</button>' +
+        '<span class="mq-hint">Shift+тяни — выделить</span>';
+      document.body.appendChild(bar);
+      bar.querySelector('#mq-clear').addEventListener('click', () => Gantt3View._marqueeReset());
+      bar.querySelector('#mq-copy').addEventListener('click', () => Gantt3View._marqueeCopy());
+      Gantt3View._marquee.bar = bar;
+    }
+    bar.querySelector('#mq-n').textContent = n;
+    bar.querySelector('#mq-word').textContent = Gantt3View._plRabot(n);
+    bar.classList.add('on');
+  },
+  _marqueeHideBar() { document.getElementById('gdt-mq-bar')?.classList.remove('on'); },
+  _marqueeReset() { Gantt3View._marqueeClearSel(); Gantt3View._marqueeHideBar(); },
+  _marqueeCopy() {
+    const sel = Gantt3View._marqueeSelected();
+    const lines = sel.map(p => {
+      const wt = (p.querySelector('.gdt-pill-name')?.textContent || p.dataset.wt || '').trim();
+      const epic = (p.closest('.gantt-row[data-epic-key]')?.querySelector('.v16-epic-name')?.textContent || '').trim();
+      const col = p.closest('.gantt-cell[data-col]')?.dataset.col || '';
+      const rel = GANTT_COL_LABELS[col] || col;
+      return [epic, wt, rel].filter(Boolean).join(' · ');
+    });
+    const text = lines.join('\n');
+    try { navigator.clipboard?.writeText(text); window.showToast?.('Сводка скопирована (' + sel.length + ')', 'info', 1600); }
+    catch (_) { window.showToast?.('Копирование недоступно', 'info', 1400); }
+  },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -3526,6 +3647,10 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     if (Gantt3View._densityAuto) Gantt3View._densityApplyAuto();
     // Гант 3.0 п.8 — «Курс»: headers пересозданы → пересобрать ось.
     if (Gantt3View._northstar && Gantt3View._northstar.on) Gantt3View._northstarBuild();
+    // Гант 3.0 п.9 — Marquee: делегат идемпотентен; выделение слетело (пилюли
+    // пересозданы) → прячем панель.
+    Gantt3View._marqueeBind();
+    Gantt3View._marqueeHideBar();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
