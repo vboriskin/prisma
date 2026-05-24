@@ -685,15 +685,21 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
    Toggle «Курс» → компактная ось квартала над чартом: сегменты релизов, вехи
    точками с подписями, маркер «сейчас». Позиции по DOY% (как milestone-lines). */
 #btn-gantt3-northstar.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
-#gdt-northstar { padding: 8px 26px 2px; }
-#gdt-northstar .ns-track { position: relative; height: 54px; }
+#gdt-northstar { padding: 14px 26px 14px; border-bottom: 1px solid var(--prizma-border, var(--border)); background: var(--prizma-bg-elevated, transparent); }
+#gdt-northstar .ns-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 2px; flex-wrap: wrap; }
+#gdt-northstar .ns-h-title { font-weight: 800; font-size: 15px; letter-spacing: -.01em; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-northstar .ns-h-sub { font: 500 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-northstar .ns-track { position: relative; height: 66px; margin-top: 8px; }
 #gdt-northstar .ns-line { position: absolute; left: 0; right: 0; top: 30px; height: 2px; background: var(--prizma-border-strong, var(--border)); border-radius: 2px; }
 #gdt-northstar .ns-bnd { position: absolute; top: 24px; width: 1px; height: 13px; background: var(--prizma-border, var(--border)); }
 #gdt-northstar .ns-seg { position: absolute; top: 40px; transform: translateX(-50%); font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); white-space: nowrap; }
 #gdt-northstar .ns-seg.cur { color: var(--prizma-text-secondary, var(--text-2)); }
 #gdt-northstar .ns-ms { position: absolute; top: 30px; transform: translate(-50%, -50%); width: 10px; height: 10px; }
 #gdt-northstar .ns-ms .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--prizma-drift); box-shadow: 0 0 0 2px var(--prizma-bg, #0A0A0F); }
-#gdt-northstar .ns-ms .lbl { position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%); font: 600 10px/1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; background: var(--prizma-bg, #0A0A0F); padding: 0 4px; }
+#gdt-northstar .ns-ms .lbl { position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%); font: 600 10px/1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; background: var(--prizma-bg-elevated, var(--prizma-bg, #0A0A0F)); padding: 0 4px; }
+#gdt-northstar .ns-ms .dt { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font: 500 9px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); white-space: nowrap; }
+#gdt-northstar .ns-ms.past .dot { background: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-northstar .ns-ms.future .dot { background: var(--prizma-bg-elevated, var(--prizma-bg, #fff)); border: 2px solid var(--prizma-drift); }
 #gdt-northstar .ns-now { position: absolute; top: 12px; bottom: 4px; width: 0; border-left: 2px solid var(--prizma-information); }
 #gdt-northstar .ns-now span { position: absolute; top: -2px; left: 4px; font: 700 9px/1 var(--mono, ui-monospace, monospace); letter-spacing: .4px; color: var(--prizma-information); white-space: nowrap; }
 #gdt-northstar .ns-empty { font-size: 11.5px; color: var(--prizma-text-tertiary, var(--text-3)); padding: 8px 0; }
@@ -2784,9 +2790,17 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
     wins.forEach(w => { const s = w.s; let e = w.e; if (e < s) e += 365; minS = Math.min(minS, s); maxE = Math.max(maxE, e); });
     const span = Math.max(1, maxE - minS);
     const pctOf = (doy) => { let d = doy; if (d < minS) d += 365; return Math.max(0, Math.min(100, ((d - minS) / span) * 100)); };
-    let html = '<div class="ns-track"><div class="ns-line"></div>';
-    // сегменты релизов + границы
     const curKey = (wins.find(w => { const today = new Date(); const td = Math.floor((Date.UTC(yr, today.getMonth(), today.getDate()) - Date.UTC(yr, 0, 1)) / 86400000); let s = w.s, e = w.e < w.s ? w.e + 365 : w.e, d = td < s ? td + 365 : td; return d >= s && d <= e; }) || {}).key;
+    // шапка-компас: сегодня · окно · до ближайшей вехи N дней
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const tdy = new Date(); const tdy0 = new Date(); tdy0.setHours(0, 0, 0, 0);
+    const _tdoy = Math.floor((Date.UTC(yr, tdy.getMonth(), tdy.getDate()) - Date.UTC(yr, 0, 1)) / 86400000);
+    const plDays = (n) => { const m = n % 10, d = n % 100; if (m === 1 && d !== 11) return 'день'; if (m >= 2 && m <= 4 && (d < 10 || d >= 20)) return 'дня'; return 'дней'; };
+    const fut = (Array.isArray(state.milestones) ? state.milestones : []).map(m => ({ label: m.label, t: Date.parse(m.date + 'T00:00:00') })).filter(m => m.t && m.t >= tdy0.getTime()).sort((a, b) => a.t - b.t);
+    const nextMs = fut[0]; const daysTo = nextMs ? Math.round((nextMs.t - tdy0.getTime()) / 86400000) : null;
+    const headTxt = 'сегодня ' + tdy.getDate() + ' ' + months[tdy.getMonth()] + ' · окно ' + (curKey ? (GANTT_COL_LABELS[curKey] || curKey) : '—') + (nextMs ? ' · до «' + nextMs.label + '» ' + daysTo + ' ' + plDays(daysTo) : '');
+    let html = '<div class="ns-head"><span class="ns-h-title">Компас квартала</span><span class="ns-h-sub">' + esc(headTxt) + '</span></div><div class="ns-track"><div class="ns-line"></div>';
+    // сегменты релизов + границы
     wins.forEach(w => {
       const e = w.e < w.s ? w.e + 365 : w.e;
       const cpct = pctOf((w.s + e) / 2);
@@ -2801,7 +2815,7 @@ html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; 
       const d = String(ms.date).match(/^(\d{4})-(\d{2})-(\d{2})/);
       const shortD = d ? d[3] + '.' + d[2] : '';
       const lbl = String(ms.label || '').trim() || shortD || 'веха';
-      html += '<div class="ns-ms" style="left:' + pctOf(doy).toFixed(2) + '%" title="' + esc(lbl + (shortD ? ' · ' + shortD : '')) + '"><span class="lbl">' + esc(lbl) + '</span><span class="dot"></span></div>';
+      html += '<div class="ns-ms ' + (doy < _tdoy ? 'past' : 'future') + '" style="left:' + pctOf(doy).toFixed(2) + '%" title="' + esc(lbl + (shortD ? ' · ' + shortD : '')) + '"><span class="lbl">' + esc(lbl) + '</span><span class="dot"></span><span class="dt">' + esc(shortD) + '</span></div>';
     });
     // сейчас
     const today = new Date();
