@@ -114,6 +114,8 @@ export const Gantt3View = {
   _marquee: { box: null, bar: null, start: null, dragging: false },
   // Гант 3.0 п.10 — «Peek-quicklook»: клик по лейблу эпика → карточка-превью.
   _peek: { pop: null, onDoc: null, anchor: null },
+  // Гант 3.0 п.11 — «Переносы» (plan-diff по переносам): toggle подсветки.
+  _diff: { on: false },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -716,6 +718,17 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
 #gdt-peek .pk-fact .fk { font: 600 9.5px/1 var(--font, inherit); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); }
 #gdt-peek .pk-fact .fv { font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); margin-top: 3px; }
 #gdt-peek .pk-fact .fv.warn { color: var(--prizma-drift); }
+
+/* === ГАНТ 3.0 · п.11 «Plan-diff» по переносам (lab sketch 13) =============
+   Toggle «Переносы»: подсвечивает пилюли с записанным переносом (drift),
+   приглушает остальные. Источник — реальные переносы (cmt-transfer marker /
+   row.ganttArrows), НЕ синтетический baseline. */
+#btn-gantt3-diff.active { border-color: var(--prizma-drift); color: var(--prizma-drift); background: var(--prizma-drift-bg, rgba(176,123,26,.14)); }
+body.gdt-diff-on #section-gantt3 .gantt-type-pill.gdt-diff-moved {
+  outline: 2px solid var(--prizma-drift, #B07B1A) !important; outline-offset: -1px;
+  background: var(--prizma-drift-bg, rgba(176,123,26,.14)) !important; border-radius: var(--r-sm, 6px);
+}
+body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff-moved):not(.gantt-pill-ghost) { opacity: .32; transition: opacity .2s; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1365,6 +1378,12 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     if (nsBtn && !nsBtn._gdtNsBound) {
       nsBtn._gdtNsBound = true;
       nsBtn.addEventListener('click', () => Gantt3View._northstarToggle());
+    }
+    // Гант 3.0 п.11 — «Переносы» (plan-diff).
+    const diffBtn = document.getElementById('btn-gantt3-diff');
+    if (diffBtn && !diffBtn._gdtDiffBound) {
+      diffBtn._gdtDiffBound = true;
+      diffBtn.addEventListener('click', () => Gantt3View._diffToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2470,6 +2489,46 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     }
     if (P.pop) { P.pop.remove(); P.pop = null; }
     P.anchor = null;
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.11 — «ПЕРЕНОСЫ» / plan-diff (порт lab sketch 13, по переносам).
+     Toggle: подсвечивает пилюли с записанным переносом (DOM-маркер
+     .gdt-pill-cmt-transfer ← row.ganttArrows/transferComments), приглушает
+     остальные. НЕ синтетический baseline — реальная история переносов.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _plPerenos(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'перенос';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'переноса';
+    return 'переносов';
+  },
+  _diffToggle() {
+    const D = Gantt3View._diff;
+    D.on = !D.on;
+    const btn = document.getElementById('btn-gantt3-diff');
+    if (btn) { btn.classList.toggle('active', D.on); btn.setAttribute('aria-pressed', D.on ? 'true' : 'false'); }
+    document.body.classList.toggle('gdt-diff-on', D.on);
+    if (D.on) {
+      const n = Gantt3View._diffApply();
+      window.showToast?.(n ? (n + ' ' + Gantt3View._plPerenos(n) + ' в плане') : 'Переносов в плане пока нет', 'info', 2000);
+    } else {
+      Gantt3View._diffClear();
+    }
+  },
+  _diffApply() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return 0;
+    let n = 0;
+    wrap.querySelectorAll('.gantt-type-pill[data-wt]').forEach(p => {
+      const moved = !!p.querySelector('.gdt-pill-cmt-transfer');
+      p.classList.toggle('gdt-diff-moved', moved);
+      if (moved) n++;
+    });
+    return n;
+  },
+  _diffClear() {
+    document.querySelectorAll('#gantt3-wrap .gantt-type-pill.gdt-diff-moved').forEach(p => p.classList.remove('gdt-diff-moved'));
   },
 
   bindFullscreen() {
@@ -3775,6 +3834,8 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     // Гант 3.0 п.10 — Peek: делегат идемпотентен; закрыть карточку (строки новые).
     Gantt3View._peekBind();
     Gantt3View._peekClose();
+    // Гант 3.0 п.11 — Переносы: пере-тегировать moved-пилюли после ре-рендера.
+    if (Gantt3View._diff && Gantt3View._diff.on) Gantt3View._diffApply();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
