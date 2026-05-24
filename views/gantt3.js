@@ -891,23 +891,34 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     const btn = document.getElementById('btn-gantt3-density');
     if (!btn || btn._gdtDensityBound) return;
     btn._gdtDensityBound = true;
-    const NEXT = { regular: 'compact', compact: 'minimal', minimal: 'regular' };
-    const LABEL = { regular: 'Regular', compact: 'Compact', minimal: 'Minimal' };
+    // Гант 3.0 п.7 — добавлен «Адаптивная» (auto) шаг в цикл: плотность
+    // выбирается по числу видимых эпиков. _densityChoice хранит ВЫБОР юзера
+    // (включая 'auto'), data-gdt-density — фактически применённое значение.
+    const NEXT = { regular: 'compact', compact: 'minimal', minimal: 'auto', auto: 'regular' };
+    const LABEL = { regular: 'Regular', compact: 'Compact', minimal: 'Minimal', auto: 'Адаптивная' };
     btn.addEventListener('click', () => {
       // V16 roadmap-2 (B4) — preserve scroll anchor: density attribute
       // change reflows row heights, but our anchor read still works
       // because team-header positions update synchronously.
       Gantt3View._withScrollAnchor(() => {
-        const cur  = document.body.dataset.gdtDensity || 'regular';
+        const cur  = Gantt3View._densityChoice || document.body.dataset.gdtDensity || 'regular';
         const next = NEXT[cur] || 'regular';
-        document.body.dataset.gdtDensity = next;
-        try { localStorage.setItem('q2_gantt3_density_v16', next); } catch (_) {}
-        btn.title = `Плотность: ${LABEL[next]} (клик → ${LABEL[NEXT[next]]})`;
-        // V21 — sync aria-label с current density для screen-reader.
-        // 3-state cycle не позволяет boolean aria-pressed; полное состояние
-        // в aria-label.
-        btn.setAttribute('aria-label', `Плотность строк: ${LABEL[next]}`);
-        window.showToast?.(`Плотность: ${LABEL[next]}`, 'info', 1400);
+        Gantt3View._densityChoice = next;
+        if (next === 'auto') {
+          Gantt3View._densityAuto = true;
+          const applied = Gantt3View._densityApplyAuto();
+          btn.title = `Плотность: Адаптивная → ${LABEL[applied]} (клик → Regular)`;
+          btn.setAttribute('aria-label', `Плотность строк: Адаптивная (${LABEL[applied]})`);
+          window.showToast?.(`Плотность: Адаптивная → ${LABEL[applied]}`, 'info', 1600);
+        } else {
+          Gantt3View._densityAuto = false;
+          document.body.dataset.gdtDensity = next;
+          try { localStorage.setItem('q2_gantt3_density_v16', next); } catch (_) {}
+          btn.title = `Плотность: ${LABEL[next]} (клик → ${LABEL[NEXT[next]]})`;
+          // V21 — sync aria-label с current density для screen-reader.
+          btn.setAttribute('aria-label', `Плотность строк: ${LABEL[next]}`);
+          window.showToast?.(`Плотность: ${LABEL[next]}`, 'info', 1400);
+        }
       });
       // #7 — density change меняет row heights через CSS, но pre-render'ные
       // SVG-стрелки переносов остаются с устаревшими координатами. Re-draw
@@ -920,6 +931,17 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
         try { Gantt3View._positionTodayLine(wrap); } catch (_) {}
       }));
     });
+  },
+  /** Гант 3.0 п.7 — «Адаптивная» плотность: выбирает regular/compact/minimal по
+   *  числу видимых эпиков (мало → свободно, много → плотно). Возвращает
+   *  применённое значение. Пере-вызывается из post-render hook, пока выбран auto. */
+  _densityApplyAuto() {
+    const wrap = document.getElementById('gantt3-wrap');
+    const n = wrap ? wrap.querySelectorAll('.gantt-row[data-epic-key]').length : 0;
+    const applied = n < 12 ? 'regular' : n < 28 ? 'compact' : 'minimal';
+    document.body.dataset.gdtDensity = applied;
+    try { localStorage.setItem('q2_gantt3_density_v16', 'auto'); } catch (_) {}
+    return applied;
   },
   /** V16 (gantt-roadmap #5) — Cmd+K palette: fuzzy search across teams +
    *  epics. Opens on ⌘K / Ctrl+K (and via the toolbar button). Selecting
@@ -3402,6 +3424,8 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     // активен); открытый поповер на старой пилюле закрываем (пилюли пересозданы).
     Gantt3View._anatomyBind();
     Gantt3View._anatomyClose();
+    // Гант 3.0 п.7 — Адаптивная плотность: пересчитать по новому числу эпиков.
+    if (Gantt3View._densityAuto) Gantt3View._densityApplyAuto();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
