@@ -924,6 +924,16 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
 #gdt-annot-pop button { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); cursor: pointer; padding: 5px 10px; font-size: 12px; color: var(--prizma-text-secondary, var(--text-2)); }
 #gdt-annot-pop .ga-save { border-color: var(--prizma-information); color: var(--prizma-information); }
 #gdt-annot-pop .ga-del { margin-left: auto; color: var(--prizma-off-course); border-color: transparent; }
+
+/* === ГАНТ 3.0 · z-index fix ===============================================
+   Чром приложения: топбар z:100, сайдбар z:90, модалки z:1000+. Все наши
+   fixed-оверлеи изначально стояли на 60–72 → их шапки с кнопкой «Закрыть»
+   прятались ПОД топбаром/сайдбаром (выйти можно было только Esc). Поднимаем
+   выше чрома, но ниже FAB(10000)/confirm-dialog(11500). */
+#gdt-lens-wires, #gdt-lens-readout, #gdt-anatomy-pop, #gdt-peek, #gdt-radial,
+#gdt-annot-pop, #gdt-marquee, #gdt-mq-bar, #gdt-suggest, #gdt-views-menu,
+#gdt-narrative, #gdt-mode { z-index: 9100; }
+#gdt-views-menu { z-index: 9200; }   /* дропдаун — поверх своего оверлея-режима */
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
