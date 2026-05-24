@@ -91,6 +91,11 @@ export const Gantt3View = {
     }
     Gantt3View._cancelTransientInteractions = null;
   },
+  // Гант 3.0 п.2 — состояние «Линзы зависимостей» (sketch 09). on = режим
+  // включён; focusKey = текущий эпик в фокусе; locked = зафиксирован кликом;
+  // graph = мемоизированные множества предков/потомков/крит-путь; els = карта
+  // epicKey→row-элемент; handlers/overlay/readout — для аккуратного teardown.
+  _lens: { on: false, focusKey: null, locked: false, graph: null, els: null, overlay: null, readout: null, onScroll: null, onKey: null, _raf: 0 },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -420,6 +425,74 @@ export const Gantt3View = {
   outline: 2px solid var(--prizma-information) !important;
   outline-offset: -2px;
 }
+
+/* === ГАНТ 3.0 · п.2 «Линза зависимостей» (lab sketch 09) =================
+   Toggle-режим: наведение на эпик-строку гасит несвязанное и проявляет
+   цепочку — предки (зависит от · information/синий), потомки (блокирует ·
+   off-course/красный), крит-путь (drift/жёлтый). SVG-провода рисуются в
+   fixed-overlay (#gdt-lens-wires) поверх вьюпорта, readout-плашка плавает
+   в правом-нижнем углу. Всё scoped под #section-gantt3 / собственные id —
+   оригинальный Гант не затронут. */
+#btn-gantt3-lens.active {
+  border-color: var(--prizma-information);
+  color: var(--prizma-information);
+  background: var(--prizma-information-bg);
+}
+/* Дым: при активном фокусе несвязанные строки гаснут. */
+#section-gantt3 #gantt3-wrap.gdt-lens-focusing .gantt-row:not(.gdt-lens-chain),
+#section-gantt3 #gantt3-wrap.gdt-lens-focusing .gantt-row-trail {
+  opacity: .13; filter: saturate(.35);
+  transition: opacity .25s var(--ease-calm, ease), filter .25s var(--ease-calm, ease);
+}
+#section-gantt3 #gantt3-wrap.gdt-lens-focusing .gantt-row.gdt-lens-chain {
+  transition: opacity .25s var(--ease-calm, ease);
+}
+/* Левый stripe строки перекрашиваем под роль (бьёт inline-цвет через !important). */
+#section-gantt3 .gantt-row.gdt-lens-focus  .v16-epic-stripe { background: var(--prizma-text-primary, var(--text-1, #111)) !important; width: 3px !important; }
+#section-gantt3 .gantt-row.gdt-lens-anc    .v16-epic-stripe { background: var(--prizma-information) !important; width: 3px !important; }
+#section-gantt3 .gantt-row.gdt-lens-desc   .v16-epic-stripe { background: var(--prizma-off-course) !important; width: 3px !important; }
+#section-gantt3 .gantt-row.gdt-lens-crit   .v16-epic-stripe { background: var(--prizma-drift) !important; width: 3px !important; }
+#section-gantt3 .gantt-row.gdt-lens-focus { background: var(--prizma-information-bg); }
+#section-gantt3 .gantt-row.gdt-lens-crit  { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-drift) 55%, transparent); }
+/* Role-чип, инжектится в .v16-epic-sub. */
+.gdt-lens-role { display: inline-flex; align-items: center; font: 700 9px/1 var(--font, inherit); letter-spacing: .5px; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; white-space: nowrap; }
+.gdt-lens-role.foc  { color: var(--prizma-text-primary, var(--text-1)); background: var(--prizma-bg-tertiary, rgba(0,0,0,.06)); }
+.gdt-lens-role.anc  { color: var(--prizma-information); background: var(--prizma-information-bg); }
+.gdt-lens-role.desc { color: var(--prizma-off-course); background: var(--prizma-off-course-bg, rgba(193,56,56,.12)); }
+.gdt-lens-role.crit { color: var(--prizma-drift); background: var(--prizma-drift-bg, rgba(176,123,26,.14)); }
+/* Fixed SVG-overlay для проводов. */
+#gdt-lens-wires { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 60; overflow: visible; }
+/* Плавающая readout-плашка. */
+#gdt-lens-readout {
+  position: fixed; right: 22px; bottom: 22px; z-index: 61;
+  min-width: 252px; max-width: 340px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 7px;
+  background: var(--prizma-bg-elevated, var(--card, #fff));
+  border: 1px solid var(--prizma-border, var(--border));
+  border-left: 3px solid var(--prizma-information);
+  border-radius: var(--r-md, 10px);
+  box-shadow: 0 10px 30px rgba(0,0,0,.30);
+  font: 12px/1.4 var(--font, inherit);
+  animation: gdtLensReadoutIn .18s var(--ease-calm, ease);
+}
+@keyframes gdtLensReadoutIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#gdt-lens-readout .lr-title { font-weight: 700; font-size: 12.5px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-lens-readout .lr-title .muted { color: var(--prizma-text-tertiary, var(--text-3)); font-weight: 500; }
+#gdt-lens-readout .lr-counts { display: flex; gap: 14px; font: 600 11px/1 var(--mono, ui-monospace, monospace); }
+#gdt-lens-readout .lr-counts .dep { color: var(--prizma-information); }
+#gdt-lens-readout .lr-counts .blk { color: var(--prizma-off-course); }
+#gdt-lens-readout .lr-crit { font: 500 11px/1.45 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-lens-readout .lr-crit b { color: var(--prizma-drift); font-weight: 700; }
+#gdt-lens-readout .lr-empty { font-size: 11.5px; color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-lens-readout .lr-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 10px; color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-lens-readout .lr-legend i { display: inline-block; width: 14px; height: 0; border-top: 2px solid; margin-right: 5px; vertical-align: middle; }
+#gdt-lens-readout .lr-hint { font-size: 10.5px; color: var(--prizma-text-tertiary, var(--text-3)); border-top: 1px solid var(--prizma-border, var(--border)); padding-top: 6px; }
+#gdt-lens-readout .lr-hint kbd { font: 600 10px/1 var(--mono, ui-monospace, monospace); padding: 1px 4px; border: 1px solid var(--prizma-border, var(--border)); border-radius: 3px; }
+/* Линза живёт только на вкладке Гант 3.0: уходишь на другой раздел —
+   fixed-chrome авто-прячется (html[data-active-section] ставит app/nav.js).
+   Сам режим не выключаем — вернёшься, и линза снова доступна. */
+html:not([data-active-section="gantt3"]) #gdt-lens-wires,
+html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !important; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1017,6 +1090,13 @@ export const Gantt3View = {
         try { Services.DependencyGraphView?.toggle?.(); } catch (_) {}
       });
     }
+    // Гант 3.0 п.2 — «Линза зависимостей» (sketch 09): in-context overlay,
+    // в отличие от btn-gantt3-deps (отдельный граф-вид). Toggle режима.
+    const lensBtn = document.getElementById('btn-gantt3-lens');
+    if (lensBtn && !lensBtn._gdtLensBound) {
+      lensBtn._gdtLensBound = true;
+      lensBtn.addEventListener('click', () => Gantt3View._lensToggleMode());
+    }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
    *  state.actionLog (наполняется HistoryLog.data/.gantt + HistoryManager). */
@@ -1030,6 +1110,294 @@ export const Gantt3View = {
   _openAddEpicModal(presetTeam) {
     _auxAddEpicModal(presetTeam, { onCreated: () => Gantt3View.renderChart() });
   },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.2 — «ЛИНЗА ЗАВИСИМОСТЕЙ» (порт lab sketch 09-dependency-lens)
+     Toggle-режим поверх живого Ганта: наводишь на эпик-строку — несвязанное
+     гаснет, проявляется цепочка (предки=зависит-от/синий, потомки=блокирует/
+     красный, крит-путь/жёлтый). Провода — fixed SVG-overlay (getBoundingRect,
+     перерисовка на scroll/resize). Click=lock, Esc/повторный клик=выход.
+     Граф из state.epicDeps (multi-deps массивы, cycle-safe). Всё scoped под
+     #section-gantt3 / собственные id — оригинальный Гант не затронут.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _lensToggleMode() {
+    if (Gantt3View._lens.on) Gantt3View._lensExit();
+    else                     Gantt3View._lensEnter();
+  },
+  _lensEnter() {
+    const L = Gantt3View._lens;
+    L.on = true;
+    const btn = document.getElementById('btn-gantt3-lens');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    document.body.classList.add('gdt-lens-on');
+    Gantt3View._lensEnsureChrome();
+    Gantt3View._lensBuildGraph();
+    Gantt3View._lensBindRows();
+    // Esc выходит из режима — но ТОЛЬКО когда активна вкладка Гант 3.0, иначе
+    // глобальный capture-listener воровал бы Escape у модалок других разделов.
+    L.onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (document.documentElement.dataset.activeSection !== 'gantt3') return;
+      e.preventDefault();
+      Gantt3View._lensExit();
+    };
+    document.addEventListener('keydown', L.onKey, true);
+    L.onScroll = () => Gantt3View._lensScheduleRedraw();
+    window.addEventListener('scroll', L.onScroll, true);   // capture: ловим и вложенные скроллеры
+    window.addEventListener('resize', L.onScroll);
+    Gantt3View._lensRenderReadoutEmpty();
+    try { Services.Toast?.info?.('Линза зависимостей: наведите на эпик. Esc — выйти.', { ms: 2600 }); } catch (_) {}
+  },
+  _lensExit() {
+    const L = Gantt3View._lens;
+    Gantt3View._lensClearFocus();
+    L.on = false; L.locked = false; L.focusKey = null;
+    const btn = document.getElementById('btn-gantt3-lens');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+    document.body.classList.remove('gdt-lens-on');
+    if (L.onKey)    { document.removeEventListener('keydown', L.onKey, true); L.onKey = null; }
+    if (L.onScroll) { window.removeEventListener('scroll', L.onScroll, true); window.removeEventListener('resize', L.onScroll); L.onScroll = null; }
+    if (L._raf)     { cancelAnimationFrame(L._raf); L._raf = 0; }
+    if (L.overlay)  { L.overlay.remove(); L.overlay = null; }
+    if (L.readout)  { L.readout.remove(); L.readout = null; }
+    L.graph = null; L.els = null;
+  },
+  _lensEnsureChrome() {
+    const L = Gantt3View._lens;
+    if (!L.overlay) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.id = 'gdt-lens-wires'; svg.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(svg);
+      L.overlay = svg;
+    }
+    if (!L.readout) {
+      const div = document.createElement('div');
+      div.id = 'gdt-lens-readout';
+      document.body.appendChild(div);
+      L.readout = div;
+    }
+  },
+  /** Строит граф зависимостей из state.epicDeps. Ключ эпика = row.epic.
+   *  epicDeps[from] = to | [to,…] означает «from зависит от to» (to — предок).
+   *  Cycle-safe: транзитивные множества через visited-guard, длиннейшие цепи
+   *  (крит-путь) — через on-stack guard (реальные dep-графы ацикличны, но от
+   *  кривых данных не должно зависать). */
+  _lensBuildGraph() {
+    const L = Gantt3View._lens;
+    const deps = (state && state.epicDeps) ? state.epicDeps : {};
+    const keys = new Set();
+    (state.rows || []).forEach(r => { const k = String(r.epic || r.tasks || '').trim(); if (k) keys.add(k); });
+    Object.keys(deps).forEach(k => keys.add(String(k)));
+    Object.values(deps).forEach(v => (Array.isArray(v) ? v : [v]).forEach(t => { if (t) keys.add(String(t)); }));
+
+    const depsOf = (k) => { const v = deps[k]; return (Array.isArray(v) ? v : (v ? [v] : [])).map(String).filter(Boolean); };
+    const directChildren = {}; keys.forEach(k => directChildren[k] = []);
+    keys.forEach(k => depsOf(k).forEach(d => { (directChildren[d] = directChildren[d] || []).push(k); }));
+
+    const ancestorsOf = {}, descendantsOf = {};
+    const collectAnc  = (k, acc) => depsOf(k).forEach(d => { if (!acc.has(d)) { acc.add(d); collectAnc(d, acc); } });
+    const collectDesc = (k, acc) => (directChildren[k] || []).forEach(c => { if (!acc.has(c)) { acc.add(c); collectDesc(c, acc); } });
+    keys.forEach(k => {
+      const a = new Set(); collectAnc(k, a);  a.delete(k); ancestorsOf[k]   = a;
+      const d = new Set(); collectDesc(k, d); d.delete(k); descendantsOf[k] = d;
+    });
+
+    const upMemo = {}, downMemo = {};
+    const longestUp = (k, stack) => {
+      if (upMemo[k]) return upMemo[k];
+      stack = stack || new Set();
+      if (stack.has(k)) return [];
+      stack.add(k);
+      let best = [];
+      depsOf(k).forEach(d => { const ch = longestUp(d, stack).concat([d]); if (ch.length > best.length) best = ch; });
+      stack.delete(k);
+      return (upMemo[k] = best);
+    };
+    const longestDown = (k, stack) => {
+      if (downMemo[k]) return downMemo[k];
+      stack = stack || new Set();
+      if (stack.has(k)) return [];
+      stack.add(k);
+      let best = [];
+      (directChildren[k] || []).forEach(c => { const ch = [c].concat(longestDown(c, stack)); if (ch.length > best.length) best = ch; });
+      stack.delete(k);
+      return (downMemo[k] = best);
+    };
+    const criticalPath = (k) => longestUp(k).concat([k]).concat(longestDown(k));
+
+    L.graph = { keys, depsOf, directChildren, ancestorsOf, descendantsOf, criticalPath };
+  },
+  /** Карта epicKey → первый row-элемент в DOM (для подсветки + якорей проводов). */
+  _lensMapEls() {
+    const wrap = document.getElementById('gantt3-wrap');
+    const els = {};
+    if (wrap) wrap.querySelectorAll('.gantt-row[data-epic-key]').forEach(el => {
+      const k = el.getAttribute('data-epic-key');
+      if (k && !els[k]) els[k] = el;
+    });
+    Gantt3View._lens.els = els;
+    return els;
+  },
+  /** Делегированные слушатели на #gantt3-wrap (переживают innerHTML-ре-рендер,
+   *  т.к. wrap-элемент не пересоздаётся). Idempotent через wrap._gdtLensBound. */
+  _lensBindRows() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    Gantt3View._lensMapEls();
+    if (wrap._gdtLensBound) return;
+    wrap._gdtLensBound = true;
+    wrap.addEventListener('mouseover', (e) => {
+      const L = Gantt3View._lens;
+      if (!L.on || L.locked) return;
+      const row = e.target.closest('.gantt-row[data-epic-key]');
+      if (!row) return;
+      const k = row.getAttribute('data-epic-key');
+      if (k && k !== L.focusKey) Gantt3View._lensFocus(k);
+    });
+    wrap.addEventListener('mouseleave', () => {
+      const L = Gantt3View._lens;
+      if (L.on && !L.locked) Gantt3View._lensClearFocus();
+    });
+    wrap.addEventListener('click', (e) => {
+      const L = Gantt3View._lens;
+      if (!L.on) return;
+      const row = e.target.closest('.gantt-row[data-epic-key]');
+      if (!row) return;
+      // не воровать клики у интерактивных контролов строки
+      if (e.target.closest('button, a, input, select, textarea, .gantt-type-pill, .v16-epic-deps-badge, .v16-epic-deps-edit')) return;
+      const k = row.getAttribute('data-epic-key');
+      if (!k) return;
+      e.preventDefault(); e.stopPropagation();
+      if (L.locked && L.focusKey === k) { L.locked = false; Gantt3View._lensFocus(k); }
+      else { L.locked = true; Gantt3View._lensFocus(k); }
+    });
+  },
+  _lensFocus(key) {
+    const L = Gantt3View._lens;
+    if (!L.on) return;
+    if (!L.graph) Gantt3View._lensBuildGraph();
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    L.focusKey = key;
+    const G = L.graph;
+    const anc  = G.ancestorsOf[key]   || new Set();
+    const desc = G.descendantsOf[key] || new Set();
+    const crit = G.criticalPath(key);
+    const critSet = new Set(crit);
+    const els = Gantt3View._lensMapEls();
+
+    wrap.classList.add('gdt-lens-focusing');
+    Gantt3View._lensStripRowDecor(wrap);
+    const addCls = (k, ...cls) => { const el = els[k]; if (el) el.classList.add('gdt-lens-chain', ...cls); };
+    addCls(key, 'gdt-lens-focus');
+    anc.forEach(a  => addCls(a,  'gdt-lens-anc'));
+    desc.forEach(d => addCls(d, 'gdt-lens-desc'));
+    crit.forEach(c => { if (els[c]) els[c].classList.add('gdt-lens-chain', 'gdt-lens-crit'); });
+    Gantt3View._lensAddRole(els[key], 'foc', 'фокус');
+    anc.forEach(a  => Gantt3View._lensAddRole(els[a],  'anc',  'предок'));
+    desc.forEach(d => Gantt3View._lensAddRole(els[d], 'desc', 'потомок'));
+
+    Gantt3View._lensDrawWires(key, anc, desc, critSet);
+    Gantt3View._lensRenderReadout(key, anc, desc, crit);
+  },
+  _lensClearFocus() {
+    const L = Gantt3View._lens;
+    L.focusKey = null;
+    const wrap = document.getElementById('gantt3-wrap');
+    if (wrap) { wrap.classList.remove('gdt-lens-focusing'); Gantt3View._lensStripRowDecor(wrap); }
+    if (L.overlay) L.overlay.innerHTML = '';
+    if (L.on) Gantt3View._lensRenderReadoutEmpty();
+  },
+  _lensStripRowDecor(wrap) {
+    wrap = wrap || document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    wrap.querySelectorAll('.gdt-lens-chain,.gdt-lens-focus,.gdt-lens-anc,.gdt-lens-desc,.gdt-lens-crit')
+      .forEach(el => el.classList.remove('gdt-lens-chain','gdt-lens-focus','gdt-lens-anc','gdt-lens-desc','gdt-lens-crit'));
+    wrap.querySelectorAll('.gdt-lens-role').forEach(el => el.remove());
+  },
+  _lensAddRole(rowEl, cls, text) {
+    if (!rowEl) return;
+    const sub = rowEl.querySelector('.v16-epic-sub');
+    if (!sub || sub.querySelector('.gdt-lens-role.' + cls)) return;
+    const span = document.createElement('span');
+    span.className = 'gdt-lens-role ' + cls;
+    span.textContent = text;
+    sub.insertBefore(span, sub.firstChild);
+  },
+  /** Рисует провода в fixed-overlay: якорь — правый край лейбла строки (живой
+   *  getBoundingClientRect, поэтому переживает любой scroll/sticky при redraw).
+   *  Безье изгибается в левый гаттер. Крит-путь — жирная сплошная, прочее —
+   *  тонкий пунктир. */
+  _lensDrawWires(key, anc, desc, critSet) {
+    const L = Gantt3View._lens;
+    const svg = L.overlay; if (!svg) return;
+    const els = L.els || Gantt3View._lensMapEls();
+    const focusEl = els[key];
+    if (!focusEl) { svg.innerHTML = ''; return; }
+    const anchor = (el) => {
+      const label = el.querySelector('.gantt-row-label') || el;
+      const r = label.getBoundingClientRect();
+      return { x: r.right - 6, y: r.top + r.height / 2 };
+    };
+    const fa = anchor(focusEl);
+    let s = '';
+    const wire = (toEl, color, onCrit) => {
+      if (!toEl) return;
+      const b = anchor(toEl);
+      const dx = Math.max(26, Math.min(90, Math.abs(b.y - fa.y) * 0.18 + 26));
+      const cx = Math.min(fa.x, b.x) - dx;
+      s += '<path d="M' + fa.x.toFixed(1) + ' ' + fa.y.toFixed(1) +
+           ' C ' + cx.toFixed(1) + ' ' + fa.y.toFixed(1) + ', ' +
+           cx.toFixed(1) + ' ' + b.y.toFixed(1) + ', ' +
+           b.x.toFixed(1) + ' ' + b.y.toFixed(1) + '" fill="none" stroke="' + color +
+           '" stroke-width="' + (onCrit ? 2.2 : 1.3) + '"' + (onCrit ? '' : ' stroke-dasharray="4 3"') +
+           ' opacity="' + (onCrit ? 1 : 0.8) + '"/>';
+      s += '<circle cx="' + b.x.toFixed(1) + '" cy="' + b.y.toFixed(1) + '" r="' + (onCrit ? 3 : 2.3) + '" fill="' + color + '"/>';
+    };
+    anc.forEach(a  => wire(els[a],  'var(--prizma-information)', critSet.has(a)));
+    desc.forEach(d => wire(els[d], 'var(--prizma-off-course)',  critSet.has(d)));
+    svg.innerHTML = s;
+  },
+  _lensScheduleRedraw() {
+    const L = Gantt3View._lens;
+    if (!L.on || !L.focusKey || L._raf) return;
+    L._raf = requestAnimationFrame(() => {
+      L._raf = 0;
+      const G = L.graph;
+      if (!L.on || !L.focusKey || !G) return;
+      Gantt3View._lensDrawWires(
+        L.focusKey,
+        G.ancestorsOf[L.focusKey]   || new Set(),
+        G.descendantsOf[L.focusKey] || new Set(),
+        new Set(G.criticalPath(L.focusKey))
+      );
+    });
+  },
+  _lensRenderReadout(key, anc, desc, crit) {
+    const L = Gantt3View._lens; const ro = L.readout; if (!ro) return;
+    const esc = (s) => Utils.escapeHtml(String(s));
+    const short = (k) => k.split(/\s+/).slice(0, 2).join(' ');
+    const critLabels = crit.length > 1
+      ? crit.map(c => c === key ? '<b>' + esc(short(c)) + '</b>' : esc(short(c))).join(' → ')
+      : '— (изолирован)';
+    ro.innerHTML =
+      '<div class="lr-title">' + esc(key) + '</div>' +
+      '<div class="lr-counts"><span class="dep">зависит от ' + anc.size + '</span><span class="blk">блокирует ' + desc.size + '</span></div>' +
+      '<div class="lr-crit">крит-путь: ' + critLabels + '</div>' +
+      '<div class="lr-hint">' + (L.locked ? 'Закреплено · клик по эпику снимет' : 'Клик — закрепить') + ' · <kbd>Esc</kbd> выход</div>';
+  },
+  _lensRenderReadoutEmpty() {
+    const ro = Gantt3View._lens.readout; if (!ro) return;
+    ro.innerHTML =
+      '<div class="lr-empty">Наведите эпик — проявится его цепочка зависимостей.</div>' +
+      '<div class="lr-legend">' +
+        '<span><i style="border-color:var(--prizma-information)"></i>зависит от</span>' +
+        '<span><i style="border-color:var(--prizma-off-course)"></i>блокирует</span>' +
+        '<span><i style="border-color:var(--prizma-drift)"></i>крит-путь</span>' +
+      '</div>' +
+      '<div class="lr-hint"><kbd>Esc</kbd> — выйти из режима</div>';
+  },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -1953,7 +2321,7 @@ export const Gantt3View = {
         // #1: risk badges removed from epic-column header — they cluttered
         //   the title and the dedicated risks panel on the dashboard already
         //   surfaces them. Keep the no-assignee triangle.
-        body += `<div class="gantt-row gdt-grid-row${isHidden ? ' is-team-collapsed' : ''}" data-team-key="${esc(tk)}" data-row-id="${esc(row.id)}" style="grid-template-columns:${makeGT()}">
+        body += `<div class="gantt-row gdt-grid-row${isHidden ? ' is-team-collapsed' : ''}" data-team-key="${esc(tk)}" data-row-id="${esc(row.id)}" data-epic-key="${esc(_epicKey)}" style="grid-template-columns:${makeGT()}">
           <div class="gantt-row-label v16-epic-label">
             <span class="v16-epic-stripe" style="background:${_epicStripeColor}" aria-hidden="true"></span>
             <div class="v16-epic-name gantt-row-label-name">${esc(epicText)}</div>
@@ -2296,6 +2664,16 @@ export const Gantt3View = {
     // wipe out the scroll restoration above and the user would see the
     // Gantt blink + jump to top after every drag/delete.
     try { Services.App?.markRenderedNow?.(); } catch(_) {}
+
+    // Гант 3.0 п.2 — после ре-рендера строки пересозданы: снимаем устаревший
+    // фокус-декор линзы (делегированные слушатели на #gantt3-wrap переживают
+    // innerHTML-замену — wrap-элемент тот же, режим остаётся включён, юзер
+    // наводит заново). Без этого L.focusKey указывал бы на detached-узлы.
+    if (Gantt3View._lens && Gantt3View._lens.on) {
+      Gantt3View._lens.locked = false;
+      Gantt3View._lensBindRows();      // идемпотентно (guard wrap._gdtLensBound)
+      Gantt3View._lensClearFocus();
+    }
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
