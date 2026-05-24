@@ -894,6 +894,21 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-rep .cap .cn { width: 150px; flex: none; font-size: 12.5px; color: var(--prizma-text-secondary, var(--text-2)); }
 .gdt-rep .cap .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.06)); overflow: hidden; }
 .gdt-rep .cap .bar i { display: block; height: 100%; background: var(--prizma-information); }
+.gdt-rep .rk-meta { margin-left: auto; font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); white-space: nowrap; }
+.ms-tl { position: relative; height: 66px; margin: 16px 0 10px; }
+.ms-tl-line { position: absolute; left: 0; right: 0; top: 23px; height: 2px; background: var(--prizma-border-strong, var(--border)); }
+.ms-tl-pt { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.ms-tl-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--prizma-bg, #fff); border: 2px solid var(--prizma-border-strong, var(--border)); margin-top: 18px; order: -1; }
+.ms-tl-pt.past .ms-tl-dot { background: var(--prizma-text-tertiary, var(--text-3)); border-color: var(--prizma-text-tertiary, var(--text-3)); }
+.ms-tl-pt.now .ms-tl-dot { background: var(--prizma-information); border-color: var(--prizma-information); box-shadow: 0 0 0 4px color-mix(in srgb, var(--prizma-information) 22%, transparent); }
+.ms-tl-lab { font: 600 10px/1.1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; }
+.ms-tl-pt.now .ms-tl-lab { color: var(--prizma-information); }
+.ms-tl-dt { font: 500 9.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-deck .dk-intro { font-size: 14px; color: var(--prizma-text-secondary, var(--text-2)); max-width: 560px; margin: -10px 0 22px; line-height: 1.5; }
+.gdt-deck .dk-ms { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+.gdt-deck .dk-ms-tile { border: 1px solid var(--prizma-border, var(--border)); border-left: 3px solid var(--prizma-information); border-radius: var(--r-sm, 6px); padding: 11px 16px; min-width: 132px; }
+.gdt-deck .dk-ms-tile .dt { font: 700 13px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-deck .dk-ms-tile .lb { font-size: 12px; color: var(--prizma-text-secondary, var(--text-2)); margin-top: 5px; }
 .gdt-deck { position: relative; height: 100%; }
 .gdt-deck .dk-slide { position: absolute; inset: 0; padding: 40px 56px; overflow-y: auto; opacity: 0; pointer-events: none; transition: opacity .3s var(--ease-calm, ease); }
 .gdt-deck .dk-slide.on { opacity: 1; pointer-events: auto; }
@@ -3250,6 +3265,19 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     };
     render();
   },
+  _milestonesTimeline() {
+    const esc = Utils.escapeHtml;
+    const ms = (Array.isArray(state.milestones) ? state.milestones : []).map(m => ({ label: m.label, t: Date.parse(m.date + 'T00:00:00') })).filter(m => m.t).sort((a, b) => a.t - b.t);
+    if (!ms.length) return '';
+    const today = Date.now();
+    const lo = Math.min(today, ms[0].t), hi = Math.max(today, ms[ms.length - 1].t);
+    const span = Math.max(1, hi - lo);
+    const pos = (t) => Math.max(3, Math.min(97, Math.round((t - lo) / span * 100)));
+    const fmt = (t) => { const d = new Date(t); return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0'); };
+    const dots = ms.map(m => '<div class="ms-tl-pt' + (m.t < today ? ' past' : '') + '" style="left:' + pos(m.t) + '%"><span class="ms-tl-dot"></span><span class="ms-tl-lab">' + esc(m.label) + '</span><span class="ms-tl-dt">' + fmt(m.t) + '</span></div>').join('');
+    const now = '<div class="ms-tl-pt now" style="left:' + pos(today) + '%"><span class="ms-tl-dot"></span><span class="ms-tl-lab">сегодня</span></div>';
+    return '<div class="ms-tl"><div class="ms-tl-line"></div>' + dots + now + '</div>';
+  },
   _mode_report(body, data) {
     const esc = Utils.escapeHtml;
     const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
@@ -3264,7 +3292,9 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
       '<div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div>' +
       '<div class="gdt-kpi"><div class="kv">' + risks.length + '</div><div class="kk">рисков</div></div>' +
       '<div class="gdt-kpi"><div class="kv">' + totalWork + '</div><div class="kk">работ</div></div></div>';
-    h += '<h2>Риски</h2>' + (risks.length ? risks.map(e => '<div class="rk off"><b>' + esc(e.epic) + '</b>&nbsp;<span style="color:var(--prizma-text-tertiary)">— ' + esc(e.team) + '</span></div>').join('') : '<div style="color:var(--prizma-text-tertiary);font-size:13px">Рисков не зафиксировано</div>');
+    const tl = Gantt3View._milestonesTimeline();
+    if (tl) h += '<h2>Вехи</h2>' + tl;
+    h += '<h2>Топ-рисков</h2>' + (risks.length ? risks.map(e => '<div class="rk off"><b>' + esc(e.epic) + '</b>&nbsp;<span style="color:var(--prizma-text-tertiary)">— ' + esc(e.team) + '</span><span class="rk-meta">готовность ' + (e.total ? Math.round(e.done / e.total * 100) : 0) + '%' + (e.moves ? ' · ' + e.moves + ' ' + Gantt3View._plPeren(e.moves) : '') + '</span></div>').join('') : '<div style="color:var(--prizma-text-tertiary);font-size:13px">Рисков не зафиксировано</div>');
     h += '<h2>Нагрузка команд</h2>' + cap.map(c => '<div class="cap"><span class="cn">' + esc(c.name) + '</span><span class="bar"><i style="width:' + Math.round(c.n / maxCap * 100) + '%"></i></span><span style="font:600 11px/1 var(--mono);color:var(--prizma-text-tertiary)">' + c.n + '</span></div>').join('');
     h += '</div>';
     body.innerHTML = h;
@@ -3277,7 +3307,11 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
     const doneWork = data.epics.reduce((n, e) => n + e.done, 0);
     const pct = totalWork ? Math.round(doneWork / totalWork * 100) : 0;
-    slides.push('<div class="dk-h">Квартал — обзор</div><div class="gdt-kpis"><div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div><div class="gdt-kpi"><div class="kv">' + data.teams.length + '</div><div class="kk">команд</div></div><div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div><div class="gdt-kpi"><div class="kv">' + data.epics.filter(e => e.risk).length + '</div><div class="kk">рисков</div></div></div>');
+    const msTiles = (Array.isArray(state.milestones) ? state.milestones : []).map(m => { const d = new Date(m.date + 'T00:00:00'); const dd = isNaN(d) ? '' : d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0'); return '<div class="dk-ms-tile"><div class="dt">' + esc(dd) + '</div><div class="lb">' + esc(m.label) + '</div></div>'; }).join('');
+    slides.push('<div class="dk-h">Квартал — обзор</div>' +
+      '<p class="dk-intro">Статус на сегодня. Ниже — ключевые цифры и вехи, к которым движемся.</p>' +
+      '<div class="gdt-kpis"><div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div><div class="gdt-kpi"><div class="kv">' + data.teams.length + '</div><div class="kk">команд</div></div><div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div><div class="gdt-kpi"><div class="kv">' + data.epics.filter(e => e.risk).length + '</div><div class="kk">рисков</div></div></div>' +
+      (msTiles ? '<div class="dk-ms">' + msTiles + '</div>' : ''));
     data.teams.forEach(t => { const eps = data.epics.filter(e => e.teamKey === t.key); slides.push('<div class="dk-h">' + esc(t.name) + '</div>' + eps.map(e => '<div style="padding:11px 0;border-bottom:1px solid var(--prizma-border);display:flex;gap:12px;align-items:center"><b style="flex:1;font-size:15px">' + esc(e.epic) + '</b><span style="font:600 13px/1 var(--mono);color:var(--prizma-text-tertiary)">' + e.done + '/' + e.total + '</span>' + (e.risk ? '<span style="color:var(--prizma-off-course);font-size:12px">риск</span>' : e.churn ? '<span style="color:var(--prizma-drift);font-size:12px">дрейф</span>' : '') + '</div>').join('')); });
     const risks = data.epics.filter(e => e.risk);
     slides.push('<div class="dk-h">Риски квартала</div>' + (risks.length ? risks.map(e => '<div style="padding:11px 0 11px 14px;border-left:3px solid var(--prizma-off-course);margin-bottom:9px"><b style="font-size:15px">' + esc(e.epic) + '</b> <span style="color:var(--prizma-text-tertiary)">— ' + esc(e.team) + '</span></div>').join('') : '<div style="color:var(--prizma-text-tertiary)">Рисков не зафиксировано</div>'));
