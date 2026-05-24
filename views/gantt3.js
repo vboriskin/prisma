@@ -103,6 +103,9 @@ export const Gantt3View = {
   // режим включён; filter = активный фильтр { kind,label,test } или null;
   // sel = индекс выбранного пункта меню; opts = плоский список текущих опций.
   _cmd: { on: false, filter: null, sel: 0, opts: [], bar: null, onKey: null },
+  // Гант 3.0 п.5 — «Pill-anatomy»: поповер расшифровки пилюли (клик). Inline,
+  // всегда доступен. pop = текущий элемент поповера, onDoc — outside-listener.
+  _anatomy: { pop: null, onDoc: null, anchor: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -578,6 +581,30 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
 }
 #section-gantt3 .gantt-row.gdt-cmd-hit .v16-epic-name { color: var(--prizma-text-primary, var(--text-1)); font-weight: 600; }
 #section-gantt3 .gantt-cell.gdt-cmd-hl { background: var(--prizma-information-bg) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prizma-information) 45%, transparent); transition: background .2s; }
+
+/* === ГАНТ 3.0 · п.5 «Pill-anatomy» (lab sketch 08) =======================
+   Клик по пилюле → поповер с расшифровкой её «анатомии»: тип работы, статус
+   (словами + глиф), исполнитель, релиз, период, комментарий. Inline, scoped. */
+#gdt-anatomy-pop {
+  position: fixed; z-index: 64; min-width: 210px; max-width: 280px;
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-md, 10px); box-shadow: 0 12px 36px rgba(0,0,0,.34);
+  padding: 12px 13px; font: 12px/1.45 var(--font, inherit);
+  animation: gdtAnatomyIn .14s var(--ease-calm, ease);
+}
+@keyframes gdtAnatomyIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+#gdt-anatomy-pop .ga-hd { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#gdt-anatomy-pop .ga-stripe { width: 3px; align-self: stretch; min-height: 16px; border-radius: 2px; background: var(--prizma-information); flex: none; }
+#gdt-anatomy-pop .ga-wt { font-weight: 700; font-size: 13px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-anatomy-pop .ga-row { display: flex; gap: 8px; padding: 3px 0; }
+#gdt-anatomy-pop .ga-k { width: 84px; flex: none; color: var(--prizma-text-tertiary, var(--text-3)); font-size: 11px; }
+#gdt-anatomy-pop .ga-v { flex: 1; min-width: 0; color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-anatomy-pop .ga-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+#gdt-anatomy-pop .ga-dot.done { background: var(--prizma-on-course); }
+#gdt-anatomy-pop .ga-dot.active { background: var(--prizma-information); }
+#gdt-anatomy-pop .ga-dot.unplanned { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-anatomy-pop .ga-dot.todo { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-text-secondary, var(--text-2)); }
+#gdt-anatomy-pop .ga-cmt { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--prizma-border, var(--border)); font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3)); white-space: pre-wrap; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1846,6 +1873,99 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
     stat.textContent = Gantt3View._cmd.filter
       ? ((shown != null ? shown : 0) + ' из ' + totalEpics + ' эпиков')
       : (totalEpics + ' эпиков');
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.5 — «PILL-ANATOMY» (порт lab sketch 08). Клик по пилюле →
+     поповер с расшифровкой её закодированных каналов: тип работы (+цвет stripe),
+     статус словами+глиф, исполнитель, релиз, период, комментарий. Данные
+     читаются из самой пилюли (DOM) — без связки с моделью. Inline, всегда.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _anatomyBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtAnatomyBound) return;
+    wrap._gdtAnatomyBound = true;
+    wrap.addEventListener('click', (e) => {
+      const pill = e.target.closest('.gantt-type-pill[data-wt]');
+      if (!pill || pill.classList.contains('gantt-pill-ghost') || !pill.dataset.rowId) return;
+      // не мешаем командному фильтру/линзе/фокусу перехватывать свои клики —
+      // у них свои delegated-хендлеры на team-header/пустых местах, не на пилюлях.
+      e.stopPropagation();
+      Gantt3View._anatomyOpen(pill);
+    });
+  },
+  _anatomyOpen(pill) {
+    Gantt3View._anatomyClose();
+    const esc = Utils.escapeHtml;
+    const cell = pill.closest('.gantt-cell[data-col]');
+    const row  = pill.closest('.gantt-row[data-row-id]');
+    const wt   = (pill.dataset.wt || '').trim();
+    const name = (pill.querySelector('.gdt-pill-name')?.textContent || wt || 'работа').trim();
+    let stateLabel = 'К выполнению', stateCls = 'todo';
+    if      (pill.querySelector('.gdt-pill-state-done'))      { stateLabel = 'Готово';           stateCls = 'done'; }
+    else if (pill.querySelector('.gdt-pill-state-unplanned')) { stateLabel = 'Не запланирована'; stateCls = 'unplanned'; }
+    else if (pill.querySelector('.gdt-pill-state-active'))    { stateLabel = 'В работе';          stateCls = 'active'; }
+    const meta = (pill.querySelector('.gdt-pill-meta')?.textContent || '').trim();
+    let who = '', period = '';
+    if (meta && meta !== '—') { const parts = meta.split('·').map(s => s.trim()); who = parts[0] || ''; period = parts[1] || ''; }
+    const colKey = (cell?.dataset.col || pill.dataset.srcCol || '').trim();
+    const rel = (state.releases || []).find(r => r.key === colKey);
+    const relLabel = GANTT_COL_LABELS[colKey] || rel?.short || rel?.label || colKey;
+    const epicName = (row?.querySelector('.v16-epic-name')?.textContent || '').trim();
+    const cmtTip = pill.querySelector('.gdt-pill-cmt-marker')?.getAttribute('data-tip') || '';
+    const pop = document.createElement('div');
+    pop.id = 'gdt-anatomy-pop';
+    pop.innerHTML =
+      '<div class="ga-hd"><span class="ga-stripe"></span><span class="ga-wt">' + esc(name) + '</span></div>' +
+      (epicName ? '<div class="ga-row"><span class="ga-k">Эпик</span><span class="ga-v">' + esc(epicName) + '</span></div>' : '') +
+      '<div class="ga-row"><span class="ga-k">Статус</span><span class="ga-v"><span class="ga-dot ' + stateCls + '"></span>' + esc(stateLabel) + '</span></div>' +
+      '<div class="ga-row"><span class="ga-k">Исполнитель</span><span class="ga-v">' + (who ? esc(who) : '<i>не назначен</i>') + '</span></div>' +
+      '<div class="ga-row"><span class="ga-k">Релиз</span><span class="ga-v">' + esc(relLabel) + '</span></div>' +
+      (period ? '<div class="ga-row"><span class="ga-k">Период</span><span class="ga-v">' + esc(period) + '</span></div>' : '') +
+      (cmtTip ? '<div class="ga-cmt">' + esc(cmtTip) + '</div>' : '');
+    document.body.appendChild(pop);
+    Gantt3View._anatomy.pop = pop;
+    Gantt3View._anatomy.anchor = pill;
+    Gantt3View._anatomyPosition();
+    try {
+      const col = getComputedStyle(pill, '::before').backgroundColor;
+      if (col && col !== 'rgba(0, 0, 0, 0)' && col !== 'transparent') pop.querySelector('.ga-stripe').style.background = col;
+    } catch (_) {}
+    Gantt3View._anatomy.onDoc = (ev) => {
+      if (ev.type === 'keydown') { if (ev.key === 'Escape') Gantt3View._anatomyClose(); return; }
+      if (ev.type === 'scroll')  { Gantt3View._anatomyClose(); return; }
+      if (!pop.contains(ev.target) && !pill.contains(ev.target)) Gantt3View._anatomyClose();
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', Gantt3View._anatomy.onDoc, true);
+      document.addEventListener('keydown',  Gantt3View._anatomy.onDoc, true);
+      window.addEventListener('scroll',     Gantt3View._anatomy.onDoc, true);
+    }, 0);
+  },
+  _anatomyPosition() {
+    const A = Gantt3View._anatomy;
+    if (!A.pop || !A.anchor) return;
+    const r = A.anchor.getBoundingClientRect();
+    const pw = A.pop.offsetWidth, ph = A.pop.offsetHeight;
+    let left = r.left;
+    let top = r.bottom + 6;
+    if (left + pw > window.innerWidth - 12) left = window.innerWidth - pw - 12;
+    if (left < 12) left = 12;
+    if (top + ph > window.innerHeight - 12) top = r.top - ph - 6;   // flip above
+    if (top < 12) top = 12;
+    A.pop.style.left = Math.round(left) + 'px';
+    A.pop.style.top  = Math.round(top) + 'px';
+  },
+  _anatomyClose() {
+    const A = Gantt3View._anatomy;
+    if (A.onDoc) {
+      document.removeEventListener('mousedown', A.onDoc, true);
+      document.removeEventListener('keydown',  A.onDoc, true);
+      window.removeEventListener('scroll',     A.onDoc, true);
+      A.onDoc = null;
+    }
+    if (A.pop) { A.pop.remove(); A.pop = null; }
+    A.anchor = null;
   },
 
   bindFullscreen() {
@@ -3136,6 +3256,10 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
       Gantt3View._cmdEnsureBar();
       if (Gantt3View._cmd.filter) Gantt3View._cmdApplyFilter();
     }
+    // Гант 3.0 п.5 — Pill-anatomy: делегат на #gantt3-wrap (идемпотентно, всегда
+    // активен); открытый поповер на старой пилюле закрываем (пилюли пересозданы).
+    Gantt3View._anatomyBind();
+    Gantt3View._anatomyClose();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
