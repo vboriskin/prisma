@@ -118,6 +118,8 @@ export const Gantt3View = {
   _diff: { on: false },
   // Гант 3.0 п.12 — «Burndown»: toggle мини-спарклайнов сгорания в шапках релизов.
   _burndown: { on: false },
+  // Гант 3.0 п.13-16,21,24,25 — «Виды»: альтернативные представления (оверлеи).
+  _mode: { el: null, name: null, onKey: null, st: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -741,6 +743,89 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
 .gdt-burndown .bd-pace.ok { color: var(--prizma-on-course); }
 .gdt-burndown .bd-pace.behind { color: var(--prizma-drift); }
 .gdt-burndown .bd-pace.none { color: var(--prizma-text-tertiary, var(--text-3)); }
+
+/* === ГАНТ 3.0 · «Виды» — дропдаун + общий shell оверлея-режима (п.13-16,21,24,25) */
+#btn-gantt3-views.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+#gdt-views-menu {
+  position: fixed; z-index: 72; min-width: 220px; padding: 6px;
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-md, 10px); box-shadow: 0 16px 44px rgba(0,0,0,.4); display: none;
+}
+#gdt-views-menu.open { display: block; }
+#gdt-views-menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: none; cursor: pointer; padding: 9px 11px; border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); font: 500 13px/1.2 var(--font, inherit); }
+#gdt-views-menu button:hover { background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-views-menu button .vm-d { font: 500 10.5px/1.2 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-left: auto; }
+/* shell оверлея */
+#gdt-mode {
+  position: fixed; inset: 0; z-index: 71; display: flex; flex-direction: column;
+  background: var(--prizma-bg, var(--bg, #0A0A0F)); animation: gdtNarrIn .18s var(--ease-calm, ease);
+}
+#gdt-mode .gm-top { display: flex; align-items: center; gap: 12px; padding: 13px 22px; border-bottom: 1px solid var(--prizma-border, var(--border)); flex: none; }
+#gdt-mode .gm-title { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gm-sub { font: 500 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-mode .gm-spacer { flex: 1; }
+#gdt-mode .gm-act { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 11px; font-size: 12px; }
+#gdt-mode .gm-act:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-border-strong, var(--border)); }
+#gdt-mode .gm-body { flex: 1; overflow: auto; min-height: 0; }
+html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-section="gantt3"]) #gdt-views-menu { display: none !important; }
+/* per-mode (компактно, токены) */
+.gdt-dg { width: 100%; border-collapse: collapse; font: 12px/1.3 var(--font, inherit); }
+.gdt-dg th, .gdt-dg td { padding: 8px 12px; border-bottom: 1px solid var(--prizma-border, var(--border)); text-align: left; white-space: nowrap; }
+.gdt-dg th { position: sticky; top: 0; background: var(--prizma-bg-elevated, var(--card)); font: 700 10px/1 var(--font, inherit); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); z-index: 2; user-select: none; }
+.gdt-dg tbody tr:hover { background: var(--prizma-bg-elevated, rgba(0,0,0,.03)); }
+.gdt-dg td:nth-child(2) { font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-dg .num { text-align: center; font-feature-settings: "tnum"; font-family: var(--mono, ui-monospace, monospace); }
+.gdt-msplit { display: flex; height: 100%; }
+.gdt-msplit .ms-list { width: 300px; flex: none; border-right: 1px solid var(--prizma-border, var(--border)); overflow-y: auto; padding: 8px 0; }
+.gdt-msplit .ms-li { padding: 9px 16px 9px 18px; cursor: pointer; position: relative; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+.gdt-msplit .ms-li::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: transparent; }
+.gdt-msplit .ms-li.sel { background: var(--prizma-bg-elevated, rgba(0,0,0,.04)); }
+.gdt-msplit .ms-li.sel::before { background: var(--prizma-information); }
+.gdt-msplit .ms-li .nm { font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-msplit .ms-li .mt { font: 500 10.5px/1.3 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 3px; }
+.gdt-msplit .ms-insp { flex: 1; overflow-y: auto; padding: 26px 32px; }
+.gdt-card { max-width: 720px; }
+.gdt-card .ic-nm { font-size: 24px; font-weight: 800; letter-spacing: -.02em; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-card .ic-team { font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 6px; text-transform: uppercase; letter-spacing: .5px; }
+.gdt-card .ic-track { margin: 20px 0; display: grid; gap: 6px; }
+.gdt-card .ic-trk { display: flex; align-items: center; gap: 10px; }
+.gdt-card .ic-trk .k { width: 60px; flex: none; text-align: right; font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-card .ic-trk .v { display: flex; flex-wrap: wrap; gap: 4px; }
+.gdt-wt { font: 600 11px/1 var(--font, inherit); padding: 4px 8px; border-radius: 5px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-wt.done { opacity: .5; text-decoration: line-through; }
+.gdt-stats { display: flex; gap: 26px; margin: 18px 0; }
+.gdt-stat .sv { font-size: 22px; font-weight: 800; color: var(--prizma-text-primary, var(--text-1)); font-feature-settings: "tnum"; }
+.gdt-stat .sk { font: 600 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 4px; }
+.gdt-stat .sv.warn { color: var(--prizma-off-course); }
+.gdt-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--prizma-border, var(--border)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); overflow: hidden; }
+.gdt-kpi { background: var(--prizma-bg, var(--card)); padding: 16px 18px; }
+.gdt-kpi .kv { font-size: 26px; font-weight: 800; color: var(--prizma-text-primary, var(--text-1)); font-feature-settings: "tnum"; }
+.gdt-kpi .kk { font: 600 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 5px; }
+.gdt-rep { max-width: 900px; margin: 0 auto; padding: 28px 20px 80px; }
+.gdt-rep h2 { font: 700 13px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .6px; color: var(--prizma-text-tertiary, var(--text-3)); margin: 28px 0 12px; }
+.gdt-rep .rk { display: flex; align-items: center; gap: 10px; padding: 8px 0 8px 12px; position: relative; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+.gdt-rep .rk::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; background: var(--prizma-drift); }
+.gdt-rep .rk.off::before { background: var(--prizma-off-course); }
+.gdt-rep .cap { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
+.gdt-rep .cap .cn { width: 150px; flex: none; font-size: 12.5px; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-rep .cap .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.06)); overflow: hidden; }
+.gdt-rep .cap .bar i { display: block; height: 100%; background: var(--prizma-information); }
+.gdt-deck { position: relative; height: 100%; }
+.gdt-deck .dk-slide { position: absolute; inset: 0; padding: 40px 56px; overflow-y: auto; opacity: 0; pointer-events: none; transition: opacity .3s var(--ease-calm, ease); }
+.gdt-deck .dk-slide.on { opacity: 1; pointer-events: auto; }
+.gdt-deck .dk-h { font-size: 32px; font-weight: 800; letter-spacing: -.02em; margin-bottom: 22px; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-deck .dk-nav { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; }
+.gdt-deck .dk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--prizma-border-strong, var(--border)); border: none; cursor: pointer; padding: 0; }
+.gdt-deck .dk-dot.on { width: 22px; border-radius: 4px; background: var(--prizma-information); }
+.gdt-mission { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; padding: 14px; height: 100%; grid-auto-rows: minmax(0, 1fr); }
+.gdt-pan { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); padding: 13px 15px; overflow: auto; }
+.gdt-pan .ph { font: 700 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 10px; }
+.gdt-heat { display: grid; gap: 3px; }
+.gdt-heat .hr { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; align-items: center; }
+.gdt-heat .hc { height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font: 600 9px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-scrub { padding: 18px 26px; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+.gdt-scrub input[type=range] { width: 100%; accent-color: var(--prizma-information); }
+.gdt-scrub .sc-lbl { font: 600 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); margin-bottom: 10px; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1402,6 +1487,12 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
     if (bdBtn && !bdBtn._gdtBdBound) {
       bdBtn._gdtBdBound = true;
       bdBtn.addEventListener('click', () => Gantt3View._burndownToggle());
+    }
+    // Гант 3.0 — «Виды» дропдаун (альт. представления).
+    const viewsBtn = document.getElementById('btn-gantt3-views');
+    if (viewsBtn && !viewsBtn._gdtViewsBound) {
+      viewsBtn._gdtViewsBound = true;
+      viewsBtn.addEventListener('click', (e) => { e.stopPropagation(); Gantt3View._viewsToggleMenu(); });
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2601,6 +2692,249 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
       box.innerHTML = svg + '<span class="bd-pace ' + (onPace ? 'ok' : 'behind') + '">' + done + '/' + total + ' · ' + (onPace ? 'в графике' : 'отставание') + '</span>';
       hdr.appendChild(box);
     });
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · «ВИДЫ» — альтернативные представления квартала (оверлеи).
+     Дропдаун «Виды ▾» → один из 7 режимов. Общий shell #gdt-mode + DOM-скан
+     _collectEpics() кормит все режимы согласованными данными. Esc/Закрыть —
+     выход; авто-прячется вне вкладки. (п.13 split, п.14 zen, п.15 datagrid,
+     п.16 report, п.21 scrubber/history, п.24 deck, п.25 mission).
+     ═══════════════════════════════════════════════════════════════════════ */
+  _GDT_VIEWS: [
+    ['split',    'Сплит-вид',      'мастер-деталь'],
+    ['zen',      'Дзен-фокус',     'один эпик крупно'],
+    ['datagrid', 'Таблица',        'плотный грид'],
+    ['report',   'Отчёт',          'печатный статус'],
+    ['scrubber', 'История',        'ползунок по переносам'],
+    ['deck',     'Дек',            'слайды ревью'],
+    ['mission',  'Центр управления','приборная панель'],
+  ],
+  _collectEpics() {
+    const wrap = document.getElementById('gantt3-wrap');
+    const out = { teams: [], epics: [], cols: [], colLabel: {} };
+    if (!wrap) return out;
+    const firstRow = wrap.querySelector('.gantt-row[data-epic-key]');
+    if (firstRow) firstRow.querySelectorAll('.gantt-cell[data-col]').forEach(c => { out.cols.push(c.dataset.col); out.colLabel[c.dataset.col] = GANTT_COL_LABELS[c.dataset.col] || c.dataset.col; });
+    const ts = new Set();
+    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => {
+      const tk = h.dataset.teamKey; if (ts.has(tk)) return; ts.add(tk);
+      out.teams.push({ key: tk, name: (h.querySelector('.gdt-team-name')?.textContent || tk).trim() });
+    });
+    const deps = (state && state.epicDeps) ? state.epicDeps : {};
+    wrap.querySelectorAll('.gantt-row[data-epic-key]').forEach(row => {
+      const epic = (row.querySelector('.v16-epic-name')?.textContent || '(без эпика)').trim();
+      const tk = row.dataset.teamKey || '';
+      const cells = {};
+      row.querySelectorAll('.gantt-cell[data-col]').forEach(c => {
+        cells[c.dataset.col] = [...c.querySelectorAll('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)')].map(p => ({
+          wt: (p.querySelector('.gdt-pill-name')?.textContent || p.dataset.wt || '').trim(),
+          done: !!p.querySelector('.gdt-pill-state-done'),
+          active: !!p.querySelector('.gdt-pill-state-active'),
+          who: (p.querySelector('.gdt-pill-meta')?.textContent || '').split('·')[0].trim().replace(/^—$/, ''),
+        }));
+      });
+      const all = Object.values(cells).flat();
+      const dv = deps[epic]; const depList = Array.isArray(dv) ? dv : (dv ? [dv] : []);
+      out.epics.push({
+        epic, key: row.dataset.epicKey, teamKey: tk,
+        team: (out.teams.find(t => t.key === tk)?.name) || tk,
+        cells, total: all.length, done: all.filter(p => p.done).length, active: all.filter(p => p.active).length,
+        risk: !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)'),
+        churn: !!row.querySelector('.v16-epic-churn'),
+        deps: depList,
+        who: [...new Set(all.map(p => p.who).filter(Boolean))],
+      });
+    });
+    return out;
+  },
+  _viewsToggleMenu() {
+    const m = document.getElementById('gdt-views-menu');
+    if (m && m.classList.contains('open')) { Gantt3View._viewsCloseMenu(); return; }
+    Gantt3View._viewsOpenMenu();
+  },
+  _viewsOpenMenu() {
+    Gantt3View._viewsCloseMenu();
+    const btn = document.getElementById('btn-gantt3-views');
+    const menu = document.createElement('div'); menu.id = 'gdt-views-menu';
+    menu.innerHTML = Gantt3View._GDT_VIEWS.map(([k, t, d]) =>
+      '<button data-view="' + k + '">' + Utils.escapeHtml(t) + '<span class="vm-d">' + Utils.escapeHtml(d) + '</span></button>').join('');
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = (r.bottom + 6) + 'px';
+    menu.classList.add('open');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { const v = b.dataset.view; Gantt3View._viewsCloseMenu(); Gantt3View._modeOpen(v); }));
+    Gantt3View._viewsOnDoc = (e) => { if (!menu.contains(e.target) && e.target !== btn) Gantt3View._viewsCloseMenu(); };
+    setTimeout(() => document.addEventListener('mousedown', Gantt3View._viewsOnDoc, true), 0);
+  },
+  _viewsCloseMenu() {
+    if (Gantt3View._viewsOnDoc) { document.removeEventListener('mousedown', Gantt3View._viewsOnDoc, true); Gantt3View._viewsOnDoc = null; }
+    document.getElementById('gdt-views-menu')?.remove();
+    document.getElementById('btn-gantt3-views')?.setAttribute('aria-expanded', 'false');
+  },
+  _modeOpen(name) {
+    const builder = Gantt3View['_mode_' + name];
+    if (typeof builder !== 'function') return;
+    Gantt3View._modeClose();
+    const meta = Gantt3View._GDT_VIEWS.find(v => v[0] === name) || [name, name, ''];
+    const data = Gantt3View._collectEpics();
+    const el = document.createElement('div'); el.id = 'gdt-mode'; el.dataset.mode = name;
+    el.innerHTML = '<div class="gm-top"><span class="gm-title">' + Utils.escapeHtml(meta[1]) + '</span>' +
+      '<span class="gm-sub">' + data.epics.length + ' эпиков · ' + data.teams.length + ' команд</span>' +
+      '<span class="gm-spacer"></span><span class="gm-extra"></span>' +
+      '<button class="gm-act gm-close">Закрыть · Esc</button></div>' +
+      '<div class="gm-body" id="gdt-mode-body"></div>';
+    document.body.appendChild(el);
+    Gantt3View._mode = { el, name, st: null, onKey: (e) => { if (e.key === 'Escape') { e.preventDefault(); Gantt3View._modeClose(); } } };
+    el.querySelector('.gm-close').addEventListener('click', () => Gantt3View._modeClose());
+    document.addEventListener('keydown', Gantt3View._mode.onKey, true);
+    const btn = document.getElementById('btn-gantt3-views'); if (btn) btn.classList.add('active');
+    try { builder(el.querySelector('#gdt-mode-body'), data, el); } catch (e) { el.querySelector('#gdt-mode-body').innerHTML = '<div style="padding:24px;color:var(--prizma-text-tertiary)">Ошибка рендера вида: ' + Utils.escapeHtml(String(e && e.message)) + '</div>'; }
+  },
+  _modeClose() {
+    const M = Gantt3View._mode;
+    if (!M) return;
+    if (M.onKey) document.removeEventListener('keydown', M.onKey, true);
+    if (M.st && M.st.onKey2) document.removeEventListener('keydown', M.st.onKey2, true);
+    if (M.el) M.el.remove();
+    Gantt3View._mode = { el: null, name: null, onKey: null, st: null };
+    document.getElementById('btn-gantt3-views')?.classList.remove('active');
+  },
+  _modeEpicCard(e, data) {
+    const esc = Utils.escapeHtml;
+    const track = data.cols.filter(c => (e.cells[c] || []).length).map(c =>
+      '<div class="ic-trk"><span class="k">' + esc(data.colLabel[c]) + '</span><span class="v">' +
+      (e.cells[c] || []).map(p => '<span class="gdt-wt' + (p.done ? ' done' : '') + '">' + esc(p.wt) + (p.who ? ' · ' + esc(p.who) : '') + '</span>').join('') +
+      '</span></div>').join('') || '<div class="ic-trk"><span class="v" style="color:var(--prizma-text-tertiary)">Нет запланированных работ</span></div>';
+    const statusTxt = e.risk ? 'Риск срыва' : e.churn ? 'Дрейфует' : e.active ? 'В работе' : 'По плану';
+    return '<div class="gdt-card"><div class="ic-nm">' + esc(e.epic) + '</div><div class="ic-team">' + esc(e.team) + '</div>' +
+      '<div class="gdt-stats">' +
+        '<div class="gdt-stat"><div class="sv">' + e.total + '</div><div class="sk">работ</div></div>' +
+        '<div class="gdt-stat"><div class="sv">' + e.done + '</div><div class="sk">готово</div></div>' +
+        '<div class="gdt-stat"><div class="sv">' + e.who.length + '</div><div class="sk">людей</div></div>' +
+        '<div class="gdt-stat"><div class="sv' + ((e.risk || e.churn) ? ' warn' : '') + '">' + esc(statusTxt) + '</div><div class="sk">статус</div></div>' +
+      '</div><div class="ic-track">' + track + '</div>' +
+      (e.deps.length ? '<div class="ic-team" style="margin-top:14px">Зависит от: ' + esc(e.deps.join(', ')) + '</div>' : '') + '</div>';
+  },
+  _mode_split(body, data) {
+    const esc = Utils.escapeHtml;
+    body.innerHTML = '<div class="gdt-msplit"><div class="ms-list"></div><div class="ms-insp"></div></div>';
+    const list = body.querySelector('.ms-list'), insp = body.querySelector('.ms-insp');
+    list.innerHTML = data.epics.map((e, i) => '<div class="ms-li" data-i="' + i + '"><div class="nm">' + esc(e.epic) + '</div><div class="mt">' + esc(e.team) + ' · ' + e.total + ' работ' + (e.risk ? ' · риск' : e.churn ? ' · дрейф' : '') + '</div></div>').join('');
+    const sel = (i) => { list.querySelectorAll('.ms-li').forEach(x => x.classList.toggle('sel', +x.dataset.i === i)); insp.innerHTML = Gantt3View._modeEpicCard(data.epics[i], data); };
+    list.querySelectorAll('.ms-li').forEach(li => li.addEventListener('click', () => sel(+li.dataset.i)));
+    if (data.epics.length) sel(0);
+  },
+  _mode_zen(body, data) {
+    let i = 0;
+    body.innerHTML = '<div style="max-width:860px;margin:0 auto;padding:44px 28px"><div id="zen-card"></div>' +
+      '<div style="display:flex;gap:12px;justify-content:center;margin-top:28px"><button class="gm-act" id="zen-prev">← Пред</button>' +
+      '<span id="zen-pos" style="font:600 12px/1 var(--mono);color:var(--prizma-text-tertiary);align-self:center"></span>' +
+      '<button class="gm-act" id="zen-next">След →</button></div></div>';
+    const card = body.querySelector('#zen-card'), pos = body.querySelector('#zen-pos');
+    const show = () => { card.innerHTML = Gantt3View._modeEpicCard(data.epics[i], data); pos.textContent = (i + 1) + ' / ' + data.epics.length; };
+    const step = (d) => { if (!data.epics.length) return; i = (i + d + data.epics.length) % data.epics.length; show(); };
+    body.querySelector('#zen-prev').addEventListener('click', () => step(-1));
+    body.querySelector('#zen-next').addEventListener('click', () => step(1));
+    Gantt3View._mode.st = { onKey2: (ev) => { if (ev.key === 'ArrowLeft') step(-1); else if (ev.key === 'ArrowRight') step(1); } };
+    document.addEventListener('keydown', Gantt3View._mode.st.onKey2, true);
+    if (data.epics.length) show(); else card.innerHTML = '<div style="color:var(--prizma-text-tertiary)">Нет эпиков</div>';
+  },
+  _mode_datagrid(body, data) {
+    const esc = Utils.escapeHtml;
+    const cols = data.cols;
+    const st = { key: 'risk', dir: -1 };
+    const rows = data.epics.map(e => ({ e, riskN: e.risk ? 2 : (e.churn ? 1 : 0), ratio: e.total ? e.done / e.total : 0, counts: cols.reduce((m, c) => { m[c] = (e.cells[c] || []).length; return m; }, {}) }));
+    const render = () => {
+      rows.sort((a, b) => { const k = st.key; let av, bv;
+        if (k === 'team') { av = a.e.team; bv = b.e.team; } else if (k === 'epic') { av = a.e.epic; bv = b.e.epic; }
+        else if (k === 'total') { av = a.e.total; bv = b.e.total; } else if (k === 'ratio') { av = a.ratio; bv = b.ratio; }
+        else if (k === 'risk') { av = a.riskN; bv = b.riskN; } else { av = a.counts[k] || 0; bv = b.counts[k] || 0; }
+        return (typeof av === 'string') ? st.dir * av.localeCompare(bv, 'ru') : st.dir * (av - bv); });
+      const car = (k) => st.key === k ? (st.dir < 0 ? ' ▾' : ' ▴') : '';
+      const th = (k, l, num) => '<th data-k="' + k + '"' + (num ? ' class="num"' : '') + '>' + esc(l) + car(k) + '</th>';
+      let h = '<table class="gdt-dg"><thead><tr>' + th('team', 'Команда') + th('epic', 'Эпик') + cols.map(c => th(c, data.colLabel[c], true)).join('') + th('total', 'Σ', true) + th('ratio', 'Готово', true) + th('risk', 'Риск') + '</tr></thead><tbody>';
+      rows.forEach(r => { h += '<tr><td>' + esc(r.e.team) + '</td><td>' + esc(r.e.epic) + '</td>' +
+        cols.map(c => '<td class="num">' + (r.counts[c] || '·') + '</td>').join('') +
+        '<td class="num">' + r.e.total + '</td><td class="num">' + Math.round(r.ratio * 100) + '%</td>' +
+        '<td>' + (r.e.risk ? '<span style="color:var(--prizma-off-course)">риск</span>' : r.e.churn ? '<span style="color:var(--prizma-drift)">дрейф</span>' : '—') + '</td></tr>'; });
+      h += '</tbody></table>';
+      body.innerHTML = h;
+      body.querySelectorAll('th').forEach(t => t.addEventListener('click', () => { const k = t.dataset.k; if (st.key === k) st.dir *= -1; else { st.key = k; st.dir = (k === 'team' || k === 'epic') ? 1 : -1; } render(); }));
+    };
+    render();
+  },
+  _mode_report(body, data) {
+    const esc = Utils.escapeHtml;
+    const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
+    const doneWork = data.epics.reduce((n, e) => n + e.done, 0);
+    const pct = totalWork ? Math.round(doneWork / totalWork * 100) : 0;
+    const risks = data.epics.filter(e => e.risk);
+    const cap = data.teams.map(t => ({ name: t.name, n: data.epics.filter(e => e.teamKey === t.key).reduce((s, e) => s + e.total, 0) }));
+    const maxCap = Math.max(1, ...cap.map(c => c.n));
+    let h = '<div class="gdt-rep"><div class="gdt-kpis">' +
+      '<div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div>' +
+      '<div class="gdt-kpi"><div class="kv">' + data.teams.length + '</div><div class="kk">команд</div></div>' +
+      '<div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div>' +
+      '<div class="gdt-kpi"><div class="kv">' + risks.length + '</div><div class="kk">рисков</div></div>' +
+      '<div class="gdt-kpi"><div class="kv">' + totalWork + '</div><div class="kk">работ</div></div></div>';
+    h += '<h2>Риски</h2>' + (risks.length ? risks.map(e => '<div class="rk off"><b>' + esc(e.epic) + '</b>&nbsp;<span style="color:var(--prizma-text-tertiary)">— ' + esc(e.team) + '</span></div>').join('') : '<div style="color:var(--prizma-text-tertiary);font-size:13px">Рисков не зафиксировано</div>');
+    h += '<h2>Нагрузка команд</h2>' + cap.map(c => '<div class="cap"><span class="cn">' + esc(c.name) + '</span><span class="bar"><i style="width:' + Math.round(c.n / maxCap * 100) + '%"></i></span><span style="font:600 11px/1 var(--mono);color:var(--prizma-text-tertiary)">' + c.n + '</span></div>').join('');
+    h += '</div>';
+    body.innerHTML = h;
+    const extra = Gantt3View._mode.el && Gantt3View._mode.el.querySelector('.gm-extra');
+    if (extra) { extra.innerHTML = '<button class="gm-act" id="rep-print">Печать / PDF</button>'; extra.querySelector('#rep-print').addEventListener('click', () => window.print()); }
+  },
+  _mode_deck(body, data) {
+    const esc = Utils.escapeHtml;
+    const slides = [];
+    const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
+    const doneWork = data.epics.reduce((n, e) => n + e.done, 0);
+    const pct = totalWork ? Math.round(doneWork / totalWork * 100) : 0;
+    slides.push('<div class="dk-h">Квартал — обзор</div><div class="gdt-kpis"><div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div><div class="gdt-kpi"><div class="kv">' + data.teams.length + '</div><div class="kk">команд</div></div><div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div><div class="gdt-kpi"><div class="kv">' + data.epics.filter(e => e.risk).length + '</div><div class="kk">рисков</div></div></div>');
+    data.teams.forEach(t => { const eps = data.epics.filter(e => e.teamKey === t.key); slides.push('<div class="dk-h">' + esc(t.name) + '</div>' + eps.map(e => '<div style="padding:11px 0;border-bottom:1px solid var(--prizma-border);display:flex;gap:12px;align-items:center"><b style="flex:1;font-size:15px">' + esc(e.epic) + '</b><span style="font:600 13px/1 var(--mono);color:var(--prizma-text-tertiary)">' + e.done + '/' + e.total + '</span>' + (e.risk ? '<span style="color:var(--prizma-off-course);font-size:12px">риск</span>' : e.churn ? '<span style="color:var(--prizma-drift);font-size:12px">дрейф</span>' : '') + '</div>').join('')); });
+    const risks = data.epics.filter(e => e.risk);
+    slides.push('<div class="dk-h">Риски квартала</div>' + (risks.length ? risks.map(e => '<div style="padding:11px 0 11px 14px;border-left:3px solid var(--prizma-off-course);margin-bottom:9px"><b style="font-size:15px">' + esc(e.epic) + '</b> <span style="color:var(--prizma-text-tertiary)">— ' + esc(e.team) + '</span></div>').join('') : '<div style="color:var(--prizma-text-tertiary)">Рисков не зафиксировано</div>'));
+    let cur = 0;
+    body.innerHTML = '<div class="gdt-deck">' + slides.map((s, i) => '<div class="dk-slide' + (i === 0 ? ' on' : '') + '">' + s + '</div>').join('') +
+      '<div class="dk-nav"><button class="gm-act" id="dk-prev">←</button>' + slides.map((s, i) => '<button class="dk-dot' + (i === 0 ? ' on' : '') + '" data-d="' + i + '"></button>').join('') + '<button class="gm-act" id="dk-next">→</button></div></div>';
+    const go = (n) => { cur = (n + slides.length) % slides.length; body.querySelectorAll('.dk-slide').forEach((s, i) => s.classList.toggle('on', i === cur)); body.querySelectorAll('.dk-dot').forEach((d, i) => d.classList.toggle('on', i === cur)); };
+    body.querySelector('#dk-prev').addEventListener('click', () => go(cur - 1));
+    body.querySelector('#dk-next').addEventListener('click', () => go(cur + 1));
+    body.querySelectorAll('.dk-dot').forEach(d => d.addEventListener('click', () => go(+d.dataset.d)));
+    Gantt3View._mode.st = { onKey2: (ev) => { if (ev.key === 'ArrowLeft') go(cur - 1); else if (ev.key === 'ArrowRight') go(cur + 1); } };
+    document.addEventListener('keydown', Gantt3View._mode.st.onKey2, true);
+  },
+  _mode_mission(body, data) {
+    const esc = Utils.escapeHtml;
+    const totalWork = data.epics.reduce((n, e) => n + e.total, 0);
+    const doneWork = data.epics.reduce((n, e) => n + e.done, 0);
+    const pct = totalWork ? Math.round(doneWork / totalWork * 100) : 0;
+    const risks = data.epics.filter(e => e.risk);
+    let heat = '<div class="gdt-heat"><div class="hr"><span></span>' + data.cols.map(c => '<span class="hc" style="background:none;color:var(--prizma-text-tertiary)">' + esc(data.colLabel[c]) + '</span>').join('') + '</div>';
+    data.teams.forEach(t => { heat += '<div class="hr"><span style="font:600 9px/1 var(--mono);color:var(--prizma-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(t.name) + '</span>' +
+      data.cols.map(c => { const n = data.epics.filter(e => e.teamKey === t.key).reduce((s, e) => s + ((e.cells[c] || []).length), 0); const tint = n === 0 ? 'transparent' : 'color-mix(in srgb, var(--prizma-information) ' + Math.min(64, n * 12) + '%, transparent)'; return '<span class="hc" style="background:' + tint + '">' + (n || '') + '</span>'; }).join('') + '</div>'; });
+    heat += '</div>';
+    body.innerHTML = '<div class="gdt-mission">' +
+      '<div class="gdt-pan" style="grid-column:1/-1"><div class="ph">Сводка квартала</div><div class="gdt-kpis"><div class="gdt-kpi"><div class="kv">' + data.epics.length + '</div><div class="kk">эпиков</div></div><div class="gdt-kpi"><div class="kv">' + pct + '%</div><div class="kk">готово</div></div><div class="gdt-kpi"><div class="kv">' + risks.length + '</div><div class="kk">рисков</div></div><div class="gdt-kpi"><div class="kv">' + totalWork + '</div><div class="kk">работ</div></div></div></div>' +
+      '<div class="gdt-pan" style="grid-column:1/3"><div class="ph">Нагрузка: команды × релизы</div>' + heat + '</div>' +
+      '<div class="gdt-pan"><div class="ph">Риски</div>' + (risks.length ? risks.map(e => '<div style="padding:7px 0 7px 10px;border-left:3px solid var(--prizma-off-course);margin-bottom:7px;font-size:12.5px">' + esc(e.epic) + '<div style="color:var(--prizma-text-tertiary);font-size:11px;margin-top:2px">' + esc(e.team) + '</div></div>').join('') : '<div style="color:var(--prizma-text-tertiary);font-size:12px">Рисков нет</div>') + '</div>' +
+      '</div>';
+  },
+  _mode_scrubber(body, data) {
+    const esc = Utils.escapeHtml;
+    const moves = [];
+    (state.rows || []).forEach(r => { (Array.isArray(r.ganttArrows) ? r.ganttArrows : []).forEach(a => { moves.push({ epic: String(r.epic || r.tasks || '').trim(), wt: a.wt, from: a.srcCol, to: a.dstCol, at: a.at }); }); });
+    moves.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
+    if (!moves.length) { body.innerHTML = '<div style="padding:48px;max-width:560px;margin:0 auto;text-align:center;color:var(--prizma-text-tertiary);font-size:14px;line-height:1.6">История переносов пуста — пока ни одна работа не переезжала между релизами.<br>Перетащите пилюлю в другой колодец, и перенос появится здесь, на ползунке времени.</div>'; return; }
+    const N = moves.length;
+    const fmt = (at) => { const m = String(at).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '.' + m[2] : ''; };
+    body.innerHTML = '<div class="gdt-scrub"><div class="sc-lbl" id="sc-lbl"></div><input type="range" min="0" max="' + N + '" value="' + N + '" id="sc-range"></div><div id="sc-list" style="padding:18px 26px;max-width:760px"></div>';
+    const range = body.querySelector('#sc-range'), lbl = body.querySelector('#sc-lbl'), listEl = body.querySelector('#sc-list');
+    const render = () => { const k = +range.value; lbl.textContent = 'Перемотка: показаны переносы 1…' + k + ' из ' + N; listEl.innerHTML = moves.slice(0, k).map(mv => '<div style="padding:8px 0;border-bottom:1px solid var(--prizma-border);font-size:13px"><b>' + esc(mv.epic) + '</b> · ' + esc(mv.wt || '') + ' : ' + esc(GANTT_COL_LABELS[mv.from] || mv.from || '?') + ' → ' + esc(GANTT_COL_LABELS[mv.to] || mv.to || '?') + ' <span style="color:var(--prizma-text-tertiary);font:600 11px/1 var(--mono);margin-left:6px">' + fmt(mv.at) + '</span></div>').join(''); };
+    range.addEventListener('input', render); render();
   },
 
   bindFullscreen() {
