@@ -797,6 +797,16 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-dg tbody tr:hover { background: var(--prizma-bg-elevated, rgba(0,0,0,.03)); }
 .gdt-dg td:nth-child(2) { font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); }
 .gdt-dg .num { text-align: center; font-feature-settings: "tnum"; font-family: var(--mono, ui-monospace, monospace); }
+.gdt-dg td.num.warn { color: var(--prizma-drift); font-weight: 700; }
+.gdt-dg .dg-cell { text-align: center; white-space: nowrap; }
+.gdt-dg .dg-g { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin: 0 1px; vertical-align: middle; }
+.gdt-dg .dg-g.done { opacity: .4; }
+.gdt-dg .dg-more { font: 600 9px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-left: 2px; }
+.gdt-dg .dg-empty { color: var(--prizma-text-tertiary, var(--text-3)); opacity: .4; }
+.gdt-dg .dg-prog { display: inline-flex; align-items: center; gap: 7px; justify-content: flex-end; }
+.gdt-dg .dg-bar { width: 46px; height: 6px; border-radius: 3px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.08)); overflow: hidden; }
+.gdt-dg .dg-bar i { display: block; height: 100%; background: var(--prizma-information); }
+.gdt-dg tfoot td { position: sticky; bottom: 0; background: var(--prizma-bg-elevated, var(--card)); border-top: 2px solid var(--prizma-border-strong, var(--border)); font-weight: 700; color: var(--prizma-text-primary, var(--text-1)); }
 .gdt-msplit { display: flex; height: 100%; }
 .gdt-msplit .ms-list { width: 300px; flex: none; border-right: 1px solid var(--prizma-border, var(--border)); overflow-y: auto; padding: 8px 0; }
 .gdt-msplit .ms-li { padding: 9px 16px 9px 18px; cursor: pointer; position: relative; border-bottom: 1px solid var(--prizma-border, var(--border)); }
@@ -3189,23 +3199,34 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
   },
   _mode_datagrid(body, data) {
     const esc = Utils.escapeHtml;
+    const wc = Gantt3View._wtColor;
     const cols = data.cols;
     const st = { key: 'risk', dir: -1 };
     const rows = data.epics.map(e => ({ e, riskN: e.risk ? 2 : (e.churn ? 1 : 0), ratio: e.total ? e.done / e.total : 0, counts: cols.reduce((m, c) => { m[c] = (e.cells[c] || []).length; return m; }, {}) }));
+    const glyphs = (pills) => pills.length ? pills.slice(0, 5).map(p => '<span class="dg-g' + (p.done ? ' done' : '') + '" style="background:' + wc(p.wt) + '" title="' + esc(p.wt) + (p.who ? ' · ' + esc(p.who) : '') + '"></span>').join('') + (pills.length > 5 ? '<span class="dg-more">+' + (pills.length - 5) + '</span>' : '') : '<span class="dg-empty">·</span>';
     const render = () => {
       rows.sort((a, b) => { const k = st.key; let av, bv;
         if (k === 'team') { av = a.e.team; bv = b.e.team; } else if (k === 'epic') { av = a.e.epic; bv = b.e.epic; }
         else if (k === 'total') { av = a.e.total; bv = b.e.total; } else if (k === 'ratio') { av = a.ratio; bv = b.ratio; }
+        else if (k === 'moves') { av = a.e.moves || 0; bv = b.e.moves || 0; } else if (k === 'deps') { av = a.e.deps.length; bv = b.e.deps.length; }
         else if (k === 'risk') { av = a.riskN; bv = b.riskN; } else { av = a.counts[k] || 0; bv = b.counts[k] || 0; }
         return (typeof av === 'string') ? st.dir * av.localeCompare(bv, 'ru') : st.dir * (av - bv); });
       const car = (k) => st.key === k ? (st.dir < 0 ? ' ▾' : ' ▴') : '';
       const th = (k, l, num) => '<th data-k="' + k + '"' + (num ? ' class="num"' : '') + '>' + esc(l) + car(k) + '</th>';
-      let h = '<table class="gdt-dg"><thead><tr>' + th('team', 'Команда') + th('epic', 'Эпик') + cols.map(c => th(c, data.colLabel[c], true)).join('') + th('total', 'Σ', true) + th('ratio', 'Готово', true) + th('risk', 'Риск') + '</tr></thead><tbody>';
+      const tot = { cols: {}, total: 0, done: 0, moves: 0, risk: 0, deps: 0 };
+      cols.forEach(c => tot.cols[c] = 0);
+      rows.forEach(r => { cols.forEach(c => tot.cols[c] += r.counts[c]); tot.total += r.e.total; tot.done += r.e.done; tot.moves += (r.e.moves || 0); if (r.e.risk) tot.risk++; if (r.e.deps.length) tot.deps++; });
+      const totRatio = tot.total ? Math.round(tot.done / tot.total * 100) : 0;
+      let h = '<table class="gdt-dg"><thead><tr>' + th('team', 'Команда') + th('epic', 'Эпик') + cols.map(c => th(c, data.colLabel[c], true)).join('') + th('total', 'Σ', true) + th('ratio', 'Готово', true) + th('moves', 'Переносов', true) + th('deps', 'Зависит', true) + th('risk', 'Риск') + '</tr></thead><tbody>';
       rows.forEach(r => { h += '<tr><td>' + esc(r.e.team) + '</td><td>' + esc(r.e.epic) + '</td>' +
-        cols.map(c => '<td class="num">' + (r.counts[c] || '·') + '</td>').join('') +
-        '<td class="num">' + r.e.total + '</td><td class="num">' + Math.round(r.ratio * 100) + '%</td>' +
+        cols.map(c => '<td class="dg-cell">' + glyphs(r.e.cells[c] || []) + '</td>').join('') +
+        '<td class="num">' + r.e.total + '</td>' +
+        '<td class="num"><span class="dg-prog"><span class="dg-bar"><i style="width:' + Math.round(r.ratio * 100) + '%"></i></span>' + Math.round(r.ratio * 100) + '%</span></td>' +
+        '<td class="num' + (r.e.moves ? ' warn' : '') + '">' + (r.e.moves || '·') + '</td>' +
+        '<td class="num" title="' + esc(r.e.deps.join(', ')) + '">' + (r.e.deps.length || '·') + '</td>' +
         '<td>' + (r.e.risk ? '<span style="color:var(--prizma-off-course)">риск</span>' : r.e.churn ? '<span style="color:var(--prizma-drift)">дрейф</span>' : '—') + '</td></tr>'; });
-      h += '</tbody></table>';
+      h += '</tbody><tfoot><tr><td>ИТОГО</td><td>' + rows.length + ' эпиков</td>' + cols.map(c => '<td class="num">' + tot.cols[c] + '</td>').join('') + '<td class="num">' + tot.total + '</td><td class="num">' + totRatio + '%</td><td class="num">' + tot.moves + '</td><td class="num">' + tot.deps + '</td><td>' + tot.risk + ' под риском</td></tr></tfoot>';
+      h += '</table>';
       body.innerHTML = h;
       body.querySelectorAll('th').forEach(t => t.addEventListener('click', () => { const k = t.dataset.k; if (st.key === k) st.dir *= -1; else { st.key = k; st.dir = (k === 'team' || k === 'epic') ? 1 : -1; } render(); }));
     };
