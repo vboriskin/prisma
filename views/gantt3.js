@@ -96,6 +96,9 @@ export const Gantt3View = {
   // graph = мемоизированные множества предков/потомков/крит-путь; els = карта
   // epicKey→row-элемент; handlers/overlay/readout — для аккуратного teardown.
   _lens: { on: false, focusKey: null, locked: false, graph: null, els: null, overlay: null, readout: null, onScroll: null, onKey: null, _raf: 0 },
+  // Гант 3.0 п.3 — состояние «Фокус-дорожки» (sketch redesign 02). on = режим
+  // включён; team = teamKey раскрытой команды (остальные свёрнуты в сводку).
+  _focusLane: { on: false, team: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -493,6 +496,34 @@ export const Gantt3View = {
    Сам режим не выключаем — вернёшься, и линза снова доступна. */
 html:not([data-active-section="gantt3"]) #gdt-lens-wires,
 html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !important; }
+
+/* === ГАНТ 3.0 · п.3 «Фокус-дорожка» (lab redesign 02) ====================
+   Progressive disclosure поверх существующего collapse: ровно одна команда
+   раскрыта детально, остальные свёрнуты в тихую сводку (team-header +
+   bucket-ячейки нагрузки). Клик по любому team-header переключает фокус
+   (аккордеон). Реюзает _dtHiddenTeams + .is-team-collapsed. Scoped под
+   #section-gantt3 — оригинальный Гант не затронут. */
+#btn-gantt3-focuslane.active {
+  border-color: var(--prizma-information);
+  color: var(--prizma-information);
+  background: var(--prizma-information-bg);
+}
+/* В режиме фокус-дорожки все team-header кликабельны (переключают фокус). */
+body.gdt-focuslane-on #section-gantt3 .gantt-team-header { cursor: pointer; }
+/* Свёрнутые команды — тихие, но читаемые (сводка нагрузки видна). */
+body.gdt-focuslane-on #section-gantt3 .gantt-team-header:not(.gdt-lane-focus) {
+  opacity: .66; transition: opacity .2s var(--ease-calm, ease), background .15s;
+}
+body.gdt-focuslane-on #section-gantt3 .gantt-team-header:not(.gdt-lane-focus):hover {
+  opacity: 1; background: var(--prizma-bg-elevated, var(--row-hover, rgba(0,0,0,.03)));
+}
+/* Фокусная команда — акцентная полоса на sticky-лейбле + акцентное имя. */
+body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-team-label {
+  box-shadow: inset 3px 0 0 var(--prizma-information);
+}
+body.gdt-focuslane-on #section-gantt3 .gantt-team-header.gdt-lane-focus .gdt-team-name {
+  color: var(--prizma-information);
+}
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1097,6 +1128,12 @@ html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !impo
       lensBtn._gdtLensBound = true;
       lensBtn.addEventListener('click', () => Gantt3View._lensToggleMode());
     }
+    // Гант 3.0 п.3 — «Фокус-дорожка» (toggle accordion-режима).
+    const laneBtn = document.getElementById('btn-gantt3-focuslane');
+    if (laneBtn && !laneBtn._gdtLaneBound) {
+      laneBtn._gdtLaneBound = true;
+      laneBtn.addEventListener('click', () => Gantt3View._focusLaneToggleMode());
+    }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
    *  state.actionLog (наполняется HistoryLog.data/.gantt + HistoryManager). */
@@ -1396,6 +1433,101 @@ html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !impo
         '<span><i style="border-color:var(--prizma-drift)"></i>крит-путь</span>' +
       '</div>' +
       '<div class="lr-hint"><kbd>Esc</kbd> — выйти из режима</div>';
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.3 — «ФОКУС-ДОРОЖКА» (порт lab redesign 02-swimlane-focus)
+     Progressive disclosure / аккордеон поверх существующего collapse: ровно
+     одна команда раскрыта детально, остальные свёрнуты в тихую сводку
+     (team-header + bucket-ячейки нагрузки). Клик по любому team-header
+     переключает фокус. Реюзает _dtHiddenTeams + .is-team-collapsed (как
+     chevron-handler) — class-toggle без полного ре-рендера. Повторный клик
+     кнопки = выход (все команды раскрываются).
+     ═══════════════════════════════════════════════════════════════════════ */
+  _focusLaneTeamKeys() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return [];
+    return [...wrap.querySelectorAll('.gantt-team-header[data-team-key]')].map(h => h.dataset.teamKey);
+  },
+  _focusLaneToggleMode() {
+    if (Gantt3View._focusLane.on) Gantt3View._focusLaneExit();
+    else                          Gantt3View._focusLaneEnter();
+  },
+  _focusLaneEnter() {
+    const FL = Gantt3View._focusLane;
+    const keys = Gantt3View._focusLaneTeamKeys();
+    if (!keys.length) { try { Services.Toast?.info?.('Нет команд для фокуса'); } catch (_) {} return; }
+    FL.on = true;
+    const btn = document.getElementById('btn-gantt3-focuslane');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    document.body.classList.add('gdt-focuslane-on');
+    if (!Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams = new Set();
+    Gantt3View._focusLaneBind();
+    // фокус на ранее выбранную (если ещё в DOM) либо на первую команду
+    const tk = (FL.team && keys.includes(FL.team)) ? FL.team : keys[0];
+    Gantt3View._focusLaneSetFocus(tk, { silent: true });
+    try { Services.Toast?.info?.('Фокус-дорожка: клик по команде раскрывает её, остальные — в сводку. Кнопка ещё раз — выход.', { ms: 2800 }); } catch (_) {}
+  },
+  _focusLaneExit() {
+    const FL = Gantt3View._focusLane;
+    FL.on = false;
+    const btn = document.getElementById('btn-gantt3-focuslane');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+    document.body.classList.remove('gdt-focuslane-on');
+    // развернуть все команды (фокус-режим — отдельный слой; на выходе чистим)
+    if (Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams.clear();
+    const wrap = document.getElementById('gantt3-wrap');
+    if (wrap) {
+      wrap.querySelectorAll('.gantt-row.is-team-collapsed').forEach(r => r.classList.remove('is-team-collapsed'));
+      wrap.querySelectorAll('.gantt-team-header.gdt-lane-focus').forEach(h => h.classList.remove('gdt-lane-focus'));
+      wrap.querySelectorAll('.gantt-team-vis-btn').forEach(b => Gantt3View._focusLaneSetChevron(b, false));
+    }
+  },
+  _focusLaneSetFocus(tk, opts) {
+    const FL = Gantt3View._focusLane;
+    if (!tk) return;
+    FL.team = tk;
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    const keys = Gantt3View._focusLaneTeamKeys();
+    // _dtHiddenTeams = все кроме фокусной → полный ре-рендер останется консистентен
+    if (!Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams = new Set();
+    Gantt3View._dtHiddenTeams.clear();
+    keys.forEach(k => { if (k !== tk) Gantt3View._dtHiddenTeams.add(k); });
+    // class-toggle без полного ре-рендера (тот же приём, что у chevron-handler)
+    wrap.querySelectorAll('.gantt-row[data-team-key]').forEach(r => {
+      r.classList.toggle('is-team-collapsed', r.dataset.teamKey !== tk);
+    });
+    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => {
+      const isFocus = h.dataset.teamKey === tk;
+      h.classList.toggle('gdt-lane-focus', isFocus);
+      const btn = h.querySelector('.gantt-team-vis-btn');
+      if (btn) Gantt3View._focusLaneSetChevron(btn, !isFocus);
+    });
+    if (!opts || !opts.silent) {
+      const hd = wrap.querySelector('.gantt-team-header.gdt-lane-focus');
+      if (hd) hd.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  },
+  _focusLaneSetChevron(btn, collapsed) {
+    try { btn.innerHTML = Services.Icons?.get?.(collapsed ? 'chevron-right' : 'chevron-down', { size: 12 }) || ''; } catch (_) {}
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    btn.setAttribute('aria-label', collapsed ? 'Развернуть команду' : 'Свернуть команду');
+  },
+  _focusLaneBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtFocusLaneBound) return;
+    wrap._gdtFocusLaneBound = true;
+    // capture-фаза: перехватываем клик по team-header РАНЬШЕ per-button
+    // chevron-handler'а (bubble) и переводим его в смену фокуса (аккордеон).
+    wrap.addEventListener('click', (e) => {
+      if (!Gantt3View._focusLane.on) return;            // вне режима — обычное поведение chevron
+      const hd = e.target.closest('.gantt-team-header[data-team-key]');
+      if (!hd) return;
+      if (e.target.closest('.gdt-team-add-epic')) return;  // «+» добавить эпик не воруем
+      e.stopPropagation(); e.preventDefault();
+      Gantt3View._focusLaneSetFocus(hd.dataset.teamKey);
+    }, true);
   },
 
   bindFullscreen() {
@@ -1954,7 +2086,7 @@ html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !impo
         </div>`;
       }).join('');
 
-      body += `<div class="gantt-team-header gdt-grid-row v16-team-row${_isOverview ? ' gdt-overview-row' : ''}" data-team-key="${esc(tk)}" style="display:grid;grid-template-columns:${makeGT()}">
+      body += `<div class="gantt-team-header gdt-grid-row v16-team-row${_isOverview ? ' gdt-overview-row' : ''}${(Gantt3View._focusLane && Gantt3View._focusLane.on && Gantt3View._focusLane.team === tk) ? ' gdt-lane-focus' : ''}" data-team-key="${esc(tk)}" style="display:grid;grid-template-columns:${makeGT()}">
         <span class="v16-team-rail audit-art-team-rail" aria-hidden="true"></span>
         <div class="gantt-team-header-cell gdt-team-label v16-team-label">
           ${_isOverview
@@ -2673,6 +2805,11 @@ html:not([data-active-section="gantt3"]) #gdt-lens-readout { display: none !impo
       Gantt3View._lens.locked = false;
       Gantt3View._lensBindRows();      // идемпотентно (guard wrap._gdtLensBound)
       Gantt3View._lensClearFocus();
+    }
+    // Гант 3.0 п.3 — Фокус-дорожка: шаблон уже отрисовал gdt-lane-focus + collapse
+    // из _dtHiddenTeams, остаётся только (идемпотентно) переустановить делегата.
+    if (Gantt3View._focusLane && Gantt3View._focusLane.on) {
+      Gantt3View._focusLaneBind();
     }
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
