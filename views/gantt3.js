@@ -1115,7 +1115,55 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
    выше чрома, но ниже FAB(10000)/confirm-dialog(11500). */
 #gdt-lens-wires, #gdt-lens-readout, #gdt-anatomy-pop, #gdt-peek, #gdt-radial,
 #gdt-annot-pop, #gdt-marquee, #gdt-mq-bar, #gdt-suggest, #gdt-views-menu,
-#gdt-narrative, #gdt-mode { z-index: 9100; }
+#gdt-narrative, #gdt-mode, #gdt-focus { z-index: 9100; }
+/* === Гант 3.0 · «Фокус-дорожка» (оверлей, порт redesign 02) =============== */
+#gdt-focus { position: fixed; inset: 0; background: var(--prizma-bg, var(--card, #fff)); display: flex; flex-direction: column; }
+html:not([data-active-section="gantt3"]) #gdt-focus { display: none !important; }
+#gdt-focus .gf-top { display: flex; align-items: center; gap: 12px; padding: 13px 22px; border-bottom: 1px solid var(--prizma-border, var(--border)); flex: none; }
+#gdt-focus .gf-title { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-focus .gf-sub { font: 500 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-focus .gf-close { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 11px; font-size: 12px; }
+#gdt-focus .gf-close:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-border-strong, var(--border)); }
+#gdt-focus .gf-body { flex: 1; display: flex; min-height: 0; }
+#gdt-focus .gf-side { width: 250px; flex: none; border-right: 1px solid var(--prizma-border, var(--border)); overflow-y: auto; padding: 12px; }
+#gdt-focus .gf-side-h { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin: 4px 6px 12px; }
+#gdt-focus .gf-team { display: block; width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 11px 12px; cursor: pointer; margin-bottom: 4px; position: relative; }
+#gdt-focus .gf-team:hover { background: var(--prizma-bg-elevated, rgba(0,0,0,.03)); }
+#gdt-focus .gf-team.focus { background: var(--prizma-bg-elevated, rgba(0,0,0,.04)); border-color: var(--prizma-border, var(--border)); }
+#gdt-focus .gf-team.focus::before { content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--prizma-information); }
+#gdt-focus .gf-tn { display: block; font-size: 13.5px; font-weight: 700; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-focus .gf-tm { display: block; font: 500 10.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 4px; }
+#gdt-focus .gf-spark { display: flex; align-items: flex-end; gap: 3px; height: 22px; margin-top: 10px; }
+#gdt-focus .gf-spark i { flex: 1; border-radius: 2px 2px 0 0; min-height: 2px; }
+#gdt-focus .gf-main { flex: 1; overflow: auto; padding: 16px 24px 60px; }
+#gdt-focus .gf-cols, #gdt-focus .gf-erow, #gdt-focus .gf-quiet { display: grid; grid-template-columns: 210px repeat(var(--n, 5), 1fr); gap: 8px; }
+#gdt-focus .gf-cols { padding-bottom: 10px; border-bottom: 1px solid var(--prizma-border, var(--border)); margin-bottom: 4px; }
+#gdt-focus .gf-ch { font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-focus .gf-lane-h { font: 700 10px/1 var(--font, inherit); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-information); margin: 16px 0 10px; }
+#gdt-focus .gf-epic { padding: 9px 0; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+#gdt-focus .gf-en { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); margin-bottom: 8px; }
+#gdt-focus .gf-edot { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-text-tertiary, var(--text-3)); flex: none; }
+#gdt-focus .gf-epic.risk .gf-edot { background: var(--prizma-off-course); }
+#gdt-focus .gf-epic.drift .gf-edot { background: var(--prizma-drift); }
+#gdt-focus .gf-ecell { display: flex; flex-direction: column; gap: 4px; }
+#gdt-focus .gf-pill { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px; border-radius: 5px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+#gdt-focus .gf-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 5px 0 0 5px; background: var(--wt, var(--prizma-information)); }
+#gdt-focus .gf-pill b { font: 700 11px/1 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-focus .gf-pill i { font: 500 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); font-style: normal; }
+#gdt-focus .gf-pill.done { opacity: .5; } #gdt-focus .gf-pill.done b { text-decoration: line-through; }
+#gdt-focus .gf-pill.active::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); margin-left: auto; flex: none; }
+#gdt-focus .gf-quiets { margin-top: 16px; border-top: 1px solid var(--prizma-border-strong, var(--border)); padding-top: 6px; }
+#gdt-focus .gf-quiet { width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--prizma-border, var(--border)); padding: 12px 0; cursor: pointer; align-items: center; }
+#gdt-focus .gf-quiet:hover { background: var(--prizma-bg-elevated, rgba(0,0,0,.02)); }
+#gdt-focus .gf-qname { font-size: 12.5px; font-weight: 600; color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-focus .gf-qname.risk { color: var(--prizma-off-course); }
+#gdt-focus .gf-qcell { display: flex; align-items: center; gap: 7px; }
+#gdt-focus .gf-dots { display: inline-flex; gap: 3px; }
+#gdt-focus .gf-dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-focus .gf-dots i.r { background: var(--prizma-off-course); }
+#gdt-focus .gf-qn { font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-focus .gf-qz { color: var(--prizma-text-tertiary, var(--text-3)); opacity: .4; }
+#gdt-focus .gf-muted { color: var(--prizma-text-tertiary, var(--text-3)); font-size: 13px; padding: 12px 0; }
 #gdt-views-menu { z-index: 9200; }   /* дропдаун — поверх своего оверлея-режима */
 `;
     const styleEl = document.createElement('style');
@@ -2124,59 +2172,75 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
   },
   _focusLaneEnter() {
     const FL = Gantt3View._focusLane;
-    const keys = Gantt3View._focusLaneTeamKeys();
-    if (!keys.length) { try { Services.Toast?.info?.('Нет команд для фокуса'); } catch (_) {} return; }
+    const data = Gantt3View._collectEpics();
+    if (!data.teams.length) { try { Services.Toast?.info?.('Нет команд для фокуса'); } catch (_) {} return; }
     FL.on = true;
+    FL._data = data;
     const btn = document.getElementById('btn-gantt3-focuslane');
     if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
-    document.body.classList.add('gdt-focuslane-on');
-    if (!Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams = new Set();
-    Gantt3View._focusLaneBind();
-    // фокус на ранее выбранную (если ещё в DOM) либо на первую команду
-    const tk = (FL.team && keys.includes(FL.team)) ? FL.team : keys[0];
+    const el = document.createElement('div');
+    el.id = 'gdt-focus';
+    el.innerHTML = '<div class="gf-top"><span class="gf-title">Фокус-дорожка</span><span class="gf-sub">одно крупно · остальное тихо</span><span style="flex:1"></span><button class="gf-close" id="gf-close">Закрыть · Esc</button></div>' +
+      '<div class="gf-body"><aside class="gf-side" id="gf-side"></aside><main class="gf-main" id="gf-main"></main></div>';
+    document.body.appendChild(el);
+    FL.el = el;
+    el.querySelector('#gf-close').addEventListener('click', () => Gantt3View._focusLaneExit());
+    FL.onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); Gantt3View._focusLaneExit(); } };
+    document.addEventListener('keydown', FL.onKey, true);
+    const tk = (FL.team && data.teams.some(t => t.key === FL.team)) ? FL.team : data.teams[0].key;
     Gantt3View._focusLaneSetFocus(tk, { silent: true });
-    try { Services.Toast?.info?.('Фокус-дорожка: клик по команде раскрывает её, остальные — в сводку. Кнопка ещё раз — выход.', { ms: 2800 }); } catch (_) {}
   },
   _focusLaneExit() {
     const FL = Gantt3View._focusLane;
     FL.on = false;
+    if (FL.onKey) { document.removeEventListener('keydown', FL.onKey, true); FL.onKey = null; }
+    if (FL.el) { FL.el.remove(); FL.el = null; }
+    FL._data = null;
     const btn = document.getElementById('btn-gantt3-focuslane');
     if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
-    document.body.classList.remove('gdt-focuslane-on');
-    // развернуть все команды (фокус-режим — отдельный слой; на выходе чистим)
-    if (Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams.clear();
-    const wrap = document.getElementById('gantt3-wrap');
-    if (wrap) {
-      wrap.querySelectorAll('.gantt-row.is-team-collapsed').forEach(r => r.classList.remove('is-team-collapsed'));
-      wrap.querySelectorAll('.gantt-team-header.gdt-lane-focus').forEach(h => h.classList.remove('gdt-lane-focus'));
-      wrap.querySelectorAll('.gantt-team-vis-btn').forEach(b => Gantt3View._focusLaneSetChevron(b, false));
-    }
   },
-  _focusLaneSetFocus(tk, opts) {
+  _focusLaneSetFocus(tk) {
     const FL = Gantt3View._focusLane;
-    if (!tk) return;
+    if (!tk || !FL.el || !FL._data) return;
     FL.team = tk;
-    const wrap = document.getElementById('gantt3-wrap');
-    if (!wrap) return;
-    const keys = Gantt3View._focusLaneTeamKeys();
-    // _dtHiddenTeams = все кроме фокусной → полный ре-рендер останется консистентен
-    if (!Gantt3View._dtHiddenTeams) Gantt3View._dtHiddenTeams = new Set();
-    Gantt3View._dtHiddenTeams.clear();
-    keys.forEach(k => { if (k !== tk) Gantt3View._dtHiddenTeams.add(k); });
-    // class-toggle без полного ре-рендера (тот же приём, что у chevron-handler)
-    wrap.querySelectorAll('.gantt-row[data-team-key]').forEach(r => {
-      r.classList.toggle('is-team-collapsed', r.dataset.teamKey !== tk);
-    });
-    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => {
-      const isFocus = h.dataset.teamKey === tk;
-      h.classList.toggle('gdt-lane-focus', isFocus);
-      const btn = h.querySelector('.gantt-team-vis-btn');
-      if (btn) Gantt3View._focusLaneSetChevron(btn, !isFocus);
-    });
-    if (!opts || !opts.silent) {
-      const hd = wrap.querySelector('.gantt-team-header.gdt-lane-focus');
-      if (hd) hd.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    Gantt3View._focusLaneRender();
+  },
+  /** Рендер оверлея «Фокус-дорожка» (порт redesign 02): сайдбар команд с
+   *  барами нагрузки, одна команда раскрыта детально (пилюли по окнам),
+   *  остальные — тихие сводки с dot-кластерами. */
+  _focusLaneRender() {
+    const FL = Gantt3View._focusLane;
+    const data = FL._data; if (!data || !FL.el) return;
+    const esc = Utils.escapeHtml;
+    const wc = Gantt3View._wtColor;
+    const tk = FL.team;
+    const cols = data.cols;
+    const teamLoad = (key) => cols.map(c => data.epics.filter(e => e.teamKey === key).reduce((s, e) => s + ((e.cells[c] || []).length), 0));
+    const maxLoad = Math.max(1, ...data.teams.flatMap(t => teamLoad(t.key)));
+    const teamWorks = (key) => data.epics.filter(e => e.teamKey === key).reduce((s, e) => s + e.total, 0);
+    const teamRisk = (key) => data.epics.some(e => e.teamKey === key && e.risk);
+    // сайдбар команд
+    const side = '<div class="gf-side-h">Команды · ' + data.teams.length + '</div>' + data.teams.map(t => {
+      const loads = teamLoad(t.key); const eps = data.epics.filter(e => e.teamKey === t.key).length;
+      const spark = '<span class="gf-spark">' + loads.map(n => '<i style="height:' + Math.max(8, Math.round(n / maxLoad * 100)) + '%;background:' + (teamRisk(t.key) ? 'var(--prizma-off-course)' : 'var(--prizma-information)') + ';opacity:' + (n ? 1 : .2) + '"></i>').join('') + '</span>';
+      return '<button class="gf-team' + (t.key === tk ? ' focus' : '') + '" data-tk="' + esc(t.key) + '"><span class="gf-tn">' + esc(t.name) + '</span><span class="gf-tm">' + eps + ' эпиков · ' + teamWorks(t.key) + ' работ</span>' + spark + '</button>';
+    }).join('');
+    FL.el.querySelector('#gf-side').innerHTML = side;
+    // основная зона
+    const main = FL.el.querySelector('#gf-main');
+    main.style.setProperty('--n', cols.length);
+    const colsHead = '<div class="gf-cols"><span></span>' + cols.map(c => '<span class="gf-ch">' + esc(data.colLabel[c]) + '</span>').join('') + '</div>';
+    const focusEps = data.epics.filter(e => e.teamKey === tk);
+    const focusName = (data.teams.find(t => t.key === tk) || {}).name || tk;
+    const lane = '<div class="gf-lane-h">' + esc(focusName) + ' · ' + focusEps.length + ' эпиков · раскрыто</div>' + (focusEps.length ? focusEps.map(e =>
+      '<div class="gf-epic' + (e.risk ? ' risk' : e.churn ? ' drift' : '') + '"><div class="gf-en"><span class="gf-edot"></span>' + esc(e.epic) + '</div><div class="gf-erow"><span></span>' + cols.map(c => '<span class="gf-ecell">' + (e.cells[c] || []).map(p => '<span class="gf-pill' + (p.done ? ' done' : '') + (p.active ? ' active' : '') + '" style="--wt:' + wc(p.wt) + '"><b>' + esc(p.wt) + '</b>' + (p.who ? '<i>' + esc(p.who) + '</i>' : '') + '</span>').join('') + '</span>').join('') + '</div></div>'
+    ).join('') : '<div class="gf-muted">В команде нет эпиков</div>');
+    const quiet = data.teams.filter(t => t.key !== tk).map(t => {
+      const cells = cols.map(c => { const n = data.epics.filter(e => e.teamKey === t.key).reduce((s, e) => s + ((e.cells[c] || []).length), 0); const hasRisk = data.epics.some(e => e.teamKey === t.key && e.risk && (e.cells[c] || []).length); const inner = n ? '<span class="gf-dots">' + Array.from({ length: Math.min(n, 6) }).map(() => '<i' + (hasRisk ? ' class="r"' : '') + '></i>').join('') + '</span><span class="gf-qn">' + n + ' раб</span>' : '<span class="gf-qz">·</span>'; return '<span class="gf-qcell">' + inner + '</span>'; }).join('');
+      return '<button class="gf-quiet" data-tk="' + esc(t.key) + '"><span class="gf-qname' + (teamRisk(t.key) ? ' risk' : '') + '">' + esc(t.name) + '</span>' + cells + '</button>';
+    }).join('');
+    main.innerHTML = colsHead + '<div class="gf-lane">' + lane + '</div><div class="gf-quiets">' + quiet + '</div>';
+    FL.el.querySelectorAll('.gf-team, .gf-quiet').forEach(b => b.addEventListener('click', () => Gantt3View._focusLaneSetFocus(b.dataset.tk)));
   },
   _focusLaneSetChevron(btn, collapsed) {
     try { btn.innerHTML = Services.Icons?.get?.(collapsed ? 'chevron-right' : 'chevron-down', { size: 12 }) || ''; } catch (_) {}
