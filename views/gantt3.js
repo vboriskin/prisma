@@ -925,6 +925,60 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
 #gdt-annot-pop .ga-save { border-color: var(--prizma-information); color: var(--prizma-information); }
 #gdt-annot-pop .ga-del { margin-left: auto; color: var(--prizma-off-course); border-color: transparent; }
 
+/* === ГАНТ 3.0 · «Анатомия пилюли» (lab sketch 08, референс) =============== */
+#gdt-mode .gpa { max-width: 1040px; margin: 0 auto; padding: 22px 24px 70px; }
+#gdt-mode .gpa-head h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gpa-head p { margin: 0; color: var(--prizma-text-secondary, var(--text-2)); font-size: 13.5px; max-width: 660px; line-height: 1.55; }
+#gdt-mode .gpa-eyebrow { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 14px; }
+#gdt-mode .gpa-sec { margin-top: 34px; }
+#gdt-mode .gpa-stage { position: relative; background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-lg, 14px); padding: 60px 40px 66px; min-height: 300px; }
+#gdt-mode .gpa-leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+#gdt-mode .gpa-specimen-wrap { display: flex; justify-content: center; align-items: center; min-height: 80px; }
+#gdt-mode .gpa-spec { position: relative; display: inline-flex; align-items: center; gap: 12px; padding: 14px 20px 14px 22px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); border-radius: var(--r-md, 10px); user-select: none; min-width: 260px; }
+#gdt-mode .gpa-spec::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); border-radius: var(--r-md, 10px) 0 0 var(--r-md, 10px); }
+#gdt-mode .gpa-spec .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+#gdt-mode .gpa-spec .body { display: flex; flex-direction: column; gap: 4px; }
+#gdt-mode .gpa-spec .nm { font: 600 15px/1 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gpa-spec .meta { font: 500 11.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); letter-spacing: .2px; }
+#gdt-mode .gpa-callout { position: absolute; max-width: 190px; }
+#gdt-mode .gpa-callout .lab { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-information); }
+#gdt-mode .gpa-callout .desc { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-mode .gpa-callout.c-stripe { left: 26px; top: 30px; text-align: right; }
+#gdt-mode .gpa-callout.c-name { right: 32px; top: 22px; }
+#gdt-mode .gpa-callout.c-meta { right: 32px; bottom: 22px; }
+#gdt-mode .gpa-callout.c-dot { left: 26px; bottom: 28px; text-align: right; }
+#gdt-mode .gpa-variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 14px; }
+#gdt-mode .gpa-vcard { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); padding: 14px; }
+#gdt-mode .gpa-vcard .vt { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 11px; }
+#gdt-mode .gpa-vcard .vrow { display: flex; align-items: center; min-height: 36px; }
+#gdt-mode .gpa-vcard .vn { margin-top: 9px; font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3)); line-height: 1.4; }
+#gdt-mode .gpa-pill { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px 7px 13px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); border-radius: var(--r-sm, 6px); user-select: none; }
+#gdt-mode .gpa-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); border-radius: var(--r-sm, 6px) 0 0 var(--r-sm, 6px); }
+#gdt-mode .gpa-pill .nm { font: 600 12px/1 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gpa-pill .who { font: 500 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-mode .gpa-pill .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+#gdt-mode .gpa-pill[data-state="progress"]::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); flex: none; }
+#gdt-mode .gpa-pill[data-state="done"] { opacity: .5; }
+#gdt-mode .gpa-pill[data-state="done"] .nm { text-decoration: line-through; text-decoration-color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-mode .gpa-pill[data-state="unplanned"]::before { background: repeating-linear-gradient(135deg, var(--wt, var(--prizma-information)) 0 3px, transparent 3px 6px); }
+#gdt-mode .gpa-pill.weighted::before { top: 50%; transform: translateY(-50%); height: var(--wh, 60%); bottom: auto; border-radius: 2px; }
+#gdt-mode .gpa-ba { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+#gdt-mode .gpa-panel { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); padding: 20px; transition: opacity .3s var(--ease-calm, ease); }
+#gdt-mode .gpa-panel.dim { opacity: .32; }
+#gdt-mode .gpa-tag { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; margin-bottom: 16px; display: inline-flex; align-items: center; gap: 6px; }
+#gdt-mode .gpa-tag.bad { color: var(--prizma-off-course); }
+#gdt-mode .gpa-tag.good { color: var(--prizma-on-course); }
+#gdt-mode .gpa-demo { display: flex; align-items: center; justify-content: center; min-height: 70px; }
+#gdt-mode .gpa-note { margin-top: 16px; font-size: 11.5px; line-height: 1.5; color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-mode .gpa-note b { color: var(--prizma-text-primary, var(--text-1)); font-weight: 600; }
+#gdt-mode .gpa-oldpill { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; background: var(--prizma-information); color: #0A0A0F; border-radius: var(--r-sm, 6px); box-shadow: 0 0 0 2px var(--prizma-off-course), 0 2px 10px rgba(0,0,0,.5); font: 700 9.5px/1.1 var(--font, inherit); letter-spacing: .2px; }
+#gdt-mode .gpa-oldpill .sub { font-weight: 400; opacity: .85; }
+#gdt-mode .gpa-principle { margin-top: 26px; text-align: center; }
+#gdt-mode .gpa-principle .big { font: 600 18px/1.3 var(--font, inherit); letter-spacing: -.01em; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gpa-principle .big .twochan { color: var(--prizma-information); }
+#gdt-mode .gpa-principle .small { margin-top: 6px; font-size: 12.5px; color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-mode .gpa-batoggle { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 11px; font-size: 12px; }
+
 /* === ГАНТ 3.0 · z-index fix ===============================================
    Чром приложения: топбар z:100, сайдбар z:90, модалки z:1000+. Все наши
    fixed-оверлеи изначально стояли на 60–72 → их шапки с кнопкой «Закрыть»
@@ -2836,6 +2890,7 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     ['deck',     'Дек',            'слайды ревью'],
     ['mission',  'Центр управления','приборная панель'],
     ['merge',    'Слияние',        'разрешение конфликтов (превью)'],
+    ['anatomy',  'Анатомия пилюли', 'как устроена пилюля · референс'],
   ],
   _collectEpics() {
     const wrap = document.getElementById('gantt3-wrap');
@@ -2925,6 +2980,7 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     if (!M) return;
     if (M.onKey) document.removeEventListener('keydown', M.onKey, true);
     if (M.st && M.st.onKey2) document.removeEventListener('keydown', M.st.onKey2, true);
+    if (M.st && M.st.onResize) window.removeEventListener('resize', M.st.onResize);
     if (M.el) M.el.remove();
     Gantt3View._mode = { el: null, name: null, onKey: null, st: null };
     document.getElementById('btn-gantt3-views')?.classList.remove('active');
@@ -3098,6 +3154,81 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
       });
     };
     render();
+  },
+  /* «Анатомия пилюли» (порт lab sketch 08): референс — specimen с SVG-выносками,
+     грид специменов состояний, before/after «два канала, не пять». */
+  _mode_anatomy(body) {
+    const esc = Utils.escapeHtml;
+    const C_BE = 'var(--prizma-information)', C_FE = 'var(--prizma-insight, #7C5CFF)', C_QA = 'var(--prizma-on-course)', C_IM = 'var(--prizma-drift)';
+    const variants = [
+      { vt: 'Запланировано', wt: C_QA, nm: 'QA', state: 'planned', vn: 'База: полоса + имя. Точки нет — работа ещё не началась.' },
+      { vt: 'В работе', wt: C_BE, nm: 'BE', state: 'progress', vn: 'Точка 6px цвета information — активность без отдельной плашки.' },
+      { vt: 'Завершено', wt: C_FE, nm: 'FE', state: 'done', vn: 'Приглушено + зачёркнуто. Done «уходит в фон», не кричит.' },
+      { vt: 'Не запланировано', wt: C_BE, nm: 'BE', state: 'unplanned', vn: 'Штрихованная полоса — попало в релиз вне плана.' },
+      { vt: 'С исполнителем', wt: C_IM, nm: 'IMPL', who: 'Орлов', state: 'planned', vn: 'Мета-строка добавляет второй канал — кто делает.' },
+      { vt: 'Рисковый', wt: C_FE, nm: 'FE', who: 'Ким', state: 'progress', risk: true, vn: 'Риск — только на точке (off-course). Полоса остаётся типом.' },
+      { vt: 'Взвешено оценкой', wt: C_BE, nm: 'BE', weighted: true, est: 28, vn: 'Высота полосы ∝ человеко-дням. Вес виден без чисел.' },
+    ];
+    const vcards = variants.map(v => {
+      let pill = '<div class="gpa-pill' + (v.weighted ? ' weighted' : '') + '" data-state="' + v.state + '" style="--wt:' + v.wt + (v.weighted ? ';--wh:' + Math.round(30 + v.est / 28 * 60) + '%' : '') + '">';
+      if (v.state === 'done') pill += '<span class="dot" style="background:var(--prizma-on-course)"></span>';
+      if (v.risk) pill += '<span class="dot" style="background:var(--prizma-off-course)"></span>';
+      pill += '<span class="nm">' + esc(v.nm) + '</span>';
+      if (v.who) pill += '<span class="who">' + esc(v.who) + '</span>';
+      pill += '</div>';
+      return '<div class="gpa-vcard"><div class="vt">' + esc(v.vt) + '</div><div class="vrow">' + pill + '</div><div class="vn">' + esc(v.vn) + '</div></div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="gpa"><div class="gpa-head"><div class="gpa-eyebrow">Спецификация</div><h1>Анатомия пилюли</h1>' +
+      '<p>Пилюля работы несёт <b>ровно два канала</b>: вертикальная полоса слева — тип работы, и одна мета-строка — исполнитель. Статус не добавляет коробок: его выражают точка 6px, прозрачность или штриховка полосы.</p></div>' +
+      '<div class="gpa-sec"><div class="gpa-eyebrow">Эталон · разбор по частям</div>' +
+        '<div class="gpa-stage" id="gpa-stage"><svg class="gpa-leaders" id="gpa-leaders" aria-hidden="true"></svg>' +
+          '<div class="gpa-specimen-wrap"><div class="gpa-spec" id="gpa-spec" style="--wt:var(--prizma-information)">' +
+            '<span class="dot" id="gpa-a-dot" style="background:var(--prizma-information)"></span>' +
+            '<span class="body"><span class="nm" id="gpa-a-name">Новый процессинг СБП</span><span class="meta" id="gpa-a-meta">BE · Сидоров</span></span></div></div>' +
+          '<div class="gpa-callout c-stripe"><div class="lab">Полоса слева</div><div class="desc">Тип работы (BE/FE/QA…). Единственная категориальная краска. 3px, без заливки фона.</div></div>' +
+          '<div class="gpa-callout c-name"><div class="lab">Имя</div><div class="desc">Канал 1 — что это за работа. Основной вес и контраст.</div></div>' +
+          '<div class="gpa-callout c-meta"><div class="lab">Мета-строка</div><div class="desc">Канал 2 — исполнитель, моноширинный. Ровно одна строка.</div></div>' +
+          '<div class="gpa-callout c-dot"><div class="lab">Индикатор статуса</div><div class="desc">Точка 6px / прозрачность / штрих — не отдельная плашка.</div></div></div></div>' +
+      '<div class="gpa-sec"><div class="gpa-eyebrow">Специмены состояний</div><div class="gpa-variants">' + vcards + '</div></div>' +
+      '<div class="gpa-sec"><div style="display:flex;align-items:center;gap:10px"><div class="gpa-eyebrow" style="margin:0">Было / стало</div><span style="flex:1"></span><button class="gpa-batoggle" id="gpa-ba">Показать «было»</button></div>' +
+        '<div class="gpa-ba" style="margin-top:14px">' +
+          '<div class="gpa-panel" id="gpa-bad"><span class="gpa-tag bad">Было · пять каналов</span><div class="gpa-demo"><span class="gpa-oldpill"><span>◆</span><span>BE</span><span>●</span><span class="sub">Сидоров</span><span>⚠</span><span class="sub">75%</span><span>↗</span></span></div><div class="gpa-note">Заливка, кольцо-тень, <b>три глифа</b>, процент, текст 9.5px. Цвет фона спорит со статусом — глаз не знает, куда смотреть.</div></div>' +
+          '<div class="gpa-panel" id="gpa-good"><span class="gpa-tag good">Стало · два канала</span><div class="gpa-demo"><div class="gpa-pill" data-state="progress" style="--wt:var(--prizma-information)"><span class="nm">BE</span><span class="who">Сидоров</span></div></div><div class="gpa-note">Полоса = тип. Имя + исполнитель. Точка = в работе. <b>Ничего лишнего</b> — статус читается периферийным зрением.</div></div></div>' +
+        '<div class="gpa-principle"><div class="big">«<span class="twochan">два канала</span>, не пять»</div><div class="small">Каждый дополнительный сигнал на пилюле снижает читаемость остальных. Ограничение — это и есть дизайн.</div></div></div></div>';
+    // before/after toggle
+    const baBtn = body.querySelector('#gpa-ba'), bad = body.querySelector('#gpa-bad'), good = body.querySelector('#gpa-good');
+    let mode = 'after';
+    const applyMode = (m) => { if (m === 'before') { good.classList.add('dim'); bad.classList.remove('dim'); baBtn.textContent = 'Показать «стало»'; } else { bad.classList.add('dim'); good.classList.remove('dim'); baBtn.textContent = 'Показать «было»'; } mode = m; };
+    applyMode('after');
+    baBtn.addEventListener('click', () => applyMode(mode === 'after' ? 'before' : 'after'));
+    // SVG-выноски от частей пилюли к подписям
+    const stage = body.querySelector('#gpa-stage'), svg = body.querySelector('#gpa-leaders');
+    const rel = (elm) => { const s = stage.getBoundingClientRect(), r = elm.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height, cx: r.left - s.left + r.width / 2, cy: r.top - s.top + r.height / 2 }; };
+    const drawLeaders = () => {
+      const spec = body.querySelector('#gpa-spec'); if (!spec || !spec.getBoundingClientRect().width) return;
+      const sp = rel(spec);
+      const pStripe = { x: sp.x + 2, y: sp.cy }, pName = rel(body.querySelector('#gpa-a-name')), pMeta = rel(body.querySelector('#gpa-a-meta')), pDot = rel(body.querySelector('#gpa-a-dot'));
+      const ends = [
+        { c: '.c-stripe', to: [pStripe.x, pStripe.y - 14], side: 'left' },
+        { c: '.c-name', to: [pName.x + pName.w, pName.cy], side: 'right' },
+        { c: '.c-meta', to: [pMeta.x + pMeta.w, pMeta.cy], side: 'right' },
+        { c: '.c-dot', to: [pDot.cx, pDot.cy], side: 'left' },
+      ];
+      let s = '';
+      ends.forEach(e => {
+        const co = rel(stage.querySelector(e.c));
+        const from = e.side === 'right' ? [co.x, co.cy] : [co.x + co.w, co.cy];
+        const mx = (from[0] + e.to[0]) / 2;
+        s += '<path d="M' + from[0].toFixed(1) + ' ' + from[1].toFixed(1) + ' C ' + mx.toFixed(1) + ' ' + from[1].toFixed(1) + ', ' + mx.toFixed(1) + ' ' + e.to[1].toFixed(1) + ', ' + e.to[0].toFixed(1) + ' ' + e.to[1].toFixed(1) + '" fill="none" stroke="var(--prizma-border-strong, var(--border))" stroke-width="1"/>';
+        s += '<circle cx="' + e.to[0].toFixed(1) + '" cy="' + e.to[1].toFixed(1) + '" r="2.4" fill="var(--prizma-information)"/>';
+      });
+      svg.innerHTML = s;
+    };
+    drawLeaders(); setTimeout(drawLeaders, 60);
+    const onResize = () => drawLeaders();
+    window.addEventListener('resize', onResize);
+    Gantt3View._mode.st = { onResize };
   },
 
   /* ═══════════════════════════════════════════════════════════════════════
