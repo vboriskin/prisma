@@ -880,6 +880,11 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
 #section-gantt3 .gantt-row.gdt-flash { animation: gdtRowFlash 1.6s var(--ease-calm, ease); }
 @keyframes gdtRowFlash { 0%,100% { background: transparent; } 25% { background: var(--prizma-information-bg); } }
 html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important; }
+
+/* === ГАНТ 3.0 · п.22 «Inline-edit» (lab sketch 22) ======================== */
+#section-gantt3 .v16-epic-name { cursor: text; }
+.gdt-inline-input { width: 100%; box-sizing: border-box; font: inherit; color: var(--prizma-text-primary, var(--text-1)); background: var(--prizma-bg, #fff); border: 1px solid var(--prizma-information); border-radius: 4px; padding: 1px 5px; outline: none; box-shadow: 0 0 0 3px var(--prizma-information-bg); }
+#section-gantt3 .gantt-row.gdt-edit-saved { animation: gdtRowFlash 1s var(--ease-calm, ease); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -3225,6 +3230,51 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     const btn = document.getElementById('btn-gantt3-suggest'); if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
   },
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.22 — «INLINE-EDIT» (порт lab sketch 22). Двойной клик по имени
+     эпика → инлайн-input; Enter/blur коммитит в state.rows[i].epic (реактивный
+     ре-рендер + HistoryManager-checkpoint для undo), Esc отменяет. Делегат на
+     #gantt3-wrap; не активен в режимах Линза/Фокус.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _inlineBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtInlineBound) return;
+    wrap._gdtInlineBound = true;
+    wrap.addEventListener('dblclick', (e) => {
+      if (Gantt3View._lens.on || Gantt3View._focusLane.on) return;
+      const nm = e.target.closest('.v16-epic-name');
+      if (!nm || nm.querySelector('input')) return;
+      const row = nm.closest('.gantt-row[data-row-id]');
+      if (!row) return;
+      e.preventDefault(); e.stopPropagation();
+      Gantt3View._inlineEditName(nm, row.dataset.rowId);
+    });
+  },
+  _inlineEditName(nm, rowId) {
+    const cur = nm.textContent.trim();
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = cur; inp.className = 'gdt-inline-input';
+    inp.setAttribute('aria-label', 'Переименовать эпик');
+    nm.textContent = ''; nm.appendChild(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true;
+      const val = inp.value.trim();
+      if (commit && val && val !== cur) {
+        const row = (state.rows || []).find(r => r.id === rowId);
+        if (row) {
+          try { Services.HistoryManager?.checkpoint?.('переименование эпика'); } catch (_) {}
+          row.epic = val;                         // reactive proxy → Storage.save + re-render
+          try { window.showToast?.('Эпик переименован', 'info', 1400); } catch (_) {}
+          return;                                 // re-render перерисует строку
+        }
+      }
+      nm.textContent = cur;                       // отмена / без изменений
+    };
+    inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    inp.addEventListener('blur', () => finish(true));
+  },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -4537,6 +4587,8 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     // Гант 3.0 п.19 — Radial-menu: делегат идемпотентен; закрыть открытое меню.
     Gantt3View._radialBind();
     Gantt3View._radialClose();
+    // Гант 3.0 п.22 — Inline-edit: делегат dblclick на #gantt3-wrap (идемпотентно).
+    Gantt3View._inlineBind();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
