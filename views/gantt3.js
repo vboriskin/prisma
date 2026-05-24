@@ -806,6 +806,58 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-stat .sv { font-size: 22px; font-weight: 800; color: var(--prizma-text-primary, var(--text-1)); font-feature-settings: "tnum"; }
 .gdt-stat .sk { font: 600 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 4px; }
 .gdt-stat .sv.warn { color: var(--prizma-off-course); }
+/* === Богатая панель эпика (Сплит/Дзен) — порт деталей redesign 11 + 13 ==== */
+.gdt-dcard { max-width: 960px; }
+.gdt-dcard .dc-top { display: flex; align-items: flex-start; gap: 12px; }
+.gdt-dcard .dc-top > div:first-child { flex: 1; min-width: 0; }
+.gdt-dcard .dc-team { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 7px; }
+.gdt-dcard .dc-nm { font-size: 24px; font-weight: 800; letter-spacing: -.02em; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-dcard .dc-badge { font: 700 10px/1 var(--font, inherit); letter-spacing: .4px; text-transform: uppercase; padding: 6px 11px; border-radius: 999px; white-space: nowrap; flex: none; }
+.gdt-dcard .dc-badge.off { color: var(--prizma-off-course); background: color-mix(in srgb, var(--prizma-off-course) 14%, transparent); }
+.gdt-dcard .dc-badge.drift { color: var(--prizma-drift); background: color-mix(in srgb, var(--prizma-drift) 18%, transparent); }
+.gdt-dcard .dc-stats { display: flex; gap: 30px; margin: 20px 0 4px; flex-wrap: wrap; }
+.gdt-dcard .dc-st .v { font-size: 22px; font-weight: 800; font-feature-settings: "tnum"; color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-dcard .dc-st .v.warn { color: var(--prizma-drift); }
+.gdt-dcard .dc-st .k { font: 600 10px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .5px; color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 5px; }
+.gdt-dcard .dc-sec-h { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin: 24px 0 11px; }
+.gdt-dcard .dc-track { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+.gdt-dcard .dc-col { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: 8px; padding: 8px; min-height: 78px; }
+.gdt-dcard .dc-col-h { font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 8px; }
+.gdt-dcard .dc-col-b { display: flex; flex-direction: column; gap: 5px; }
+.gdt-dcard .dc-pill { position: relative; display: flex; align-items: center; gap: 6px; padding: 5px 9px 5px 11px; border-radius: 5px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+.gdt-dcard .dc-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 5px 0 0 5px; background: var(--wt, var(--prizma-information)); }
+.gdt-dcard .dc-pill b { font: 700 11px/1 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-dcard .dc-pill i { font: 500 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); font-style: normal; }
+.gdt-dcard .dc-pill.done { opacity: .5; }
+.gdt-dcard .dc-pill.done b { text-decoration: line-through; }
+.gdt-dcard .dc-pill.active::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--prizma-information); margin-left: auto; flex: none; }
+.gdt-dcard .dc-empty { color: var(--prizma-text-tertiary, var(--text-3)); font-size: 12px; opacity: .5; }
+.gdt-dcard .dc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+@media (max-width: 720px) { .gdt-dcard .dc-grid { grid-template-columns: 1fr; } }
+.gdt-dcard .dc-deprow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+.gdt-dcard .dc-deps .dc-h { font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 7px; }
+.gdt-dcard .dc-dep { font-size: 12.5px; color: var(--prizma-text-secondary, var(--text-2)); padding: 4px 0; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+.gdt-dcard .dc-muted { font-size: 12px; color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-dcard .dc-risk { border-radius: 8px; padding: 11px 13px; display: flex; flex-direction: column; gap: 4px; }
+.gdt-dcard .dc-risk b { font-size: 13px; }
+.gdt-dcard .dc-risk span { font-size: 11.5px; line-height: 1.45; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-dcard .dc-risk.off { border: 1px solid var(--prizma-off-course); background: color-mix(in srgb, var(--prizma-off-course) 8%, transparent); }
+.gdt-dcard .dc-risk.off b { color: var(--prizma-off-course); }
+.gdt-dcard .dc-risk.drift { border: 1px solid var(--prizma-drift); background: color-mix(in srgb, var(--prizma-drift) 10%, transparent); }
+.gdt-dcard .dc-risk.drift b { color: var(--prizma-drift); }
+.gdt-dcard .dc-risk.ok { border: 1px solid var(--prizma-border, var(--border)); }
+.gdt-dcard .dc-risk.ok b { color: var(--prizma-on-course); }
+.gdt-dcard .dc-disc { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+.gdt-dcard .dc-disc .dn { width: 54px; flex: none; font: 700 11px/1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-dcard .dc-disc .db { flex: 1; height: 8px; border-radius: 4px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.06)); overflow: hidden; }
+.gdt-dcard .dc-disc .db i { display: block; height: 100%; }
+.gdt-dcard .dc-disc .dv { width: 26px; text-align: right; font: 600 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-dcard .dc-people { display: flex; flex-wrap: wrap; gap: 8px; }
+.gdt-dcard .dc-ava { display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px 4px 4px; border-radius: 999px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); font-size: 12px; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-dcard .dc-ava b { width: 20px; height: 20px; border-radius: 50%; background: var(--prizma-information); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 10px/1 var(--font, inherit); }
+.gdt-dcard .dc-hist { font-size: 12.5px; line-height: 1.5; color: var(--prizma-text-secondary, var(--text-2)); padding: 11px 13px; border-radius: 8px; background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); }
+.gdt-dcard .dc-hist b { color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-dcard .dc-hist.ok { color: var(--prizma-text-tertiary, var(--text-3)); }
 .gdt-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1px; background: var(--prizma-border, var(--border)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); overflow: hidden; }
 .gdt-kpi { background: var(--prizma-bg, var(--card)); padding: 16px 18px; }
 .gdt-kpi .kv { font-size: 26px; font-weight: 800; color: var(--prizma-text-primary, var(--text-1)); font-feature-settings: "tnum"; }
@@ -2908,6 +2960,12 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
       out.teams.push({ key: tk, name: (h.querySelector('.gdt-team-name')?.textContent || tk).trim() });
     });
     const deps = (state && state.epicDeps) ? state.epicDeps : {};
+    const movesByEpic = {};
+    (state && Array.isArray(state.rows) ? state.rows : []).forEach(r => {
+      const nm = String(r.epic || r.tasks || '').trim();
+      const arr = Array.isArray(r.ganttArrows) ? r.ganttArrows : [];
+      if (nm && arr.length) movesByEpic[nm] = (movesByEpic[nm] || 0) + arr.length;
+    });
     wrap.querySelectorAll('.gantt-row[data-epic-key]').forEach(row => {
       const epic = (row.querySelector('.v16-epic-name')?.textContent || '(без эпика)').trim();
       const tk = row.dataset.teamKey || '';
@@ -2922,16 +2980,19 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
       });
       const all = Object.values(cells).flat();
       const dv = deps[epic]; const depList = Array.isArray(dv) ? dv : (dv ? [dv] : []);
+      const byWt = {};
+      all.forEach(p => { const k = (p.wt || '—'); if (!byWt[k]) byWt[k] = { n: 0, done: 0 }; byWt[k].n++; if (p.done) byWt[k].done++; });
       out.epics.push({
         epic, key: row.dataset.epicKey, teamKey: tk,
         team: (out.teams.find(t => t.key === tk)?.name) || tk,
         cells, total: all.length, done: all.filter(p => p.done).length, active: all.filter(p => p.active).length,
         risk: !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)'),
         churn: !!row.querySelector('.v16-epic-churn'),
-        deps: depList,
+        deps: depList, byWt, moves: movesByEpic[epic] || 0,
         who: [...new Set(all.map(p => p.who).filter(Boolean))],
       });
     });
+    out.epics.forEach(e => { e.blocks = out.epics.filter(o => o !== e && o.deps.includes(e.epic)).map(o => o.epic); });
     return out;
   },
   _viewsToggleMenu() {
@@ -2989,21 +3050,57 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     Gantt3View._mode = { el: null, name: null, onKey: null, st: null };
     document.getElementById('btn-gantt3-views')?.classList.remove('active');
   },
+  _wtColor(wt) {
+    const W = String(wt || '').toUpperCase().replace(/[^A-ZА-Я]/g, '');
+    const M = { BE: 'var(--prizma-information)', FE: 'var(--prizma-insight, #7C5CFF)', QA: 'var(--prizma-on-course)', AN: 'var(--prizma-drift)', BA: 'var(--prizma-information)', IMPL: 'var(--prizma-insight, #7C5CFF)', MIG: 'var(--prizma-drift)', STAB: 'var(--prizma-on-course)', HF: 'var(--prizma-off-course)' };
+    return M[W] || 'var(--prizma-information)';
+  },
+  /** Богатая панель эпика для Сплит/Дзен (порт деталей redesign 11 + 13):
+   *  дорожка работ по релизам с пилюлями, зависит/блокирует, оценка по
+   *  дисциплинам, статус-риск, исполнители, история переносов. */
   _modeEpicCard(e, data) {
     const esc = Utils.escapeHtml;
-    const track = data.cols.filter(c => (e.cells[c] || []).length).map(c =>
-      '<div class="ic-trk"><span class="k">' + esc(data.colLabel[c]) + '</span><span class="v">' +
-      (e.cells[c] || []).map(p => '<span class="gdt-wt' + (p.done ? ' done' : '') + '">' + esc(p.wt) + (p.who ? ' · ' + esc(p.who) : '') + '</span>').join('') +
-      '</span></div>').join('') || '<div class="ic-trk"><span class="v" style="color:var(--prizma-text-tertiary)">Нет запланированных работ</span></div>';
-    const statusTxt = e.risk ? 'Риск срыва' : e.churn ? 'Дрейфует' : e.active ? 'В работе' : 'По плану';
-    return '<div class="gdt-card"><div class="ic-nm">' + esc(e.epic) + '</div><div class="ic-team">' + esc(e.team) + '</div>' +
-      '<div class="gdt-stats">' +
-        '<div class="gdt-stat"><div class="sv">' + e.total + '</div><div class="sk">работ</div></div>' +
-        '<div class="gdt-stat"><div class="sv">' + e.done + '</div><div class="sk">готово</div></div>' +
-        '<div class="gdt-stat"><div class="sv">' + e.who.length + '</div><div class="sk">людей</div></div>' +
-        '<div class="gdt-stat"><div class="sv' + ((e.risk || e.churn) ? ' warn' : '') + '">' + esc(statusTxt) + '</div><div class="sk">статус</div></div>' +
-      '</div><div class="ic-track">' + track + '</div>' +
-      (e.deps.length ? '<div class="ic-team" style="margin-top:14px">Зависит от: ' + esc(e.deps.join(', ')) + '</div>' : '') + '</div>';
+    const wc = Gantt3View._wtColor;
+    const plw = (n) => { const m = n % 10, d = n % 100; if (m === 1 && d !== 11) return 'перенос'; if (m >= 2 && m <= 4 && (d < 10 || d >= 20)) return 'переноса'; return 'переносов'; };
+    // 1 · дорожка работ по релизам (окна-колонки с пилюлями)
+    const track = '<div class="dc-track">' + data.cols.map(c => {
+      const pills = (e.cells[c] || []);
+      return '<div class="dc-col"><div class="dc-col-h">' + esc(data.colLabel[c]) + '</div><div class="dc-col-b">' +
+        (pills.length ? pills.map(p => '<span class="dc-pill' + (p.done ? ' done' : '') + (p.active ? ' active' : '') + '" style="--wt:' + wc(p.wt) + '"><b>' + esc(p.wt) + '</b>' + (p.who ? '<i>' + esc(p.who) + '</i>' : '') + '</span>').join('') : '<span class="dc-empty">·</span>') +
+        '</div></div>';
+    }).join('') + '</div>';
+    // 2 · оценка по дисциплинам
+    const wtEntries = Object.entries(e.byWt || {}).sort((a, b) => b[1].n - a[1].n);
+    const maxN = Math.max(1, ...wtEntries.map(([, v]) => v.n));
+    const disc = wtEntries.length ? wtEntries.map(([k, v]) => '<div class="dc-disc"><span class="dn">' + esc(k) + '</span><span class="db"><i style="width:' + Math.round(v.n / maxN * 100) + '%;background:' + wc(k) + '"></i></span><span class="dv">' + v.n + '</span></div>').join('') : '<div class="dc-muted">Нет работ</div>';
+    // 3 · зависимости
+    const depCol = '<div class="dc-deps"><div class="dc-h">→ зависит от</div>' + (e.deps.length ? e.deps.map(d => '<div class="dc-dep">' + esc(d) + '</div>').join('') : '<div class="dc-muted">нет связей</div>') + '</div>';
+    const blkCol = '<div class="dc-deps"><div class="dc-h">← блокирует</div>' + ((e.blocks && e.blocks.length) ? e.blocks.map(d => '<div class="dc-dep">' + esc(d) + '</div>').join('') : '<div class="dc-muted">никого</div>') + '</div>';
+    // 4 · статус и риск
+    const riskBox = e.risk ? '<div class="dc-risk off"><b>Риск срыва</b><span>Эпик отстаёт от плана — нужен фокус владельца и пересмотр сроков.</span></div>'
+      : e.churn ? '<div class="dc-risk drift"><b>Дрейф сроков</b><span>Работы часто переезжают между релизами — план нестабилен.</span></div>'
+      : '<div class="dc-risk ok"><b>По плану</b><span>Критичных отклонений не зафиксировано.</span></div>';
+    // 5 · исполнители
+    const people = e.who.length ? e.who.map(w => '<span class="dc-ava"><b>' + esc((w[0] || '?').toUpperCase()) + '</b>' + esc(w) + '</span>').join('') : '<div class="dc-muted">не назначены</div>';
+    // 6 · история переносов
+    const hist = e.moves ? '<div class="dc-hist"><b>' + e.moves + ' ' + plw(e.moves) + '</b> между релизами за квартал — частые переезды повод обсудить реалистичность плана.</div>' : '<div class="dc-hist ok">Переносов нет — план стабилен.</div>';
+    const badge = e.risk ? '<span class="dc-badge off">риск срыва</span>' : e.churn ? '<span class="dc-badge drift">дрейф</span>' : '';
+    return '<div class="gdt-dcard">' +
+      '<div class="dc-top"><div><div class="dc-team">' + esc(e.team) + '</div><div class="dc-nm">' + esc(e.epic) + '</div></div>' + badge + '</div>' +
+      '<div class="dc-stats">' +
+        '<div class="dc-st"><div class="v">' + e.total + '</div><div class="k">работ</div></div>' +
+        '<div class="dc-st"><div class="v">' + e.done + '</div><div class="k">готово</div></div>' +
+        '<div class="dc-st"><div class="v">' + e.active + '</div><div class="k">в работе</div></div>' +
+        '<div class="dc-st"><div class="v">' + e.who.length + '</div><div class="k">людей</div></div>' +
+        '<div class="dc-st"><div class="v' + (e.moves ? ' warn' : '') + '">' + e.moves + '</div><div class="k">переносов</div></div>' +
+      '</div>' +
+      '<div class="dc-sec-h">Дорожка работ по релизам</div>' + track +
+      '<div class="dc-grid">' +
+        '<div class="dc-gc"><div class="dc-sec-h">Зависимости</div><div class="dc-deprow">' + depCol + blkCol + '</div>' + riskBox + '</div>' +
+        '<div class="dc-gc"><div class="dc-sec-h">Оценка по дисциплинам</div>' + disc + '<div class="dc-sec-h" style="margin-top:18px">Исполнители</div><div class="dc-people">' + people + '</div></div>' +
+      '</div>' +
+      '<div class="dc-sec-h">История · переносы</div>' + hist +
+    '</div>';
   },
   _mode_split(body, data) {
     const esc = Utils.escapeHtml;
