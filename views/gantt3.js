@@ -401,6 +401,25 @@ export const Gantt3View = {
 }
 .ms-item-del:hover { color: var(--prizma-off-course, #C13838); background: var(--prizma-surface-2, rgba(0,0,0,.04)); }
 .ms-count { font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3, #94a3b8)); }
+
+/* === ГАНТ 3.0 · п.1 «Перетаскивание с подсветкой дропзон» (lab sketch 02) ===
+   Делаем drag-affordance явной: grab-курсор на пилюлях; ЧЁТКАЯ подсветка
+   валидных дропзон (тот же эпик, другой колодец) + приглушение невалидных;
+   усиленное кольцо на ячейке прямо под курсором. Scoped под #section-gantt3 —
+   оригинальный Гант (общий бледный .gdt-drop-valid в styles.css) не затронут.
+   ВАЖНО: фон/тень/прозрачность ставятся ИНЛАЙНОМ в dragstart-хендлере (см.
+   gantt3.js), т.к. общий .gdt-drop-valid в styles.css объявлен с !important и
+   перебивает любой class-rule. Здесь — только то, что инлайн не задаёт: курсор,
+   transition и hover-кольцо через outline (единственное свойство, что слоится
+   поверх инлайн background/box-shadow). */
+#section-gantt3 .gantt-type-pill { cursor: grab; }
+#section-gantt3 .gantt-type-pill.gantt-pill-dragging { cursor: grabbing; opacity: .4; }
+#section-gantt3 .gantt-cell.gdt-drop-valid { cursor: copy; transition: background .12s, box-shadow .12s; }
+#section-gantt3 .gantt-cell.gdt-drop-invalid { cursor: not-allowed; transition: opacity .12s; }
+#section-gantt3 .gantt-cell.gdt-drop-valid.gantt-cell-dragover {
+  outline: 2px solid var(--prizma-information) !important;
+  outline-offset: -2px;
+}
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -3650,11 +3669,22 @@ export const Gantt3View = {
       // dropping near a hatched OT gutter feels especially uncertain.
       // Iterate via dataset comparison rather than CSS selectors (cleaner
       // and avoids cross-scope cssEscape helpers).
+      // Гант 3.0 п.1 — подсветка дропзон через inline-!important. Класс
+      // .gdt-drop-valid в общем .gantt-* каскаде перебивается правилами
+      // [data-theme=…] .gantt-window-* (специфичность 0,3,0) и shared
+      // !important-правилом, поэтому фон/тень/прозрачность ставим инлайном
+      // (бьёт любой stylesheet-rule). cursor задаётся CSS-классом — там
+      // конфликта нет. Снимаем в dragend.
       wrap.querySelectorAll('.gantt-cell[data-row-id]').forEach(c => {
         if (c.dataset.rowId === _dragData.rowId) {
-          if (c.dataset.col !== _dragData.srcCol) c.classList.add('gdt-drop-valid');
+          if (c.dataset.col !== _dragData.srcCol) {
+            c.classList.add('gdt-drop-valid');
+            c.style.setProperty('background-color', 'var(--prizma-information-bg)', 'important');
+            c.style.setProperty('box-shadow', 'inset 0 0 0 1.5px var(--prizma-information)', 'important');
+          }
         } else {
           c.classList.add('gdt-drop-invalid');
+          c.style.setProperty('opacity', '0.4', 'important');
         }
       });
     });
@@ -3662,7 +3692,13 @@ export const Gantt3View = {
       const pill = e.target.closest('.gantt-type-pill');
       if (pill) pill.classList.remove('gantt-pill-dragging');
       wrap.querySelectorAll('.gantt-pill-drop-target,.gantt-cell-drop-target,.gdt-drop-valid,.gdt-drop-invalid')
-        .forEach(el => el.classList.remove('gantt-pill-drop-target','gantt-cell-drop-target','gdt-drop-valid','gdt-drop-invalid'));
+        .forEach(el => {
+          el.classList.remove('gantt-pill-drop-target','gantt-cell-drop-target','gdt-drop-valid','gdt-drop-invalid');
+          // Гант 3.0 п.1 — снять inline-подсветку (см. dragstart).
+          el.style.removeProperty('background-color');
+          el.style.removeProperty('box-shadow');
+          el.style.removeProperty('opacity');
+        });
       _dragData = null;
     });
     // Wrap-level handlers cover ONLY intra-cell pill→pill reorder.
@@ -3672,6 +3708,11 @@ export const Gantt3View = {
     // double-mutate the row.
     wrap.addEventListener('dragover', wrap._gdtDelegated.dragover = e => {
       if (!_dragData) return;
+      // Гант 3.0 п.1 — edge-autoscroll: тащишь к правому/левому краю → колодцы
+      // прокручиваются, дальние релизы достижимы перетаскиванием (#gantt3-wrap = h-скроллер).
+      { const r = wrap.getBoundingClientRect();
+        if (e.clientX > r.right - 64) wrap.scrollLeft += 14;
+        else if (e.clientX < r.left + 248) wrap.scrollLeft = Math.max(0, wrap.scrollLeft - 14); }
       const pillTarget = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
       if (!pillTarget) return;
       if (pillTarget.classList.contains('gantt-pill-ghost') || pillTarget.classList.contains('gantt-pill-dragging')) return;
