@@ -666,6 +666,19 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
 #gdt-narrative .gn-trk { font: 600 10px/1 var(--mono, ui-monospace, monospace); padding: 4px 8px; border-radius: var(--r-sm, 6px); border: 1px solid var(--prizma-border, var(--border)); color: var(--prizma-text-tertiary, var(--text-3)); }
 #gdt-narrative .gn-trk.has { color: var(--prizma-text-secondary, var(--text-2)); border-color: var(--prizma-border-strong, var(--border)); background: var(--prizma-bg-elevated, transparent); }
 #gdt-narrative .gn-trk.cur { border-color: var(--prizma-information); color: var(--prizma-information); }
+#gdt-narrative .gn-wins { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-top: 11px; }
+#gdt-narrative .gn-win { border: 1px solid var(--prizma-border, var(--border)); border-radius: 6px; padding: 6px; min-height: 56px; background: var(--prizma-bg-elevated, transparent); }
+#gdt-narrative .gn-win-h { font: 600 9.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 6px; }
+#gdt-narrative .gn-win-b { display: flex; flex-direction: column; gap: 4px; }
+#gdt-narrative .gn-pill { position: relative; display: flex; align-items: center; gap: 5px; padding: 3px 7px 3px 9px; border-radius: 5px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+#gdt-narrative .gn-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; border-radius: 5px 0 0 5px; background: var(--wt, var(--prizma-information)); }
+#gdt-narrative .gn-pill b { font: 700 10px/1.2 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-narrative .gn-pill i { font: 500 9px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); font-style: normal; }
+#gdt-narrative .gn-pill.done { opacity: .5; }
+#gdt-narrative .gn-pill.done b { text-decoration: line-through; }
+#gdt-narrative .gn-pill.active::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); margin-left: auto; flex: none; }
+#gdt-narrative .gn-win-e { color: var(--prizma-text-tertiary, var(--text-3)); opacity: .4; font-size: 12px; }
+#gdt-narrative .gn-moved { margin-top: 10px; font-size: 12px; color: var(--prizma-drift); }
 html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !important; }
 
 /* === ГАНТ 3.0 · п.8 «North-star» — только таймлайн (lab redesign 10) =======
@@ -2511,33 +2524,53 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'работы';
     return 'работ';
   },
-  _narrativeEpicHtml(row) {
+  _plPeren(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'перенос';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'переноса';
+    return 'переносов';
+  },
+  _narrativeEpicHtml(row, movesByEpic) {
     const esc = Utils.escapeHtml;
+    const wc = Gantt3View._wtColor;
+    const cap = (s) => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };
     const epic = (row.querySelector('.v16-epic-name')?.textContent || '(без эпика)').trim();
-    const realPill = (c) => c.querySelector('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)');
     const cells = [...row.querySelectorAll('.gantt-cell[data-col]')];
-    const pills = [...row.querySelectorAll('.gantt-type-pill[data-wt]')].filter(p => !p.classList.contains('gantt-pill-ghost'));
-    const n = pills.length;
-    const done   = pills.filter(p => p.querySelector('.gdt-pill-state-done')).length;
-    const active = pills.filter(p => p.querySelector('.gdt-pill-state-active')).length;
+    const pillOf = (c) => [...c.querySelectorAll('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)')].map(p => ({
+      wt: (p.querySelector('.gdt-pill-name')?.textContent || p.dataset.wt || '').trim(),
+      done: !!p.querySelector('.gdt-pill-state-done'),
+      active: !!p.querySelector('.gdt-pill-state-active'),
+      who: (p.querySelector('.gdt-pill-meta')?.textContent || '').split('·')[0].trim().replace(/^—$/, ''),
+    }));
+    const all = cells.flatMap(pillOf);
+    const n = all.length;
     const hasRisk = !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)');
-    const churn   = !!row.querySelector('.v16-epic-churn');
+    const churn = !!row.querySelector('.v16-epic-churn');
     const riskCls = hasRisk ? ' risk-off' : (churn ? ' risk-drift' : '');
-    let s = n ? (n + ' ' + Gantt3View._plRabot(n)) : 'работы пока не заведены';
-    const parts = [];
-    if (done)   parts.push('<span class="done">' + done + ' готово</span>');
-    if (active) parts.push('<span class="prog">' + active + ' в работе</span>');
-    let sentence = s + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '.';
-    if (hasRisk) sentence += ' <span class="warn">Есть риск-метки.</span>';
-    if (churn)   sentence += ' <span class="warn">Переезжал между релизами.</span>';
+    // человекочитаемое предложение по дисциплинам (как в скетче 07)
+    let sentence;
+    if (!n) sentence = 'Работы пока не заведены.';
+    else {
+      const phr = all.slice(0, 6).map(p => {
+        const st = p.done ? '<span class="done">готово</span>' : p.active ? '<span class="prog">в работе</span>' : 'запланировано';
+        return '<b>' + esc(cap(p.wt)) + '</b> ' + st + (p.who ? ' у ' + esc(p.who) : '');
+      });
+      sentence = phr.join(', ') + (n > 6 ? ' и ещё ' + (n - 6) + ' ' + Gantt3View._plRabot(n - 6) : '') + '.';
+    }
+    if (hasRisk) sentence += ' <span class="warn">Риск срыва.</span>';
+    // дорожка-окна с реальными пилюлями
     const track = cells.map(c => {
-      const has = !!realPill(c);
       const lbl = GANTT_COL_LABELS[c.dataset.col] || c.dataset.col;
-      return '<span class="gn-trk' + (has ? ' has' : '') + '">' + esc(lbl) + '</span>';
+      const ps = pillOf(c);
+      return '<div class="gn-win"><div class="gn-win-h">' + esc(lbl) + '</div><div class="gn-win-b">' +
+        (ps.length ? ps.map(p => '<span class="gn-pill' + (p.done ? ' done' : '') + (p.active ? ' active' : '') + '" style="--wt:' + wc(p.wt) + '"><b>' + esc(p.wt) + '</b>' + (p.who ? '<i>' + esc(p.who) + '</i>' : '') + '</span>').join('') : '<span class="gn-win-e">·</span>') +
+        '</div></div>';
     }).join('');
+    const mv = movesByEpic && movesByEpic[epic];
+    const moveNote = mv ? '<div class="gn-moved">Переносился ' + esc(mv.label) + ' · всего ' + mv.count + ' ' + Gantt3View._plPeren(mv.count) + '</div>' : '';
     return '<div class="gn-epic' + riskCls + '"><div class="gn-nm">' + esc(epic) + '</div>' +
       '<div class="gn-status">' + sentence + '</div>' +
-      '<div class="gn-track">' + track + '</div></div>';
+      '<div class="gn-wins">' + track + '</div>' + moveNote + '</div>';
   },
   _narrativeOpen() {
     const wrap = document.getElementById('gantt3-wrap');
@@ -2545,6 +2578,16 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     const esc = Utils.escapeHtml;
     const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
     const teamHeaders = [...wrap.querySelectorAll('.gantt-team-header[data-team-key]')];
+    const movesByEpic = {};
+    (Array.isArray(state.rows) ? state.rows : []).forEach(r => {
+      const nm = String(r.epic || r.tasks || '').trim();
+      const arr = Array.isArray(r.ganttArrows) ? r.ganttArrows : [];
+      if (nm && arr.length) {
+        const f = arr[0];
+        const lbl = (GANTT_COL_LABELS[f.srcCol] || f.srcCol || '?') + ' → ' + (GANTT_COL_LABELS[f.dstCol] || f.dstCol || '?');
+        movesByEpic[nm] = { count: (movesByEpic[nm] ? movesByEpic[nm].count : 0) + arr.length, label: movesByEpic[nm] ? movesByEpic[nm].label : lbl };
+      }
+    });
     let toc = '', feed = '';
     teamHeaders.forEach((th, ti) => {
       const tk = th.dataset.teamKey;
@@ -2553,7 +2596,7 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
       toc  += '<a data-anchor="' + anchor + '">' + esc(teamName) + '</a>';
       feed += '<div class="gn-team" id="' + anchor + '">' + esc(teamName) + '</div>';
       wrap.querySelectorAll('.gantt-row[data-team-key="' + cssEsc(tk) + '"][data-epic-key]')
-        .forEach(row => { feed += Gantt3View._narrativeEpicHtml(row); });
+        .forEach(row => { feed += Gantt3View._narrativeEpicHtml(row, movesByEpic); });
     });
     const el = document.createElement('div');
     el.id = 'gdt-narrative';
