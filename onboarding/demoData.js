@@ -15,6 +15,29 @@ export function loadDemoData() {
   const rows = _buildRows();
   rows.forEach(r => RowFactory.updateDerived(r));
   state.rows = rows;
+
+  // V22+ demo — зависимости между эпиками (для Линзы / графа / бейджей).
+  // Ключ/значение = ИМЯ эпика (epicDeps[from] = [to,…] → «from зависит от to»).
+  // Цепочки дают и предков, и потомков, и крит-путь:
+  //   Apple Pay → Новый процессинг → Интеграция с НСПК
+  //   Редизайн → Дашборд KYC → Рефакторинг лимитов ← Автоодобрение
+  state.epicDeps = {
+    'Новый процессинг платежей SBP': ['Интеграция с НСПК'],
+    'Apple Pay повторная интеграция': ['Новый процессинг платежей SBP'],
+    'Дашборд KYC-метрик': ['Рефакторинг расчёта лимитов'],
+    'Автоматическое одобрение кредитов': ['Рефакторинг расчёта лимитов', 'Дашборд KYC-метрик'],
+    'Редизайн главного экрана': ['Дашборд KYC-метрик'],
+  };
+
+  // V22+ demo — вехи на оси (для «Курса» / milestone-линий).
+  const today = new Date();
+  const isoShift = (days) => new Date(today.getTime() + days * 86400000).toISOString().slice(0, 10);
+  state.milestones = [
+    { id: 'ms_demo_1', date: isoShift(-34), label: 'Старт квартала' },
+    { id: 'ms_demo_2', date: isoShift(2),   label: 'Релиз 1.21' },
+    { id: 'ms_demo_3', date: isoShift(40),  label: 'Code freeze 1.22' },
+  ];
+
   RiskEngine.computeAll();
   state.employees = [];
   state.diagnostics = {
@@ -57,6 +80,10 @@ function _buildRows() {
       assignee: 'Иванов А.',
       blockingDependency: true,
       blockingDeadline: isoShift(14),  // overdue by ~14 days from today
+      // V22+ demo: тестирование готово, backend в работе; жёсткий дедлайн-риск
+      donePills: { 'r120__тестирование': true },
+      inProgressPills: { 'r120__backend': true },
+      cellRisks: [{ id: 'rk_sbp', col: 'r120', kind: 'hard-deadline', text: 'Регуляторный дедлайн SBP — нельзя сдвигать', dueDate: isoShift(5) }],
     }),
     mk({
       team: 'Платежи',
@@ -73,6 +100,9 @@ function _buildRows() {
       scopeStatus: 'Требует подтверждения',
       release120Types: ['аналитика', 'backend'],
       assignee: 'Сидоров В.',
+      // V22+ demo: аналитика готова, backend в работе
+      donePills: { 'r120__аналитика': true },
+      inProgressPills: { 'r120__backend': true },
     }),
     mk({
       team: 'Кредиты',
@@ -91,6 +121,8 @@ function _buildRows() {
       assignee: 'Козлов Д.',
       blockingDependency: true,
       blockingDeadline: isoShift(7),  // overdue by ~7 days
+      // V22+ demo: backend готов
+      donePills: { 'r120__backend': true },
     }),
     mk({
       team: 'Интеграции',
@@ -109,6 +141,7 @@ function _buildRows() {
       assignee: 'Новиков К.',
       isDone: true,
       doneDate: isoShift(-21),  // completed ~3 weeks ago
+      donePills: { 'r120__стабилизация': true },
     }),
 
     /* ── Release 1.21 tasks ─────────────────────────────────────── */
@@ -119,6 +152,10 @@ function _buildRows() {
       scopeStatus: 'Да',
       release121Types: ['аналитика', 'frontend'],
       assignee: 'Морозова Е.',
+      // V22+ demo: аналитика в работе и переехала из 1.20 (для Переносов/Истории)
+      inProgressPills: { 'r121__аналитика': true },
+      ganttArrows: [{ wt: 'аналитика', srcCol: 'r120', dstCol: 'r121', at: isoShift(-28) }],
+      transferComments: [{ at: isoShift(-28), from: 'r120', to: 'r121', wt: 'аналитика', text: 'Перенос: ждали выгрузку из НСПК' }],
     }),
     mk({
       team: 'Аналитика',
@@ -135,6 +172,10 @@ function _buildRows() {
       scopeStatus: 'Требует подтверждения',
       release121Types: ['бизнес аналитика', 'аналитика'],
       assignee: 'Смирнова О.',
+      // V22+ demo: открытый вопрос по скоупу + переезд из 1.20
+      cellRisks: [{ id: 'rk_auto', col: 'r121', kind: 'open-question', text: 'Скоуп ML-модели не подтверждён бизнесом' }],
+      ganttArrows: [{ wt: 'аналитика', srcCol: 'r120', dstCol: 'r121', at: isoShift(-35) }],
+      transferComments: [{ at: isoShift(-35), from: 'r120', to: 'r121', wt: 'аналитика', text: 'Сдвинули — зависит от рефакторинга лимитов' }],
     }),
     mk({
       team: 'Кредиты',
@@ -151,6 +192,10 @@ function _buildRows() {
       scopeStatus: 'Да',
       release121Types: ['внедрение', 'тестирование'],
       assignee: 'Петрова М.',
+      // V22+ demo: внедрение в работе + переехало из 1.20
+      inProgressPills: { 'r121__внедрение': true },
+      ganttArrows: [{ wt: 'внедрение', srcCol: 'r120', dstCol: 'r121', at: isoShift(-20) }],
+      transferComments: [{ at: isoShift(-20), from: 'r120', to: 'r121', wt: 'внедрение', text: 'Перенос из 1.20 — ждали процессинг SBP' }],
     }),
 
     /* ── Release 1.22 tasks ─────────────────────────────────────── */
@@ -161,6 +206,13 @@ function _buildRows() {
       scopeStatus: 'Да',
       release122Types: ['frontend'],
       assignee: 'Лебедев Т.',
+      // V22+ demo: 3 переезда → нестабильный эпик (churn-бейдж: 1.20→1.21→1.22)
+      ganttArrows: [
+        { wt: 'frontend', srcCol: 'r120', dstCol: 'r121', at: isoShift(-62) },
+        { wt: 'frontend', srcCol: 'r121', dstCol: 'r122', at: isoShift(-30) },
+        { wt: 'frontend', srcCol: 'r122', dstCol: 'r122', at: isoShift(-12) },
+      ],
+      transferComments: [{ at: isoShift(-30), from: 'r121', to: 'r122', wt: 'frontend', text: 'Дважды переезжал — скоуп дизайна нестабилен' }],
     }),
     mk({
       team: 'Мобайл',
@@ -177,6 +229,8 @@ function _buildRows() {
       scopeStatus: 'Требует подтверждения',
       release122Types: ['backend', 'стабилизация'],
       assignee: 'Новиков К.',
+      // V22+ demo: висящая зависимость (dangling-риск)
+      cellRisks: [{ id: 'rk_mtls', col: 'r122', kind: 'dangling', text: 'Висящая зависимость от сетевого контура — не закрыта' }],
     }),
 
     /* ── Overtime ────────────────────────────────────────────────── */
