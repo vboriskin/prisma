@@ -126,6 +126,9 @@ export const Gantt3View = {
   _radial: { el: null, onDoc: null, bypass: false },
   // Гант 3.0 п.23 — «Подсказки» (smart-suggest): панель наблюдений по плану.
   _suggest: { el: null },
+  // Гант 3.0 п.17 — «Слой заметок» (annotations): отдельный store, не мутит план.
+  _annot: { on: false, pop: null, onDoc: null },
+  _annotStore: null,
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -885,6 +888,42 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
 #section-gantt3 .v16-epic-name { cursor: text; }
 .gdt-inline-input { width: 100%; box-sizing: border-box; font: inherit; color: var(--prizma-text-primary, var(--text-1)); background: var(--prizma-bg, #fff); border: 1px solid var(--prizma-information); border-radius: 4px; padding: 1px 5px; outline: none; box-shadow: 0 0 0 3px var(--prizma-information-bg); }
 #section-gantt3 .gantt-row.gdt-edit-saved { animation: gdtRowFlash 1s var(--ease-calm, ease); }
+
+/* === ГАНТ 3.0 · п.18 «Merge-resolve» (lab sketch 29, превью-режим) ========= */
+.gdt-merge { max-width: 760px; margin: 0 auto; padding: 24px 20px 70px; }
+.gdt-merge .mg-note { font-size: 12px; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 16px; padding: 9px 12px; border: 1px dashed var(--prizma-border-strong, var(--border)); border-radius: var(--r-sm, 6px); }
+.gdt-merge .mg-summary { display: flex; gap: 18px; font-size: 13px; margin-bottom: 16px; }
+.gdt-merge .mg-summary .ok { color: var(--prizma-on-course); font-weight: 600; }
+.gdt-merge .mg-summary .cf { color: var(--prizma-drift); font-weight: 600; }
+.gdt-merge .mg-auto { border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); margin-bottom: 18px; overflow: hidden; }
+.gdt-merge .mg-auto-h { padding: 11px 14px; cursor: pointer; display: flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-merge .mg-auto-b { max-height: 0; overflow: hidden; transition: max-height .25s var(--ease-calm, ease); }
+.gdt-merge .mg-auto.open .mg-auto-b { max-height: 600px; }
+.gdt-merge .mg-auto-row { padding: 8px 14px; border-top: 1px solid var(--prizma-border, var(--border)); font-size: 12.5px; color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-merge .mg-auto-row b { color: var(--prizma-text-primary, var(--text-1)); }
+.gdt-merge .mg-conf { border: 1px solid var(--prizma-border, var(--border)); border-left: 3px solid var(--prizma-drift); border-radius: var(--r-md, 10px); padding: 13px 15px; margin-bottom: 12px; }
+.gdt-merge .mg-conf.resolved { border-left-color: var(--prizma-on-course); }
+.gdt-merge .mg-conf.skipped { border-left-color: var(--prizma-text-tertiary, var(--text-3)); opacity: .7; }
+.gdt-merge .mg-conf-t { font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); margin-bottom: 9px; }
+.gdt-merge .mg-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.gdt-merge .mg-opt { border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); padding: 9px 11px; cursor: pointer; }
+.gdt-merge .mg-opt:has(input:checked) { border-color: var(--prizma-information); background: var(--prizma-information-bg); }
+.gdt-merge .mg-opt .ok2 { font: 600 9px/1 var(--font, inherit); text-transform: uppercase; letter-spacing: .4px; color: var(--prizma-text-tertiary, var(--text-3)); }
+.gdt-merge .mg-opt .vv { font-size: 13px; color: var(--prizma-text-primary, var(--text-1)); margin-top: 4px; }
+.gdt-merge .mg-skip { margin-top: 9px; background: none; border: none; color: var(--prizma-text-tertiary, var(--text-3)); cursor: pointer; font-size: 11.5px; text-decoration: underline; }
+.gdt-merge .mg-apply { margin-top: 8px; background: var(--prizma-information); color: #fff; border: none; border-radius: var(--r-sm, 6px); padding: 9px 18px; cursor: pointer; font-size: 13px; font-weight: 600; }
+
+/* === ГАНТ 3.0 · п.17 «Annotations-layer» (lab sketch 30) ================== */
+#btn-gantt3-annot.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
+.gdt-annot-marker { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--prizma-information); box-shadow: 0 0 0 2px var(--prizma-bg, #fff); cursor: pointer; z-index: 4; }
+#gdt-annot-pop { position: fixed; z-index: 69; width: 240px; background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border)); border-radius: var(--r-md, 10px); box-shadow: 0 12px 36px rgba(0,0,0,.34); padding: 11px; animation: gdtAnatomyIn .14s var(--ease-calm, ease); }
+#gdt-annot-pop .ga-ta { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; font: 12.5px/1.4 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); background: var(--prizma-bg, #fff); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); padding: 7px 9px; outline: none; }
+#gdt-annot-pop .ga-ta:focus { border-color: var(--prizma-information); }
+#gdt-annot-pop .ga-row { display: flex; gap: 7px; margin-top: 9px; }
+#gdt-annot-pop button { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); cursor: pointer; padding: 5px 10px; font-size: 12px; color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-annot-pop .ga-save { border-color: var(--prizma-information); color: var(--prizma-information); }
+#gdt-annot-pop .ga-del { margin-left: auto; color: var(--prizma-off-course); border-color: transparent; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1564,6 +1603,12 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     if (sugBtn && !sugBtn._gdtSugBound) {
       sugBtn._gdtSugBound = true;
       sugBtn.addEventListener('click', () => Gantt3View._suggestToggle());
+    }
+    // Гант 3.0 п.17 — «Слой заметок» (annotations).
+    const annotBtn = document.getElementById('btn-gantt3-annot');
+    if (annotBtn && !annotBtn._gdtAnnotBtnBound) {
+      annotBtn._gdtAnnotBtnBound = true;
+      annotBtn.addEventListener('click', () => Gantt3View._annotToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2780,6 +2825,7 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     ['scrubber', 'История',        'ползунок по переносам'],
     ['deck',     'Дек',            'слайды ревью'],
     ['mission',  'Центр управления','приборная панель'],
+    ['merge',    'Слияние',        'разрешение конфликтов (превью)'],
   ],
   _collectEpics() {
     const wrap = document.getElementById('gantt3-wrap');
@@ -3006,6 +3052,42 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     const range = body.querySelector('#sc-range'), lbl = body.querySelector('#sc-lbl'), listEl = body.querySelector('#sc-list');
     const render = () => { const k = +range.value; lbl.textContent = 'Перемотка: показаны переносы 1…' + k + ' из ' + N; listEl.innerHTML = moves.slice(0, k).map(mv => '<div style="padding:8px 0;border-bottom:1px solid var(--prizma-border);font-size:13px"><b>' + esc(mv.epic) + '</b> · ' + esc(mv.wt || '') + ' : ' + esc(GANTT_COL_LABELS[mv.from] || mv.from || '?') + ' → ' + esc(GANTT_COL_LABELS[mv.to] || mv.to || '?') + ' <span style="color:var(--prizma-text-tertiary);font:600 11px/1 var(--mono);margin-left:6px">' + fmt(mv.at) + '</span></div>').join(''); };
     range.addEventListener('input', render); render();
+  },
+  _mode_merge(body, data) {
+    const esc = Utils.escapeHtml;
+    const names = data.epics.map(e => e.epic);
+    const pick = (i) => names[i % (names.length || 1)] || 'эпик';
+    const AUTO = [
+      { ep: pick(0), fld: 'комментарий', to: 'обновлён из файла' },
+      { ep: pick(1), fld: 'исполнитель', to: 'добавлен' },
+      { ep: pick(2), fld: 'дата', to: 'сдвинута на неделю' },
+    ];
+    const CONF = [
+      { ep: pick(3), fld: 'scope', local: 'Да', file: 'Требует подтверждения' },
+      { ep: pick(4), fld: 'релиз', local: '1.21', file: '1.22' },
+    ];
+    const st = Gantt3View._mode.st = { decided: {} };
+    const render = () => {
+      const resolved = Object.values(st.decided).filter(v => v === 'local' || v === 'file').length;
+      const skipped = Object.values(st.decided).filter(v => v === 'skip').length;
+      let h = '<div class="gdt-merge">';
+      h += '<div class="mg-note">Превью режима слияния: как разрешались бы конфликты при импорте плана поверх текущего. Данные демонстрационные — реальный план не меняется.</div>';
+      h += '<div class="mg-summary"><span class="ok">' + AUTO.length + ' авто-применено</span><span class="cf">' + CONF.length + ' конфликта</span><span style="color:var(--prizma-text-tertiary)">' + resolved + ' решено · ' + skipped + ' пропущено</span></div>';
+      h += '<div class="mg-auto"><div class="mg-auto-h" id="mg-auth"><span>▸</span> Авто-применённые правки (' + AUTO.length + ')</div><div class="mg-auto-b">' + AUTO.map(a => '<div class="mg-auto-row"><b>' + esc(a.ep) + '</b> · ' + esc(a.fld) + ' — ' + esc(a.to) + '</div>').join('') + '</div></div>';
+      CONF.forEach((c, i) => { const d = st.decided[i]; h += '<div class="mg-conf' + (d === 'skip' ? ' skipped' : (d ? ' resolved' : '')) + '"><div class="mg-conf-t">' + esc(c.ep) + ' · поле «' + esc(c.fld) + '»</div><div class="mg-opts"><label class="mg-opt"><input type="radio" name="cf' + i + '" value="local"' + (d === 'local' ? ' checked' : '') + '> <span class="ok2">Текущий</span><div class="vv">' + esc(c.local) + '</div></label><label class="mg-opt"><input type="radio" name="cf' + i + '" value="file"' + (d === 'file' ? ' checked' : '') + '> <span class="ok2">Из файла</span><div class="vv">' + esc(c.file) + '</div></label></div><button class="mg-skip" data-skip="' + i + '">Пропустить этот конфликт</button></div>'; });
+      h += '<button class="mg-apply" id="mg-apply">Применить разрешения</button></div>';
+      body.innerHTML = h;
+      body.querySelector('#mg-auth').addEventListener('click', () => body.querySelector('.mg-auto').classList.toggle('open'));
+      body.querySelectorAll('input[type=radio]').forEach(r => r.addEventListener('change', () => { st.decided[+r.name.slice(2)] = r.value; render(); }));
+      body.querySelectorAll('.mg-skip').forEach(s => s.addEventListener('click', () => { st.decided[+s.dataset.skip] = 'skip'; render(); }));
+      body.querySelector('#mg-apply').addEventListener('click', () => {
+        const applied = AUTO.length + Object.values(st.decided).filter(v => v === 'local' || v === 'file').length;
+        const skip = Object.values(st.decided).filter(v => v === 'skip').length;
+        const undec = CONF.length - Object.keys(st.decided).length;
+        window.showToast?.('Применено ' + applied + ', пропущено ' + skip + (undec > 0 ? ', не решено ' + undec : '') + ' (превью)', 'info', 2800);
+      });
+    };
+    render();
   },
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -3273,6 +3355,76 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     };
     inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
     inp.addEventListener('blur', () => finish(true));
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.17 — «СЛОЙ ЗАМЕТОК» / annotations (порт lab sketch 30). Toggle
+     «Слой» → клик по ячейке добавляет свободную заметку; маркеры на размеченных
+     ячейках; клик по маркеру → правка/удаление. Хранится В ОТДЕЛЬНОМ store
+     (localStorage q2_gantt3_annot_v1), НЕ мутирует план эпиков.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _annotLoad() {
+    if (!Gantt3View._annotStore) { try { Gantt3View._annotStore = JSON.parse(localStorage.getItem('q2_gantt3_annot_v1') || '{}') || {}; } catch (_) { Gantt3View._annotStore = {}; } }
+    return Gantt3View._annotStore;
+  },
+  _annotSave() { try { localStorage.setItem('q2_gantt3_annot_v1', JSON.stringify(Gantt3View._annotStore || {})); } catch (_) {} },
+  _annotToggle() {
+    const A = Gantt3View._annot; A.on = !A.on;
+    document.body.classList.toggle('gdt-annot-on', A.on);
+    const btn = document.getElementById('btn-gantt3-annot'); if (btn) { btn.classList.toggle('active', A.on); btn.setAttribute('aria-pressed', A.on ? 'true' : 'false'); }
+    if (A.on) { Gantt3View._annotBind(); Gantt3View._annotRenderMarkers(); try { window.showToast?.('Слой заметок: клик по ячейке — добавить заметку', 'info', 2400); } catch (_) {} }
+    else { Gantt3View._annotClearMarkers(); Gantt3View._annotClosePop(); }
+  },
+  _annotRenderMarkers() {
+    const wrap = document.getElementById('gantt3-wrap'); if (!wrap) return;
+    Gantt3View._annotClearMarkers();
+    const store = Gantt3View._annotLoad();
+    const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    Object.keys(store).forEach(key => {
+      const sep = key.indexOf('|'); const rowId = key.slice(0, sep), col = key.slice(sep + 1);
+      const cell = wrap.querySelector('.gantt-cell[data-row-id="' + esc(rowId) + '"][data-col="' + esc(col) + '"]');
+      if (cell) { const m = document.createElement('span'); m.className = 'gdt-annot-marker'; m.dataset.key = key; m.title = store[key]; cell.appendChild(m); }
+    });
+  },
+  _annotClearMarkers() { document.querySelectorAll('#gantt3-wrap .gdt-annot-marker').forEach(m => m.remove()); },
+  _annotBind() {
+    const wrap = document.getElementById('gantt3-wrap'); if (!wrap || wrap._gdtAnnotBound) return;
+    wrap._gdtAnnotBound = true;
+    wrap.addEventListener('click', (e) => {
+      if (!Gantt3View._annot.on) return;
+      const marker = e.target.closest('.gdt-annot-marker');
+      if (marker) { e.stopPropagation(); Gantt3View._annotOpenPop(marker.dataset.key, marker); return; }
+      const cell = e.target.closest('.gantt-cell[data-row-id][data-col]');
+      if (!cell || e.target.closest('.gantt-type-pill, button, .gdt-cell-risk-glyph, .gdt-note-bubble')) return;
+      e.stopPropagation();
+      Gantt3View._annotOpenPop(cell.dataset.rowId + '|' + cell.dataset.col, cell);
+    });
+  },
+  _annotOpenPop(key, anchor) {
+    Gantt3View._annotClosePop();
+    const store = Gantt3View._annotLoad();
+    const cur = store[key] || '';
+    const pop = document.createElement('div'); pop.id = 'gdt-annot-pop';
+    pop.innerHTML = '<textarea class="ga-ta" placeholder="Заметка к ячейке…">' + Utils.escapeHtml(cur) + '</textarea>' +
+      '<div class="ga-row"><button class="ga-save">Сохранить</button>' + (cur ? '<button class="ga-del">Удалить</button>' : '') + '<button class="ga-cancel">Отмена</button></div>';
+    document.body.appendChild(pop);
+    Gantt3View._annot.pop = pop;
+    const r = anchor.getBoundingClientRect();
+    let left = r.left, top = r.bottom + 6; const pw = 240;
+    if (left + pw > window.innerWidth - 12) left = window.innerWidth - pw - 12;
+    if (top + 130 > window.innerHeight) top = Math.max(12, r.top - 136);
+    pop.style.left = Math.max(12, left) + 'px'; pop.style.top = top + 'px';
+    const ta = pop.querySelector('.ga-ta'); ta.focus();
+    pop.querySelector('.ga-save').addEventListener('click', () => { const v = ta.value.trim(); if (v) store[key] = v; else delete store[key]; Gantt3View._annotSave(); Gantt3View._annotRenderMarkers(); Gantt3View._annotClosePop(); });
+    pop.querySelector('.ga-del')?.addEventListener('click', () => { delete store[key]; Gantt3View._annotSave(); Gantt3View._annotRenderMarkers(); Gantt3View._annotClosePop(); });
+    pop.querySelector('.ga-cancel').addEventListener('click', () => Gantt3View._annotClosePop());
+    Gantt3View._annot.onDoc = (ev) => { if (ev.type === 'keydown') { if (ev.key === 'Escape') Gantt3View._annotClosePop(); return; } if (!pop.contains(ev.target) && !anchor.contains(ev.target)) Gantt3View._annotClosePop(); };
+    setTimeout(() => { document.addEventListener('mousedown', Gantt3View._annot.onDoc, true); document.addEventListener('keydown', Gantt3View._annot.onDoc, true); }, 0);
+  },
+  _annotClosePop() {
+    const A = Gantt3View._annot;
+    if (A.onDoc) { document.removeEventListener('mousedown', A.onDoc, true); document.removeEventListener('keydown', A.onDoc, true); A.onDoc = null; }
+    if (A.pop) { A.pop.remove(); A.pop = null; }
   },
 
   bindFullscreen() {
@@ -4589,6 +4741,8 @@ html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important
     Gantt3View._radialClose();
     // Гант 3.0 п.22 — Inline-edit: делегат dblclick на #gantt3-wrap (идемпотентно).
     Gantt3View._inlineBind();
+    // Гант 3.0 п.17 — Слой заметок: ячейки пересозданы → пере-навесить маркеры.
+    if (Gantt3View._annot && Gantt3View._annot.on) { Gantt3View._annotBind(); Gantt3View._annotRenderMarkers(); }
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
