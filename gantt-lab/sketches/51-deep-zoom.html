@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скетч 51 · Глубокий зум (fly-into)</title>
+<link rel="stylesheet" href="../shared/tokens.css">
+<script src="../shared/sample-data.js"></script>
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 26px 24px 56px; }
+  .head { margin-bottom: 16px; }
+  .head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; }
+  .head p { margin: 0; color: var(--prizma-text-secondary); font-size: 14px; max-width: 660px; }
+
+  /* ── панель навигации глубины ── */
+  .bar { display: flex; align-items: center; gap: 12px; margin: 16px 0 10px; }
+  .crumbs { display: flex; align-items: center; gap: 4px; font-size: 13px; flex-wrap: wrap; }
+  .crumb { background: none; border: none; color: var(--prizma-text-secondary); font: 600 13px/1 var(--font); cursor: pointer; padding: 4px 6px; border-radius: var(--r-sm); }
+  .crumb:hover { color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); }
+  .crumb.cur { color: var(--prizma-text-primary); cursor: default; }
+  .crumb-sep { color: var(--prizma-text-tertiary); }
+  .bar .spacer { flex: 1; }
+  .depth-meter { display: inline-flex; gap: 5px; align-items: center; }
+  .depth-meter i { width: 7px; height: 7px; border-radius: 50%; background: var(--prizma-border-strong); transition: background .2s, transform .2s; }
+  .depth-meter i.on { background: var(--prizma-information); transform: scale(1.25); }
+  .hint { font-size: 12px; color: var(--prizma-text-tertiary); }
+
+  /* ── сцена зума ── */
+  .scene { position: relative; height: 540px; border: 1px solid var(--prizma-border); border-radius: var(--r-lg);
+    background: var(--prizma-bg-elevated); overflow: hidden; }
+  .layer { position: absolute; inset: 0; padding: 20px; overflow: auto;
+    transition: transform .27s var(--ease-calm), opacity .27s var(--ease-calm); transform-origin: 50% 50%; }
+  .layer.fly-out-in  { transform: scale(1.9); opacity: 0; }   /* уходим ВГЛУБЬ: текущий разрастается к точке */
+  .layer.fly-out-up  { transform: scale(.72); opacity: 0; }   /* выходим НАРУЖУ: текущий сжимается */
+  .layer.enter-in    { transform: scale(.9);  opacity: 0; }   /* новый глубокий слой влетает из точки */
+  .layer.enter-up    { transform: scale(1.08); opacity: 0; }  /* новый верхний слой влетает «издалека» */
+
+  /* depth 0 — квартал */
+  .teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .teamcard { text-align: left; background: var(--prizma-bg); border: 1px solid var(--prizma-border); border-radius: var(--r-lg);
+    padding: 14px; cursor: zoom-in; transition: border-color .15s, transform .15s; }
+  .teamcard:hover { border-color: var(--prizma-information); transform: translateY(-2px); }
+  .teamcard .th { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .mono { width: 24px; height: 19px; display: inline-flex; align-items: center; justify-content: center; font: 700 10px/1 var(--mono);
+    letter-spacing: .6px; text-transform: uppercase; border: 1px solid var(--prizma-border-strong); border-radius: 4px; color: var(--prizma-text-secondary); }
+  .teamcard b { font-size: 14px; }
+  .teamcard .sub { font: 500 11px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .dots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 2px; background: var(--prizma-text-tertiary); }
+  .dot.s-done { background: var(--prizma-on-course); opacity: .7; }
+  .dot.s-progress { background: var(--prizma-information); }
+  .dot.s-planned { background: var(--prizma-border-strong); }
+  .dot.s-unplanned { background: transparent; border: 1px dashed var(--prizma-text-tertiary); }
+  .dot.risk { outline: 1.5px solid var(--risk); outline-offset: 1px; }
+
+  /* depth 1 — команда (эпики × релизы) */
+  .t1-grid { display: grid; grid-template-columns: 200px repeat(5, 1fr); gap: 0; }
+  .t1-h { position: sticky; top: 0; padding: 6px 8px 8px; font: 300 16px/1 var(--mono); color: var(--prizma-text-secondary); border-bottom: 1px solid var(--prizma-border); }
+  .t1-h.cur { color: var(--prizma-text-primary); }
+  .t1-h.lbl { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); align-self: end; }
+  .t1-elabel { padding: 9px 8px; border-bottom: 1px solid var(--prizma-border); display: flex; flex-direction: column; gap: 3px; cursor: zoom-in; }
+  .t1-elabel:hover { background: var(--prizma-bg-tertiary); }
+  .t1-elabel .nm { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .t1-elabel .risk { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .t1-cell { padding: 9px 6px; border-bottom: 1px solid var(--prizma-border); border-left: 1px solid var(--prizma-border); display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
+
+  /* pill (общий) */
+  .pill { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 10px; font: 600 11px/1 var(--font);
+    color: var(--prizma-text-primary); background: var(--prizma-bg-tertiary); border-radius: var(--r-sm); cursor: zoom-in; }
+  .pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .pill .who { font: 500 9px/1 var(--mono); color: var(--prizma-text-tertiary); }
+  .pill[data-st="done"] { opacity: .65; } .pill[data-st="done"] .nm { text-decoration: line-through; }
+  .pill[data-st="progress"]::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--prizma-information); }
+  .pill[data-st="unplanned"] { border: 1px dashed var(--prizma-border-strong); background: transparent; }
+
+  /* depth 2 — эпик (трек по релизам) */
+  .e2-wrap { max-width: 980px; }
+  .e2-title { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 2px 0 2px; }
+  .e2-meta { font: 500 12px/1 var(--mono); color: var(--prizma-text-tertiary); margin-bottom: 18px; }
+  .e2-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; border: 1px solid var(--prizma-border); border-radius: var(--r-md); overflow: hidden; }
+  .e2-col { border-left: 1px solid var(--prizma-border); min-height: 150px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .e2-col:first-child { border-left: none; }
+  .e2-col .ch { font: 300 17px/1 var(--mono); color: var(--prizma-text-secondary); margin-bottom: 4px; }
+  .e2-col .ch.cur { color: var(--prizma-text-primary); }
+  .e2-col .pill { padding: 6px 10px 6px 12px; font-size: 12px; }
+
+  /* depth 3 — пилюля (детальная карточка) */
+  .d3 { max-width: 560px; }
+  .d3-card { background: var(--prizma-bg); border: 1px solid var(--prizma-border); border-left: 3px solid var(--wt); border-radius: var(--r-lg); padding: 22px; }
+  .d3-eyebrow { font: 700 10px/1 var(--font); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary); }
+  .d3-card h2 { font-size: 24px; font-weight: 800; margin: 6px 0 14px; }
+  .d3-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 22px; }
+  .d3-field .k { font: 700 9.5px/1 var(--font); letter-spacing: .5px; text-transform: uppercase; color: var(--prizma-text-tertiary); margin-bottom: 4px; }
+  .d3-field .v { font-size: 14px; color: var(--prizma-text-primary); }
+  .d3-field .v.mono { font-family: var(--mono); }
+  .d3-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font: 600 11px/1.4 var(--font); }
+
+  .pz-btn.sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="pz-eyebrow">Скетч 51 · Deep zoom</div>
+    <h1>Глубокий зум — погружение в план</h1>
+    <p>Один непрерывный жест ведёт вглубь: <b>Квартал → Команда → Эпик → Работа</b>. Клик (или колесо) «влетает» в выбранное с зумом к точке, уровень детализации меняется по глубине. Назад — крошки, «‹ наверх», Esc или колесо вверх.</p>
+  </div>
+
+  <div class="bar">
+    <button class="pz-btn sm" id="up" title="Наверх (Esc / колесо вверх)">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 15l-6-6-6 6"/></svg>
+      Наверх
+    </button>
+    <div class="crumbs" id="crumbs"></div>
+    <span class="spacer"></span>
+    <span class="depth-meter" id="meter" title="Глубина"></span>
+    <button class="pz-btn pz-btn-icon sm" id="tt" title="Тема" aria-label="Тема"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></button>
+  </div>
+
+  <div class="scene" id="scene"><div class="layer" id="layer"></div></div>
+</div>
+
+<script>
+(function () {
+  const D = window.PZ_DATA;
+  const cols = D.releases;
+  const layer = document.getElementById('layer');
+  const scene = document.getElementById('scene');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const wtVar = wt => 'var(' + ({BE:'--wt-be',FE:'--wt-fe',QA:'--wt-qa',AN:'--wt-an',BA:'--wt-ba',IMPL:'--wt-impl',MIG:'--wt-mig',STAB:'--wt-stab',HF:'--wt-hf'}[wt] || '--prizma-information') + ')';
+  const riskVar = r => r === 'off-course' ? 'var(--prizma-off-course)' : (r === 'drift' ? 'var(--prizma-drift)' : 'transparent');
+  const relShort = k => (cols.find(c => c.key === k) || {}).short || k;
+
+  // состояние глубины
+  let st = { depth: 0, team: null, epic: null, pill: null };
+  let busy = false;
+
+  function meter() {
+    return [0,1,2,3].map(i => '<i class="' + (i <= st.depth ? 'on' : '') + '"></i>').join('');
+  }
+  function crumbs() {
+    const c = [{ d: 0, t: 'Квартал' }];
+    if (st.team) c.push({ d: 1, t: st.team });
+    if (st.epic) c.push({ d: 2, t: st.epic.epic });
+    if (st.pill) c.push({ d: 3, t: (D.WT[st.pill.wt] ? D.WT[st.pill.wt].label : st.pill.wt) + ' · ' + relShort(st.pill.col) });
+    return c.map((x, i) => (i ? '<span class="crumb-sep">›</span>' : '') +
+      '<button class="crumb' + (i === c.length - 1 ? ' cur' : '') + '" data-d="' + x.d + '">' + esc(x.t) + '</button>').join('');
+  }
+
+  function pillHtml(epic, p, cls) {
+    const who = p.who ? '<span class="who">' + esc(p.who) + '</span>' : '';
+    return '<button type="button" class="pill ' + (cls||'') + '" data-pill="1" data-epic="' + epic.id + '" data-col="' + p.col + '" data-wt="' + p.wt + '" data-st="' + p.state + '" style="--wt:' + wtVar(p.wt) + '">' +
+      '<span class="nm">' + esc(p.wt) + '</span>' + who + '</button>';
+  }
+
+  // ── рендер по глубине ──
+  function render() {
+    if (st.depth === 0) renderQuarter();
+    else if (st.depth === 1) renderTeam();
+    else if (st.depth === 2) renderEpic();
+    else renderPill();
+    document.getElementById('crumbs').innerHTML = crumbs();
+    document.getElementById('meter').innerHTML = meter();
+    wire();
+  }
+
+  function renderQuarter() {
+    layer.innerHTML = '<div class="teams">' + D.teams.map(team => {
+      const eps = D.helpers.teamEpics(team);
+      const work = eps.reduce((n, e) => n + e.pills.length, 0);
+      const dots = eps.flatMap(e => e.pills.map(p =>
+        '<span class="dot s-' + p.state + (e.risk ? ' risk' : '') + '" style="--risk:' + riskVar(e.risk) + '"></span>')).join('');
+      return '<button type="button" class="teamcard" data-team="' + esc(team) + '">' +
+        '<div class="th"><span class="mono">' + esc(team.slice(0,2)) + '</span><b>' + esc(team) + '</b></div>' +
+        '<span class="sub">' + eps.length + ' эпик · ' + work + ' работ</span>' +
+        '<div class="dots">' + dots + '</div></button>';
+    }).join('') + '</div>';
+  }
+
+  function renderTeam() {
+    const eps = D.helpers.teamEpics(st.team);
+    let h = '<div class="t1-grid">';
+    h += '<div class="t1-h lbl">Эпик</div>';
+    cols.forEach(c => { h += '<div class="t1-h' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</div>'; });
+    eps.forEach(e => {
+      h += '<div class="t1-elabel" data-epic="' + e.id + '"><span class="nm">' +
+        (e.risk ? '<span class="risk" style="background:' + riskVar(e.risk) + '"></span>' : '') + esc(e.epic) + '</span>' +
+        '<span class="sub" style="font:500 10px/1 var(--mono);color:var(--prizma-text-tertiary)">' + D.helpers.effortOf(e) + ' дн</span></div>';
+      cols.forEach(c => {
+        h += '<div class="t1-cell">' + D.helpers.pillsOf(e, c.key).map(p => pillHtml(e, p)).join('') + '</div>';
+      });
+    });
+    h += '</div>';
+    layer.innerHTML = h;
+  }
+
+  function renderEpic() {
+    const e = st.epic;
+    let h = '<div class="e2-wrap"><div class="e2-title">' + esc(e.epic) + '</div>' +
+      '<div class="e2-meta">' + esc(e.team) + ' · ' + D.helpers.effortOf(e) + ' дн · ' + e.pills.length + ' работ' +
+      (e.risk ? ' · <span style="color:' + riskVar(e.risk) + '">риск</span>' : '') +
+      (e.deps && e.deps.length ? ' · зависит от ' + e.deps.length : '') + '</div>';
+    h += '<div class="e2-track">';
+    cols.forEach(c => {
+      h += '<div class="e2-col"><span class="ch' + (c.current ? ' cur' : '') + '">' + esc(c.short) + '</span>' +
+        D.helpers.pillsOf(e, c.key).map(p => pillHtml(e, p)).join('') + '</div>';
+    });
+    h += '</div></div>';
+    layer.innerHTML = h;
+  }
+
+  function renderPill() {
+    const p = st.pill, e = st.epic;
+    const stLabel = { planned: 'Запланировано', progress: 'В работе', done: 'Завершено', unplanned: 'Не запланировано' }[p.state] || p.state;
+    const stColor = { done: 'var(--prizma-on-course)', progress: 'var(--prizma-information)', unplanned: 'var(--prizma-drift)', planned: 'var(--prizma-text-secondary)' }[p.state];
+    const estKey = p.wt.toLowerCase();
+    const est = (e.est && e.est[estKey]) ? e.est[estKey] + ' дн' : '—';
+    let h = '<div class="d3"><div class="d3-card" style="--wt:' + wtVar(p.wt) + '">' +
+      '<div class="d3-eyebrow">Работа · ' + esc(relShort(p.col)) + '</div>' +
+      '<h2>' + esc(D.WT[p.wt] ? D.WT[p.wt].label : p.wt) + '</h2>' +
+      '<div class="d3-grid">' +
+        field('Статус', '<span class="d3-badge" style="color:' + stColor + ';background:color-mix(in srgb,' + stColor + ' 14%,transparent)">' + stLabel + '</span>') +
+        field('Исполнитель', esc(p.who || 'не назначен')) +
+        field('Оценка', '<span class="mono">' + est + '</span>') +
+        field('Окно релиза', '<span class="mono">' + esc(relShort(p.col)) + '</span>') +
+        field('Эпик', esc(e.epic)) +
+        field('Команда', esc(e.team)) +
+      '</div>';
+    if (e.deps && e.deps.length) {
+      const names = e.deps.map(id => (D.epics.find(x => x.id === id) || {}).epic).filter(Boolean);
+      h += '<div class="d3-field" style="margin-top:14px"><div class="k">Эпик зависит от</div><div class="v">' + esc(names.join(', ')) + '</div></div>';
+    }
+    h += '</div></div>';
+    layer.innerHTML = h;
+  }
+  function field(k, v) { return '<div class="d3-field"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>'; }
+
+  // ── переходы с «полётом» ──
+  function fly(dir, mutate, originEl) {
+    if (busy) return; busy = true;
+    const sr = scene.getBoundingClientRect();
+    if (originEl) {
+      const r = originEl.getBoundingClientRect();
+      layer.style.transformOrigin = ((r.left + r.width/2 - sr.left) / sr.width * 100).toFixed(1) + '% ' +
+                                     ((r.top + r.height/2 - sr.top) / sr.height * 100).toFixed(1) + '%';
+    } else { layer.style.transformOrigin = '50% 50%'; }
+    layer.classList.add(dir === 'in' ? 'fly-out-in' : 'fly-out-up');
+    setTimeout(() => {
+      mutate();
+      render();
+      layer.scrollTop = 0;
+      layer.classList.remove('fly-out-in', 'fly-out-up');
+      layer.classList.add(dir === 'in' ? 'enter-in' : 'enter-up');
+      busy = false;   // снимаем lock сразу после свопа контента (один таймер — устойчиво к throttle)
+      // снять enter-состояние, чтобы слой въехал: rAF (foreground) + setTimeout-fallback (если rAF throttled)
+      requestAnimationFrame(() => requestAnimationFrame(() => layer.classList.remove('enter-in', 'enter-up')));
+      setTimeout(() => layer.classList.remove('enter-in', 'enter-up'), 80);
+    }, 220);
+  }
+
+  function goTeam(team, el) { fly('in', () => { st = { depth: 1, team, epic: null, pill: null }; }, el); }
+  function goEpic(epicId, el) { const e = D.epics.find(x => x.id === epicId); if (!e) return; fly('in', () => { st = { depth: 2, team: e.team, epic: e, pill: null }; }, el); }
+  function goPill(epicId, col, wt, el) {
+    const e = D.epics.find(x => x.id === epicId); if (!e) return;
+    const p = e.pills.find(x => x.col === col && x.wt === wt); if (!p) return;
+    fly('in', () => { st = { depth: 3, team: e.team, epic: e, pill: p }; }, el);
+  }
+  function goDepth(d) {
+    if (d >= st.depth) return;
+    fly('up', () => {
+      if (d === 0) st = { depth: 0, team: null, epic: null, pill: null };
+      else if (d === 1) st = { depth: 1, team: st.team, epic: null, pill: null };
+      else if (d === 2) st = { depth: 2, team: st.team, epic: st.epic, pill: null };
+    });
+  }
+
+  function wire() {
+    layer.querySelectorAll('.teamcard').forEach(b => b.addEventListener('click', () => goTeam(b.dataset.team, b)));
+    layer.querySelectorAll('.t1-elabel').forEach(b => b.addEventListener('click', () => goEpic(b.dataset.epic, b)));
+    layer.querySelectorAll('.pill[data-pill]').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation(); goPill(b.dataset.epic, b.dataset.col, b.dataset.wt, b);
+    }));
+  }
+
+  document.getElementById('crumbs').addEventListener('click', e => {
+    const b = e.target.closest('.crumb'); if (b) goDepth(+b.dataset.d);
+  });
+  document.getElementById('up').addEventListener('click', () => goDepth(Math.max(0, st.depth - 1)));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') goDepth(Math.max(0, st.depth - 1)); });
+  // колесо: вниз-страницы = наверх по глубине (zoom out); вверх = вглубь в центр
+  let wheelLock = 0;
+  scene.addEventListener('wheel', e => {
+    e.preventDefault();
+    const now = Date.now(); if (now - wheelLock < 360 || busy) return; wheelLock = now;
+    if (e.deltaY > 0) { goDepth(Math.max(0, st.depth - 1)); return; }
+    // вглубь: берём первый осмысленный элемент текущего слоя
+    if (st.depth === 0) { const b = layer.querySelector('.teamcard'); if (b) b.click(); }
+    else if (st.depth === 1) { const b = layer.querySelector('.t1-elabel'); if (b) b.click(); }
+    else if (st.depth === 2) { const b = layer.querySelector('.pill[data-pill]'); if (b) b.click(); }
+  }, { passive: false });
+
+  document.getElementById('tt').addEventListener('click', () => {
+    const r = document.documentElement; r.setAttribute('data-theme', r.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
