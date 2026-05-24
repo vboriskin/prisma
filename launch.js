@@ -4,7 +4,7 @@
    launch.js — one-click launcher.
    --
    What it does:
-     1. Finds a free TCP port starting from 8080 (8081, 8082… up to 8090).
+     1. Finds a free TCP port starting from 5470 (5471, 5472… up to 5479).
      2. Spawns `node server.js <port>` and forwards its stdout/stderr.
      3. When the server prints `LISTENING:<port>`, opens the user's default
         browser at http://localhost:<port>.
@@ -35,12 +35,14 @@ const APP_NAME = 'Призма';
 // V22 — `--profile` режим: пишем CPU-profile + memory snapshot сервера в
 // файл по таймеру, плюс эмитит heap stats каждые 30 сек в stdout. Запуск:
 //   node launch.js --profile        (default port)
-//   node launch.js 8080 --profile
+//   node launch.js 5470 --profile
 // Profile-файлы сохраняются в .profile/ рядом с launch.js и переписываются
 // между запусками (последний — актуальный).
 const PROFILE_FLAG = process.argv.includes('--profile');
 const PORT_ARG     = process.argv.find(a => /^\d+$/.test(a));
-const FROM     = parseInt(PORT_ARG, 10) || 8080;
+// Зарезервированный диапазон приложения — 5470–5489 (деконфликт с соседним
+// приложением, занявшим 4xxx). FROM=5470, скан до FROM+9=5479.
+const FROM     = parseInt(PORT_ARG, 10) || 5470;
 const TO       = FROM + 9;
 const NODE     = process.execPath;
 

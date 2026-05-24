@@ -17,7 +17,7 @@ const logger = require('./server/logger.js');
 // LLM-budget code), передаётся в фабрику createObservability ниже.
 const { createObservability } = require('./server/observability.js');
 
-const PORT = parseInt(process.argv[2], 10) || 8080;
+const PORT = parseInt(process.argv[2], 10) || 5470;   // дефолт в зарезервированном диапазоне 5470–5489 (деконфликт с соседним приложением на 4xxx)
 const ROOT = __dirname;
 
 // V22 Stage 8 — bootstrap helpers + static handler extracted to small

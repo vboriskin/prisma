@@ -4,8 +4,8 @@
     {
       "name": "prisma",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["server.js", "8080"],
-      "port": 8080
+      "runtimeArgs": ["server.js", "5470"],
+      "port": 5470
     }
   ]
 }

@@ -98,7 +98,7 @@ const dwarn = (...args) => { try { console.warn(...args); } catch (_) {} };
 // ============================================================
 function getLLMDefaultSettings() {
   const defaultProxy = (typeof window !== 'undefined' && window.location && window.location.protocol === 'file:')
-    ? 'http://127.0.0.1:8080' : '';
+    ? 'http://127.0.0.1:5470' : '';   // file://-фолбэк → зарезервированный порт приложения (был 8080)
   return {
     apiMode: 'direct', apiBaseUrl: 'http://localhost:3000/v1', proxyUrl: defaultProxy,
     model: 'GigaChat-2', token: '', temperature: 0.2, maxTokens: 2000,

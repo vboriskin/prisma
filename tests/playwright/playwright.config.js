@@ -5,7 +5,10 @@
 const { defineConfig, devices } = require('@playwright/test');
 const path = require('node:path');
 
-const PORT = 19080;
+// Внутри зарезервированного диапазона приложения 5470–5489. 5481 — отдельно
+// от dev-сервера (5470) и его скан-диапазона (5470–5479), чтобы visual-тесты
+// и запущенный dev-сервер не конфликтовали.
+const PORT = 5481;
 
 module.exports = defineConfig({
   testDir: __dirname,
