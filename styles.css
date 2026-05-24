@@ -5572,6 +5572,17 @@ body.theme-dark .assistant-panel-header { background: var(--card, #121a2f); }
   border-color: var(--prizma-off-course, #dc2626);
   transform: translate(-50%, -50%) scale(1.15);
 }
+/* Hover-подсветка цепочки: на ховер по узлу гаснет несвязанное, проявляются
+   связи всей цепочки (предки + потомки), как в lab-скетче 09. */
+.dep-graph-canvas .dep-node-wrap, .dep-graph-canvas .dep-edge { transition: opacity .16s, stroke .16s, stroke-width .16s; }
+.dep-graph-canvas.dep-focusing .dep-node-wrap:not(.dep-chain) { opacity: .16; }
+.dep-graph-canvas.dep-focusing .dep-edge:not(.dep-edge-active) { opacity: .07; }
+.dep-graph-canvas.dep-focusing .dep-edge.dep-edge-active { opacity: 1; stroke: var(--prizma-information); stroke-width: 2.4; }
+.dep-graph-canvas.dep-focusing .dep-edge.dep-edge-active.dep-edge-critical { stroke: var(--prizma-critical); }
+.dep-graph-canvas.dep-focusing .dep-edge-del { opacity: 0 !important; pointer-events: none; }
+.dep-node-wrap.dep-chain-focus .dep-node { border-color: var(--prizma-information) !important; box-shadow: 0 0 0 2px var(--prizma-information-bg); }
+.dep-node-wrap.dep-chain-anc .dep-node { border-color: var(--prizma-information); }
+.dep-node-wrap.dep-chain-desc .dep-node { border-color: var(--prizma-off-course); }
 
 .dep-node-wrap { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .dep-node {

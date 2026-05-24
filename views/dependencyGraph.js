@@ -93,7 +93,7 @@ function _renderOverlay() {
     const to   = nodeByName.get(e.to);
     if (!from || !to) return '';
     const cls = e.critical ? 'dep-edge dep-edge-critical' : 'dep-edge';
-    return `<path class="${cls}" d="${_edgePath(from, to, nodeSize)}" marker-end="url(#dep-arrow${e.critical ? '-critical' : ''})"/>`;
+    return `<path class="${cls}" data-from="${_esc(e.from)}" data-to="${_esc(e.to)}" d="${_edgePath(from, to, nodeSize)}" marker-end="url(#dep-arrow${e.critical ? '-critical' : ''})"/>`;
   }).join('');
 
   // «×» на середине каждого ребра — удалить зависимость. edge.to зависит
@@ -238,6 +238,46 @@ export const DependencyGraphView = {
         } catch (_) {}
       });
     });
+
+    // Hover по узлу — подсветить ВСЮ его цепочку (предки + потомки) и связи,
+    // приглушить остальное (как в lab-скетче 09). Раньше при наведении ничего
+    // не происходило — связи были не видны.
+    const canvas = root.querySelector('.dep-graph-canvas');
+    const edgeEls = [...root.querySelectorAll('.dep-edge[data-from]')];
+    if (canvas && edgeEls.length) {
+      // adjacency: ребро from→to означает «to зависит от from».
+      const fwd = Object.create(null), bwd = Object.create(null);
+      edgeEls.forEach(p => { const f = p.dataset.from, t = p.dataset.to; (fwd[f] ||= []).push(t); (bwd[t] ||= []).push(f); });
+      const chainOf = (start) => {
+        const anc = new Set(), desc = new Set();
+        const up = (n) => (bwd[n] || []).forEach(f => { if (!anc.has(f)) { anc.add(f); up(f); } });
+        const down = (n) => (fwd[n] || []).forEach(t => { if (!desc.has(t)) { desc.add(t); down(t); } });
+        up(start); down(start);
+        anc.delete(start); desc.delete(start);
+        return { anc, desc, all: new Set([start, ...anc, ...desc]) };
+      };
+      const clearFocus = () => {
+        canvas.classList.remove('dep-focusing');
+        root.querySelectorAll('.dep-node-wrap').forEach(w => w.classList.remove('dep-chain', 'dep-chain-focus', 'dep-chain-anc', 'dep-chain-desc'));
+        edgeEls.forEach(p => p.classList.remove('dep-edge-active'));
+      };
+      root.querySelectorAll('.dep-node').forEach(node => {
+        node.addEventListener('mouseenter', () => {
+          const epic = node.dataset.epic;
+          const { anc, desc, all } = chainOf(epic);
+          canvas.classList.add('dep-focusing');
+          root.querySelectorAll('.dep-node-wrap').forEach(w => {
+            const nm = w.querySelector('.dep-node')?.dataset.epic;
+            w.classList.toggle('dep-chain', all.has(nm));
+            w.classList.toggle('dep-chain-focus', nm === epic);
+            w.classList.toggle('dep-chain-anc', anc.has(nm));
+            w.classList.toggle('dep-chain-desc', desc.has(nm));
+          });
+          edgeEls.forEach(p => p.classList.toggle('dep-edge-active', all.has(p.dataset.from) && all.has(p.dataset.to)));
+        });
+        node.addEventListener('mouseleave', clearFocus);
+      });
+    }
   },
 };
 
