@@ -122,6 +122,8 @@ export const Gantt3View = {
   _mode: { el: null, name: null, onKey: null, st: null },
   // Гант 3.0 п.20 — «Чипы»: быстрые фильтры (toggle-режим, AND-комбинация).
   _chips: { on: false, active: null, strip: null },
+  // Гант 3.0 п.19 — «Radial-menu»: радиальное контекст-меню на пилюле.
+  _radial: { el: null, onDoc: null, bypass: false },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -841,6 +843,20 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 #gdt-chips .gc-res { margin-left: auto; font: 500 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
 body.gdt-chips-on #section-gantt3 .gantt-row.gdt-chip-dim,
 body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14; transition: opacity .25s var(--ease-calm, ease); }
+
+/* === ГАНТ 3.0 · п.19 «Radial-menu» (lab sketch 27, посимпатичнее) ========= */
+#gdt-radial { position: fixed; width: 232px; height: 232px; margin: -116px 0 0 -116px; z-index: 68; pointer-events: none; opacity: 0; transform: scale(.6); transition: opacity .14s var(--ease-calm, ease), transform .16s var(--ease-spring, cubic-bezier(.34,1.56,.64,1)); }
+#gdt-radial.show { opacity: 1; transform: scale(1); pointer-events: auto; }
+#gdt-radial svg { width: 100%; height: 100%; overflow: visible; }
+#gdt-radial .rs-arc { fill: var(--prizma-bg-elevated, var(--card)); stroke: var(--prizma-border, var(--border)); stroke-width: 1; cursor: pointer; transition: fill .12s; }
+#gdt-radial .rs-sect.hot .rs-arc { fill: color-mix(in srgb, var(--rs-acc, var(--prizma-information)) 18%, var(--prizma-bg-elevated, var(--card))); stroke: var(--rs-acc, var(--prizma-information)); }
+#gdt-radial .rs-glyph { fill: none; stroke: var(--prizma-text-secondary, var(--text-2)); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+#gdt-radial .rs-sect.hot .rs-glyph { stroke: var(--rs-acc, var(--prizma-information)); }
+#gdt-radial .rs-lab { fill: var(--prizma-text-tertiary, var(--text-3)); font: 700 8.5px/1 var(--font, sans-serif); text-anchor: middle; pointer-events: none; text-transform: uppercase; letter-spacing: .3px; }
+#gdt-radial .rs-sect.hot .rs-lab { fill: var(--rs-acc, var(--prizma-information)); }
+#gdt-radial .rs-hub { fill: var(--prizma-bg, #0A0A0F); stroke: var(--prizma-border-strong, var(--border)); stroke-width: 1; }
+#gdt-radial .rs-hub-t { fill: var(--prizma-text-primary, var(--text-1)); font: 700 11px/1 var(--font, sans-serif); text-anchor: middle; pointer-events: none; }
+#gdt-radial .rs-hub-t2 { fill: var(--prizma-text-tertiary, var(--text-3)); font: 600 8px/1 var(--mono, monospace); text-anchor: middle; pointer-events: none; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -3037,6 +3053,101 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
   },
   _chipsClearDim() { document.querySelectorAll('#gantt3-wrap .gdt-chip-dim').forEach(e => e.classList.remove('gdt-chip-dim')); },
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.19 — «RADIAL-MENU» (порт lab sketch 27, посимпатичнее). ПКМ по
+     пилюле → радиальное SVG-меню (5 секторов). Перехват в capture-фазе раньше
+     существующего rect-меню; безопасные действия (Детали/Линза/Похожие/Копир.)
+     + сектор «Ещё» возвращает существующее wired-меню через bypass-флаг.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _radialBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtRadialBound) return;
+    wrap._gdtRadialBound = true;
+    wrap.addEventListener('contextmenu', (e) => {
+      if (Gantt3View._radial.bypass) { Gantt3View._radial.bypass = false; return; }  // → существующее rect-меню
+      const pill = e.target.closest('.gantt-type-pill[data-wt][data-row-id]');
+      if (!pill || pill.dataset.wt === 'задача' || pill.classList.contains('gantt-pill-ghost')) return;
+      e.preventDefault(); e.stopPropagation();
+      Gantt3View._radialOpen(e.clientX, e.clientY, pill);
+    }, true);
+  },
+  _radialOpen(x, y, pill) {
+    Gantt3View._radialClose();
+    const esc = Utils.escapeHtml;
+    const wt = (pill.querySelector('.gdt-pill-name')?.textContent || pill.dataset.wt || '').trim();
+    const colKey = pill.closest('.gantt-cell[data-col]')?.dataset.col || pill.dataset.srcCol || '';
+    const rel = GANTT_COL_LABELS[colKey] || colKey;
+    const sectors = [
+      { key: 'details', label: 'Детали',  acc: 'var(--prizma-information)',          glyph: '<circle cx="0" cy="-3" r="1.2"/><path d="M0 0v5"/>' },
+      { key: 'lens',    label: 'Линза',    acc: 'var(--prizma-information)',          glyph: '<circle cx="-2" cy="-2" r="3.2"/><path d="M2.4 2.4l2 2"/>' },
+      { key: 'similar', label: 'Похожие',  acc: 'var(--prizma-insight, #7C5CFF)',     glyph: '<path d="M-5 -3h10M-5 0h10M-5 3h6"/>' },
+      { key: 'copy',    label: 'Копир.',   acc: 'var(--prizma-on-course)',            glyph: '<rect x="-5" y="-4" width="7" height="9" rx="1.2"/><path d="M-2 -7h6v9"/>' },
+      { key: 'more',    label: 'Ещё',      acc: 'var(--prizma-text-secondary, #888)', glyph: '<circle cx="-4.5" cy="0" r="1.1"/><circle cx="0" cy="0" r="1.1"/><circle cx="4.5" cy="0" r="1.1"/>' },
+    ];
+    const N = sectors.length, R_IN = 44, R_OUT = 104, GAP = 3;
+    const polar = (r, deg) => { const a = (deg - 90) * Math.PI / 180; return [116 + r * Math.cos(a), 116 + r * Math.sin(a)]; };
+    const arcPath = (a0, a1) => {
+      const [x0, y0] = polar(R_OUT, a0), [x1, y1] = polar(R_OUT, a1), [x2, y2] = polar(R_IN, a1), [x3, y3] = polar(R_IN, a0);
+      const laf = (a1 - a0) > 180 ? 1 : 0;
+      return 'M' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A' + R_OUT + ' ' + R_OUT + ' 0 ' + laf + ' 1 ' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+        ' L' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' A' + R_IN + ' ' + R_IN + ' 0 ' + laf + ' 0 ' + x3.toFixed(1) + ' ' + y3.toFixed(1) + ' Z';
+    };
+    let svg = '';
+    sectors.forEach((s, i) => {
+      const a0 = i * (360 / N) + GAP / 2, a1 = (i + 1) * (360 / N) - GAP / 2, mid = (a0 + a1) / 2;
+      const [lx, ly] = polar((R_IN + R_OUT) / 2 + 16, mid), [gx, gy] = polar((R_IN + R_OUT) / 2 - 8, mid);
+      svg += '<g class="rs-sect" data-key="' + s.key + '" style="--rs-acc:' + s.acc + '"><path class="rs-arc" d="' + arcPath(a0, a1) + '"/>' +
+        '<g class="rs-glyph" transform="translate(' + gx.toFixed(1) + ',' + gy.toFixed(1) + ')">' + s.glyph + '</g>' +
+        '<text class="rs-lab" x="' + lx.toFixed(1) + '" y="' + (ly + 3).toFixed(1) + '">' + esc(s.label) + '</text></g>';
+    });
+    svg += '<circle class="rs-hub" cx="116" cy="116" r="' + (R_IN - 4) + '"/><text class="rs-hub-t" x="116" y="114">' + esc(wt.slice(0, 9)) + '</text><text class="rs-hub-t2" x="116" y="126">' + esc(rel) + '</text>';
+    const el = document.createElement('div'); el.id = 'gdt-radial';
+    el.innerHTML = '<svg viewBox="0 0 232 232" aria-label="Радиальное меню">' + svg + '</svg>';
+    const pad = 120;
+    el.style.left = Math.max(pad, Math.min(window.innerWidth - pad, x)) + 'px';
+    el.style.top = Math.max(pad, Math.min(window.innerHeight - pad, y)) + 'px';
+    document.body.appendChild(el);
+    Gantt3View._radial.el = el;
+    requestAnimationFrame(() => el.classList.add('show'));
+    el.querySelectorAll('.rs-sect').forEach(g => {
+      g.addEventListener('mouseenter', () => g.classList.add('hot'));
+      g.addEventListener('mouseleave', () => g.classList.remove('hot'));
+      g.addEventListener('click', () => Gantt3View._radialAction(g.dataset.key, pill, x, y));
+    });
+    Gantt3View._radial.onDoc = (ev) => {
+      if (ev.type === 'keydown') { if (ev.key === 'Escape') Gantt3View._radialClose(); return; }
+      if (!el.contains(ev.target)) Gantt3View._radialClose();
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', Gantt3View._radial.onDoc, true);
+      document.addEventListener('keydown', Gantt3View._radial.onDoc, true);
+      window.addEventListener('scroll', Gantt3View._radialClose, true);
+    }, 0);
+  },
+  _radialAction(key, pill, x, y) {
+    Gantt3View._radialClose();
+    if (key === 'details') { Gantt3View._anatomyOpen(pill); }
+    else if (key === 'lens') { if (!Gantt3View._lens.on) Gantt3View._lensEnter(); const ek = pill.closest('.gantt-row[data-epic-key]')?.dataset.epicKey; if (ek) { Gantt3View._lens.locked = true; Gantt3View._lensFocus(ek); } }
+    else if (key === 'similar') { Gantt3View._radialSimilar(pill); }
+    else if (key === 'copy') { const wt = (pill.querySelector('.gdt-pill-name')?.textContent || pill.dataset.wt || '').trim(); const ep = (pill.closest('.gantt-row[data-epic-key]')?.querySelector('.v16-epic-name')?.textContent || '').trim(); try { navigator.clipboard?.writeText((ep ? ep + ' · ' : '') + wt); window.showToast?.('Скопировано', 'info', 1300); } catch (_) {} }
+    else if (key === 'more') { Gantt3View._radial.bypass = true; pill.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y })); }
+  },
+  _radialSimilar(pill) {
+    const wt = pill.dataset.wt; const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || !wt) return;
+    const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    wrap.querySelectorAll('.gantt-type-pill.gdt-mq-sel').forEach(p => p.classList.remove('gdt-mq-sel'));
+    const same = wrap.querySelectorAll('.gantt-type-pill[data-wt="' + esc(wt) + '"]:not(.gantt-pill-ghost)');
+    same.forEach(p => p.classList.add('gdt-mq-sel'));
+    window.showToast?.('Похожих по «' + wt + '»: ' + same.length, 'info', 1800);
+  },
+  _radialClose() {
+    const R = Gantt3View._radial;
+    if (R.onDoc) { document.removeEventListener('mousedown', R.onDoc, true); document.removeEventListener('keydown', R.onDoc, true); R.onDoc = null; }
+    window.removeEventListener('scroll', Gantt3View._radialClose, true);
+    if (R.el) { R.el.remove(); R.el = null; }
+  },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -4346,6 +4457,9 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
     if (Gantt3View._burndown && Gantt3View._burndown.on) Gantt3View._burndownBuild();
     // Гант 3.0 п.20 — Чипы: строки пересозданы → пересобрать строку чипов + dim.
     if (Gantt3View._chips && Gantt3View._chips.on) Gantt3View._chipsBuild();
+    // Гант 3.0 п.19 — Radial-menu: делегат идемпотентен; закрыть открытое меню.
+    Gantt3View._radialBind();
+    Gantt3View._radialClose();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
