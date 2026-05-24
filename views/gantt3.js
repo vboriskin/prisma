@@ -116,6 +116,8 @@ export const Gantt3View = {
   _peek: { pop: null, onDoc: null, anchor: null },
   // Гант 3.0 п.11 — «Переносы» (plan-diff по переносам): toggle подсветки.
   _diff: { on: false },
+  // Гант 3.0 п.12 — «Burndown»: toggle мини-спарклайнов сгорания в шапках релизов.
+  _burndown: { on: false },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -729,6 +731,16 @@ body.gdt-diff-on #section-gantt3 .gantt-type-pill.gdt-diff-moved {
   background: var(--prizma-drift-bg, rgba(176,123,26,.14)) !important; border-radius: var(--r-sm, 6px);
 }
 body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff-moved):not(.gantt-pill-ghost) { opacity: .32; transition: opacity .2s; }
+
+/* === ГАНТ 3.0 · п.12 «Burndown-rail» (lab sketch 20, toggleable) ==========
+   «Burndown» → мини-спарклайн сгорания в шапке каждого датированного релиза. */
+#btn-gantt3-burndown.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+.gdt-burndown { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.gdt-burndown svg { width: 100%; height: 28px; display: block; }
+.gdt-burndown .bd-pace { font: 600 9px/1 var(--mono, ui-monospace, monospace); letter-spacing: .3px; }
+.gdt-burndown .bd-pace.ok { color: var(--prizma-on-course); }
+.gdt-burndown .bd-pace.behind { color: var(--prizma-drift); }
+.gdt-burndown .bd-pace.none { color: var(--prizma-text-tertiary, var(--text-3)); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1384,6 +1396,12 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
     if (diffBtn && !diffBtn._gdtDiffBound) {
       diffBtn._gdtDiffBound = true;
       diffBtn.addEventListener('click', () => Gantt3View._diffToggle());
+    }
+    // Гант 3.0 п.12 — «Burndown».
+    const bdBtn = document.getElementById('btn-gantt3-burndown');
+    if (bdBtn && !bdBtn._gdtBdBound) {
+      bdBtn._gdtBdBound = true;
+      bdBtn.addEventListener('click', () => Gantt3View._burndownToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2529,6 +2547,60 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
   },
   _diffClear() {
     document.querySelectorAll('#gantt3-wrap .gantt-type-pill.gdt-diff-moved').forEach(p => p.classList.remove('gdt-diff-moved'));
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.12 — «BURNDOWN-RAIL» (порт lab sketch 20, toggleable). В шапку
+     каждого датированного релиза — мини-спарклайн сгорания: пунктир-идеал
+     (total→0 за окно), фактическая линия (по done), вертикаль «сегодня», цвет
+     по pace (в графике/отставание). Считается из DOM (пилюли колонки + done).
+     ═══════════════════════════════════════════════════════════════════════ */
+  _burndownToggle() {
+    const B = Gantt3View._burndown;
+    B.on = !B.on;
+    const btn = document.getElementById('btn-gantt3-burndown');
+    if (btn) { btn.classList.toggle('active', B.on); btn.setAttribute('aria-pressed', B.on ? 'true' : 'false'); }
+    if (B.on) Gantt3View._burndownBuild(); else Gantt3View._burndownClear();
+  },
+  _burndownClear() { document.querySelectorAll('#gantt3-wrap .gdt-burndown').forEach(e => e.remove()); },
+  _burndownBuild() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    Gantt3View._burndownClear();
+    const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    const yr = new Date().getFullYear();
+    const today = new Date();
+    const todayDoy = Math.floor((Date.UTC(yr, today.getMonth(), today.getDate()) - Date.UTC(yr, 0, 1)) / 86400000);
+    wrap.querySelectorAll('.gantt-header-col[data-win-start]').forEach(hdr => {
+      const key = hdr.dataset.col; if (!key) return;
+      let s = parseInt(hdr.dataset.winStart, 10), e = parseInt(hdr.dataset.winEnd, 10);
+      if (!Number.isFinite(s) || !Number.isFinite(e)) return;
+      if (e < s) e += 365;
+      const windowDays = Math.max(1, e - s + 1);
+      let td = todayDoy; if (td < s) td += 365;
+      const elapsed = Math.max(0, Math.min(windowDays - 1, td - s));
+      const cellPills = [...wrap.querySelectorAll('.gantt-cell[data-col="' + cssEsc(key) + '"] .gantt-type-pill[data-wt]:not(.gantt-pill-ghost)')];
+      const total = cellPills.length;
+      const done = cellPills.filter(p => p.querySelector('.gdt-pill-state-done')).length;
+      const box = document.createElement('div'); box.className = 'gdt-burndown';
+      if (total === 0) { box.innerHTML = '<span class="bd-pace none">нет работ</span>'; hdr.appendChild(box); return; }
+      const elapsedPct = elapsed / (windowDays - 1 || 1);
+      const idealRemain = total * (1 - elapsedPct);
+      const actualRemain = total - done;
+      const onPace = actualRemain <= idealRemain + 0.001;
+      const yOf = (r) => (2 + (1 - r / total) * 22).toFixed(1);
+      const tx = (elapsedPct * 100).toFixed(1);
+      const accent = onPace ? 'var(--prizma-on-course)' : 'var(--prizma-drift)';
+      const svg = '<svg viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true">' +
+        '<line x1="0" y1="25" x2="100" y2="25" stroke="var(--prizma-border)" stroke-width="1" vector-effect="non-scaling-stroke"/>' +
+        '<line x1="0" y1="' + yOf(total) + '" x2="100" y2="' + yOf(0) + '" stroke="var(--prizma-text-tertiary)" stroke-width="1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"/>' +
+        '<line x1="' + tx + '" y1="0" x2="' + tx + '" y2="26" stroke="var(--prizma-information)" stroke-width="1" stroke-dasharray="2 2" vector-effect="non-scaling-stroke"/>' +
+        '<polyline points="0,' + yOf(total) + ' ' + tx + ',' + yOf(actualRemain) + '" fill="none" stroke="' + accent + '" stroke-width="1.6" vector-effect="non-scaling-stroke"/>' +
+        '<circle cx="' + tx + '" cy="' + yOf(actualRemain) + '" r="2.2" fill="' + accent + '"/>' +
+        '</svg>';
+      box.innerHTML = svg + '<span class="bd-pace ' + (onPace ? 'ok' : 'behind') + '">' + done + '/' + total + ' · ' + (onPace ? 'в графике' : 'отставание') + '</span>';
+      hdr.appendChild(box);
+    });
   },
 
   bindFullscreen() {
@@ -3836,6 +3908,8 @@ body.gdt-diff-on #section-gantt3 .gantt-bar-multi .gantt-type-pill:not(.gdt-diff
     Gantt3View._peekClose();
     // Гант 3.0 п.11 — Переносы: пере-тегировать moved-пилюли после ре-рендера.
     if (Gantt3View._diff && Gantt3View._diff.on) Gantt3View._diffApply();
+    // Гант 3.0 п.12 — Burndown: шапки пересозданы → пересобрать спарклайны.
+    if (Gantt3View._burndown && Gantt3View._burndown.on) Gantt3View._burndownBuild();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
