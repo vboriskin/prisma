@@ -112,6 +112,8 @@ export const Gantt3View = {
   _northstar: { on: false },
   // Гант 3.0 п.9 — «Marquee-bulk»: Shift+тяни рамку → выделение пилюль.
   _marquee: { box: null, bar: null, start: null, dragging: false },
+  // Гант 3.0 п.10 — «Peek-quicklook»: клик по лейблу эпика → карточка-превью.
+  _peek: { pop: null, onDoc: null, anchor: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -688,6 +690,32 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
 #gdt-mq-bar button { background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 10px; font-size: 12px; }
 #gdt-mq-bar button:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-border-strong, var(--border)); }
 #gdt-mq-bar .mq-hint { font: 500 10.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+
+/* === ГАНТ 3.0 · п.10 «Peek-quicklook» (lab sketch 12) =====================
+   Клик по лейблу эпика → карточка-превью: мини-трек релизов + факты. */
+#gdt-peek {
+  position: fixed; z-index: 65; width: 320px; max-width: calc(100vw - 24px);
+  background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border-strong, var(--border));
+  border-radius: var(--r-md, 10px); box-shadow: 0 16px 44px rgba(0,0,0,.4); padding: 14px 15px;
+  font: 12px/1.45 var(--font, inherit); animation: gdtAnatomyIn .15s var(--ease-calm, ease);
+}
+#gdt-peek .pk-hd { display: flex; align-items: flex-start; gap: 9px; padding-left: 10px; position: relative; margin-bottom: 11px; }
+#gdt-peek .pk-hd::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--prizma-border-strong, var(--border)); }
+#gdt-peek.risk-off .pk-hd::before { background: var(--prizma-off-course); }
+#gdt-peek.risk-drift .pk-hd::before { background: var(--prizma-drift); }
+#gdt-peek .pk-nm { font-weight: 700; font-size: 14px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-peek .pk-team { font: 500 10.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); margin-top: 4px; }
+#gdt-peek .pk-track { display: grid; gap: 4px; margin: 4px 0 11px; }
+#gdt-peek .pk-trk { display: flex; align-items: center; gap: 8px; }
+#gdt-peek .pk-trk .k { width: 52px; flex: none; font: 600 10px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); text-align: right; }
+#gdt-peek .pk-trk .v { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 3px; }
+#gdt-peek .pk-wt { font: 600 10px/1 var(--font, inherit); padding: 3px 6px; border-radius: 4px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-peek .pk-wt.done { opacity: .55; text-decoration: line-through; }
+#gdt-peek .pk-trk .empty { color: var(--prizma-text-tertiary, var(--text-3)); opacity: .5; }
+#gdt-peek .pk-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border-top: 1px solid var(--prizma-border, var(--border)); padding-top: 10px; }
+#gdt-peek .pk-fact .fk { font: 600 9.5px/1 var(--font, inherit); letter-spacing: .4px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-peek .pk-fact .fv { font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); margin-top: 3px; }
+#gdt-peek .pk-fact .fv.warn { color: var(--prizma-drift); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -2351,6 +2379,99 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     catch (_) { window.showToast?.('Копирование недоступно', 'info', 1400); }
   },
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.10 — «PEEK-QUICKLOOK» (порт lab sketch 12). Клик по лейблу
+     эпика → карточка-превью: мини-трек релизов (работы по колонкам) + факты
+     (работ, готово, исполнители, статус). DOM-driven. Гард: не в режиме Линза/
+     Фокус (они используют клик по строке/хедеру) и не по пилюле/кнопке.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _peekBind() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || wrap._gdtPeekBound) return;
+    wrap._gdtPeekBound = true;
+    wrap.addEventListener('click', (e) => {
+      if (Gantt3View._lens.on || Gantt3View._focusLane.on) return;
+      const label = e.target.closest('.gantt-row-label');
+      if (!label) return;
+      if (e.target.closest('button, a, input, .v16-epic-deps-badge, .v16-epic-deps-edit, .gantt-type-pill')) return;
+      const row = label.closest('.gantt-row[data-epic-key]');
+      if (!row) return;
+      e.stopPropagation();
+      Gantt3View._peekOpen(row, label);
+    });
+  },
+  _peekOpen(row, anchor) {
+    Gantt3View._peekClose();
+    const esc = Utils.escapeHtml;
+    const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    const wrap = document.getElementById('gantt3-wrap');
+    const epic = (row.querySelector('.v16-epic-name')?.textContent || '(без эпика)').trim();
+    const tk = row.dataset.teamKey || '';
+    const team = (wrap.querySelector('.gantt-team-header[data-team-key="' + cssEsc(tk) + '"] .gdt-team-name')?.textContent || tk || '').trim();
+    const cells = [...row.querySelectorAll('.gantt-cell[data-col]')];
+    const pills = [...row.querySelectorAll('.gantt-type-pill[data-wt]')].filter(p => !p.classList.contains('gantt-pill-ghost'));
+    const n = pills.length;
+    const done   = pills.filter(p => p.querySelector('.gdt-pill-state-done')).length;
+    const active = pills.filter(p => p.querySelector('.gdt-pill-state-active')).length;
+    const hasRisk = !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)');
+    const churn   = !!row.querySelector('.v16-epic-churn');
+    let trackHtml = '';
+    cells.forEach(c => {
+      const ps = [...c.querySelectorAll('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)')];
+      if (!ps.length) return;
+      const rel = GANTT_COL_LABELS[c.dataset.col] || c.dataset.col;
+      trackHtml += '<div class="pk-trk"><span class="k">' + esc(rel) + '</span><span class="v">' +
+        ps.map(p => { const wt = (p.querySelector('.gdt-pill-name')?.textContent || p.dataset.wt || '').trim(); const dn = p.querySelector('.gdt-pill-state-done') ? ' done' : ''; return '<span class="pk-wt' + dn + '">' + esc(wt) + '</span>'; }).join('') +
+        '</span></div>';
+    });
+    if (!trackHtml) trackHtml = '<div class="pk-trk"><span class="v empty">Нет запланированных работ</span></div>';
+    const whoSet = new Set();
+    pills.forEach(p => { const m = (p.querySelector('.gdt-pill-meta')?.textContent || '').split('·')[0].trim(); if (m && m !== '—') whoSet.add(m); });
+    const statusV = hasRisk ? 'Риск' : churn ? 'Переезды' : active ? 'В работе' : 'План';
+    const pop = document.createElement('div');
+    pop.id = 'gdt-peek';
+    pop.className = hasRisk ? 'risk-off' : (churn ? 'risk-drift' : '');
+    pop.innerHTML =
+      '<div class="pk-hd"><div><div class="pk-nm">' + esc(epic) + '</div>' + (team ? '<div class="pk-team">' + esc(team) + '</div>' : '') + '</div></div>' +
+      '<div class="pk-track">' + trackHtml + '</div>' +
+      '<div class="pk-facts">' +
+        '<div class="pk-fact"><div class="fk">Работ</div><div class="fv">' + n + '</div></div>' +
+        '<div class="pk-fact"><div class="fk">Готово</div><div class="fv">' + done + ' / ' + n + '</div></div>' +
+        '<div class="pk-fact"><div class="fk">Исполнители</div><div class="fv">' + (whoSet.size || '—') + '</div></div>' +
+        '<div class="pk-fact"><div class="fk">Статус</div><div class="fv' + ((hasRisk || churn) ? ' warn' : '') + '">' + esc(statusV) + '</div></div>' +
+      '</div>';
+    document.body.appendChild(pop);
+    Gantt3View._peek.pop = pop; Gantt3View._peek.anchor = anchor;
+    // position near anchor (right of label, clamp)
+    const r = anchor.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = r.right + 8, top = r.top;
+    if (left + pw > window.innerWidth - 12) left = Math.max(12, r.left - pw - 8);
+    if (top + ph > window.innerHeight - 12) top = Math.max(12, window.innerHeight - ph - 12);
+    pop.style.left = Math.round(left) + 'px'; pop.style.top = Math.round(top) + 'px';
+    Gantt3View._peek.onDoc = (ev) => {
+      if (ev.type === 'keydown') { if (ev.key === 'Escape') Gantt3View._peekClose(); return; }
+      if (ev.type === 'scroll')  { Gantt3View._peekClose(); return; }
+      if (!pop.contains(ev.target) && !anchor.contains(ev.target)) Gantt3View._peekClose();
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', Gantt3View._peek.onDoc, true);
+      document.addEventListener('keydown',  Gantt3View._peek.onDoc, true);
+      window.addEventListener('scroll',     Gantt3View._peek.onDoc, true);
+    }, 0);
+  },
+  _peekClose() {
+    const P = Gantt3View._peek;
+    if (P.onDoc) {
+      document.removeEventListener('mousedown', P.onDoc, true);
+      document.removeEventListener('keydown',  P.onDoc, true);
+      window.removeEventListener('scroll',     P.onDoc, true);
+      P.onDoc = null;
+    }
+    if (P.pop) { P.pop.remove(); P.pop = null; }
+    P.anchor = null;
+  },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -3651,6 +3772,9 @@ html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !importa
     // пересозданы) → прячем панель.
     Gantt3View._marqueeBind();
     Gantt3View._marqueeHideBar();
+    // Гант 3.0 п.10 — Peek: делегат идемпотентен; закрыть карточку (строки новые).
+    Gantt3View._peekBind();
+    Gantt3View._peekClose();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
