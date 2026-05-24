@@ -106,6 +106,8 @@ export const Gantt3View = {
   // Гант 3.0 п.5 — «Pill-anatomy»: поповер расшифровки пилюли (клик). Inline,
   // всегда доступен. pop = текущий элемент поповера, onDoc — outside-listener.
   _anatomy: { pop: null, onDoc: null, anchor: null },
+  // Гант 3.0 п.6 — «Нарратив»: оверлей-документ квартала (кнопка). el = оверлей.
+  _narrative: { el: null, onKey: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -605,6 +607,45 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
 #gdt-anatomy-pop .ga-dot.unplanned { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-text-tertiary, var(--text-3)); }
 #gdt-anatomy-pop .ga-dot.todo { background: transparent; box-shadow: inset 0 0 0 1.5px var(--prizma-text-secondary, var(--text-2)); }
 #gdt-anatomy-pop .ga-cmt { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--prizma-border, var(--border)); font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3)); white-space: pre-wrap; }
+
+/* === ГАНТ 3.0 · п.6 «Narrative» (lab redesign 07) =========================
+   Кнопка «Нарратив» → оверлей: квартал как читаемый документ. Каждый эпик —
+   абзац со статус-фразой (генерится из DOM-данных) + мини-трек релизов. TOC
+   команд слева. Оверлей в body, авто-прячется вне вкладки. */
+#btn-gantt3-narrative.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+#gdt-narrative {
+  position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  background: var(--prizma-bg, var(--bg, #0A0A0F)); animation: gdtNarrIn .18s var(--ease-calm, ease);
+}
+@keyframes gdtNarrIn { from { opacity: 0; } to { opacity: 1; } }
+#gdt-narrative .gn-top { display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-bottom: 1px solid var(--prizma-border, var(--border)); flex: none; }
+#gdt-narrative .gn-title { font-weight: 800; font-size: 17px; letter-spacing: -.01em; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-narrative .gn-sub { font: 500 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-narrative .gn-close { margin-left: auto; background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 6px 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+#gdt-narrative .gn-close:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-border-strong, var(--border)); }
+#gdt-narrative .gn-body { flex: 1; display: flex; min-height: 0; }
+#gdt-narrative .gn-toc { width: 196px; flex: none; border-right: 1px solid var(--prizma-border, var(--border)); overflow-y: auto; padding: 14px 0; }
+#gdt-narrative .gn-toc a { display: block; padding: 7px 18px; font-size: 12.5px; color: var(--prizma-text-secondary, var(--text-2)); text-decoration: none; border-left: 2px solid transparent; cursor: pointer; }
+#gdt-narrative .gn-toc a:hover { color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-narrative .gn-toc a.active { color: var(--prizma-information); border-left-color: var(--prizma-information); font-weight: 600; }
+#gdt-narrative .gn-feed { flex: 1; overflow-y: auto; padding: 22px 28px 80px; }
+#gdt-narrative .gn-doc { max-width: 760px; margin: 0 auto; }
+#gdt-narrative .gn-team { font: 700 11px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin: 26px 0 12px; padding-top: 14px; border-top: 1px solid var(--prizma-border, var(--border)); }
+#gdt-narrative .gn-team:first-child { margin-top: 0; border-top: none; padding-top: 0; }
+#gdt-narrative .gn-epic { position: relative; padding: 4px 0 16px 14px; }
+#gdt-narrative .gn-epic::before { content: ""; position: absolute; left: 0; top: 7px; bottom: 16px; width: 3px; border-radius: 2px; background: var(--prizma-border-strong, var(--border)); }
+#gdt-narrative .gn-epic.risk-off::before { background: var(--prizma-off-course); }
+#gdt-narrative .gn-epic.risk-drift::before { background: var(--prizma-drift); }
+#gdt-narrative .gn-epic .gn-nm { font-size: 15px; font-weight: 600; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-narrative .gn-epic .gn-status { font-size: 13.5px; line-height: 1.55; color: var(--prizma-text-secondary, var(--text-2)); margin-top: 3px; }
+#gdt-narrative .gn-epic .gn-status .done { color: var(--prizma-on-course); }
+#gdt-narrative .gn-epic .gn-status .prog { color: var(--prizma-information); }
+#gdt-narrative .gn-epic .gn-status .warn { color: var(--prizma-drift); }
+#gdt-narrative .gn-track { display: flex; gap: 5px; margin-top: 9px; flex-wrap: wrap; }
+#gdt-narrative .gn-trk { font: 600 10px/1 var(--mono, ui-monospace, monospace); padding: 4px 8px; border-radius: var(--r-sm, 6px); border: 1px solid var(--prizma-border, var(--border)); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-narrative .gn-trk.has { color: var(--prizma-text-secondary, var(--text-2)); border-color: var(--prizma-border-strong, var(--border)); background: var(--prizma-bg-elevated, transparent); }
+#gdt-narrative .gn-trk.cur { border-color: var(--prizma-information); color: var(--prizma-information); }
+html:not([data-active-section="gantt3"]) #gdt-narrative { display: none !important; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1220,6 +1261,12 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
     if (cmdBtn && !cmdBtn._gdtCmdBound) {
       cmdBtn._gdtCmdBound = true;
       cmdBtn.addEventListener('click', () => Gantt3View._cmdToggleMode());
+    }
+    // Гант 3.0 п.6 — «Нарратив» (оверлей-документ квартала).
+    const narrBtn = document.getElementById('btn-gantt3-narrative');
+    if (narrBtn && !narrBtn._gdtNarrBound) {
+      narrBtn._gdtNarrBound = true;
+      narrBtn.addEventListener('click', () => Gantt3View._narrativeToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -1966,6 +2013,101 @@ body.gdt-cmd-filtering #section-gantt3 .gantt-team-header.gdt-cmd-dim {
     }
     if (A.pop) { A.pop.remove(); A.pop = null; }
     A.anchor = null;
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.6 — «НАРРАТИВ» (порт lab redesign 07). Кнопка → оверлей:
+     квартал как читаемый документ. Каждый эпик — абзац со статус-фразой
+     (генерится из DOM: кол-во работ, готово/в работе, риск, переезды) +
+     мини-трек релизов. TOC команд слева со скроллом. Esc / «Закрыть» — выход.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _narrativeToggle() {
+    if (Gantt3View._narrative.el) Gantt3View._narrativeClose();
+    else                          Gantt3View._narrativeOpen();
+  },
+  _plRabot(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'работа';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'работы';
+    return 'работ';
+  },
+  _narrativeEpicHtml(row) {
+    const esc = Utils.escapeHtml;
+    const epic = (row.querySelector('.v16-epic-name')?.textContent || '(без эпика)').trim();
+    const realPill = (c) => c.querySelector('.gantt-type-pill[data-wt]:not(.gantt-pill-ghost)');
+    const cells = [...row.querySelectorAll('.gantt-cell[data-col]')];
+    const pills = [...row.querySelectorAll('.gantt-type-pill[data-wt]')].filter(p => !p.classList.contains('gantt-pill-ghost'));
+    const n = pills.length;
+    const done   = pills.filter(p => p.querySelector('.gdt-pill-state-done')).length;
+    const active = pills.filter(p => p.querySelector('.gdt-pill-state-active')).length;
+    const hasRisk = !!row.querySelector('.gdt-cell-risk-glyph:not(.is-empty)');
+    const churn   = !!row.querySelector('.v16-epic-churn');
+    const riskCls = hasRisk ? ' risk-off' : (churn ? ' risk-drift' : '');
+    let s = n ? (n + ' ' + Gantt3View._plRabot(n)) : 'работы пока не заведены';
+    const parts = [];
+    if (done)   parts.push('<span class="done">' + done + ' готово</span>');
+    if (active) parts.push('<span class="prog">' + active + ' в работе</span>');
+    let sentence = s + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '.';
+    if (hasRisk) sentence += ' <span class="warn">Есть риск-метки.</span>';
+    if (churn)   sentence += ' <span class="warn">Переезжал между релизами.</span>';
+    const track = cells.map(c => {
+      const has = !!realPill(c);
+      const lbl = GANTT_COL_LABELS[c.dataset.col] || c.dataset.col;
+      return '<span class="gn-trk' + (has ? ' has' : '') + '">' + esc(lbl) + '</span>';
+    }).join('');
+    return '<div class="gn-epic' + riskCls + '"><div class="gn-nm">' + esc(epic) + '</div>' +
+      '<div class="gn-status">' + sentence + '</div>' +
+      '<div class="gn-track">' + track + '</div></div>';
+  },
+  _narrativeOpen() {
+    const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap) return;
+    const esc = Utils.escapeHtml;
+    const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    const teamHeaders = [...wrap.querySelectorAll('.gantt-team-header[data-team-key]')];
+    let toc = '', feed = '';
+    teamHeaders.forEach((th, ti) => {
+      const tk = th.dataset.teamKey;
+      const teamName = (th.querySelector('.gdt-team-name')?.textContent || tk || '—').trim();
+      const anchor = 'gn-team-' + ti;
+      toc  += '<a data-anchor="' + anchor + '">' + esc(teamName) + '</a>';
+      feed += '<div class="gn-team" id="' + anchor + '">' + esc(teamName) + '</div>';
+      wrap.querySelectorAll('.gantt-row[data-team-key="' + cssEsc(tk) + '"][data-epic-key]')
+        .forEach(row => { feed += Gantt3View._narrativeEpicHtml(row); });
+    });
+    const el = document.createElement('div');
+    el.id = 'gdt-narrative';
+    el.innerHTML =
+      '<div class="gn-top"><span class="gn-title">Нарратив квартала</span>' +
+      '<span class="gn-sub">' + teamHeaders.length + ' ' + Gantt3View._plKomand(teamHeaders.length) + ' · читаемый план</span>' +
+      '<button class="gn-close" id="gn-close">Закрыть · Esc</button></div>' +
+      '<div class="gn-body"><nav class="gn-toc">' + toc + '</nav>' +
+      '<div class="gn-feed"><div class="gn-doc">' + (feed || '<div class="gn-team">Нет данных</div>') + '</div></div></div>';
+    document.body.appendChild(el);
+    Gantt3View._narrative.el = el;
+    const btn = document.getElementById('btn-gantt3-narrative');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    el.querySelector('#gn-close').addEventListener('click', () => Gantt3View._narrativeClose());
+    el.querySelectorAll('.gn-toc a').forEach(a => a.addEventListener('click', () => {
+      el.querySelector('#' + a.dataset.anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.querySelectorAll('.gn-toc a').forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+    }));
+    Gantt3View._narrative.onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); Gantt3View._narrativeClose(); } };
+    document.addEventListener('keydown', Gantt3View._narrative.onKey, true);
+  },
+  _plKomand(n) {
+    const m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return 'команда';
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'команды';
+    return 'команд';
+  },
+  _narrativeClose() {
+    const N = Gantt3View._narrative;
+    if (N.onKey) { document.removeEventListener('keydown', N.onKey, true); N.onKey = null; }
+    if (N.el) { N.el.remove(); N.el = null; }
+    const btn = document.getElementById('btn-gantt3-narrative');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
   },
 
   bindFullscreen() {
