@@ -925,13 +925,17 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
 #gdt-annot-pop .ga-save { border-color: var(--prizma-information); color: var(--prizma-information); }
 #gdt-annot-pop .ga-del { margin-left: auto; color: var(--prizma-off-course); border-color: transparent; }
 
-/* === ГАНТ 3.0 · «Анатомия пилюли» (lab sketch 08, референс) =============== */
-#gdt-mode .gpa { max-width: 1040px; margin: 0 auto; padding: 22px 24px 70px; }
-#gdt-mode .gpa-head h1 { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; color: var(--prizma-text-primary, var(--text-1)); }
-#gdt-mode .gpa-head p { margin: 0; color: var(--prizma-text-secondary, var(--text-2)); font-size: 13.5px; max-width: 660px; line-height: 1.55; }
+/* === ГАНТ 3.0 · «Анатомия пилюли» (lab sketch 08, референс) ===============
+   ВАЖНО: в реальном приложении нет --r-sm/--r-md/--r-lg (там --radius-*),
+   поэтому фолбэки давали 10/6/14 — углы крупнее скетча. Задаём ЛАБОВЫЕ радиусы
+   локально на .gpa, чтобы все .gpa-* совпали со скетчем 1-в-1 (4/6/10). */
+#gdt-mode .gpa { --r-sm: 4px; --r-md: 6px; --r-lg: 10px; --r-xl: 14px; max-width: 1080px; margin: 0 auto; padding: 28px 24px 72px; }
+#gdt-mode .gpa-head { margin-bottom: 22px; }
+#gdt-mode .gpa-head h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; margin: 6px 0 6px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-mode .gpa-head p { margin: 0; color: var(--prizma-text-secondary, var(--text-2)); font-size: 14px; max-width: 660px; line-height: 1.55; }
 #gdt-mode .gpa-eyebrow { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 14px; }
-#gdt-mode .gpa-sec { margin-top: 34px; }
-#gdt-mode .gpa-stage { position: relative; background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-lg, 14px); padding: 60px 40px 66px; min-height: 300px; }
+#gdt-mode .gpa-sec { margin-top: 38px; }
+#gdt-mode .gpa-stage { position: relative; background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-lg, 14px); padding: 64px 40px 70px; min-height: 320px; }
 #gdt-mode .gpa-leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 #gdt-mode .gpa-specimen-wrap { display: flex; justify-content: center; align-items: center; min-height: 80px; }
 #gdt-mode .gpa-spec { position: relative; display: inline-flex; align-items: center; gap: 12px; padding: 14px 20px 14px 22px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); border-radius: var(--r-md, 10px); user-select: none; min-width: 260px; }
@@ -940,17 +944,17 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
 #gdt-mode .gpa-spec .body { display: flex; flex-direction: column; gap: 4px; }
 #gdt-mode .gpa-spec .nm { font: 600 15px/1 var(--font, inherit); color: var(--prizma-text-primary, var(--text-1)); }
 #gdt-mode .gpa-spec .meta { font: 500 11.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); letter-spacing: .2px; }
-#gdt-mode .gpa-callout { position: absolute; max-width: 190px; }
+#gdt-mode .gpa-callout { position: absolute; max-width: 188px; }
 #gdt-mode .gpa-callout .lab { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-information); }
 #gdt-mode .gpa-callout .desc { margin-top: 4px; font-size: 11.5px; line-height: 1.45; color: var(--prizma-text-secondary, var(--text-2)); }
-#gdt-mode .gpa-callout.c-stripe { left: 26px; top: 30px; text-align: right; }
-#gdt-mode .gpa-callout.c-name { right: 32px; top: 22px; }
-#gdt-mode .gpa-callout.c-meta { right: 32px; bottom: 22px; }
-#gdt-mode .gpa-callout.c-dot { left: 26px; bottom: 28px; text-align: right; }
-#gdt-mode .gpa-variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(224px, 1fr)); gap: 14px; }
+#gdt-mode .gpa-callout.c-stripe { left: 24px; top: 26px; text-align: right; }
+#gdt-mode .gpa-callout.c-name { right: 30px; top: 18px; }
+#gdt-mode .gpa-callout.c-meta { right: 30px; bottom: 18px; }
+#gdt-mode .gpa-callout.c-dot { left: 24px; bottom: 24px; text-align: right; }
+#gdt-mode .gpa-variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 #gdt-mode .gpa-vcard { background: var(--prizma-bg-elevated, var(--card)); border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); padding: 14px; }
 #gdt-mode .gpa-vcard .vt { font: 700 10px/1 var(--font, inherit); letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-tertiary, var(--text-3)); margin-bottom: 11px; }
-#gdt-mode .gpa-vcard .vrow { display: flex; align-items: center; min-height: 36px; }
+#gdt-mode .gpa-vcard .vrow { display: flex; align-items: center; min-height: 38px; }
 #gdt-mode .gpa-vcard .vn { margin-top: 9px; font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3)); line-height: 1.4; }
 #gdt-mode .gpa-pill { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px 7px 13px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); border-radius: var(--r-sm, 6px); user-select: none; }
 #gdt-mode .gpa-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--wt, var(--prizma-information)); border-radius: var(--r-sm, 6px) 0 0 var(--r-sm, 6px); }
