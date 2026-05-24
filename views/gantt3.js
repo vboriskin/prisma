@@ -927,7 +927,24 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-mission .mgm-row.past { opacity: .5; }
 .gdt-scrub { padding: 18px 26px; border-bottom: 1px solid var(--prizma-border, var(--border)); }
 .gdt-scrub input[type=range] { width: 100%; accent-color: var(--prizma-information); }
-.gdt-scrub .sc-lbl { font: 600 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); margin-bottom: 10px; }
+.gdt-scrub .sc-lbl { font: 500 12px/1.3 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); }
+.gdt-scrub .sc-head { display: flex; align-items: center; gap: 12px; margin-bottom: 11px; }
+.gdt-scrub .sc-play { background: none; border: 1px solid var(--prizma-border-strong, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 5px 13px; font: 600 12px/1 var(--font, inherit); flex: none; }
+.gdt-scrub .sc-play:hover { color: var(--prizma-text-primary, var(--text-1)); border-color: var(--prizma-information); }
+.gdt-scrub .sc-drift { color: var(--prizma-drift); font-weight: 700; }
+.gdt-scrub .sc-legend { margin-top: 9px; font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3)); display: flex; align-items: center; gap: 7px; }
+.gdt-scrub .sc-lg-moved { width: 18px; height: 9px; border-radius: 3px; background: color-mix(in srgb, var(--prizma-drift) 30%, transparent); box-shadow: 0 0 0 1px var(--prizma-drift); display: inline-block; }
+.sc-stage { padding: 14px 24px 60px; overflow: auto; }
+.sc-gantt { min-width: 640px; }
+.sc-gantt .scg-row { display: grid; grid-template-columns: 196px repeat(var(--n, 5), 1fr); gap: 5px; align-items: start; padding: 4px 0; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+.sc-gantt .scg-head { border-bottom: 1px solid var(--prizma-border-strong, var(--border)); padding-bottom: 6px; margin-bottom: 2px; }
+.sc-gantt .scg-hc { font: 600 9.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); text-align: center; }
+.sc-gantt .scg-nm { font-size: 11.5px; color: var(--prizma-text-secondary, var(--text-2)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; align-self: center; }
+.sc-gantt .scg-cell { display: flex; flex-wrap: wrap; gap: 3px; align-content: flex-start; }
+.sc-gantt .scg-pill { position: relative; font: 600 9.5px/1.4 var(--font, inherit); padding: 3px 6px 3px 8px; border-radius: 4px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); color: var(--prizma-text-secondary, var(--text-2)); }
+.sc-gantt .scg-pill::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2.5px; border-radius: 4px 0 0 4px; background: var(--wt, var(--prizma-information)); }
+.sc-gantt .scg-pill.done { opacity: .45; text-decoration: line-through; }
+.sc-gantt .scg-pill.moved { background: color-mix(in srgb, var(--prizma-drift) 16%, transparent); box-shadow: 0 0 0 1px var(--prizma-drift); color: var(--prizma-text-primary, var(--text-1)); }
 
 /* === ГАНТ 3.0 · п.20 «Filter-chips» (lab sketch 25) ======================= */
 #btn-gantt3-chips.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
@@ -3117,6 +3134,7 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
     if (M.onKey) document.removeEventListener('keydown', M.onKey, true);
     if (M.st && M.st.onKey2) document.removeEventListener('keydown', M.st.onKey2, true);
     if (M.st && M.st.onResize) window.removeEventListener('resize', M.st.onResize);
+    if (M.st && M.st.timer) clearInterval(M.st.timer);
     if (M.el) M.el.remove();
     Gantt3View._mode = { el: null, name: null, onKey: null, st: null };
     document.getElementById('btn-gantt3-views')?.classList.remove('active');
@@ -3315,16 +3333,43 @@ body.gdt-annot-on #section-gantt3 .gantt-cell[data-row-id] { cursor: copy; }
   },
   _mode_scrubber(body, data) {
     const esc = Utils.escapeHtml;
+    const wc = Gantt3View._wtColor;
     const moves = [];
-    (state.rows || []).forEach(r => { (Array.isArray(r.ganttArrows) ? r.ganttArrows : []).forEach(a => { moves.push({ epic: String(r.epic || r.tasks || '').trim(), wt: a.wt, from: a.srcCol, to: a.dstCol, at: a.at }); }); });
+    (state.rows || []).forEach(r => { const nm = String(r.epic || r.tasks || '').trim(); (Array.isArray(r.ganttArrows) ? r.ganttArrows : []).forEach(a => moves.push({ epic: nm, wt: a.wt, src: a.srcCol, dst: a.dstCol, at: a.at })); });
     moves.sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0));
-    if (!moves.length) { body.innerHTML = '<div style="padding:48px;max-width:560px;margin:0 auto;text-align:center;color:var(--prizma-text-tertiary);font-size:14px;line-height:1.6">История переносов пуста — пока ни одна работа не переезжала между релизами.<br>Перетащите пилюлю в другой колодец, и перенос появится здесь, на ползунке времени.</div>'; return; }
     const N = moves.length;
+    if (!N) { body.innerHTML = '<div style="padding:48px;max-width:560px;margin:0 auto;text-align:center;color:var(--prizma-text-tertiary);font-size:14px;line-height:1.6">История переносов пуста — пока ни одна работа не переезжала между релизами.<br>Перетащите пилюлю в другой колодец, и перенос появится здесь, на ползунке времени.</div>'; return; }
     const fmt = (at) => { const m = String(at).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '.' + m[2] : ''; };
-    body.innerHTML = '<div class="gdt-scrub"><div class="sc-lbl" id="sc-lbl"></div><input type="range" min="0" max="' + N + '" value="' + N + '" id="sc-range"></div><div id="sc-list" style="padding:18px 26px;max-width:760px"></div>';
-    const range = body.querySelector('#sc-range'), lbl = body.querySelector('#sc-lbl'), listEl = body.querySelector('#sc-list');
-    const render = () => { const k = +range.value; lbl.textContent = 'Перемотка: показаны переносы 1…' + k + ' из ' + N; listEl.innerHTML = moves.slice(0, k).map(mv => '<div style="padding:8px 0;border-bottom:1px solid var(--prizma-border);font-size:13px"><b>' + esc(mv.epic) + '</b> · ' + esc(mv.wt || '') + ' : ' + esc(GANTT_COL_LABELS[mv.from] || mv.from || '?') + ' → ' + esc(GANTT_COL_LABELS[mv.to] || mv.to || '?') + ' <span style="color:var(--prizma-text-tertiary);font:600 11px/1 var(--mono);margin-left:6px">' + fmt(mv.at) + '</span></div>').join(''); };
-    range.addEventListener('input', render); render();
+    // текущее расположение пилюль (cur запоминаем для подсветки дрейфа)
+    const epicsP = data.epics.filter(e => e.total > 0);
+    const cur = {};
+    epicsP.forEach(e => { const arr = []; data.cols.forEach(c => (e.cells[c] || []).forEach(p => arr.push({ wt: p.wt, col: c, baseCol: c, done: p.done }))); cur[e.epic] = arr; });
+    body.innerHTML = '<div class="gdt-scrub"><div class="sc-head"><button class="sc-play" id="sc-play">Проиграть</button><div class="sc-lbl" id="sc-lbl"></div></div>' +
+      '<input type="range" min="0" max="' + N + '" value="' + N + '" id="sc-range">' +
+      '<div class="sc-legend"><span class="sc-lg-moved"></span> позиция отличается от текущего плана</div></div>' +
+      '<div id="sc-stage" class="sc-stage"></div>';
+    const range = body.querySelector('#sc-range'), lbl = body.querySelector('#sc-lbl'), stage = body.querySelector('#sc-stage'), play = body.querySelector('#sc-play');
+    const st = Gantt3View._mode.st = { timer: null };
+    const render = () => {
+      const k = +range.value;
+      const work = {}; Object.keys(cur).forEach(ep => work[ep] = cur[ep].map(p => ({ ...p })));
+      for (let i = N - 1; i >= k; i--) { const mv = moves[i]; const arr = work[mv.epic]; if (!arr) continue; const pill = arr.find(p => p.col === mv.dst && p.wt === mv.wt); if (pill) pill.col = mv.src; }
+      const driftN = Object.values(work).reduce((s, arr) => s + arr.filter(p => p.col !== p.baseCol).length, 0);
+      lbl.innerHTML = (k >= N ? '<b>Сегодня</b> · применены все ' + N + ' ' + Gantt3View._plPeren(N) : '<b>' + (k === 0 ? 'Старт квартала' : 'Применено ' + k + ' из ' + N) + '</b>' + (k < N ? ' · след. перенос ' + fmt(moves[k].at) : '')) + (driftN ? ' · <span class="sc-drift">' + driftN + ' на других местах</span>' : '');
+      let g = '<div class="sc-gantt" style="--n:' + data.cols.length + '"><div class="scg-row scg-head"><span class="scg-nm"></span>' + data.cols.map(c => '<span class="scg-hc">' + esc(data.colLabel[c]) + '</span>').join('') + '</div>';
+      epicsP.forEach(e => { const arr = work[e.epic] || [];
+        g += '<div class="scg-row"><span class="scg-nm">' + esc(e.epic) + '</span>' + data.cols.map(c => '<span class="scg-cell">' + arr.filter(p => p.col === c).map(p => '<span class="scg-pill' + (p.col !== p.baseCol ? ' moved' : '') + (p.done ? ' done' : '') + '" style="--wt:' + wc(p.wt) + '">' + esc(p.wt) + '</span>').join('') + '</span>').join('') + '</div>'; });
+      g += '</div>'; stage.innerHTML = g;
+    };
+    const stop = () => { if (st.timer) { clearInterval(st.timer); st.timer = null; play.textContent = 'Проиграть'; } };
+    play.addEventListener('click', () => {
+      if (st.timer) { stop(); return; }
+      if (+range.value >= N) range.value = 0;
+      play.textContent = 'Пауза';
+      st.timer = setInterval(() => { const v = +range.value; if (v >= N) { stop(); return; } range.value = v + 1; render(); }, 750);
+    });
+    range.addEventListener('input', () => { stop(); render(); });
+    render();
   },
   _mode_merge(body, data) {
     const esc = Utils.escapeHtml;
