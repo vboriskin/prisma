@@ -124,6 +124,8 @@ export const Gantt3View = {
   _chips: { on: false, active: null, strip: null },
   // Гант 3.0 п.19 — «Radial-menu»: радиальное контекст-меню на пилюле.
   _radial: { el: null, onDoc: null, bypass: false },
+  // Гант 3.0 п.23 — «Подсказки» (smart-suggest): панель наблюдений по плану.
+  _suggest: { el: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -857,6 +859,27 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
 #gdt-radial .rs-hub { fill: var(--prizma-bg, #0A0A0F); stroke: var(--prizma-border-strong, var(--border)); stroke-width: 1; }
 #gdt-radial .rs-hub-t { fill: var(--prizma-text-primary, var(--text-1)); font: 700 11px/1 var(--font, sans-serif); text-anchor: middle; pointer-events: none; }
 #gdt-radial .rs-hub-t2 { fill: var(--prizma-text-tertiary, var(--text-3)); font: 600 8px/1 var(--mono, monospace); text-anchor: middle; pointer-events: none; }
+
+/* === ГАНТ 3.0 · п.23 «Smart-suggest» (lab sketch 21) ====================== */
+#btn-gantt3-suggest.active { border-color: var(--prizma-insight, #7C5CFF); color: var(--prizma-insight, #7C5CFF); background: color-mix(in srgb, var(--prizma-insight, #7C5CFF) 12%, transparent); }
+#gdt-suggest { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 66; display: flex; flex-direction: column; background: var(--prizma-bg-elevated, var(--card)); border-left: 1px solid var(--prizma-border-strong, var(--border)); box-shadow: -12px 0 36px rgba(0,0,0,.28); animation: gdtSuggIn .2s var(--ease-calm, ease); }
+@keyframes gdtSuggIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+#gdt-suggest .sg-top { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--prizma-border, var(--border)); }
+#gdt-suggest .sg-title { font-weight: 700; font-size: 14px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-suggest .sg-close { margin-left: auto; background: none; border: none; cursor: pointer; color: var(--prizma-text-tertiary, var(--text-3)); font-size: 18px; line-height: 1; }
+#gdt-suggest .sg-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+#gdt-suggest .sg-card { position: relative; padding: 12px 13px 12px 15px; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-md, 10px); }
+#gdt-suggest .sg-card::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--prizma-insight, #7C5CFF); }
+#gdt-suggest .sg-card.warn::before { background: var(--prizma-drift); }
+#gdt-suggest .sg-card.crit::before { background: var(--prizma-off-course); }
+#gdt-suggest .sg-ct { font-weight: 600; font-size: 13px; color: var(--prizma-text-primary, var(--text-1)); }
+#gdt-suggest .sg-cw { font-size: 12px; line-height: 1.45; color: var(--prizma-text-secondary, var(--text-2)); margin-top: 5px; }
+#gdt-suggest .sg-act { margin-top: 9px; background: none; border: 1px solid var(--prizma-border, var(--border)); border-radius: var(--r-sm, 6px); color: var(--prizma-text-secondary, var(--text-2)); cursor: pointer; padding: 5px 10px; font-size: 11.5px; }
+#gdt-suggest .sg-act:hover { color: var(--prizma-information); border-color: var(--prizma-information); }
+#gdt-suggest .sg-empty { color: var(--prizma-text-tertiary, var(--text-3)); font-size: 13px; text-align: center; padding: 30px 16px; line-height: 1.5; }
+#section-gantt3 .gantt-row.gdt-flash { animation: gdtRowFlash 1.6s var(--ease-calm, ease); }
+@keyframes gdtRowFlash { 0%,100% { background: transparent; } 25% { background: var(--prizma-information-bg); } }
+html:not([data-active-section="gantt3"]) #gdt-suggest { display: none !important; }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1530,6 +1553,12 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
     if (chipsBtn && !chipsBtn._gdtChipsBound) {
       chipsBtn._gdtChipsBound = true;
       chipsBtn.addEventListener('click', () => Gantt3View._chipsToggleMode());
+    }
+    // Гант 3.0 п.23 — «Подсказки» (smart-suggest).
+    const sugBtn = document.getElementById('btn-gantt3-suggest');
+    if (sugBtn && !sugBtn._gdtSugBound) {
+      sugBtn._gdtSugBound = true;
+      sugBtn.addEventListener('click', () => Gantt3View._suggestToggle());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -3146,6 +3175,54 @@ body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14
     if (R.onDoc) { document.removeEventListener('mousedown', R.onDoc, true); document.removeEventListener('keydown', R.onDoc, true); R.onDoc = null; }
     window.removeEventListener('scroll', Gantt3View._radialClose, true);
     if (R.el) { R.el.remove(); R.el = null; }
+  },
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.23 — «ПОДСКАЗКИ» / smart-suggest (порт lab sketch 21). Боковая
+     панель: read-only наблюдения по плану (перегруз / риск без владельца /
+     частые переезды / не начато), у каждого «Показать в Ганте» — scroll+flash
+     эпика. БЕЗ мутаций (apply из скетча небезопасен на проде) — это нудж, не
+     автодействие; решение за человеком.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _suggestToggle() {
+    if (Gantt3View._suggest.el) Gantt3View._suggestClose();
+    else                       Gantt3View._suggestOpen();
+  },
+  _suggestDerive(data) {
+    const out = [];
+    let worst = null;
+    data.teams.forEach(t => data.cols.forEach(c => { const n = data.epics.filter(e => e.teamKey === t.key).reduce((s, e) => s + ((e.cells[c] || []).length), 0); if (!worst || n > worst.n) worst = { team: t.name, col: c, n }; }));
+    if (worst && worst.n >= 4) out.push({ sev: 'warn', title: 'Перегруз: ' + worst.team + ' · ' + (data.colLabel[worst.col] || worst.col), why: 'В этом окне ' + worst.n + ' работ — больше всех. Стоит разгрузить или перенести часть на соседний релиз.', epicKey: null });
+    data.epics.filter(e => e.risk).forEach(e => { if (Object.values(e.cells).flat().some(p => !p.who)) out.push({ sev: 'crit', title: 'Риск без владельца: ' + e.epic, why: 'У эпика есть риск-метки, но не все работы назначены. Назначьте ответственного.', epicKey: e.key }); });
+    data.epics.filter(e => e.churn).forEach(e => out.push({ sev: 'warn', title: 'Частые переезды: ' + e.epic, why: 'Эпик нестабилен — переезжал между релизами. Проверьте реалистичность плана.', epicKey: e.key }));
+    data.epics.filter(e => e.total > 0 && e.active === 0 && e.done === 0).slice(0, 3).forEach(e => out.push({ sev: 'info', title: 'Не начато: ' + e.epic, why: 'Запланировано работ: ' + e.total + ', но ни одна не в работе. Пора стартовать?', epicKey: e.key }));
+    return out;
+  },
+  _suggestOpen() {
+    const data = Gantt3View._collectEpics();
+    const items = Gantt3View._suggestDerive(data);
+    const esc = Utils.escapeHtml;
+    const el = document.createElement('div'); el.id = 'gdt-suggest';
+    el.innerHTML = '<div class="sg-top"><span class="sg-title">Подсказки</span><span style="font:600 11px/1 var(--mono,monospace);color:var(--prizma-text-tertiary)">' + items.length + '</span><button class="sg-close" aria-label="Закрыть">×</button></div>' +
+      '<div class="sg-body">' + (items.length ? items.map(it => '<div class="sg-card ' + it.sev + '"><div class="sg-ct">' + esc(it.title) + '</div><div class="sg-cw">' + esc(it.why) + '</div>' + (it.epicKey ? '<button class="sg-act" data-ek="' + esc(it.epicKey) + '">Показать в Ганте</button>' : '') + '</div>').join('') : '<div class="sg-empty">План выглядит сбалансированно — серьёзных наблюдений нет.</div>') + '</div>';
+    document.body.appendChild(el);
+    Gantt3View._suggest.el = el;
+    const btn = document.getElementById('btn-gantt3-suggest'); if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    el.querySelector('.sg-close').addEventListener('click', () => Gantt3View._suggestClose());
+    el.querySelectorAll('.sg-act').forEach(b => b.addEventListener('click', () => Gantt3View._suggestShow(b.dataset.ek)));
+  },
+  _suggestShow(ek) {
+    const wrap = document.getElementById('gantt3-wrap'); if (!wrap) return;
+    const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    const row = wrap.querySelector('.gantt-row[data-epic-key="' + esc(ek) + '"]');
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.classList.remove('gdt-flash'); void row.offsetWidth; row.classList.add('gdt-flash');
+    setTimeout(() => row.classList.remove('gdt-flash'), 1700);
+  },
+  _suggestClose() {
+    if (Gantt3View._suggest.el) { Gantt3View._suggest.el.remove(); Gantt3View._suggest.el = null; }
+    const btn = document.getElementById('btn-gantt3-suggest'); if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
   },
 
   bindFullscreen() {
