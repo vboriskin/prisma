@@ -55,6 +55,21 @@
 
   /* ── prototype tiles ── */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 16px; }
+
+  /* ── витрина (top picks) ── */
+  .pickgroup { margin-bottom: 30px; }
+  .pickgroup .pz-eyebrow { color: var(--prizma-information); }
+  .pickgroup h3 { font-size: 16px; font-weight: 700; margin: 3px 0 14px; }
+  .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .pick { display: flex; flex-direction: column; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border);
+    border-left: 3px solid var(--prizma-information); border-radius: var(--r-lg); overflow: hidden; text-decoration: none; color: inherit;
+    transition: border-color .15s, transform .15s; }
+  .pick:hover { transform: translateY(-2px); border-left-color: var(--prizma-on-course); }
+  .pick .thumb { aspect-ratio: 16/10; background: var(--prizma-bg); border-bottom: 1px solid var(--prizma-border); position: relative; overflow: hidden; }
+  .pick .thumb iframe { position: absolute; top: 0; left: 0; width: 200%; height: 200%; transform: scale(.5); transform-origin: top left; border: 0; pointer-events: none; }
+  .pick .body { padding: 13px 15px 16px; }
+  .pick h4 { font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+  .pick p { font-size: 12.5px; color: var(--prizma-text-secondary); margin: 0; line-height: 1.5; }
   .tile { display: flex; flex-direction: column; background: var(--prizma-bg-elevated); border: 1px solid var(--prizma-border);
     border-radius: var(--r-lg); overflow: hidden; text-decoration: none; color: inherit; transition: border-color .15s, transform .15s; }
   .tile:hover { border-color: var(--prizma-border-strong); transform: translateY(-2px); }
@@ -80,6 +95,7 @@
       Призма · Лаборатория
     </span>
     <nav>
+      <a href="#top">Витрина</a>
       <a href="#analysis">Аудит</a>
       <a href="#variants">Варианты развития</a>
       <a href="#apple">Apple-цель</a>
@@ -104,6 +120,13 @@
       <div>Простой, считываемый с первого взгляда путь — но с «вау» уровня Apple: ясность, полировка, ощущение продуманности, ничего лишнего.</div>
     </div>
   </header>
+
+  <!-- ВИТРИНА · кураторский топ -->
+  <section id="top">
+    <div class="sec-head"><h2>Витрина · кураторский топ</h2><span class="count">из 100</span></div>
+    <p class="sec-sub" id="topIntro"></p>
+    <div id="topGroups"></div>
+  </section>
 
   <!-- ANALYSIS -->
   <section id="analysis">
@@ -184,6 +207,21 @@
       a.items.map(i => '<li>' + i + '</li>').join('') + '</ul></div>').join('');
   }
 
+  function fillTop() {
+    const t = D.top; if (!t) return;
+    var intro = document.getElementById('topIntro'); if (intro) intro.textContent = t.intro;
+    var host = document.getElementById('topGroups'); if (!host) return;
+    host.innerHTML = t.groups.map(function (g) {
+      return '<div class="pickgroup"><div class="pz-eyebrow">' + g.eyebrow + '</div><h3>' + g.title + '</h3><div class="picks">' +
+        g.picks.map(function (p) {
+          var href = p.dir + '/' + p.file;
+          return '<a class="pick" href="' + href + '" target="_blank" rel="noopener">' +
+            '<div class="thumb"><iframe loading="lazy" src="' + href + '" tabindex="-1" aria-hidden="true" scrolling="no"></iframe></div>' +
+            '<div class="body"><h4>' + p.title + '</h4><p>' + p.why + '</p></div></a>';
+        }).join('') + '</div></div>';
+    }).join('');
+  }
+  fillTop();
   fillLenses(); fillVariants(); fillApple();
   fillGrid('sketchGrid', D.sketches, 'sketches');
   fillGrid('redesignGrid', D.redesigns, 'redesigns');
