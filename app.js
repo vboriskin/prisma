@@ -19,6 +19,7 @@ import { prizmaLoaderMark } from './app/prizmaUI.js';
 import { DashboardView } from './views/dashboard.js';
 import { RegistryView } from './views/registry.js';
 import { GanttView } from './views/gantt.js';   // V14: GanttV2 removed (B2)
+import { Gantt3View } from './views/gantt3.js'; // Гант 3.0 — независимый форк вкладки Гант
 import { GanttHTMLExport } from './views/ganttHtmlExport.js';   // V15: standalone HTML viewer
 import { KanbanView } from './views/kanban.js';
 import { TimelineView, PodlozhkaView } from './views/timeline.js';
@@ -2017,6 +2018,7 @@ const App = {
       dashboard:'dashboard-legend',
       registry:'registry-legend',
       gantt:'gantt-legend-extra',
+      gantt3:'gantt3-legend-extra',
       // V14: gantt2 legend retired
       kanban:'kanban-legend',
       timeline:'timeline-legend-extra',
@@ -2045,6 +2047,8 @@ const App = {
     if(s==='dashboard') DashboardView.render();
     else if(s==='registry') RegistryView.render();
     else if(s==='gantt') GanttView.render();
+    else if(s==='gantt3') Gantt3View.render();   // Гант 3.0 — форк
+
     // V14: 'gantt2' route removed — old links auto-redirected to gantt below.
     else if(s==='kanban') KanbanView.render();
     else if(s==='timeline') TimelineView.render();

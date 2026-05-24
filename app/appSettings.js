@@ -60,6 +60,7 @@ export const MODULES = [
     sections: [
       { key: 'registry',  label: 'Реестр' },
       { key: 'gantt',     label: 'Гант' },
+      { key: 'gantt3',    label: 'Гант 3.0' },
       { key: 'kanban',    label: 'Канбан' },
       { key: 'timeline',  label: 'Таймлайн' },
       { key: 'podlozhka', label: 'Подложка' },

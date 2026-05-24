@@ -871,6 +871,10 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/><line x1="14" y1="14" x2="21" y2="14"/></svg>
         <span class="nav-label">Гант</span>
       </button>
+      <button class="nav-item" data-section="gantt3" title="Гант 3.0 — рабочая копия для переделки">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="4" rx="1"/><rect x="3" y="12" width="9" height="4" rx="1"/><rect x="3" y="20" width="6" height="4" rx="1" transform="translate(0,-4)"/><line x1="10" y1="6" x2="21" y2="6"/><line x1="14" y1="14" x2="21" y2="14"/></svg>
+        <span class="nav-label">Гант 3.0</span>
+      </button>
       <button class="nav-item" data-section="kanban">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18"/><rect x="10" y="3" width="5" height="14"/><rect x="17" y="3" width="5" height="10"/></svg>
         <span class="nav-label">Канбан</span>
@@ -1306,6 +1310,39 @@
            GanttView.renderFilters() (display:none + всегда пустой). -->
       <div id="gantt-wrap" role="application" aria-label="Доска Ганта"></div>
       <div id="gantt-legend-extra" class="view-legend"></div>
+    </section>
+
+    <!-- ГАНТ 3.0 — полная независимая копия вкладки Гант (форк для переделки).
+         Свой модуль Gantt3View (views/gantt3.js), свои id (gantt3-*), свои
+         ls-ключи (q2_gantt3_*), свой EventBus 'gantt3-rendered'. CSS-классы
+         .gantt-* общие (визуальная база). PLAN-кластер (фиксация плана)
+         опущен: он биндится в app.js по id оригинала; добавим при переделке. -->
+    <section id="section-gantt3" class="app-section hidden">
+      <div class="section-header">
+        <div class="section-header-actions" role="toolbar" aria-label="Действия Ганта 3.0">
+          <span class="gantt-toolbar-spacer" aria-hidden="true"></span>
+          <span class="topbar-divider" data-cluster-label="Вид" aria-hidden="true"></span>
+          <!-- ── VIEW cluster ── -->
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-tips-toggle" title="Как читать Гант" aria-label="Открыть подсказки по визуализации Ганта" aria-controls="gantt3-pill-legend" aria-expanded="false">Как читать?</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-deps" title="Граф зависимостей эпиков" aria-label="Открыть граф зависимостей">Граф зависимостей</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-history" title="История изменений Ганта" aria-label="Открыть историю изменений Ганта">История</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-milestones" data-icon="target" data-icon-size="14" title="Контрольные точки (вехи) на Ганте" aria-label="Управление вехами Ганта">Вехи</button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt3-expand-all" data-icon="minus-square" data-icon-size="14" aria-label="Свернуть/развернуть все команды" title="Свернуть все команды"></button>
+          <button class="btn btn-sm btn-outline btn-undo-clone prizma-icon-only-btn" id="btn-undo-gantt3" data-icon="undo" data-icon-size="14" aria-label="Отменить" title="Отменить (Ctrl+Z)" disabled></button>
+          <button class="btn btn-sm btn-outline btn-redo-clone prizma-icon-only-btn" id="btn-redo-gantt3" data-icon="redo" data-icon-size="14" aria-label="Повторить" title="Повторить (Ctrl+Shift+Z / Ctrl+Y)" disabled></button>
+          <span class="topbar-divider" data-cluster-label="Навигация" aria-hidden="true"></span>
+          <!-- ── NAV cluster ── -->
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt3-jump" data-icon="search" data-icon-size="14" aria-label="Поиск команд и эпиков (Cmd+K)" title="Поиск команд / эпиков (⌘K / Ctrl+K)"></button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-mode" data-icon="layout-grid" data-icon-size="14" aria-label="Переключить режим: детальный / обзор" title="Режим: Default (детальный) / Overview (одна строка на команду)">Режим</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-density" data-icon="chevrons-up-down" data-icon-size="14" aria-label="Плотность строк" title="Плотность: Свободная / Плотная / Минимум">Плотность</button>
+          <button class="btn btn-sm btn-outline prizma-icon-only-btn" id="btn-gantt3-fullscreen" data-icon="maximize" data-icon-size="14" title="Полный экран" aria-label="Полный экран Ганта"></button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-add-release" data-icon="plus" data-icon-size="14" title="Добавить пользовательский релиз" aria-label="Добавить релиз">Релиз</button>
+          <button class="btn btn-sm btn-outline" id="btn-gantt3-annotations" data-icon="message-square" data-icon-size="14" title="Все заметки и риски" aria-label="Все заметки и риски">Заметки</button>
+        </div>
+      </div>
+      <div id="gantt3-pill-legend" class="gdt-pill-legend"></div>
+      <div id="gantt3-wrap" role="application" aria-label="Доска Ганта 3.0"></div>
+      <div id="gantt3-legend-extra" class="view-legend"></div>
     </section>
 
     <!-- V14: section-gantt2 removed (B2) -->
