@@ -120,6 +120,8 @@ export const Gantt3View = {
   _burndown: { on: false },
   // Гант 3.0 п.13-16,21,24,25 — «Виды»: альтернативные представления (оверлеи).
   _mode: { el: null, name: null, onKey: null, st: null },
+  // Гант 3.0 п.20 — «Чипы»: быстрые фильтры (toggle-режим, AND-комбинация).
+  _chips: { on: false, active: null, strip: null },
   // AUDIT-ART #11/#12/#13 — runtime style-инжект (идемпотентный).
   // Не редактируем styles.css напрямую (merge-conflict зона). Все правила
   // помечены маркером `AUDIT-ART #N` (в CSS-комментарии) чтобы было легко
@@ -826,6 +828,19 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
 .gdt-scrub { padding: 18px 26px; border-bottom: 1px solid var(--prizma-border, var(--border)); }
 .gdt-scrub input[type=range] { width: 100%; accent-color: var(--prizma-information); }
 .gdt-scrub .sc-lbl { font: 600 12px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-secondary, var(--text-2)); margin-bottom: 10px; }
+
+/* === ГАНТ 3.0 · п.20 «Filter-chips» (lab sketch 25) ======================= */
+#btn-gantt3-chips.active { border-color: var(--prizma-information); color: var(--prizma-information); background: var(--prizma-information-bg); }
+#gdt-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 9px 18px 3px; }
+#gdt-chips .gc-chip { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 13px; border: 1px solid var(--prizma-border, var(--border)); border-radius: 999px; background: none; cursor: pointer; font: 500 12px/1 var(--font, inherit); color: var(--prizma-text-secondary, var(--text-2)); }
+#gdt-chips .gc-chip::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 0; height: 60%; background: var(--prizma-information); border-radius: 0 2px 2px 0; transition: width .15s; }
+#gdt-chips .gc-chip.on { color: var(--prizma-information); border-color: var(--prizma-information); }
+#gdt-chips .gc-chip.on::before { width: 3px; }
+#gdt-chips .gc-chip .gc-n { font: 600 10.5px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+#gdt-chips .gc-chip[data-zero="1"] { opacity: .45; }
+#gdt-chips .gc-res { margin-left: auto; font: 500 11px/1 var(--mono, ui-monospace, monospace); color: var(--prizma-text-tertiary, var(--text-3)); }
+body.gdt-chips-on #section-gantt3 .gantt-row.gdt-chip-dim,
+body.gdt-chips-on #section-gantt3 .gantt-team-header.gdt-chip-dim { opacity: .14; transition: opacity .25s var(--ease-calm, ease); }
 `;
     const styleEl = document.createElement('style');
     styleEl.id = 'audit-art-gantt3-style';
@@ -1493,6 +1508,12 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
     if (viewsBtn && !viewsBtn._gdtViewsBound) {
       viewsBtn._gdtViewsBound = true;
       viewsBtn.addEventListener('click', (e) => { e.stopPropagation(); Gantt3View._viewsToggleMenu(); });
+    }
+    // Гант 3.0 п.20 — «Чипы».
+    const chipsBtn = document.getElementById('btn-gantt3-chips');
+    if (chipsBtn && !chipsBtn._gdtChipsBound) {
+      chipsBtn._gdtChipsBound = true;
+      chipsBtn.addEventListener('click', () => Gantt3View._chipsToggleMode());
     }
   },
   /** V17.1 C9 — собрать модалку истории изменений Ганта. Источник —
@@ -2937,6 +2958,85 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
     range.addEventListener('input', render); render();
   },
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     Гант 3.0 · п.20 — «ЧИПЫ» (порт lab sketch 25). Toggle-строка быстрых
+     фильтров над чартом: риски / в работе / переезды / готовое / по релизам.
+     Клики комбинируются по AND, несовпадающие строки гаснут, у каждого чипа
+     live-счётчик (превью «если добавить»). DOM-driven.
+     ═══════════════════════════════════════════════════════════════════════ */
+  _chipsPredicates() {
+    const wrap = document.getElementById('gantt3-wrap');
+    const cssEsc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s);
+    const cols = []; const seen = new Set();
+    const firstRow = wrap && wrap.querySelector('.gantt-row[data-epic-key]');
+    if (firstRow) firstRow.querySelectorAll('.gantt-cell[data-col]').forEach(c => { if (!seen.has(c.dataset.col)) { seen.add(c.dataset.col); cols.push(c.dataset.col); } });
+    const base = [
+      { key: 'risk',   label: 'Риски',         test: r => !!r.querySelector('.gdt-cell-risk-glyph:not(.is-empty)') },
+      { key: 'active', label: 'В работе',      test: r => !!r.querySelector('.gdt-pill-state-active') },
+      { key: 'churn',  label: 'Переезды',      test: r => !!r.querySelector('.v16-epic-churn') },
+      { key: 'done',   label: 'Есть готовое',  test: r => !!r.querySelector('.gdt-pill-state-done') },
+    ];
+    cols.forEach(c => base.push({ key: 'col:' + c, label: GANTT_COL_LABELS[c] || c, test: r => !!r.querySelector('.gantt-cell[data-col="' + cssEsc(c) + '"] .gantt-type-pill[data-wt]:not(.gantt-pill-ghost)') }));
+    return base;
+  },
+  _chipsToggleMode() {
+    const C = Gantt3View._chips;
+    if (C.on) { Gantt3View._chipsExit(); return; }
+    C.on = true; C.active = new Set();
+    document.body.classList.add('gdt-chips-on');
+    const btn = document.getElementById('btn-gantt3-chips');
+    if (btn) { btn.classList.add('active'); btn.setAttribute('aria-pressed', 'true'); }
+    Gantt3View._chipsBuild();
+  },
+  _chipsExit() {
+    const C = Gantt3View._chips; C.on = false; C.active = null;
+    document.body.classList.remove('gdt-chips-on');
+    const btn = document.getElementById('btn-gantt3-chips');
+    if (btn) { btn.classList.remove('active'); btn.setAttribute('aria-pressed', 'false'); }
+    Gantt3View._chipsClearDim();
+    document.getElementById('gdt-chips')?.remove(); C.strip = null;
+  },
+  _chipsBuild() {
+    const wrap = document.getElementById('gantt3-wrap'); if (!wrap) return;
+    document.getElementById('gdt-chips')?.remove();
+    const esc = Utils.escapeHtml;
+    const preds = Gantt3View._chipsPredicates();
+    const strip = document.createElement('div'); strip.id = 'gdt-chips';
+    strip.innerHTML = preds.map(p => '<button class="gc-chip" data-k="' + esc(p.key) + '">' + esc(p.label) + ' <span class="gc-n"></span></button>').join('') + '<span class="gc-res"></span>';
+    wrap.parentNode.insertBefore(strip, wrap);
+    strip.querySelectorAll('.gc-chip').forEach(ch => ch.addEventListener('click', () => {
+      const k = ch.dataset.k;
+      if (Gantt3View._chips.active.has(k)) Gantt3View._chips.active.delete(k); else Gantt3View._chips.active.add(k);
+      Gantt3View._chipsApply();
+    }));
+    Gantt3View._chips.strip = strip;
+    Gantt3View._chipsApply();
+  },
+  _chipsApply() {
+    const C = Gantt3View._chips; const wrap = document.getElementById('gantt3-wrap');
+    if (!wrap || !C.strip) return;
+    const preds = Gantt3View._chipsPredicates();
+    const active = preds.filter(p => C.active.has(p.key));
+    const rows = [...wrap.querySelectorAll('.gantt-row[data-epic-key]')];
+    let shown = 0; const teamHit = {};
+    rows.forEach(r => {
+      const hit = active.every(p => p.test(r));
+      r.classList.toggle('gdt-chip-dim', active.length > 0 && !hit);
+      if (hit) { shown++; teamHit[r.dataset.teamKey] = true; }
+    });
+    wrap.querySelectorAll('.gantt-team-header[data-team-key]').forEach(h => h.classList.toggle('gdt-chip-dim', active.length > 0 && !teamHit[h.dataset.teamKey]));
+    C.strip.querySelectorAll('.gc-chip').forEach(ch => {
+      const k = ch.dataset.k; const p = preds.find(x => x.key === k);
+      const test = active.slice(); if (!C.active.has(k) && p) test.push(p);
+      const cnt = rows.filter(r => test.every(x => x.test(r))).length;
+      ch.querySelector('.gc-n').textContent = cnt;
+      ch.dataset.zero = cnt === 0 ? '1' : '0';
+      ch.classList.toggle('on', C.active.has(k));
+    });
+    C.strip.querySelector('.gc-res').textContent = active.length ? ('показано ' + shown + ' из ' + rows.length) : (rows.length + ' эпиков');
+  },
+  _chipsClearDim() { document.querySelectorAll('#gantt3-wrap .gdt-chip-dim').forEach(e => e.classList.remove('gdt-chip-dim')); },
+
   bindFullscreen() {
     const btn = document.getElementById('btn-gantt3-fullscreen');
     if (!btn || btn._gdtFsBound) return;
@@ -4244,6 +4344,8 @@ html:not([data-active-section="gantt3"]) #gdt-mode, html:not([data-active-sectio
     if (Gantt3View._diff && Gantt3View._diff.on) Gantt3View._diffApply();
     // Гант 3.0 п.12 — Burndown: шапки пересозданы → пересобрать спарклайны.
     if (Gantt3View._burndown && Gantt3View._burndown.on) Gantt3View._burndownBuild();
+    // Гант 3.0 п.20 — Чипы: строки пересозданы → пересобрать строку чипов + dim.
+    if (Gantt3View._chips && Gantt3View._chips.on) Gantt3View._chipsBuild();
 
     /* update expand/collapse-all button icon (V21 P11.3 — Lucide line-glyph
        вместо box-drawing ⊟/⊞: иконка зависит от состояния, переключаемся
