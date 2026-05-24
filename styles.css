@@ -2755,9 +2755,15 @@ body.theme-dark .gdt-pill-row-2 { color: var(--prizma-text-secondary); }
    Раньше оба использовали `--prizma-bg-tertiary` (#F0EDE5 light) — сливались.
    Теперь backlog = `--prizma-bg-elevated` (white в light, dark уже на :4100). */
 .gantt-window-backlog { background: var(--prizma-bg-elevated); }
-.gantt-window-r120 { background: var(--prizma-information-bg); }
-.gantt-window-r121 { background: var(--prizma-on-course-bg); }
-.gantt-window-r122 { background: var(--prizma-drift-bg); }
+/* «Честный цвет» (lab winner, #1 находка аудита) — колодцы релизов НЕЙТРАЛЬНЫ.
+   Раньше r120/r121/r122 = information/on-course/drift-bg → 1.21 «зелёный = здоров»,
+   1.22 «амбер = риск». Это ЛОЖЬ: релизы — бакеты, не состояния. Light приводим
+   к тому же нейтралу, что и dark (catch-all styles.css ~:18400 → bg-elevated).
+   «Сейчас» отмечают today-line + «сегодня»-pill (information = реально now);
+   signal-палитра освобождена под настоящий статус/риск пилюль. */
+.gantt-window-r120 { background: var(--prizma-bg-elevated); }
+.gantt-window-r121 { background: var(--prizma-bg-elevated); }
+.gantt-window-r122 { background: var(--prizma-bg-elevated); }
 /* V16 (gantt-roadmap #2) — OT is conceptually NOT another release-colodet
    but a separate «off-grid» zone for overtime that sits OUTSIDE the
    release flow. We:
@@ -4628,9 +4634,11 @@ body.theme-dark .diag-card-header { color: var(--text-2); }
 body.theme-dark .employees-table th { color: var(--text-2); border-bottom-color: var(--prizma-border); }
 body.theme-dark .gantt-cell { border-right-color: var(--prizma-border); }
 body.theme-dark .gantt-window-backlog { background: var(--prizma-bg-elevated); }
-body.theme-dark .gantt-window-r120 { background: color-mix(in srgb, var(--prizma-information) 8%, var(--prizma-bg)); }
-body.theme-dark .gantt-window-r121 { background: color-mix(in srgb, var(--prizma-on-course) 6%, var(--prizma-bg)); }
-body.theme-dark .gantt-window-r122 { background: color-mix(in srgb, var(--prizma-drift) 7%, var(--prizma-bg)); }
+/* «Честный цвет» — нейтрализуем и dark-tier (на случай body.theme-dark без
+   [data-theme]); основной dark и так нейтрален через catch-all ~:18400. */
+body.theme-dark .gantt-window-r120 { background: var(--prizma-bg-elevated); }
+body.theme-dark .gantt-window-r121 { background: var(--prizma-bg-elevated); }
+body.theme-dark .gantt-window-r122 { background: var(--prizma-bg-elevated); }
 /* V16 (gantt-roadmap #2) — OT is off-grid, no red tint background. */
 body.theme-dark .gantt-window-overtime { background: var(--bg, #0b1020); }
 body.theme-dark .gantt-legend,
