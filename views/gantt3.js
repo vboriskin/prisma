@@ -247,6 +247,12 @@ export const Gantt3View = {
 .gantt-window-overtime {
   position: relative; /* чтобы абсолютный today-маркер позиционировался */
 }
+/* По запросу — убрана цветовая закраска колодцев 1.20–1.22 именно в Гант 3.0.
+   ID-скоуп (#section-gantt3) перебивает общие .gantt-window-r12x и тёмную тему
+   по специфичности; продакшн-Гант не затрагивается. Цвет несут только пилюли. */
+#section-gantt3 .gantt-window-r120,
+#section-gantt3 .gantt-window-r121,
+#section-gantt3 .gantt-window-r122 { background: transparent; }
 
 /* V22-G-15 — Toolbar visual hierarchy.
    Primary actions (Зафиксировать план, Снять фиксацию) — outline + текст.
