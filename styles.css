@@ -21956,6 +21956,19 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
 }
 .gantt-header-col:hover .gdt-col-eye { opacity: .6; }
 .gdt-col-eye:hover { opacity: 1; color: var(--prizma-off-course, #dc2626); background: var(--prizma-off-course-bg, rgba(220,38,38,.08)); }
+/* Карандаш-правка кастомного релиза — слева от «глаза». Hover синий (правка, не удаление). */
+.gdt-col-edit {
+  position: absolute;
+  top: 4px; right: 34px;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0;
+  color: var(--text-3); cursor: pointer;
+  opacity: 0; transition: opacity .12s, color .12s;
+  border-radius: 4px; padding: 0; z-index: 5;
+}
+.gantt-header-col:hover .gdt-col-edit { opacity: .6; }
+.gdt-col-edit:hover { opacity: 1; color: var(--prizma-information, #2563eb); background: var(--prizma-information-bg, rgba(37,99,235,.08)); }
 
 /* #1 — Release editor modal: чистый дизайн, date-pickers, smart-hint. */
 .re-modal-box {

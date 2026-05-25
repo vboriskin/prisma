@@ -2152,6 +2152,12 @@ export const GanttView = {
         // AUDIT-6 — SVG eye-off вместо «×» (× читался как «удалить релиз»).
         const eyeBtn = c.key === 'backlog' ? '' :
           `<button type="button" class="gdt-col-eye" data-col-key="${esc(c.key)}" title="Скрыть колодец из Ганта" aria-label="Скрыть колодец ${esc(c.label)}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>`;
+        // Правка кастомного релиза (даты/ярлык/удаление): карандаш в шапке →
+        // openReleaseEditor({key}). Встроенные релизы модалка править не даёт,
+        // поэтому кнопку показываем только для kind==='custom'.
+        const editBtn = c.kind === 'custom'
+          ? `<button type="button" class="gdt-col-edit" data-col-key="${esc(c.key)}" title="Редактировать релиз — даты, ярлык, удаление" aria-label="Редактировать релиз ${esc(c.label)}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>`
+          : '';
         // #6 — week-ticks: тонкие vertical засечки по 7 дней внутри окна
         // (только для колодцев с реальным диапазоном дат).
         const weekTicks = (() => {
@@ -2177,6 +2183,7 @@ export const GanttView = {
           ${distSpark}
           ${weekTicks}
           <div class="gdt-rail-stack">${label}${sub}${todayPill}${flowBadges}</div>
+          ${editBtn}
           ${eyeBtn}
           <div class="gdt-resize-handle" data-col-key="${esc(c.key)}" title="Потяните чтобы изменить ширину"></div>
         </div>`;
@@ -2401,6 +2408,19 @@ export const GanttView = {
         GanttView.renderChart();
         // AUDIT-6 — feedback: скрытие происходило молча.
         try { window.showToast?.(`Колодец «${COL_LABEL_MAP[key] || key}» скрыт · нажмите «Показать все» сверху`, 'info', 2600); } catch (_) {}
+      });
+    });
+
+    /* Карандаш в шапке кастомного релиза → редактор (даты/ярлык/удаление). */
+    wrap.querySelectorAll('.gdt-col-edit').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        e.preventDefault();
+        const key = btn.dataset.colKey;
+        if (!key) return;
+        import('../components/releaseEditorModal.js')
+          .then(m => m.openReleaseEditor({ key, onSaved: () => GanttView.renderChart() }))
+          .catch(() => {});
       });
     });
 
