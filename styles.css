@@ -1954,6 +1954,17 @@ body.app-debug-off .app-nav-row[data-section="diagnostics"] { display: none !imp
   overflow-y: visible;
   position: relative;
 }
+/* Гант 3.0 форк рендерит чарт в #gantt3-wrap. Базового правила для него не было,
+   из-за чего .gantt-container (width:max-content) переполнял вьюпорт и обрезался
+   (body overflow-x:hidden) — горизонтальный скролл не работал. Даём тот же
+   скролл-контейнер, что и у #gantt-wrap (код gantt3.js это и предполагал). */
+#gantt3-wrap {
+  background: var(--card); border-radius: var(--radius); border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  overflow-y: visible;
+  position: relative;
+}
 .gantt-filters {
   display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
   padding: 12px 16px; background: var(--card); border-radius: var(--radius); border: 1px solid var(--border);
@@ -7634,8 +7645,10 @@ body.theme-dark .gdt-ctx-bucket-chip {
    GANTT v9 — team collapse / fullscreen / add-picker
    ============================================================ */
 
-/* Fullscreen mode */
-#section-gantt.gdt-fullscreen {
+/* Fullscreen mode (форк Гант 3.0 тоглит gdt-fullscreen на #section-gantt3 —
+   даём те же правила, иначе фуллскрин форка без layout/скролла). */
+#section-gantt.gdt-fullscreen,
+#section-gantt3.gdt-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 800;
@@ -7645,11 +7658,13 @@ body.theme-dark .gdt-ctx-bucket-chip {
   display: flex !important;
   flex-direction: column;
 }
-#section-gantt.gdt-fullscreen .gdt-container {
+#section-gantt.gdt-fullscreen .gdt-container,
+#section-gantt3.gdt-fullscreen .gdt-container {
   max-height: calc(100vh - 130px);
   flex: 1;
 }
-#section-gantt.gdt-fullscreen #gantt-wrap {
+#section-gantt.gdt-fullscreen #gantt-wrap,
+#section-gantt3.gdt-fullscreen #gantt3-wrap {
   flex: 1;
 }
 
@@ -22047,6 +22062,38 @@ body.theme-dark .release-item-text { color: rgba(255,255,255,0.86); }
   border-color: var(--prizma-off-course, #dc2626);
 }
 .re-delete-btn:hover { background: var(--prizma-off-course, #dc2626); color: #fff; }
+
+/* Контрольные точки (вехи) — список в модалке. Раньше эти стили жили только
+   в инъекции Гант 3.0 (audit-art-gantt3-style), поэтому при открытии модалки
+   из обычного Ганта (до рендера Гант 3.0) дата/название рендерились без вёрстки
+   («криво»). Модалка общая → стили общие. */
+.ms-add-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+.ms-add-row .re-field-input { margin: 0; }
+.ms-add-row #ms-label { flex: 1; }
+.ms-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.ms-empty { padding: 16px; text-align: center; color: var(--prizma-text-tertiary, var(--text-3, #94a3b8)); font-size: 12px; }
+.ms-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--prizma-border, var(--border, #e2e8f0));
+  border-radius: 6px;
+}
+.ms-item-date {
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  color: var(--prizma-information, #4f46e5);
+  min-width: 58px;
+}
+.ms-item-label { flex: 1; font-size: 13px; color: var(--prizma-text-primary, var(--text-1)); }
+.ms-item-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; border: none; border-radius: 4px;
+  color: var(--prizma-text-tertiary, var(--text-3, #94a3b8));
+  cursor: pointer;
+}
+.ms-item-del:hover { color: var(--prizma-off-course, #C13838); background: var(--prizma-surface-2, rgba(0,0,0,.04)); }
+.ms-count { font-size: 11px; color: var(--prizma-text-tertiary, var(--text-3, #94a3b8)); }
 
 /* #11 — Иконка «зависимости эпика» рядом с категорией. */
 .v16-epic-deps-edit {
