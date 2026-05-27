@@ -410,6 +410,9 @@ export const CSV = {
       simMode:state.simMode, sidebarCollapsed:state.sidebarCollapsed,
       activeSection:state.activeSection,
       filters:state.filters,
+      // Пользовательские колодцы/вехи — чтобы CSV round-trip восстанавливал их
+      // в live-state сразу (не только через localStorage-bundle после reload).
+      releases:state.releases, ganttHiddenReleases:state.ganttHiddenReleases, milestones:state.milestones,
     };
     const localStorageBundle = {};
     CSV.STORAGE_KEYS_FOR_EXPORT.forEach(k => {
@@ -533,6 +536,10 @@ export const CSV = {
               }
             }
           }
+          // Пользовательские колодцы/вехи (раньше CSV-импорт их ронял).
+          if (Array.isArray(s.releases)) state.releases=s.releases;
+          if (Array.isArray(s.ganttHiddenReleases)) state.ganttHiddenReleases=s.ganttHiddenReleases;
+          if (Array.isArray(s.milestones)) state.milestones=s.milestones;
           syncColumnSettings();
           if (Services.App?.applyPresetsCollapsed) Services.App.applyPresetsCollapsed();
           if (Services.ThemeUI?.apply) Services.ThemeUI.apply();
@@ -895,6 +902,11 @@ export const JSONImport = {
       // V14 plan-lock + edit-mode (paired audit#1 fix).
       if (Object.prototype.hasOwnProperty.call(s, 'planLocked'))    state.planLocked    = s.planLocked || null;
       if (Object.prototype.hasOwnProperty.call(s, 'ganttEditMode')) state.ganttEditMode = !!s.ganttEditMode;
+      // Пользовательские колодцы/вехи: экспорт их кладёт (_buildSettingsPayload),
+      // но import их раньше ронял → кастомные релизы пропадали после re-import.
+      if (Array.isArray(s.releases))            state.releases            = s.releases;
+      if (Array.isArray(s.ganttHiddenReleases)) state.ganttHiddenReleases = s.ganttHiddenReleases;
+      if (Array.isArray(s.milestones))          state.milestones          = s.milestones;
     }
     // Bundle — same allowlist as CSV bundle import (prevents prototype pollution).
     const b = snapshot.bundle || {};
