@@ -3,13 +3,11 @@
    TEAM SCANNER 2.0 — BRIEF EXPORT
    Standalone HTML «бриф» команды: одна команда — одна .html-страница.
 
-   Сохраняет ТОТ ЖЕ визуал, что и в Сканнере (вытягивает CSS из
-   document.styleSheets), плюс добавляет inline JS для:
-     · разворачивания каждой строки в полную карточку сотрудника
-     · поиска по имени
-     · фильтра по группам (stop/watch/moving/idle)
-     · сортировки внутри групп
-     · «развернуть всё / свернуть всё»
+   Плоский список сотрудников (без группировки stop/watch/moving/idle),
+   каждая строка раскрывается в полную карточку из renderEmployeeDetailPanel.
+   Inline JS даёт: разворачивание строки, поиск по имени, сортировку
+   колонок, «развернуть всё / свернуть всё», переключатель темы
+   (светлая по умолчанию).
 
    Содержимое разворачиваемой части = вывод renderEmployeeDetailPanel,
    пост-обработанный: убираем кнопки «Закрыть / TG / Share / 1:1 / Copy»
@@ -21,7 +19,6 @@
 
 import { renderEmployeeDetailPanel } from './teamScanner2Renderer.js';
 import { renderPersonRows } from './teamScanner2RendererPersonRows.js';
-import { classifyPerson } from './teamScanner2Classifier.js';
 import { emit as telemetryEmit } from './telemetry.js';
 
 const ALL_SRC_FILTERS = { j: true, b: true, c: true, zc: true, ze: true };
@@ -33,18 +30,29 @@ const CSS_KEEP_TOKENS = [
 
 /**
  * Основная точка входа. Собирает standalone HTML, триггерит скачивание.
+ * Перед сборкой ходит в LLM по каждому сотруднику и подмешивает «Сводную LLM»
+ * в конец карточки (раскрывашка). Если LLM недоступен — секция показывает
+ * placeholder с причиной, экспорт не блокируется.
  *
  * @param {object} model — pulse-model (model.participants, model.scannerV2 …)
  * @param {object} [opts]
- * @param {string} [opts.teamLabel] — название команды для шапки и имени файла
+ * @param {string}   [opts.teamLabel]   — название команды для шапки и имени файла
+ * @param {function} [opts.onProgress]  — (done, total) → void; сообщения для UI
+ * @param {AbortSignal} [opts.signal]   — отмена LLM-вызовов
  */
-export function exportTeamBrief(model, opts = {}) {
+export async function exportTeamBrief(model, opts = {}) {
   if (!model || !Array.isArray(model.participants) || model.participants.length === 0) {
     throw new Error('Нет данных для выгрузки — сначала обновите Сканнер.');
   }
   const teamLabel = opts.teamLabel || (model.projectKeys || []).join(', ') || 'команда';
   const generatedAt = new Date();
-  const peopleHtml = _buildPeopleSection(model);
+  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+  const llmSummaries = await _generateLLMSummariesForAll(model.participants, {
+    signal: opts.signal,
+    onProgress,
+    concurrency: 3,
+  });
+  const peopleHtml = _buildPeopleSection(model, llmSummaries);
   const css = _collectScopedCss();
   const headerHtml = _buildHeader(model, teamLabel, generatedAt);
   const toolbarHtml = _buildToolbar();
@@ -66,20 +74,195 @@ export function exportTeamBrief(model, opts = {}) {
   const filename = `team-brief-${_slug(teamLabel)}-${_dateStamp(generatedAt)}.html`;
   _downloadFile(documentHtml, filename);
   try {
+    let llmOk = 0;
+    if (llmSummaries && llmSummaries.size) {
+      for (const v of llmSummaries.values()) if (v) llmOk++;
+    }
     telemetryEmit('scanner2.brief_export', {
       teamLabel,
       peopleCount: model.participants.length,
+      llmOk,
       sizeBytes: documentHtml.length,
     });
   } catch (_) { /* telemetry — best effort */ }
 }
 
+/* ── LLM summary: batch with concurrency ─── */
+
+async function _generateLLMSummariesForAll(participants, opts = {}) {
+  const map = new Map();
+  if (!Array.isArray(participants) || participants.length === 0) return map;
+  const concurrency = Math.max(1, Math.min(6, opts.concurrency || 3));
+  const onProgress = opts.onProgress || (() => {});
+  const total = participants.length;
+  let done = 0;
+  onProgress(0, total);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
+    while (cursor < participants.length) {
+      const i = cursor++;
+      const p = participants[i];
+      let summaryHtml = null;
+      try {
+        const text = await _callLLMSummary(p, { signal: opts.signal });
+        if (text) summaryHtml = _formatLLMText(text);
+      } catch (_) { /* ignore — per-person LLM is best-effort */ }
+      if (!summaryHtml) {
+        summaryHtml = `<div class="brief-llm-error">LLM-сводка недоступна (проверь /api/llm/chat или настройки GigaChat).</div>`;
+      }
+      map.set(p.key, summaryHtml);
+      done++;
+      try { onProgress(done, total); } catch (_) {}
+    }
+  });
+  await Promise.all(workers);
+  return map;
+}
+
+const LLM_SYSTEM_PROMPT = `Ты — ассистент тимлида в инструменте Призма. Получаешь сырые данные по сотруднику за последние 72 часа: задачи Jira (WIP, события, блокеры), Bitbucket (коммиты/PR/ревью), Confluence (правки), агрегированные метрики.
+
+Пиши короткую человеко-читаемую сводку для тимлида.
+
+Жёсткие правила:
+- Сухой профессиональный тон, без оценок «хорошо/плохо», без воды.
+- НЕ выдумывай задач, ключей, событий — только то, что есть в payload. Если в разделе пусто — пиши «По данным интеграций информации нет».
+- Не используй markdown заголовки (#, ##) и emoji.
+- Структура ответа РОВНО три блока. Каждый заголовок — отдельной строкой буквально как указано. После заголовка — 2-4 предложения.
+
+Чем занимался вчера:
+<текст>
+
+Чем занимается сегодня:
+<текст>
+
+Возможные проблемы:
+<текст>`;
+
+async function _callLLMSummary(p, opts = {}) {
+  const userPayload = _buildLLMUserPayload(p);
+  const body = {
+    messages: [
+      { role: 'system', content: LLM_SYSTEM_PROMPT },
+      { role: 'user',   content: userPayload },
+    ],
+    model: 'GigaChat',
+    max_tokens: 600,
+    temperature: 0.4,
+    stream: false,
+  };
+  // 30-second per-person timeout; combined with the parent abort signal.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException('timeout', 'TimeoutError')), 30000);
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
+    else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal.reason), { once: true });
+  }
+  try {
+    const res = await fetch('/api/llm/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    if (!data) return null;
+    const text = data?.choices?.[0]?.message?.content || data?.text || data?.content || null;
+    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function _buildLLMUserPayload(p) {
+  // Сжимаем участника до минимально-достаточного payload'а. Не больше 10
+  // событий из таймлайна, 5 WIP, 3 блокера — иначе LLM захлёбывается и
+  // дороже по токенам.
+  const _evt = (e) => ({
+    at: e?.at || '',
+    src: e?.src || 'jira',
+    kind: e?.kind || '',
+    key: e?.issue?.key || '',
+    summary: e?.issue?.summary || e?.issue?.fields?.summary || '',
+    text: _truncate(e?.text || '', 80),
+  });
+  const slim = {
+    name: p.label || p.key || '—',
+    role: p.role || p.position || '',
+    timelineToday:    (p.timelineToday    || []).slice(0, 10).map(_evt),
+    timelineYesterday:(p.timelineYesterday|| []).slice(0, 10).map(_evt),
+    issuesNow: (p.issuesNow || []).slice(0, 5).map(it => ({
+      key: it.key, summary: it.summary, status: it.status,
+    })),
+    blockers:  (p.blockers  || []).slice(0, 3).map(b => ({
+      key: b.key, summary: b.summary, status: b.status,
+      dwellHours: Math.round(Number(b.dwellHours) || 0),
+    })),
+    bitbucket: {
+      commits48h: p.badges?.commits48h || 0,
+      pr48h: p.badges?.pr48h || 0,
+      items: (p.bbItems || []).slice(0, 5).map(it => ({
+        kind: it.kind, title: _truncate(it.title || '', 80), status: it.status || '',
+      })),
+    },
+    confluence: {
+      items: (p.cfItems || []).slice(0, 5).map(it => ({
+        kind: it.kind, title: _truncate(it.title || '', 80),
+      })),
+    },
+    hoursLoggedToday: Math.round((p.loggedTodaySec || 0) / 360) / 10,
+    burnoutFlag: p.personMetrics?.burnout?.level || 'none',
+    contextSwitches72h: p.contextSwitches?.switchEvents?.length || 0,
+  };
+  return [
+    `Сотрудник: ${slim.name}${slim.role ? ` (${slim.role})` : ''}`,
+    'Данные за 72 часа (JSON):',
+    JSON.stringify(slim, null, 2),
+    '',
+    'Напиши сводку строго по структуре из system-сообщения.',
+  ].join('\n');
+}
+
+/**
+ * Форматирует ответ LLM в HTML: распознаёт три заголовка
+ * («Чем занимался вчера:» / «Чем занимается сегодня:» / «Возможные проблемы:»)
+ * и оборачивает их в <strong class="brief-llm-h">, абзацы — в <p>.
+ */
+function _formatLLMText(text) {
+  const lines = String(text).split(/\r?\n/);
+  const out = [];
+  let inPara = false;
+  const flushPara = (buf) => {
+    if (!buf.length) return;
+    out.push(`<p>${_esc(buf.join(' ').trim())}</p>`);
+  };
+  let buf = [];
+  const HEADERS = /^\s*(Чем занимался вчера|Чем занимается сегодня|Возможные проблемы)\s*:?\s*$/i;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      flushPara(buf); buf = []; inPara = false;
+      continue;
+    }
+    if (HEADERS.test(line)) {
+      flushPara(buf); buf = []; inPara = false;
+      out.push(`<strong class="brief-llm-h">${_esc(line.replace(/:?\s*$/, ':'))}</strong>`);
+      continue;
+    }
+    buf.push(line);
+    inPara = true;
+  }
+  flushPara(buf);
+  return out.join('\n');
+}
+
 /* ── people section: ts2-row + .brief-detail next-sibling ─── */
 
-function _buildPeopleSection(model) {
+function _buildPeopleSection(model, llmSummaries) {
   const rawRowsHtml = renderPersonRows(model, { expandedKey: '' });
   if (typeof DOMParser === 'undefined') {
-    // Без DOM (например, jsdom без правильного флага) — отдадим как есть.
     return rawRowsHtml;
   }
   const parser = new DOMParser();
@@ -88,11 +271,13 @@ function _buildPeopleSection(model) {
   if (!wrap) return rawRowsHtml;
   const byKey = new Map();
   for (const p of model.participants) byKey.set(p.key, p);
-  const rows = wrap.querySelectorAll('.ts2-row[data-key]');
-  rows.forEach(row => {
+  const allRows = Array.from(wrap.querySelectorAll('.ts2-row[data-key]'));
+  const flat = doc.createElement('div');
+  flat.className = 'ts2-rows brief-people-flat';
+  for (const row of allRows) {
     const key = row.getAttribute('data-key');
     const p = byKey.get(key);
-    if (!p) return;
+    if (!p) continue;
     row.classList.add('brief-row');
     row.setAttribute('aria-expanded', 'false');
     row.dataset.briefKey = key;
@@ -111,9 +296,105 @@ function _buildPeopleSection(model) {
     detailWrap.dataset.detailFor = key;
     detailWrap.innerHTML = detailRawHtml;
     _stripRuntimeArtifacts(detailWrap);
-    row.parentNode.insertBefore(detailWrap, row.nextSibling);
+    _trimDetailForBrief(detailWrap, p, doc);
+    const llmHtml = (llmSummaries && llmSummaries.get) ? llmSummaries.get(key) : null;
+    if (llmHtml) detailWrap.appendChild(_buildLLMBlock(doc, llmHtml));
+    flat.appendChild(row);
+    flat.appendChild(detailWrap);
+  }
+  return flat.outerHTML;
+}
+
+/**
+ * Подгон контента detail-панели под формат брифа:
+ *   1. Убираем ts2-panel-head (ФИО+3д тренд+email+CR/PR/cross-team — это
+ *      уже видно в строке выше).
+ *   2. Из нарратива выкидываем «Блокер: …» / «N блокеров: …» (тимлид и так
+ *      увидит блокеры в LLM-сводке).
+ *   3. В строке «Сегодня:» подставляем «(название задачи)» рядом с каждым
+ *      ключом Jira.
+ *   4. Убираем ts2-pm-section (метрики PROD/АКТИВ/CF/Z/J).
+ *   5. Убираем «Старые задачи» (renderBlockersShelf).
+ */
+function _trimDetailForBrief(root, p, doc) {
+  // 1. Шапка панели (имя + sub-meta + metric row).
+  root.querySelectorAll('.ts2-panel-head').forEach(el => el.remove());
+  // 4. Метрики сотрудника (Метрики сотрудника / клик по chip / PROD / АКТИВ / CF / Z / J).
+  root.querySelectorAll('.ts2-pm-section').forEach(el => el.remove());
+  // 5. Старые задачи (blockers shelf). Когда blockers непусто — это
+  //    <details class="ts2-blockers-details">. Когда пусто, рендерер
+  //    отдаёт обычную .ts2-panel-section с заголовком «Старые задачи».
+  //    Сносим оба варианта по заголовку.
+  root.querySelectorAll('.ts2-blockers-details').forEach(el => el.remove());
+  root.querySelectorAll('.ts2-panel-section').forEach(sec => {
+    const title = sec.querySelector('.ts2-panel-section-title');
+    if (title && /старые задачи/i.test(title.textContent || '')) sec.remove();
   });
-  return wrap.innerHTML;
+  // 2. Narrative-предложение про блокеры.
+  root.querySelectorAll('.ts2-narrative-item').forEach(li => {
+    const lab = li.querySelector('.ts2-narrative-label');
+    if (lab && /блокер/i.test(lab.textContent || '')) li.remove();
+  });
+  // 3. «Сегодня:» — рядом с каждым Jira-ключом подставить (название).
+  const keyToSummary = _buildKeyToSummaryMap(p);
+  root.querySelectorAll('.ts2-narrative-item').forEach(li => {
+    const lab = li.querySelector('.ts2-narrative-label');
+    if (!lab || !/сегодня/i.test(lab.textContent || '')) return;
+    const txt = li.querySelector('.ts2-narrative-text');
+    if (!txt) return;
+    txt.querySelectorAll('a.ts2-issue-link').forEach(a => {
+      const key = (a.textContent || '').trim().toUpperCase();
+      const summary = keyToSummary.get(key);
+      if (!summary) return;
+      // Не дублируем, если рядом уже есть suffix.
+      const next = a.nextSibling;
+      if (next && next.nodeType === 3 && next.textContent && next.textContent.startsWith(' (')) return;
+      const tail = doc.createTextNode(` (${_truncate(summary, 80)})`);
+      a.parentNode.insertBefore(tail, a.nextSibling);
+    });
+  });
+}
+
+function _buildKeyToSummaryMap(p) {
+  const m = new Map();
+  const put = (key, sum) => {
+    const k = String(key || '').trim().toUpperCase();
+    const s = String(sum || '').trim();
+    if (!k || !s) return;
+    if (!m.has(k)) m.set(k, s);
+  };
+  for (const it of (p.issuesNow || [])) put(it?.key, it?.summary);
+  for (const b of (p.blockers || [])) put(b?.key, b?.summary);
+  for (const lst of [p.timelineToday, p.timelineYesterday, p.timelinePrev]) {
+    for (const e of (lst || [])) {
+      const issue = e?.issue;
+      if (!issue?.key) continue;
+      put(issue.key, issue.summary || issue?.fields?.summary);
+    }
+  }
+  return m;
+}
+
+function _truncate(s, n) {
+  const str = String(s || '');
+  return str.length > n ? str.slice(0, n - 1) + '…' : str;
+}
+
+/* ── LLM block (collapsible at the end of each detail) ─── */
+
+function _buildLLMBlock(doc, htmlInner) {
+  const wrap = doc.createElement('details');
+  wrap.className = 'brief-llm-section';
+  wrap.open = false;
+  const sum = doc.createElement('summary');
+  sum.className = 'brief-llm-summary';
+  sum.textContent = 'Сводная LLM';
+  wrap.appendChild(sum);
+  const body = doc.createElement('div');
+  body.className = 'brief-llm-body';
+  body.innerHTML = htmlInner;
+  wrap.appendChild(body);
+  return wrap;
 }
 
 /**
@@ -161,7 +442,6 @@ function _buildHeader(model, teamLabel, generatedAt) {
     ? `<span class="brief-header-sprint">Спринт: ${_esc(sg.aggregateDone)}/${_esc(sg.aggregateTotal)} (${_esc(sg.aggregateProgress)}%)</span>`
     : '';
   const peopleCount = (model.participants || []).length;
-  const groupCounts = _countGroups(model.participants);
   return `
     <header class="brief-header">
       <h1 class="brief-header-title">Бриф команды ${_esc(teamLabel)}</h1>
@@ -171,12 +451,6 @@ function _buildHeader(model, teamLabel, generatedAt) {
         <span class="brief-header-count">${peopleCount} ${_plural(peopleCount, ['сотрудник', 'сотрудника', 'сотрудников'])}</span>
         ${sprintLine ? `<span class="brief-header-sep">·</span>${sprintLine}` : ''}
       </div>
-      <div class="brief-header-groups">
-        <span class="brief-group-stat brief-group-stop"><strong>${groupCounts.stop}</strong> требуют внимания</span>
-        <span class="brief-group-stat brief-group-watch"><strong>${groupCounts.watch}</strong> под наблюдением</span>
-        <span class="brief-group-stat brief-group-moving"><strong>${groupCounts.moving}</strong> движется</span>
-        <span class="brief-group-stat brief-group-idle"><strong>${groupCounts.idle}</strong> без активности</span>
-      </div>
     </header>
   `;
 }
@@ -185,15 +459,12 @@ function _buildToolbar() {
   return `
     <div class="brief-toolbar" role="toolbar" aria-label="Управление брифом">
       <input type="search" id="brief-search" class="brief-search" placeholder="Поиск по имени" autocomplete="off" aria-label="Поиск сотрудника по имени">
-      <div class="brief-chips" role="group" aria-label="Фильтр групп">
-        <button type="button" class="brief-chip brief-chip-stop" data-brief-group="stop" aria-pressed="true">Требуют внимания</button>
-        <button type="button" class="brief-chip brief-chip-watch" data-brief-group="watch" aria-pressed="true">Наблюдение</button>
-        <button type="button" class="brief-chip brief-chip-moving" data-brief-group="moving" aria-pressed="true">Движется</button>
-        <button type="button" class="brief-chip brief-chip-idle" data-brief-group="idle" aria-pressed="true">Без активности</button>
-      </div>
-      <div class="brief-toolbar-spacer"></div>
       <button type="button" class="brief-btn" id="brief-expand-all">Развернуть всё</button>
       <button type="button" class="brief-btn" id="brief-collapse-all">Свернуть всё</button>
+      <div class="brief-toolbar-spacer"></div>
+      <button type="button" class="brief-btn brief-theme-btn" id="brief-theme-toggle" aria-label="Переключить тему" title="Светлая ↔ тёмная">
+        <span class="brief-theme-icon" aria-hidden="true">☾</span><span class="brief-theme-label"> Тёмная</span>
+      </button>
     </div>
   `;
 }
@@ -265,6 +536,9 @@ function _isRootSelector(sel) {
   if (/^:root\b/.test(s)) return true;
   if (/^html\b/.test(s) && !s.includes(' ')) return true;
   if (/^body\b/.test(s) && !s.includes(' ')) return true;
+  // [data-theme="…"] / :root[data-theme="…"] — корневые селекторы для CSS
+  // переменных темы; обязательны, чтобы toggle светлая↔тёмная работал.
+  if (s.includes('[data-theme=')) return true;
   return false;
 }
 
@@ -279,26 +553,16 @@ function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
     .brief-shell { max-width: 1280px; margin: 0 auto; padding: 16px 24px 64px; }
     .brief-header { padding: 12px 0 16px; border-bottom: 1px solid var(--prizma-border, #E5E0D5); margin-bottom: 12px; }
     .brief-header-title { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
-    .brief-header-meta, .brief-header-groups { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--prizma-text-secondary, #555); }
-    .brief-header-groups { margin-top: 6px; }
+    .brief-header-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--prizma-text-secondary, #555); }
     .brief-header-sep { opacity: .4; }
-    .brief-group-stat { padding: 2px 8px; border-radius: 10px; background: var(--prizma-bg-tertiary, #F0EDE5); }
-    .brief-group-stop strong  { color: var(--prizma-off-course, #C03030); }
-    .brief-group-watch strong { color: var(--prizma-drift, #B86A00); }
-    .brief-group-moving strong{ color: var(--prizma-on-course, #1B7A3E); }
-    .brief-group-idle strong  { color: var(--prizma-text-tertiary, #999); }
 
     .brief-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; }
     .brief-toolbar-spacer { flex: 1 1 auto; }
     .brief-search { padding: 6px 10px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 8px; min-width: 220px; font-size: 13px; background: var(--prizma-bg-elevated, #fff); color: inherit; }
-    .brief-chip { padding: 4px 10px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 12px; background: var(--prizma-bg-elevated, #fff); font-size: 12px; cursor: pointer; color: inherit; }
-    .brief-chip[aria-pressed="false"], .brief-chip.brief-chip-off { opacity: .45; text-decoration: line-through; }
-    .brief-chip-stop[aria-pressed="true"]   { box-shadow: inset 3px 0 0 var(--prizma-off-course, #C03030); }
-    .brief-chip-watch[aria-pressed="true"]  { box-shadow: inset 3px 0 0 var(--prizma-drift, #B86A00); }
-    .brief-chip-moving[aria-pressed="true"] { box-shadow: inset 3px 0 0 var(--prizma-on-course, #1B7A3E); }
-    .brief-chip-idle[aria-pressed="true"]   { box-shadow: inset 3px 0 0 var(--prizma-text-tertiary, #999); }
     .brief-btn { padding: 5px 10px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 8px; background: var(--prizma-bg-elevated, #fff); font-size: 12px; cursor: pointer; color: inherit; }
-    .brief-btn:hover, .brief-chip:hover { background: var(--prizma-bg-tertiary, #F0EDE5); }
+    .brief-btn:hover { background: var(--prizma-bg-tertiary, #F0EDE5); }
+    .brief-theme-btn { display: inline-flex; align-items: center; gap: 2px; }
+    .brief-theme-icon { font-size: 14px; line-height: 1; }
 
     .brief-sortbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 12px; font-size: 12px; }
     .brief-sortbar-label { color: var(--prizma-text-secondary, #555); margin-right: 4px; }
@@ -308,17 +572,27 @@ function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
     .brief-sort-btn[data-brief-dir="asc"], .brief-sort-btn[data-brief-dir="desc"] { background: var(--prizma-bg-tertiary, #F0EDE5); font-weight: 600; }
 
     .brief-row { cursor: pointer; position: relative; }
-    .brief-row::after { content: ""; position: absolute; right: 8px; top: 50%; width: 8px; height: 8px; border-right: 1.5px solid var(--prizma-text-tertiary, #999); border-bottom: 1.5px solid var(--prizma-text-tertiary, #999); transform: translateY(-65%) rotate(45deg); transition: transform .15s; opacity: .6; pointer-events: none; }
-    .brief-row.brief-row-expanded::after { transform: translateY(-25%) rotate(-135deg); opacity: 1; }
     .brief-row[aria-expanded="true"] { background: var(--prizma-bg-tertiary, #F0EDE5); }
+    .brief-row .ts2-chev { transition: transform .15s ease; }
+    .brief-row.brief-row-expanded .ts2-chev { transform: rotate(90deg); }
 
     .brief-detail { margin: 4px 0 12px; padding: 4px 12px 12px; border-left: 3px solid var(--prizma-information, #6EC1E4); background: var(--prizma-bg-elevated, #fff); border-radius: 0 8px 8px 0; }
     .brief-detail[hidden] { display: none; }
     .brief-panel-inline { position: static !important; transform: none !important; box-shadow: none !important; max-width: none !important; width: auto !important; height: auto !important; max-height: none !important; padding: 8px 0 !important; overflow: visible !important; background: transparent !important; border: none !important; }
     .brief-panel-inline .ts2-panel-head { padding-top: 0; }
+
+    .brief-llm-section { margin-top: 12px; border-top: 1px dashed var(--prizma-border, #E5E0D5); padding-top: 10px; }
+    .brief-llm-summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, #1A1A22); list-style: none; padding: 4px 0; user-select: none; }
+    .brief-llm-summary::-webkit-details-marker { display: none; }
+    .brief-llm-summary::before { content: "▸"; display: inline-block; margin-right: 6px; color: var(--prizma-text-secondary, #555); transition: transform .15s ease; }
+    .brief-llm-section[open] > .brief-llm-summary::before { transform: rotate(90deg); }
+    .brief-llm-body { font-size: 13px; line-height: 1.5; color: var(--prizma-text-primary, #1A1A22); padding: 8px 0 4px; }
+    .brief-llm-body h4, .brief-llm-body strong.brief-llm-h { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--prizma-text-secondary, #555); margin: 10px 0 4px; }
+    .brief-llm-body p { margin: 0 0 6px; }
+    .brief-llm-error { color: var(--prizma-off-course, #C13838); font-style: italic; font-size: 12px; }
   `;
   return `<!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -345,6 +619,7 @@ function _briefInlineJs() {
   return `(function () {
   'use strict';
   var doc = document;
+  var root = doc.documentElement;
   function $(sel, ctx) { return (ctx || doc).querySelector(sel); }
   function $$(sel, ctx) { return Array.prototype.slice.call((ctx || doc).querySelectorAll(sel)); }
 
@@ -405,56 +680,66 @@ function _briefInlineJs() {
     });
   });
 
-  // 4. Status filter chips (toggle group visibility)
-  $$('.brief-chip[data-brief-group]').forEach(function (chip) {
-    chip.addEventListener('click', function () {
-      var g = chip.dataset.briefGroup;
-      var pressed = chip.getAttribute('aria-pressed') !== 'false';
-      var next = !pressed;
-      chip.setAttribute('aria-pressed', next ? 'true' : 'false');
-      var grp = $('[data-group-anchor="' + g + '"]');
-      if (grp) grp.style.display = next ? '' : 'none';
-    });
-  });
-
-  // 5. Sort within each group
+  // 4. Sort over single flat container
   $$('.brief-sort-btn[data-brief-sort]').forEach(function (btn) {
     btn.addEventListener('click', function () {
       var by = btn.dataset.briefSort;
       var dir = btn.dataset.briefDir === 'asc' ? 'desc' : 'asc';
       $$('.brief-sort-btn').forEach(function (b) { if (b !== btn) b.dataset.briefDir = ''; });
       btn.dataset.briefDir = dir;
-      var groups = $$('[data-group-anchor]');
-      groups.forEach(function (grpEl) {
-        var inner = grpEl.querySelector('.ts2-rows-inner') || grpEl;
-        var items = [];
-        var kids = Array.prototype.slice.call(inner.children);
-        for (var i = 0; i < kids.length; i++) {
-          var el = kids[i];
-          if (el.classList && el.classList.contains('brief-row')) {
-            var nxt = kids[i + 1];
-            var det = (nxt && nxt.classList && nxt.classList.contains('brief-detail')) ? nxt : null;
-            items.push({ row: el, detail: det });
-          }
+      var container = $('.brief-people-flat');
+      if (!container) return;
+      var items = [];
+      var kids = Array.prototype.slice.call(container.children);
+      for (var i = 0; i < kids.length; i++) {
+        var el = kids[i];
+        if (el.classList && el.classList.contains('brief-row')) {
+          var nxt = kids[i + 1];
+          var det = (nxt && nxt.classList && nxt.classList.contains('brief-detail')) ? nxt : null;
+          items.push({ row: el, detail: det });
         }
-        items.sort(function (a, b) {
-          if (by === 'name') {
-            var an = a.row.dataset.sortName || '';
-            var bn = b.row.dataset.sortName || '';
-            return dir === 'asc' ? an.localeCompare(bn, 'ru') : bn.localeCompare(an, 'ru');
-          }
-          var keyMap = { today: 'sortToday', yest: 'sortYest', wip: 'sortWip', pr: 'sortPr', tasks: 'sortTasks', hours: 'sortHours' };
-          var dsKey = keyMap[by];
-          var av = parseFloat(a.row.dataset[dsKey] || '0') || 0;
-          var bv = parseFloat(b.row.dataset[dsKey] || '0') || 0;
-          return dir === 'asc' ? av - bv : bv - av;
-        });
-        items.forEach(function (it) {
-          inner.appendChild(it.row);
-          if (it.detail) inner.appendChild(it.detail);
-        });
+      }
+      items.sort(function (a, b) {
+        if (by === 'name') {
+          var an = a.row.dataset.sortName || '';
+          var bn = b.row.dataset.sortName || '';
+          return dir === 'asc' ? an.localeCompare(bn, 'ru') : bn.localeCompare(an, 'ru');
+        }
+        var keyMap = { today: 'sortToday', yest: 'sortYest', wip: 'sortWip', pr: 'sortPr', tasks: 'sortTasks', hours: 'sortHours' };
+        var dsKey = keyMap[by];
+        var av = parseFloat(a.row.dataset[dsKey] || '0') || 0;
+        var bv = parseFloat(b.row.dataset[dsKey] || '0') || 0;
+        return dir === 'asc' ? av - bv : bv - av;
+      });
+      items.forEach(function (it) {
+        container.appendChild(it.row);
+        if (it.detail) container.appendChild(it.detail);
       });
     });
+  });
+
+  // 5. Theme toggle (light default, persist в localStorage briefTheme)
+  var themeBtn = $('#brief-theme-toggle');
+  function updateThemeBtn(theme) {
+    if (!themeBtn) return;
+    var isLight = theme === 'light';
+    var icon = themeBtn.querySelector('.brief-theme-icon');
+    var label = themeBtn.querySelector('.brief-theme-label');
+    if (icon)  icon.textContent  = isLight ? '\\u263E' : '\\u2600';
+    if (label) label.textContent = isLight ? ' Тёмная' : ' Светлая';
+    themeBtn.setAttribute('aria-pressed', isLight ? 'false' : 'true');
+  }
+  try {
+    var saved = localStorage.getItem('briefTheme');
+    if (saved === 'dark' || saved === 'light') root.setAttribute('data-theme', saved);
+  } catch (_) {}
+  updateThemeBtn(root.getAttribute('data-theme') || 'light');
+  if (themeBtn) themeBtn.addEventListener('click', function () {
+    var current = root.getAttribute('data-theme') || 'light';
+    var next = current === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('briefTheme', next); } catch (_) {}
+    updateThemeBtn(next);
   });
 })();
 `;
@@ -472,15 +757,6 @@ function _downloadFile(html, filename) {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function _countGroups(parts) {
-  const counts = { stop: 0, watch: 0, moving: 0, idle: 0 };
-  for (const p of parts || []) {
-    const g = classifyPerson(p);
-    if (counts[g] != null) counts[g]++;
-  }
-  return counts;
 }
 
 function _slug(s) {

@@ -3837,8 +3837,15 @@ export const TeamScanner2 = {
    * `_model`, применяет тот же pk-filter, что и `_renderFull()` в single-team
    * view, передаёт в `exportTeamBrief()`. В multi-view kebab-item не
    * рендерится — но всё равно гардим на случай прямого вызова.
+   *
+   * Async: внутри `exportTeamBrief` идут N запросов в LLM (по сотруднику)
+   * для секции «Сводная LLM». Прогресс пробрасывается через _announce.
    */
-  _exportBrief() {
+  async _exportBrief() {
+    if (this._briefBusy) {
+      this._announce('Бриф уже готовится — подождите.');
+      return;
+    }
     if (!this._model) {
       this._announce('Нет данных — сначала обновите Сканнер.');
       return;
@@ -3847,16 +3854,25 @@ export const TeamScanner2 = {
       this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
       return;
     }
+    this._briefBusy = true;
     try {
       const filteredModel = (this._activePkFilter && this._activeView === 'team')
         ? this._applyPkFilter(this._model, this._activePkFilter)
         : this._model;
       const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
-      exportTeamBrief(filteredModel, { teamLabel });
+      this._announce(`Готовлю бриф команды ${teamLabel}: считаю сводки LLM по сотрудникам…`);
+      await exportTeamBrief(filteredModel, {
+        teamLabel,
+        onProgress: (done, total) => {
+          if (total > 0) this._announce(`LLM-сводка ${done}/${total}…`);
+        },
+      });
       this._announce(`Бриф команды ${teamLabel} сохранён.`);
     } catch (e) {
       console.warn('[scanner2] brief export failed:', e);
       this._announce('Не удалось создать бриф: ' + (e?.message || 'неизвестная ошибка'));
+    } finally {
+      this._briefBusy = false;
     }
   },
 
