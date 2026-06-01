@@ -128,6 +128,8 @@ import {
 } from './teamScanner2Diagnostic.js';
 // Standalone HTML-бриф для команды (доступен из kebab «Выгрузить бриф»).
 import { exportTeamBrief } from './teamScanner2BriefExport.js';
+// Бриф v2.0 — decision artefact с TL;DR / attention queue / KPI band / etc.
+import { exportTeamBriefV2 } from './teamScanner2BriefExportV2.js';
 // LLM-ассистент: «Сводка ассистента» секция в модалке сотрудника.
 import {
   generateSummary as _llmGenerateSummary,
@@ -2410,6 +2412,9 @@ export const TeamScanner2 = {
     root.querySelector('#ts2-brief-export-btn')?.addEventListener('click', () => {
       this._exportBrief();
     });
+    root.querySelector('#ts2-brief-export-v2-btn')?.addEventListener('click', () => {
+      this._exportBriefV2();
+    });
     // V20 S1.5 — stale-banner refresh button (cache > 5min).
     root.querySelector('#ts2-stale-refresh')?.addEventListener('click', () => {
       telemetryEmit('scanner2.stale_refresh_click', { ageMs: this._cacheAgeMs() });
@@ -4000,6 +4005,43 @@ export const TeamScanner2 = {
     } catch (e) {
       console.warn('[scanner2] brief export failed:', e);
       this._announce('Не удалось создать бриф: ' + (e?.message || 'неизвестная ошибка'));
+    }
+  },
+
+  /**
+   * Бриф v2.0 — decision artefact с TL;DR, attention queue, KPI band,
+   * Idle/Stop секцией, PR queue, roster с дельтами и чек-боксами,
+   * audience-mode, анонимизацией, print-стилями и copy-MD для чата.
+   * Реализует рекомендации экспертной панели (workflow brief-html-utility-audit).
+   */
+  _exportBriefV2() {
+    if (!this._model) {
+      this._announce('Нет данных — сначала обновите Сканнер.');
+      return;
+    }
+    if (this._activeView === 'multi') {
+      this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
+      return;
+    }
+    try {
+      const filteredModel = (this._activePkFilter && this._activeView === 'team')
+        ? this._applyPkFilter(this._model, this._activePkFilter)
+        : this._model;
+      const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
+      const userEmail = (typeof window !== 'undefined' && window.userEmail) ? window.userEmail : '';
+      exportTeamBriefV2(filteredModel, {
+        teamLabel,
+        context: {
+          history: this._historyOverride || null,
+          prev: this._prevSnapshot || null,
+          employees: appState.employees || [],
+          userEmail,
+        },
+      });
+      this._announce(`Бриф v2.0 команды ${teamLabel} сохранён.`);
+    } catch (e) {
+      console.warn('[scanner2] brief v2 export failed:', e);
+      this._announce('Не удалось создать бриф v2.0: ' + (e?.message || 'неизвестная ошибка'));
     }
   },
 

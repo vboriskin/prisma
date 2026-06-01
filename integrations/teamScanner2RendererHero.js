@@ -106,6 +106,7 @@ export function renderTopBar(model, ctx = {}) {
             <div class="ts2-kebab-divider" role="separator"></div>
             <div class="ts2-kebab-group-title">Действия</div>
             ${ctx.activeView !== 'multi' ? `<button class="ts2-kebab-item" id="ts2-brief-export-btn" type="button" role="menuitem" title="Сохранить standalone HTML-бриф команды: список сотрудников 1-в-1 как здесь, каждая строка разворачивается в полную карточку.">${Icons.get('download', { cls: 'btn-icon', size: 14 })} Выгрузить бриф</button>` : ''}
+            ${ctx.activeView !== 'multi' ? `<button class="ts2-kebab-item" id="ts2-brief-export-v2-btn" type="button" role="menuitem" title="Бриф v2.0: decision artefact — TL;DR + Attention queue + блокеры + KPI band + Idle/Stop + PR queue + roster с дельтами и чек-боксами + audience-mode + анонимизация + print + copy MD для чата.">${Icons.get('download', { cls: 'btn-icon', size: 14 })} Выгрузить бриф v2.0</button>` : ''}
             <button class="ts2-kebab-item" id="ts2-how-btn" type="button" role="menuitem">${Icons.get('help-circle', { cls: 'btn-icon', size: 14 })} Как считается</button>
             <button class="ts2-kebab-item" id="ts2-config-btn" type="button" role="menuitem">${Icons.get('settings', { cls: 'btn-icon', size: 14 })} Настройка команд</button>
           </div>
