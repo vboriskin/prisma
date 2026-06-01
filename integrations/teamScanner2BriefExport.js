@@ -95,6 +95,16 @@ async function _generateLLMSummariesForAll(participants, opts = {}) {
   const concurrency = Math.max(1, Math.min(6, opts.concurrency || 3));
   const onProgress = opts.onProgress || (() => {});
   const total = participants.length;
+  const llmCfg = _readLLMConfig();
+  if (!llmCfg.token && !(llmCfg.clientId && llmCfg.clientSecret)) {
+    // Без токена сервер вернёт 400 — не идём в сеть, ставим понятный
+    // плейсхолдер на всех.
+    for (const p of participants) {
+      map.set(p.key, `<div class="brief-llm-error">LLM не настроен: Настройки → LLM → введи token или clientId+clientSecret.</div>`);
+    }
+    onProgress(total, total);
+    return map;
+  }
   let done = 0;
   onProgress(0, total);
   let cursor = 0;
@@ -103,12 +113,14 @@ async function _generateLLMSummariesForAll(participants, opts = {}) {
       const i = cursor++;
       const p = participants[i];
       let summaryHtml = null;
+      let errMsg = '';
       try {
-        const text = await _callLLMSummary(p, { signal: opts.signal });
-        if (text) summaryHtml = _formatLLMText(text);
-      } catch (_) { /* ignore — per-person LLM is best-effort */ }
+        const r = await _callLLMSummary(p, llmCfg, { signal: opts.signal });
+        if (r.ok && r.text) summaryHtml = _formatLLMText(r.text);
+        else if (r.error) errMsg = r.error;
+      } catch (e) { errMsg = e?.message || String(e); }
       if (!summaryHtml) {
-        summaryHtml = `<div class="brief-llm-error">LLM-сводка недоступна (проверь /api/llm/chat или настройки GigaChat).</div>`;
+        summaryHtml = `<div class="brief-llm-error">LLM-сводка не получилась${errMsg ? ': ' + _esc(errMsg) : ''}.</div>`;
       }
       map.set(p.key, summaryHtml);
       done++;
@@ -117,6 +129,27 @@ async function _generateLLMSummariesForAll(participants, opts = {}) {
   });
   await Promise.all(workers);
   return map;
+}
+
+function _readLLMConfig() {
+  // Те же поля, что использует чат-бот (см. integrations/release2/release2Notes.js
+  // _getLLMConfig). Без token / clientId+clientSecret + apiBaseUrl сервер
+  // /api/llm/chat возвращает 400.
+  try {
+    if (typeof window !== 'undefined' && window.LLMAssistant) {
+      const settings = window.LLMAssistant.getSettings?.() || {};
+      const token = window.LLMAssistant.getToken?.() || '';
+      return {
+        apiBaseUrl:   String(settings.apiBaseUrl || '').replace(/\/+$/, ''),
+        model:        settings.model || 'GigaChat-2',
+        temperature:  Number.isFinite(Number(settings.temperature)) ? Number(settings.temperature) : 0.4,
+        clientId:     settings.clientId     || '',
+        clientSecret: settings.clientSecret || '',
+        token,
+      };
+    }
+  } catch (_) { /* fallthrough */ }
+  return { apiBaseUrl: '', model: 'GigaChat-2', temperature: 0.4, token: '', clientId: '', clientSecret: '' };
 }
 
 const LLM_SYSTEM_PROMPT = `Ты — ассистент тимлида в инструменте Призма. Получаешь сырые данные по сотруднику за последние 72 часа: задачи Jira (WIP, события, блокеры), Bitbucket (коммиты/PR/ревью), Confluence (правки), агрегированные метрики.
@@ -138,21 +171,30 @@ const LLM_SYSTEM_PROMPT = `Ты — ассистент тимлида в инс�
 Возможные проблемы:
 <текст>`;
 
-async function _callLLMSummary(p, opts = {}) {
+async function _callLLMSummary(p, cfg, opts = {}) {
   const userPayload = _buildLLMUserPayload(p);
   const body = {
+    // Точно такой же shape, как у чат-бота (см. release2Notes.callLLMForNotes
+    // и app/llmAssistant.js callGigaChatStream). Без apiBaseUrl+token сервер
+    // отдаёт 400 «Нет токена».
+    apiBaseUrl:   cfg.apiBaseUrl || '',
+    model:        cfg.model || 'GigaChat-2',
+    temperature:  typeof cfg.temperature === 'number' ? cfg.temperature : 0.4,
+    max_tokens:   600,
+    stream:       false,
     messages: [
       { role: 'system', content: LLM_SYSTEM_PROMPT },
       { role: 'user',   content: userPayload },
     ],
-    model: 'GigaChat',
-    max_tokens: 600,
-    temperature: 0.4,
-    stream: false,
+    token:        cfg.token || '',
+    clientId:     cfg.clientId || '',
+    clientSecret: cfg.clientSecret || '',
   };
-  // 30-second per-person timeout; combined with the parent abort signal.
+  // 45-second per-person timeout; объединён с внешним abort signal.
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(new DOMException('timeout', 'TimeoutError')), 30000);
+  const timer = setTimeout(() => {
+    try { ctrl.abort(new DOMException('timeout', 'TimeoutError')); } catch (_) { ctrl.abort(); }
+  }, 45000);
   if (opts.signal) {
     if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
     else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal.reason), { once: true });
@@ -164,13 +206,20 @@ async function _callLLMSummary(p, opts = {}) {
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      const errMsg = errBody?.error ? String(errBody.error) : `HTTP ${res.status} ${res.statusText || ''}`.trim();
+      return { ok: false, error: errMsg };
+    }
     const data = await res.json().catch(() => null);
-    if (!data) return null;
+    if (!data) return { ok: false, error: 'Сервер вернул не-JSON ответ.' };
     const text = data?.choices?.[0]?.message?.content || data?.text || data?.content || null;
-    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
-  } catch (_) {
-    return null;
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return { ok: false, error: 'LLM вернул пустой ответ.' };
+    }
+    return { ok: true, text: text.trim() };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
   } finally {
     clearTimeout(timer);
   }
