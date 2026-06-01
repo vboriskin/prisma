@@ -1181,7 +1181,7 @@ function renderAssistantSection(p) {
           <div class="ts2-assistant-block-content"><div class="ts2-assistant-placeholder">Раскройте секцию, чтобы сгенерировать.</div></div>
         </div>
         <div class="ts2-assistant-block ts2-assistant-block-plan" data-assistant-block="plan">
-          <div class="ts2-assistant-block-title">План сегодня / факт вчера <span class="ts2-assistant-hint">— гипотеза по данным интеграций, не явный commitment</span></div>
+          <div class="ts2-assistant-block-title">План сегодня / факт вчера <span class="ts2-assistant-hint">— активные задачи по данным интеграций, не явный план</span></div>
           <div class="ts2-assistant-block-content"><div class="ts2-assistant-placeholder">Раскройте секцию, чтобы сгенерировать.</div></div>
         </div>
       </div>
