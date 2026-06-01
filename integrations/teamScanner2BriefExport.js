@@ -112,11 +112,15 @@ async function _generateLLMSummariesForAll(participants, opts = {}) {
     while (cursor < participants.length) {
       const i = cursor++;
       const p = participants[i];
+      const keyToSummary = _buildKeyToSummaryMap(p);
       let summaryHtml = null;
       let errMsg = '';
       try {
         const r = await _callLLMSummary(p, llmCfg, { signal: opts.signal });
-        if (r.ok && r.text) summaryHtml = _formatLLMText(r.text);
+        if (r.ok && r.text) {
+          const augmented = _augmentJiraKeysWithTitles(r.text, keyToSummary);
+          summaryHtml = _formatLLMText(augmented);
+        }
         else if (r.error) errMsg = r.error;
       } catch (e) { errMsg = e?.message || String(e); }
       if (!summaryHtml) {
@@ -159,6 +163,7 @@ const LLM_SYSTEM_PROMPT = `Ты — ассистент тимлида в инс�
 Жёсткие правила:
 - Сухой профессиональный тон, без оценок «хорошо/плохо», без воды.
 - НЕ выдумывай задач, ключей, событий — только то, что есть в payload. Если в разделе пусто — пиши «По данным интеграций информации нет».
+- Когда упоминаешь задачу Jira, ВСЕГДА пиши её в формате «КЛЮЧ — Полное название» (например: «ABC-123 — Перевод авторизации на OAuth»). Полное название бери из payload (поле summary). Если summary в payload нет — допускается голый ключ.
 - Не используй markdown заголовки (#, ##) и emoji.
 - Структура ответа РОВНО три блока. Каждый заголовок — отдельной строкой буквально как указано. После заголовка — 2-4 предложения.
 
@@ -275,6 +280,21 @@ function _buildLLMUserPayload(p) {
 }
 
 /**
+ * Пост-обработка LLM-ответа: к каждому встретившемуся ключу Jira (формат
+ * ПРОЕКТ-ЧИСЛО) подставляем «KEY — Название» из payload, если LLM не
+ * сделал это сам. Не трогаем формы, где после ключа уже идёт ` —` или
+ * `(название)` / `—`.
+ */
+function _augmentJiraKeysWithTitles(text, keyToSummary) {
+  if (!text || !keyToSummary || keyToSummary.size === 0) return text;
+  const re = /\b([A-Z][A-Z0-9]+-\d+)\b(?!\s*(?:[—–-]|\())/g;
+  return text.replace(re, (match, key) => {
+    const sum = keyToSummary.get(String(key).toUpperCase());
+    return sum ? `${key} — ${sum}` : match;
+  });
+}
+
+/**
  * Форматирует ответ LLM в HTML: распознаёт три заголовка
  * («Чем занимался вчера:» / «Чем занимается сегодня:» / «Возможные проблемы:»)
  * и оборачивает их в <strong class="brief-llm-h">, абзацы — в <p>.
@@ -384,24 +404,115 @@ function _trimDetailForBrief(root, p, doc) {
     const lab = li.querySelector('.ts2-narrative-label');
     if (lab && /блокер/i.test(lab.textContent || '')) li.remove();
   });
-  // 3. «Сегодня:» — рядом с каждым Jira-ключом подставить (название).
-  const keyToSummary = _buildKeyToSummaryMap(p);
-  root.querySelectorAll('.ts2-narrative-item').forEach(li => {
+  // 3. «Сегодня:» — заменяем одну строку «через запятую» на список
+  //    задач с полным названием. Перекомпонуем сами из participant'а.
+  _rewriteTodayAsList(root, p, doc);
+}
+
+/**
+ * Удаляет оригинальный narrative-item «Сегодня: …» (одной строкой через
+ * запятую) и подставляет вместо него li со встроенным `<ul>`:
+ *   · по одному пункту на каждую задачу (KEY — Полное название)
+ *   · отдельные пункты на коммиты / PR за 48ч (если есть)
+ * Без обрезки названий.
+ */
+function _rewriteTodayAsList(root, p, doc) {
+  const list = root.querySelector('.ts2-narrative-list');
+  if (!list) return;
+  const items = Array.from(list.children).filter(li => li.classList.contains('ts2-narrative-item'));
+  const todayLi = items.find(li => {
     const lab = li.querySelector('.ts2-narrative-label');
-    if (!lab || !/сегодня/i.test(lab.textContent || '')) return;
-    const txt = li.querySelector('.ts2-narrative-text');
-    if (!txt) return;
-    txt.querySelectorAll('a.ts2-issue-link').forEach(a => {
-      const key = (a.textContent || '').trim().toUpperCase();
-      const summary = keyToSummary.get(key);
-      if (!summary) return;
-      // Не дублируем, если рядом уже есть suffix.
-      const next = a.nextSibling;
-      if (next && next.nodeType === 3 && next.textContent && next.textContent.startsWith(' (')) return;
-      const tail = doc.createTextNode(` (${_truncate(summary, 80)})`);
-      a.parentNode.insertBefore(tail, a.nextSibling);
-    });
+    return lab && /сегодня/i.test(lab.textContent || '');
   });
+  // Если оригинальная строка «Сегодня тишина в Jira/BB.» — оставляем как есть.
+  if (todayLi) {
+    const txt = todayLi.querySelector('.ts2-narrative-text');
+    if (!txt) return;
+    // Если в строке нет ни одного Jira-ключа — это, скорее всего, plain
+    // «тишина», тогда не трогаем.
+    if (!todayLi.querySelector('a.ts2-issue-link')) return;
+  }
+  const keyToSummary = _buildKeyToSummaryMap(p);
+  const todayEvents = (p.timelineToday || []);
+  const wip = (p.issuesNow || []);
+  const bb = (p.bbItems || []);
+  // Уникальные ключи (WIP сначала, чтобы они шли первыми; потом today-events).
+  const seen = new Set();
+  const taskItems = [];
+  for (const it of wip) {
+    const k = String(it?.key || '').toUpperCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const sum = it.summary || keyToSummary.get(k) || '';
+    taskItems.push({ key: k, summary: sum, status: it.status || '', source: 'wip' });
+  }
+  for (const e of todayEvents) {
+    const k = String(e?.issue?.key || '').toUpperCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    const sum = e.issue?.summary || keyToSummary.get(k) || '';
+    taskItems.push({ key: k, summary: sum, status: '', source: 'touched' });
+  }
+  const commitsN = bb.filter(it => it.kind === 'commit' || !it.kind).length;
+  const prN = bb.filter(it => it.kind === 'pr').length;
+  if (taskItems.length === 0 && commitsN === 0 && prN === 0) return;
+  const sublist = doc.createElement('ul');
+  sublist.className = 'brief-today-list';
+  for (const t of taskItems) {
+    const li = doc.createElement('li');
+    li.className = `brief-today-item brief-today-item-${t.source}`;
+    const a = doc.createElement('a');
+    a.className = 'ts2-issue-link jira-key-link';
+    a.href = _jiraIssueHref(t.key);
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = t.key;
+    li.appendChild(a);
+    if (t.summary) {
+      li.appendChild(doc.createTextNode(` — ${t.summary}`));
+    }
+    if (t.status) {
+      const st = doc.createElement('span');
+      st.className = 'brief-today-status';
+      st.textContent = ` · ${t.status}`;
+      li.appendChild(st);
+    }
+    sublist.appendChild(li);
+  }
+  if (commitsN > 0) {
+    const li = doc.createElement('li');
+    li.className = 'brief-today-item brief-today-item-meta';
+    li.textContent = `Коммитов за 48ч: ${commitsN}`;
+    sublist.appendChild(li);
+  }
+  if (prN > 0) {
+    const li = doc.createElement('li');
+    li.className = 'brief-today-item brief-today-item-meta';
+    li.textContent = `PR за 48ч: ${prN}`;
+    sublist.appendChild(li);
+  }
+  // Заменяем оригинальный «Сегодня: …» на наш li с label + <ul>.
+  const newLi = doc.createElement('li');
+  newLi.className = 'ts2-narrative-item brief-today-block';
+  const lab = doc.createElement('span');
+  lab.className = 'ts2-narrative-label';
+  lab.textContent = 'Сегодня:';
+  newLi.appendChild(lab);
+  newLi.appendChild(sublist);
+  if (todayLi) todayLi.replaceWith(newLi);
+  else list.insertBefore(newLi, list.firstChild);
+}
+
+function _jiraIssueHref(key) {
+  // Тот же синтез, что в jiraIssueLink (но мы не дёргаем import чтобы
+  // не плодить cyclic). Если значение из state недоступно — отдаём
+  // относительную ссылку, чтобы хотя бы выглядела как ссылка.
+  try {
+    const base = (typeof window !== 'undefined' && window.location?.origin) || '';
+    return `${base}/browse/${encodeURIComponent(key)}`;
+  } catch (_) {
+    return `#${key}`;
+  }
 }
 
 function _buildKeyToSummaryMap(p) {
@@ -624,11 +735,23 @@ function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
     .brief-row[aria-expanded="true"] { background: var(--prizma-bg-tertiary, #F0EDE5); }
     .brief-row .ts2-chev { transition: transform .15s ease; }
     .brief-row.brief-row-expanded .ts2-chev { transform: rotate(90deg); }
+    /* «N в пути» — первый счётчик ряда. WIP видно в развёрнутой карточке,
+       в самой строке загромождает. */
+    .brief-row .ts2-counters > :first-child { display: none !important; }
 
     .brief-detail { margin: 4px 0 12px; padding: 4px 12px 12px; border-left: 3px solid var(--prizma-information, #6EC1E4); background: var(--prizma-bg-elevated, #fff); border-radius: 0 8px 8px 0; }
     .brief-detail[hidden] { display: none; }
-    .brief-panel-inline { position: static !important; transform: none !important; box-shadow: none !important; max-width: none !important; width: auto !important; height: auto !important; max-height: none !important; padding: 8px 0 !important; overflow: visible !important; background: transparent !important; border: none !important; }
+    .brief-panel-inline,
+    .ts2-panel.ts2-panel-modal.brief-panel-inline { position: static !important; transform: none !important; box-shadow: none !important; max-width: none !important; width: auto !important; height: auto !important; max-height: none !important; padding: 8px 0 !important; overflow: visible !important; background: transparent !important; border: none !important; }
     .brief-panel-inline .ts2-panel-head { padding-top: 0; }
+
+    .brief-today-block { display: block; margin: 4px 0; }
+    .brief-today-list { margin: 4px 0 0; padding-left: 18px; list-style: disc; }
+    .brief-today-item { margin: 2px 0; line-height: 1.5; }
+    .brief-today-item .ts2-issue-link { font-weight: 600; }
+    .brief-today-status { color: var(--prizma-text-secondary, #555); font-size: 12px; }
+    .brief-today-item-meta { color: var(--prizma-text-secondary, #555); list-style: none; margin-left: -18px; }
+    .brief-today-item-meta::before { content: "·"; margin-right: 6px; opacity: .6; }
 
     .brief-llm-section { margin-top: 12px; border-top: 1px dashed var(--prizma-border, #E5E0D5); padding-top: 10px; }
     .brief-llm-summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, #1A1A22); list-style: none; padding: 4px 0; user-select: none; }
