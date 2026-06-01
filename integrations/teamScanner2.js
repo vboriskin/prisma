@@ -126,6 +126,8 @@ import {
   // V20 S8.5 #19 — счётчик known-issues для badge на топбаре.
   countKnownIssues,
 } from './teamScanner2Diagnostic.js';
+// Standalone HTML-бриф для команды (доступен из kebab «Выгрузить бриф»).
+import { exportTeamBrief } from './teamScanner2BriefExport.js';
 // V21 π5 — demo-fixture (10 участников × 2 команды × sprint goal × risks).
 // TECH 17.9 — динамический импорт: 937 LOC fixture не нужны если пользователь
 // никогда не открывает demo-режим. Раньше eager static-import — fixture
@@ -2381,6 +2383,13 @@ export const TeamScanner2 = {
       telemetryEmit('scanner2.diag_open', { hasModel: !!this._model });
       this._openDiagModal();
     });
+    // Standalone HTML-бриф выбранной команды: тот же список людей, что в
+    // Сканнере, но каждая строка раскрывается в полную карточку (контент
+    // detail-panel'и). Только в single-team view — kebab-item рендерится
+    // только когда ctx.activeView !== 'multi'.
+    root.querySelector('#ts2-brief-export-btn')?.addEventListener('click', () => {
+      this._exportBrief();
+    });
     // V20 S1.5 — stale-banner refresh button (cache > 5min).
     root.querySelector('#ts2-stale-refresh')?.addEventListener('click', () => {
       telemetryEmit('scanner2.stale_refresh_click', { ageMs: this._cacheAgeMs() });
@@ -3820,6 +3829,34 @@ export const TeamScanner2 = {
     } catch (e) {
       console.warn('[scanner2] diagnostic export failed:', e);
       this._announce('Не удалось создать экспорт: ' + (e?.message || 'неизвестная ошибка'));
+    }
+  },
+
+  /**
+   * Выгрузка standalone HTML-брифа выбранной команды. Берёт текущий
+   * `_model`, применяет тот же pk-filter, что и `_renderFull()` в single-team
+   * view, передаёт в `exportTeamBrief()`. В multi-view kebab-item не
+   * рендерится — но всё равно гардим на случай прямого вызова.
+   */
+  _exportBrief() {
+    if (!this._model) {
+      this._announce('Нет данных — сначала обновите Сканнер.');
+      return;
+    }
+    if (this._activeView === 'multi') {
+      this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
+      return;
+    }
+    try {
+      const filteredModel = (this._activePkFilter && this._activeView === 'team')
+        ? this._applyPkFilter(this._model, this._activePkFilter)
+        : this._model;
+      const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
+      exportTeamBrief(filteredModel, { teamLabel });
+      this._announce(`Бриф команды ${teamLabel} сохранён.`);
+    } catch (e) {
+      console.warn('[scanner2] brief export failed:', e);
+      this._announce('Не удалось создать бриф: ' + (e?.message || 'неизвестная ошибка'));
     }
   },
 
