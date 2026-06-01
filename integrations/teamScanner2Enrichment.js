@@ -1103,6 +1103,18 @@ export function computeBlockers(p, assigneeIndex, thresholds, teamThresholds = {
       sinceIso:   c.lastStatusChangeIso,
       dwellHours: Math.round(dwellMsActual / 3600 / 1000),
       thresholdHours,
+      // 2026-06-01 — extras для AI-ассистента: due date, оценка, потраченное.
+      duedate:    c.issue?.fields?.duedate || '',
+      priority:   c.issue?.fields?.priority?.name || '',
+      labels:     Array.isArray(c.issue?.fields?.labels) ? c.issue.fields.labels : [],
+      originalEstimateSeconds:
+        Number(c.issue?.fields?.timetracking?.originalEstimateSeconds)
+        || Number(c.issue?.fields?.timeoriginalestimate)
+        || 0,
+      timeSpentSeconds:
+        Number(c.issue?.fields?.timetracking?.timeSpentSeconds)
+        || Number(c.issue?.fields?.aggregatetimespent)
+        || 0,
     });
   }
   out.sort((a, b) => b.dwellHours - a.dwellHours);

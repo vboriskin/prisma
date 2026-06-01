@@ -492,7 +492,31 @@ export function gatherDiagnosticState(ctx = {}) {
     };
   }, null);
 
-  return { header, config, connection, sources, identity, thresholds, snapshot, modelSummary, tzSkew, botsFilteredOut, bbCfAttribution, rawDiag, resolveReport, health, jenkins, jenkinsAttributed };
+  // 2026-06-01 — кэш LLM-сводок «Сводка ассистента» (lazy fetch в модалке
+  // сотрудника). Map<personKey, {summary, plan, ts}> сериализуем как plain
+  // object: ключи — personKey (label/email сотрудника, может быть PII —
+  // raw-mode export'у не страшно, safe-mode прогон scrub'ом срежет имена
+  // полей с password/token/secret в самом ответе LLM, если вдруг).
+  const llmAssistant = _safeStep('llmAssistant', () => {
+    const cache = ctx.assistantCache;
+    if (!cache || typeof cache.entries !== 'function') return null;
+    const out = {};
+    for (const [k, v] of cache.entries()) {
+      if (!k || !v) continue;
+      out[String(k)] = {
+        summaryOk:  !!v.summary?.ok,
+        summaryRaw: v.summary?.raw ? String(v.summary.raw).slice(0, 4000) : '',
+        summaryErr: v.summary?.error || null,
+        planOk:     !!v.plan?.ok,
+        planRaw:    v.plan?.raw ? String(v.plan.raw).slice(0, 4000) : '',
+        planErr:    v.plan?.error || null,
+        ts:         v.ts || null,
+      };
+    }
+    return Object.keys(out).length ? out : null;
+  }, null);
+
+  return { header, config, connection, sources, identity, thresholds, snapshot, modelSummary, tzSkew, botsFilteredOut, bbCfAttribution, rawDiag, resolveReport, health, jenkins, jenkinsAttributed, llmAssistant };
 }
 
 /**

@@ -16775,6 +16775,54 @@ body.theme-dark .ts2-pm-chip-popover {
   border-top: 1px dashed var(--border);
   font-size: 11px; color: var(--text-4, #94a3b8); font-style: italic;
 }
+/* 2026-06-01 — «Сводка ассистента» (lazy-load LLM в модалке сотрудника). */
+.ts2-assistant-section { background: var(--card); }
+.ts2-assistant-summary-toggle {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-right: 16px;
+}
+.ts2-assistant-summary-toggle::-webkit-details-marker { display: none; }
+.ts2-assistant-section > summary::after {
+  content: '▾'; margin-left: auto; padding-left: 8px; color: var(--text-3);
+  font-size: 12px; transition: transform .15s;
+}
+.ts2-assistant-section[open] > summary::after { content: '▴'; }
+.ts2-assistant-body { padding: 8px 0 4px; display: flex; flex-direction: column; gap: 14px; }
+.ts2-assistant-block { border-left: 3px solid var(--prizma-information, #6EC1E4); padding: 6px 12px; background: var(--prizma-bg-tertiary, rgba(110, 193, 228, 0.05)); border-radius: 0 6px 6px 0; }
+.ts2-assistant-block-plan { border-left-color: var(--prizma-insight, #B084CC); }
+.ts2-assistant-block-title {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase;
+  color: var(--prizma-text-secondary, var(--text-3));
+  margin-bottom: 6px;
+}
+.ts2-assistant-hint { color: var(--prizma-text-tertiary, var(--text-4)); font-weight: 400; text-transform: none; letter-spacing: 0; font-size: 11px; font-style: italic; }
+.ts2-assistant-block-content { font-size: 13px; line-height: 1.5; color: var(--prizma-text-primary, var(--text-1)); }
+.ts2-assistant-block-content p { margin: 6px 0; }
+.ts2-assistant-block-content .ts2-assistant-h { display: block; margin: 8px 0 4px; font-weight: 600; font-size: 12px; color: var(--prizma-text-secondary, var(--text-2)); }
+.ts2-assistant-block-content .ts2-assistant-h:first-child { margin-top: 0; }
+.ts2-assistant-list { margin: 4px 0; padding-left: 18px; list-style: disc; }
+.ts2-assistant-list li { margin: 3px 0; }
+.ts2-assistant-placeholder { color: var(--prizma-text-tertiary, var(--text-4)); font-style: italic; }
+.ts2-assistant-skeleton { display: flex; flex-direction: column; gap: 6px; }
+.ts2-assistant-skeleton-line {
+  height: 10px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--prizma-bg-tertiary, #F0EDE5) 0%, var(--prizma-border, rgba(0,0,0,0.06)) 50%, var(--prizma-bg-tertiary, #F0EDE5) 100%);
+  background-size: 200% 100%;
+  animation: ts2-assistant-shimmer 1.4s linear infinite;
+}
+.ts2-assistant-skeleton-line:nth-child(1) { width: 92%; }
+.ts2-assistant-skeleton-line:nth-child(2) { width: 78%; }
+.ts2-assistant-skeleton-line:nth-child(3) { width: 60%; }
+@keyframes ts2-assistant-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.ts2-assistant-error { color: var(--prizma-off-course, #C13838); font-size: 12px; padding: 4px 0; }
+.ts2-assistant-error code { background: var(--prizma-bg-tertiary, rgba(0,0,0,0.05)); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+.ts2-assistant-retry { margin-top: 6px; padding: 4px 10px; border: 1px solid var(--prizma-border, rgba(0,0,0,0.12)); background: var(--prizma-bg-elevated, #fff); border-radius: 6px; font-size: 12px; cursor: pointer; color: inherit; }
+.ts2-assistant-retry:hover { background: var(--prizma-bg-tertiary, #F0EDE5); }
+
 /* V18.1 P7-S3.2 — collapsible details для blockers shelf */
 .ts2-blockers-details { background: var(--card); }
 .ts2-blockers-summary-toggle {

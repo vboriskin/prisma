@@ -128,6 +128,13 @@ import {
 } from './teamScanner2Diagnostic.js';
 // Standalone HTML-бриф для команды (доступен из kebab «Выгрузить бриф»).
 import { exportTeamBrief } from './teamScanner2BriefExport.js';
+// LLM-ассистент: «Сводка ассистента» секция в модалке сотрудника.
+import {
+  generateSummary as _llmGenerateSummary,
+  generatePlanHypothesis as _llmGeneratePlanHypothesis,
+  readLLMConfig as _llmReadConfig,
+  hasLLMCredentials as _llmHasCredentials,
+} from './teamScanner2AssistantLLM.js';
 // V21 π5 — demo-fixture (10 участников × 2 команды × sprint goal × risks).
 // TECH 17.9 — динамический импорт: 937 LOC fixture не нужны если пользователь
 // никогда не открывает demo-режим. Раньше eager static-import — fixture
@@ -247,6 +254,14 @@ export const TeamScanner2 = {
   // P4 опциональный: сейчас НЕ заменяет local enrichment, добавлен для
   // P5+ side-panel (где может потребоваться refresh с другим dwellHours).
   _detailCache: new Map(),
+
+  // 2026-06-01 — кэш LLM-сводок «Сводка ассистента» (panel section).
+  // Map<personKey, { summary: {ok,html,error,raw}, plan: {…}, ts }>.
+  // Чистится в refresh(). Параллельно — _assistantInflight отслеживает
+  // активные AbortController'ы, чтобы можно было abort'нуть при
+  // закрытии модалки / refresh().
+  _assistantCache:    new Map(),
+  _assistantInflight: new Map(),
 
   // V21 π5 — demo-режим. Загружает локальный fixture без fetch'а в Jira/BB/CF.
   // Активируется тремя путями (см. CTA в renderEmpty / URL hash / Debug toggle).
@@ -857,6 +872,11 @@ export const TeamScanner2 = {
     // получит свой jobId, старый умрёт на сервере).
     this._postCancelToServer(_prevJobIdForCancel);
     this._detailCache.clear();
+    // 2026-06-01 — кэш LLM-сводок жил до refresh(); новые participant'ы
+    // могут иметь другую активность, старые ответы устарели.
+    try { for (const ctrl of this._assistantInflight.values()) ctrl.abort?.(); } catch (_) {}
+    this._assistantInflight.clear();
+    this._assistantCache.clear();
     // V21 Phase 4 F1 — поскольку участники сейчас могут быть полностью
     // заменены новой fetch'ей, чистим search-cache явно (на случай если
     // dataKey hash не зацепит smaller delta — defensive).
@@ -2803,6 +2823,122 @@ export const TeamScanner2 = {
         setTimeout(() => { btn.innerHTML = orig; }, 1500);
       }
     });
+    // 2026-06-01 — «Сводка ассистента». Lazy LLM-fetch при первом раскрытии
+    // секции. Кэш живёт до refresh().
+    this._bindAssistantSection(root);
+  },
+
+  /* ── Сводка ассистента (LLM, lazy-load) ──────────────────── */
+
+  _bindAssistantSection(root) {
+    const section = root.querySelector('.ts2-assistant-section');
+    if (!section) return;
+    const key = section.dataset.assistantKey || this._expandedKey || '';
+    if (!key) return;
+    // При первом маунте — если в кэше есть готовый ответ, отрисовываем без сети.
+    const cached = this._assistantCache.get(key);
+    if (cached) {
+      this._fillAssistantBlocks(section, cached);
+    }
+    section.addEventListener('toggle', () => {
+      if (!section.open) return;
+      const body = section.querySelector('.ts2-assistant-body');
+      if (!body) return;
+      if (body.dataset.assistantLoaded === '1') return;
+      if (body.dataset.assistantLoading === '1') return;
+      if (this._assistantCache.has(key)) {
+        this._fillAssistantBlocks(section, this._assistantCache.get(key));
+        return;
+      }
+      this._runAssistantFetch(section, key);
+    });
+    // Retry-кнопки делегируем через section: тыкают на «Повторить».
+    section.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.ts2-assistant-retry[data-retry]');
+      if (!btn) return;
+      const which = btn.dataset.retry;  // 'summary' | 'plan' | 'both'
+      this._runAssistantFetch(section, key, which === 'both' ? null : which);
+    });
+  },
+
+  _runAssistantFetch(section, key, only = null) {
+    const model = this._model;
+    const p = (model?.participants || []).find(x => x.key === key);
+    if (!p) return;
+    const body = section.querySelector('.ts2-assistant-body');
+    if (!body) return;
+    body.dataset.assistantLoading = '1';
+    body.dataset.assistantLoaded = '0';
+    // skeleton по обоим блокам (или одному при retry)
+    const setSkeleton = (which) => {
+      const block = section.querySelector(`[data-assistant-block="${which}"] .ts2-assistant-block-content`);
+      if (block) block.innerHTML = `<div class="ts2-assistant-skeleton" aria-busy="true"><div class="ts2-assistant-skeleton-line"></div><div class="ts2-assistant-skeleton-line"></div><div class="ts2-assistant-skeleton-line"></div></div>`;
+    };
+    if (!only || only === 'summary') setSkeleton('summary');
+    if (!only || only === 'plan')    setSkeleton('plan');
+
+    // abort предыдущий fetch на этом сотруднике (если был).
+    try { this._assistantInflight.get(key)?.abort?.(); } catch (_) {}
+    const ctrl = new AbortController();
+    this._assistantInflight.set(key, ctrl);
+    const cfg = _llmReadConfig();
+    if (!_llmHasCredentials(cfg)) {
+      const noToken = {
+        ok: false, error: 'LLM не настроен',
+        html: `<div class="ts2-assistant-error">LLM не настроен: Настройки → LLM → введите token или clientId+clientSecret.</div>`,
+      };
+      const fake = { summary: noToken, plan: noToken, ts: Date.now() };
+      this._assistantCache.set(key, fake);
+      this._fillAssistantBlocks(section, fake);
+      body.dataset.assistantLoading = '0';
+      body.dataset.assistantLoaded = '1';
+      this._assistantInflight.delete(key);
+      return;
+    }
+    // Параллель — каждая Promise самостоятельно отрисовывает свой блок.
+    const tasks = [];
+    const existing = this._assistantCache.get(key) || { ts: Date.now() };
+    if (!only || only === 'summary') {
+      tasks.push(_llmGenerateSummary(p, model, { signal: ctrl.signal, cfg }).then(r => {
+        if (ctrl.signal.aborted) return;
+        existing.summary = r;
+        this._renderAssistantBlock(section, 'summary', r);
+      }));
+    }
+    if (!only || only === 'plan') {
+      tasks.push(_llmGeneratePlanHypothesis(p, model, { signal: ctrl.signal, cfg }).then(r => {
+        if (ctrl.signal.aborted) return;
+        existing.plan = r;
+        this._renderAssistantBlock(section, 'plan', r);
+      }));
+    }
+    Promise.allSettled(tasks).then(() => {
+      if (ctrl.signal.aborted) return;
+      existing.ts = Date.now();
+      this._assistantCache.set(key, existing);
+      body.dataset.assistantLoading = '0';
+      body.dataset.assistantLoaded = '1';
+      if (this._assistantInflight.get(key) === ctrl) this._assistantInflight.delete(key);
+      try { telemetryEmit('scanner2.assistant_fetched', { hasSummary: !!existing.summary?.ok, hasPlan: !!existing.plan?.ok }); } catch (_) {}
+    });
+  },
+
+  _fillAssistantBlocks(section, cache) {
+    if (cache?.summary) this._renderAssistantBlock(section, 'summary', cache.summary);
+    if (cache?.plan)    this._renderAssistantBlock(section, 'plan',    cache.plan);
+    const body = section.querySelector('.ts2-assistant-body');
+    if (body) { body.dataset.assistantLoaded = '1'; body.dataset.assistantLoading = '0'; }
+  },
+
+  _renderAssistantBlock(section, which, result) {
+    const block = section.querySelector(`[data-assistant-block="${which}"] .ts2-assistant-block-content`);
+    if (!block) return;
+    if (result?.ok && result.html) {
+      block.innerHTML = result.html;
+    } else {
+      const errHtml = result?.html || `<div class="ts2-assistant-error">LLM-сводка не получилась.</div>`;
+      block.innerHTML = `${errHtml}<button type="button" class="ts2-assistant-retry" data-retry="${which}">Повторить</button>`;
+    }
   },
 
   /**
@@ -3190,6 +3326,10 @@ export const TeamScanner2 = {
       employees:       appState.employees || [],
       rawDiag:         this._lastRawDiag || null,
       resolveReport:   this._lastResolveReport || null,
+      // 2026-06-01 — кэш LLM-сводок «Сводка ассистента» добавляется в
+      // diagnostic snapshot (см. gatherDiagnosticState → llmAssistant).
+      // Map сериализуется в plain object {personKey: {summary, plan, ts}}.
+      assistantCache:  this._assistantCache,
     });
     // Safe export — instant download.
     overlay.querySelector('#ts2-diag-export-safe')?.addEventListener('click', () => {
@@ -3838,14 +3978,10 @@ export const TeamScanner2 = {
    * view, передаёт в `exportTeamBrief()`. В multi-view kebab-item не
    * рендерится — но всё равно гардим на случай прямого вызова.
    *
-   * Async: внутри `exportTeamBrief` идут N запросов в LLM (по сотруднику)
-   * для секции «Сводная LLM». Прогресс пробрасывается через _announce.
+   * 2026-06-01 — sync. LLM-сводка вынесена в live-модалку (lazy fetch
+   * при раскрытии «Сводки ассистента»), бриф снова мгновенный.
    */
-  async _exportBrief() {
-    if (this._briefBusy) {
-      this._announce('Бриф уже готовится — подождите.');
-      return;
-    }
+  _exportBrief() {
     if (!this._model) {
       this._announce('Нет данных — сначала обновите Сканнер.');
       return;
@@ -3854,25 +3990,16 @@ export const TeamScanner2 = {
       this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
       return;
     }
-    this._briefBusy = true;
     try {
       const filteredModel = (this._activePkFilter && this._activeView === 'team')
         ? this._applyPkFilter(this._model, this._activePkFilter)
         : this._model;
       const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
-      this._announce(`Готовлю бриф команды ${teamLabel}: считаю сводки LLM по сотрудникам…`);
-      await exportTeamBrief(filteredModel, {
-        teamLabel,
-        onProgress: (done, total) => {
-          if (total > 0) this._announce(`LLM-сводка ${done}/${total}…`);
-        },
-      });
+      exportTeamBrief(filteredModel, { teamLabel });
       this._announce(`Бриф команды ${teamLabel} сохранён.`);
     } catch (e) {
       console.warn('[scanner2] brief export failed:', e);
       this._announce('Не удалось создать бриф: ' + (e?.message || 'неизвестная ошибка'));
-    } finally {
-      this._briefBusy = false;
     }
   },
 
@@ -3898,6 +4025,11 @@ export const TeamScanner2 = {
     // `ts2-row-expanded` руками. Раньше закрытие модалки = «jerk экрана»
     // как при открытии. Теперь — только slide-out панели.
     const focusKey = this._expandedKey;
+    // 2026-06-01 — abort активный LLM-fetch для этого сотрудника, чтобы он
+    // не отрисовал результат в detached DOM. Кэш НЕ чистим — следующее
+    // открытие модалки заберёт готовый ответ (если успел).
+    try { this._assistantInflight.get(focusKey)?.abort?.(); } catch (_) {}
+    this._assistantInflight.delete(focusKey);
     this._expandedKey = '';
     if (this._escHandler) {
       document.removeEventListener('keydown', this._escHandler);

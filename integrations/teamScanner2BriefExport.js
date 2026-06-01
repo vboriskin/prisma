@@ -14,6 +14,10 @@
    и runtime-id'шники (id="ts2-panel-main" и т.д.), которые после
    дублирования по N сотрудникам сломали бы валидность HTML.
 
+   2026-06-01 — LLM-сводка убрана из выгрузки HTML: она живёт теперь
+   в live-модалке сотрудника как раскрывашка «Сводка ассистента»
+   (lazy fetch при первом раскрытии). См. teamScanner2AssistantLLM.js.
+
    Экспорт: Blob + <a download> (тот же приём, что в _performExport).
    ============================================================ */
 
@@ -30,29 +34,18 @@ const CSS_KEEP_TOKENS = [
 
 /**
  * Основная точка входа. Собирает standalone HTML, триггерит скачивание.
- * Перед сборкой ходит в LLM по каждому сотруднику и подмешивает «Сводную LLM»
- * в конец карточки (раскрывашка). Если LLM недоступен — секция показывает
- * placeholder с причиной, экспорт не блокируется.
  *
  * @param {object} model — pulse-model (model.participants, model.scannerV2 …)
  * @param {object} [opts]
- * @param {string}   [opts.teamLabel]   — название команды для шапки и имени файла
- * @param {function} [opts.onProgress]  — (done, total) → void; сообщения для UI
- * @param {AbortSignal} [opts.signal]   — отмена LLM-вызовов
+ * @param {string} [opts.teamLabel] — название команды для шапки и имени файла
  */
-export async function exportTeamBrief(model, opts = {}) {
+export function exportTeamBrief(model, opts = {}) {
   if (!model || !Array.isArray(model.participants) || model.participants.length === 0) {
     throw new Error('Нет данных для выгрузки — сначала обновите Сканнер.');
   }
   const teamLabel = opts.teamLabel || (model.projectKeys || []).join(', ') || 'команда';
   const generatedAt = new Date();
-  const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
-  const llmSummaries = await _generateLLMSummariesForAll(model.participants, {
-    signal: opts.signal,
-    onProgress,
-    concurrency: 3,
-  });
-  const peopleHtml = _buildPeopleSection(model, llmSummaries);
+  const peopleHtml = _buildPeopleSection(model);
   const css = _collectScopedCss();
   const headerHtml = _buildHeader(model, teamLabel, generatedAt);
   const toolbarHtml = _buildToolbar();
@@ -74,262 +67,18 @@ export async function exportTeamBrief(model, opts = {}) {
   const filename = `team-brief-${_slug(teamLabel)}-${_dateStamp(generatedAt)}.html`;
   _downloadFile(documentHtml, filename);
   try {
-    let llmOk = 0;
-    if (llmSummaries && llmSummaries.size) {
-      for (const v of llmSummaries.values()) if (v) llmOk++;
-    }
     telemetryEmit('scanner2.brief_export', {
       teamLabel,
       peopleCount: model.participants.length,
-      llmOk,
       sizeBytes: documentHtml.length,
     });
   } catch (_) { /* telemetry — best effort */ }
 }
 
-/* ── LLM summary: batch with concurrency ─── */
-
-async function _generateLLMSummariesForAll(participants, opts = {}) {
-  const map = new Map();
-  if (!Array.isArray(participants) || participants.length === 0) return map;
-  const concurrency = Math.max(1, Math.min(6, opts.concurrency || 3));
-  const onProgress = opts.onProgress || (() => {});
-  const total = participants.length;
-  const llmCfg = _readLLMConfig();
-  if (!llmCfg.token && !(llmCfg.clientId && llmCfg.clientSecret)) {
-    // Без токена сервер вернёт 400 — не идём в сеть, ставим понятный
-    // плейсхолдер на всех.
-    for (const p of participants) {
-      map.set(p.key, `<div class="brief-llm-error">LLM не настроен: Настройки → LLM → введи token или clientId+clientSecret.</div>`);
-    }
-    onProgress(total, total);
-    return map;
-  }
-  let done = 0;
-  onProgress(0, total);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
-    while (cursor < participants.length) {
-      const i = cursor++;
-      const p = participants[i];
-      const keyToSummary = _buildKeyToSummaryMap(p);
-      let summaryHtml = null;
-      let errMsg = '';
-      try {
-        const r = await _callLLMSummary(p, llmCfg, { signal: opts.signal });
-        if (r.ok && r.text) {
-          const augmented = _augmentJiraKeysWithTitles(r.text, keyToSummary);
-          summaryHtml = _formatLLMText(augmented);
-        }
-        else if (r.error) errMsg = r.error;
-      } catch (e) { errMsg = e?.message || String(e); }
-      if (!summaryHtml) {
-        summaryHtml = `<div class="brief-llm-error">LLM-сводка не получилась${errMsg ? ': ' + _esc(errMsg) : ''}.</div>`;
-      }
-      map.set(p.key, summaryHtml);
-      done++;
-      try { onProgress(done, total); } catch (_) {}
-    }
-  });
-  await Promise.all(workers);
-  return map;
-}
-
-function _readLLMConfig() {
-  // Те же поля, что использует чат-бот (см. integrations/release2/release2Notes.js
-  // _getLLMConfig). Без token / clientId+clientSecret + apiBaseUrl сервер
-  // /api/llm/chat возвращает 400.
-  try {
-    if (typeof window !== 'undefined' && window.LLMAssistant) {
-      const settings = window.LLMAssistant.getSettings?.() || {};
-      const token = window.LLMAssistant.getToken?.() || '';
-      return {
-        apiBaseUrl:   String(settings.apiBaseUrl || '').replace(/\/+$/, ''),
-        model:        settings.model || 'GigaChat-2',
-        temperature:  Number.isFinite(Number(settings.temperature)) ? Number(settings.temperature) : 0.4,
-        clientId:     settings.clientId     || '',
-        clientSecret: settings.clientSecret || '',
-        token,
-      };
-    }
-  } catch (_) { /* fallthrough */ }
-  return { apiBaseUrl: '', model: 'GigaChat-2', temperature: 0.4, token: '', clientId: '', clientSecret: '' };
-}
-
-const LLM_SYSTEM_PROMPT = `Ты — ассистент тимлида в инструменте Призма. Получаешь сырые данные по сотруднику за последние 72 часа: задачи Jira (WIP, события, блокеры), Bitbucket (коммиты/PR/ревью), Confluence (правки), агрегированные метрики.
-
-Пиши короткую человеко-читаемую сводку для тимлида.
-
-Жёсткие правила:
-- Сухой профессиональный тон, без оценок «хорошо/плохо», без воды.
-- НЕ выдумывай задач, ключей, событий — только то, что есть в payload. Если в разделе пусто — пиши «По данным интеграций информации нет».
-- Когда упоминаешь задачу Jira, ВСЕГДА пиши её в формате «КЛЮЧ — Полное название» (например: «ABC-123 — Перевод авторизации на OAuth»). Полное название бери из payload (поле summary). Если summary в payload нет — допускается голый ключ.
-- Не используй markdown заголовки (#, ##) и emoji.
-- Структура ответа РОВНО три блока. Каждый заголовок — отдельной строкой буквально как указано. После заголовка — 2-4 предложения.
-
-Чем занимался вчера:
-<текст>
-
-Чем занимается сегодня:
-<текст>
-
-Возможные проблемы:
-<текст>`;
-
-async function _callLLMSummary(p, cfg, opts = {}) {
-  const userPayload = _buildLLMUserPayload(p);
-  const body = {
-    // Точно такой же shape, как у чат-бота (см. release2Notes.callLLMForNotes
-    // и app/llmAssistant.js callGigaChatStream). Без apiBaseUrl+token сервер
-    // отдаёт 400 «Нет токена».
-    apiBaseUrl:   cfg.apiBaseUrl || '',
-    model:        cfg.model || 'GigaChat-2',
-    temperature:  typeof cfg.temperature === 'number' ? cfg.temperature : 0.4,
-    max_tokens:   600,
-    stream:       false,
-    messages: [
-      { role: 'system', content: LLM_SYSTEM_PROMPT },
-      { role: 'user',   content: userPayload },
-    ],
-    token:        cfg.token || '',
-    clientId:     cfg.clientId || '',
-    clientSecret: cfg.clientSecret || '',
-  };
-  // 45-second per-person timeout; объединён с внешним abort signal.
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => {
-    try { ctrl.abort(new DOMException('timeout', 'TimeoutError')); } catch (_) { ctrl.abort(); }
-  }, 45000);
-  if (opts.signal) {
-    if (opts.signal.aborted) ctrl.abort(opts.signal.reason);
-    else opts.signal.addEventListener('abort', () => ctrl.abort(opts.signal.reason), { once: true });
-  }
-  try {
-    const res = await fetch('/api/llm/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => null);
-      const errMsg = errBody?.error ? String(errBody.error) : `HTTP ${res.status} ${res.statusText || ''}`.trim();
-      return { ok: false, error: errMsg };
-    }
-    const data = await res.json().catch(() => null);
-    if (!data) return { ok: false, error: 'Сервер вернул не-JSON ответ.' };
-    const text = data?.choices?.[0]?.message?.content || data?.text || data?.content || null;
-    if (!text || typeof text !== 'string' || !text.trim()) {
-      return { ok: false, error: 'LLM вернул пустой ответ.' };
-    }
-    return { ok: true, text: text.trim() };
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function _buildLLMUserPayload(p) {
-  // Сжимаем участника до минимально-достаточного payload'а. Не больше 10
-  // событий из таймлайна, 5 WIP, 3 блокера — иначе LLM захлёбывается и
-  // дороже по токенам.
-  const _evt = (e) => ({
-    at: e?.at || '',
-    src: e?.src || 'jira',
-    kind: e?.kind || '',
-    key: e?.issue?.key || '',
-    summary: e?.issue?.summary || e?.issue?.fields?.summary || '',
-    text: _truncate(e?.text || '', 80),
-  });
-  const slim = {
-    name: p.label || p.key || '—',
-    role: p.role || p.position || '',
-    timelineToday:    (p.timelineToday    || []).slice(0, 10).map(_evt),
-    timelineYesterday:(p.timelineYesterday|| []).slice(0, 10).map(_evt),
-    issuesNow: (p.issuesNow || []).slice(0, 5).map(it => ({
-      key: it.key, summary: it.summary, status: it.status,
-    })),
-    blockers:  (p.blockers  || []).slice(0, 3).map(b => ({
-      key: b.key, summary: b.summary, status: b.status,
-      dwellHours: Math.round(Number(b.dwellHours) || 0),
-    })),
-    bitbucket: {
-      commits48h: p.badges?.commits48h || 0,
-      pr48h: p.badges?.pr48h || 0,
-      items: (p.bbItems || []).slice(0, 5).map(it => ({
-        kind: it.kind, title: _truncate(it.title || '', 80), status: it.status || '',
-      })),
-    },
-    confluence: {
-      items: (p.cfItems || []).slice(0, 5).map(it => ({
-        kind: it.kind, title: _truncate(it.title || '', 80),
-      })),
-    },
-    hoursLoggedToday: Math.round((p.loggedTodaySec || 0) / 360) / 10,
-    burnoutFlag: p.personMetrics?.burnout?.level || 'none',
-    contextSwitches72h: p.contextSwitches?.switchEvents?.length || 0,
-  };
-  return [
-    `Сотрудник: ${slim.name}${slim.role ? ` (${slim.role})` : ''}`,
-    'Данные за 72 часа (JSON):',
-    JSON.stringify(slim, null, 2),
-    '',
-    'Напиши сводку строго по структуре из system-сообщения.',
-  ].join('\n');
-}
-
-/**
- * Пост-обработка LLM-ответа: к каждому встретившемуся ключу Jira (формат
- * ПРОЕКТ-ЧИСЛО) подставляем «KEY — Название» из payload, если LLM не
- * сделал это сам. Не трогаем формы, где после ключа уже идёт ` —` или
- * `(название)` / `—`.
- */
-function _augmentJiraKeysWithTitles(text, keyToSummary) {
-  if (!text || !keyToSummary || keyToSummary.size === 0) return text;
-  const re = /\b([A-Z][A-Z0-9]+-\d+)\b(?!\s*(?:[—–-]|\())/g;
-  return text.replace(re, (match, key) => {
-    const sum = keyToSummary.get(String(key).toUpperCase());
-    return sum ? `${key} — ${sum}` : match;
-  });
-}
-
-/**
- * Форматирует ответ LLM в HTML: распознаёт три заголовка
- * («Чем занимался вчера:» / «Чем занимается сегодня:» / «Возможные проблемы:»)
- * и оборачивает их в <strong class="brief-llm-h">, абзацы — в <p>.
- */
-function _formatLLMText(text) {
-  const lines = String(text).split(/\r?\n/);
-  const out = [];
-  let inPara = false;
-  const flushPara = (buf) => {
-    if (!buf.length) return;
-    out.push(`<p>${_esc(buf.join(' ').trim())}</p>`);
-  };
-  let buf = [];
-  const HEADERS = /^\s*(Чем занимался вчера|Чем занимается сегодня|Возможные проблемы)\s*:?\s*$/i;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) {
-      flushPara(buf); buf = []; inPara = false;
-      continue;
-    }
-    if (HEADERS.test(line)) {
-      flushPara(buf); buf = []; inPara = false;
-      out.push(`<strong class="brief-llm-h">${_esc(line.replace(/:?\s*$/, ':'))}</strong>`);
-      continue;
-    }
-    buf.push(line);
-    inPara = true;
-  }
-  flushPara(buf);
-  return out.join('\n');
-}
 
 /* ── people section: ts2-row + .brief-detail next-sibling ─── */
 
-function _buildPeopleSection(model, llmSummaries) {
+function _buildPeopleSection(model) {
   const rawRowsHtml = renderPersonRows(model, { expandedKey: '' });
   if (typeof DOMParser === 'undefined') {
     return rawRowsHtml;
@@ -366,8 +115,6 @@ function _buildPeopleSection(model, llmSummaries) {
     detailWrap.innerHTML = detailRawHtml;
     _stripRuntimeArtifacts(detailWrap);
     _trimDetailForBrief(detailWrap, p, doc);
-    const llmHtml = (llmSummaries && llmSummaries.get) ? llmSummaries.get(key) : null;
-    if (llmHtml) detailWrap.appendChild(_buildLLMBlock(doc, llmHtml));
     flat.appendChild(row);
     flat.appendChild(detailWrap);
   }
@@ -388,6 +135,10 @@ function _buildPeopleSection(model, llmSummaries) {
 function _trimDetailForBrief(root, p, doc) {
   // 1. Шапка панели (имя + sub-meta + metric row).
   root.querySelectorAll('.ts2-panel-head').forEach(el => el.remove());
+  // 2026-06-01 — «Сводка ассистента» — live-only фича (lazy LLM-fetch
+  // при раскрытии). В standalone-брифе нет бэкенда, оставлять секцию
+  // = врать «Раскройте — сгенерируется». Сносим целиком.
+  root.querySelectorAll('.ts2-assistant-section').forEach(el => el.remove());
   // 4. Метрики сотрудника (Метрики сотрудника / клик по chip / PROD / АКТИВ / CF / Z / J).
   root.querySelectorAll('.ts2-pm-section').forEach(el => el.remove());
   // 5. Старые задачи (blockers shelf). Когда blockers непусто — это
@@ -538,23 +289,6 @@ function _buildKeyToSummaryMap(p) {
 function _truncate(s, n) {
   const str = String(s || '');
   return str.length > n ? str.slice(0, n - 1) + '…' : str;
-}
-
-/* ── LLM block (collapsible at the end of each detail) ─── */
-
-function _buildLLMBlock(doc, htmlInner) {
-  const wrap = doc.createElement('details');
-  wrap.className = 'brief-llm-section';
-  wrap.open = false;
-  const sum = doc.createElement('summary');
-  sum.className = 'brief-llm-summary';
-  sum.textContent = 'Сводная LLM';
-  wrap.appendChild(sum);
-  const body = doc.createElement('div');
-  body.className = 'brief-llm-body';
-  body.innerHTML = htmlInner;
-  wrap.appendChild(body);
-  return wrap;
 }
 
 /**
@@ -753,15 +487,6 @@ function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
     .brief-today-item-meta { color: var(--prizma-text-secondary, #555); list-style: none; margin-left: -18px; }
     .brief-today-item-meta::before { content: "·"; margin-right: 6px; opacity: .6; }
 
-    .brief-llm-section { margin-top: 12px; border-top: 1px dashed var(--prizma-border, #E5E0D5); padding-top: 10px; }
-    .brief-llm-summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--prizma-text-primary, #1A1A22); list-style: none; padding: 4px 0; user-select: none; }
-    .brief-llm-summary::-webkit-details-marker { display: none; }
-    .brief-llm-summary::before { content: "▸"; display: inline-block; margin-right: 6px; color: var(--prizma-text-secondary, #555); transition: transform .15s ease; }
-    .brief-llm-section[open] > .brief-llm-summary::before { transform: rotate(90deg); }
-    .brief-llm-body { font-size: 13px; line-height: 1.5; color: var(--prizma-text-primary, #1A1A22); padding: 8px 0 4px; }
-    .brief-llm-body h4, .brief-llm-body strong.brief-llm-h { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--prizma-text-secondary, #555); margin: 10px 0 4px; }
-    .brief-llm-body p { margin: 0 0 6px; }
-    .brief-llm-error { color: var(--prizma-off-course, #C13838); font-style: italic; font-size: 12px; }
   `;
   return `<!DOCTYPE html>
 <html lang="ru" data-theme="light">

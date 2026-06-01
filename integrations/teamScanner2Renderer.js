@@ -1150,8 +1150,42 @@ export function renderEmployeeDetailPanel(model, key, ctx = {}) {
       ${renderFilters(filters, heat72.rowTotals)}
       ${renderBlockersShelf(blockers)}
       ${renderEventsFeed(filteredTl)}
+      ${renderAssistantSection(p)}
       ${renderSwitchesNote(cs)}
     </div>
+  `;
+}
+
+/**
+ * 2026-06-01 — Сводка ассистента. Lazy-load секция: при первом раскрытии
+ * выполняется параллельный fetch в LLM (через teamScanner2AssistantLLM):
+ *   · «Сводка за 72ч»            — что делал/делает/на что обратить внимание
+ *   · «План сегодня / факт вчера» — гипотеза, опирается на active sprint + WIP +
+ *                                   blockers + due dates
+ *
+ * Биндинги — в teamScanner2.js _bindPanelEvents (toggle + retry + cache).
+ * Кэш ответов хранится в orchestrator до `refresh()`; экспортируется в
+ * diagnostic snapshot.
+ */
+function renderAssistantSection(p) {
+  const key = esc(p?.key || '');
+  return `
+    <details class="ts2-panel-section ts2-assistant-section" data-assistant-key="${key}">
+      <summary class="ts2-panel-section-title ts2-assistant-summary-toggle">
+        <span>Сводка ассистента</span>
+        <span class="ts2-panel-section-hint">генерируется GigaChat по данным интеграций · клик — запросить</span>
+      </summary>
+      <div class="ts2-assistant-body" data-assistant-loaded="0" data-assistant-loading="0">
+        <div class="ts2-assistant-block ts2-assistant-block-summary" data-assistant-block="summary">
+          <div class="ts2-assistant-block-title">Сводка за 72ч</div>
+          <div class="ts2-assistant-block-content"><div class="ts2-assistant-placeholder">Раскройте секцию, чтобы сгенерировать.</div></div>
+        </div>
+        <div class="ts2-assistant-block ts2-assistant-block-plan" data-assistant-block="plan">
+          <div class="ts2-assistant-block-title">План сегодня / факт вчера <span class="ts2-assistant-hint">— гипотеза по данным интеграций, не явный commitment</span></div>
+          <div class="ts2-assistant-block-content"><div class="ts2-assistant-placeholder">Раскройте секцию, чтобы сгенерировать.</div></div>
+        </div>
+      </div>
+    </details>
   `;
 }
 

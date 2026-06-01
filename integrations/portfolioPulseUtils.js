@@ -121,6 +121,19 @@ export function slimIssue(issue, projectKey) {
     sprint:     '', // populated by caller if it knows
     hasWorklog: !!(f.worklog?.worklogs?.length),
     hasComments:!!(f.comment?.comments?.length),
+    // 2026-06-01 — extra fields для AI-ассистента (panel «Сводка ассистента»).
+    // Все три поля уже приходят в JIRA_FIELDS (timetracking,
+    // timeoriginalestimate, aggregatetimespent — см. server/jira-helpers.js
+    // ~L36), но раньше отбрасывались в slim. timetracking может быть пустым
+    // — fallback на отдельные поля.
+    originalEstimateSeconds:
+      Number(f.timetracking?.originalEstimateSeconds)
+      || Number(f.timeoriginalestimate)
+      || 0,
+    timeSpentSeconds:
+      Number(f.timetracking?.timeSpentSeconds)
+      || Number(f.aggregatetimespent)
+      || 0,
   };
 }
 
