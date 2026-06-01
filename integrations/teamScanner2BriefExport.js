@@ -50,12 +50,14 @@ export function exportTeamBrief(model, opts = {}) {
   const headerHtml = _buildHeader(model, teamLabel, generatedAt);
   const toolbarHtml = _buildToolbar();
   const sortBarHtml = _buildSortBar();
+  const footerHtml = _buildFooter(generatedAt);
   const bodyHtml = `
     <div class="brief-shell ts2-root">
       ${headerHtml}
       ${toolbarHtml}
       ${sortBarHtml}
       <div class="brief-people">${peopleHtml}</div>
+      ${footerHtml}
     </div>
   `;
   const documentHtml = _assembleHtmlDocument({
@@ -333,7 +335,7 @@ function _stripRuntimeArtifacts(root) {
 function _buildHeader(model, teamLabel, generatedAt) {
   const sg = model?.scannerV2?.sprintGoal;
   const sprintLine = sg && sg.aggregateTotal > 0
-    ? `<span class="brief-header-sprint">Спринт: ${_esc(sg.aggregateDone)}/${_esc(sg.aggregateTotal)} (${_esc(sg.aggregateProgress)}%)</span>`
+    ? `<span class="brief-header-sprint">Спринт <strong>${_esc(sg.aggregateDone)}/${_esc(sg.aggregateTotal)}</strong> (${_esc(sg.aggregateProgress)}%)</span>`
     : '';
   const peopleCount = (model.participants || []).length;
   return `
@@ -342,10 +344,18 @@ function _buildHeader(model, teamLabel, generatedAt) {
       <div class="brief-header-meta">
         <span class="brief-header-date">${_esc(_formatDate(generatedAt))}</span>
         <span class="brief-header-sep">·</span>
-        <span class="brief-header-count">${peopleCount} ${_plural(peopleCount, ['сотрудник', 'сотрудника', 'сотрудников'])}</span>
+        <span class="brief-header-count"><strong>${peopleCount}</strong> ${_plural(peopleCount, ['сотрудник', 'сотрудника', 'сотрудников'])}</span>
         ${sprintLine ? `<span class="brief-header-sep">·</span>${sprintLine}` : ''}
       </div>
     </header>
+  `;
+}
+
+function _buildFooter(generatedAt) {
+  return `
+    <footer class="brief-footer">
+      Сгенерировано Сканнером команд Призмы ${_esc(_formatDate(generatedAt))}. Снимок данных за 72 часа из Jira / Bitbucket / Confluence / Zephyr. Это интерактивный HTML — клик по строке раскрывает карточку сотрудника, переключатель темы в правом верхнем углу.
+    </footer>
   `;
 }
 
@@ -442,51 +452,246 @@ function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
   // Overrides поверх scoped CSS: панель «модалки» внутри брифа должна быть
   // обычным блоком, без position:fixed/slide-in. Плюс минимальный layout.
   const briefOwnCss = `
+    /* ── Глобальный ритм / типографика ────────────────────── */
     html, body { margin: 0; padding: 0; }
-    body { background: var(--prizma-bg, #FAFAF8); color: var(--prizma-text-primary, #1A1A22); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-    .brief-shell { max-width: 1280px; margin: 0 auto; padding: 16px 24px 64px; }
-    .brief-header { padding: 12px 0 16px; border-bottom: 1px solid var(--prizma-border, #E5E0D5); margin-bottom: 12px; }
-    .brief-header-title { font-size: 22px; margin: 0 0 6px; font-weight: 600; }
-    .brief-header-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--prizma-text-secondary, #555); }
-    .brief-header-sep { opacity: .4; }
+    body {
+      background: var(--prizma-bg, #FAFAF8);
+      color: var(--prizma-text-primary, #1A1A22);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-feature-settings: "tnum" 1, "lnum" 1;
+      font-variant-numeric: tabular-nums lining-nums;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .brief-shell { max-width: 1240px; margin: 0 auto; padding: 24px 28px 80px; }
+    a { color: var(--prizma-information, #1F6B96); }
+    a:hover { text-decoration: underline; }
 
-    .brief-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; }
+    /* ── Header ──────────────────────────────────────────── */
+    .brief-header { padding: 4px 0 18px; border-bottom: 1px solid var(--prizma-border, #E5E0D5); margin-bottom: 18px; }
+    .brief-header-title {
+      font-size: 24px; line-height: 1.15; margin: 0 0 8px;
+      font-weight: 700; letter-spacing: -.01em;
+    }
+    .brief-header-meta {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      font-size: 13px; color: var(--prizma-text-secondary, #555);
+    }
+    .brief-header-meta strong { color: var(--prizma-text-primary, #1A1A22); font-weight: 600; }
+    .brief-header-sep { opacity: .35; }
+
+    /* ── Toolbar: всё в одну строку ─────────────────────── */
+    .brief-toolbar {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      padding: 10px 0;
+    }
     .brief-toolbar-spacer { flex: 1 1 auto; }
-    .brief-search { padding: 6px 10px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 8px; min-width: 220px; font-size: 13px; background: var(--prizma-bg-elevated, #fff); color: inherit; }
-    .brief-btn { padding: 5px 10px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 8px; background: var(--prizma-bg-elevated, #fff); font-size: 12px; cursor: pointer; color: inherit; }
-    .brief-btn:hover { background: var(--prizma-bg-tertiary, #F0EDE5); }
-    .brief-theme-btn { display: inline-flex; align-items: center; gap: 2px; }
+    .brief-search {
+      padding: 7px 12px; border: 1px solid var(--prizma-border-strong, var(--prizma-border));
+      border-radius: 8px; min-width: 240px; font-size: 13px;
+      background: var(--prizma-bg-elevated, #fff); color: inherit;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .brief-search:focus {
+      outline: none;
+      border-color: var(--prizma-information, #1F6B96);
+      box-shadow: 0 0 0 3px var(--prizma-information-bg, rgba(31,107,150,.12));
+    }
+    .brief-btn {
+      padding: 6px 12px;
+      border: 1px solid var(--prizma-border-strong, var(--prizma-border));
+      border-radius: 8px; background: var(--prizma-bg-elevated, #fff);
+      font-size: 12px; font-weight: 500; cursor: pointer; color: inherit;
+      transition: background .15s, border-color .15s;
+    }
+    .brief-btn:hover { background: var(--prizma-bg-tertiary, #F0EDE5); border-color: var(--prizma-text-tertiary, #999); }
+    .brief-theme-btn { display: inline-flex; align-items: center; gap: 4px; }
     .brief-theme-icon { font-size: 14px; line-height: 1; }
 
-    .brief-sortbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 12px; font-size: 12px; }
-    .brief-sortbar-label { color: var(--prizma-text-secondary, #555); margin-right: 4px; }
-    .brief-sort-btn { padding: 4px 8px; border: 1px solid var(--prizma-border, #E5E0D5); border-radius: 6px; background: var(--prizma-bg-elevated, #fff); cursor: pointer; font-size: 12px; color: inherit; }
-    .brief-sort-btn[data-brief-dir="asc"]  .brief-sort-arrow::before { content: "↑"; }
-    .brief-sort-btn[data-brief-dir="desc"] .brief-sort-arrow::before { content: "↓"; }
-    .brief-sort-btn[data-brief-dir="asc"], .brief-sort-btn[data-brief-dir="desc"] { background: var(--prizma-bg-tertiary, #F0EDE5); font-weight: 600; }
+    /* ── Sort bar — компактнее ──────────────────────────── */
+    .brief-sortbar {
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+      padding: 4px 0 16px; font-size: 12px;
+    }
+    .brief-sortbar-label {
+      color: var(--prizma-text-secondary, #555);
+      margin-right: 8px;
+      font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .brief-sort-btn {
+      padding: 4px 9px; border: 1px solid transparent; border-radius: 14px;
+      background: transparent; cursor: pointer; font-size: 12px; color: var(--prizma-text-secondary, #555);
+      display: inline-flex; align-items: center; gap: 4px;
+      transition: background .15s, color .15s;
+    }
+    .brief-sort-btn:hover { background: var(--prizma-bg-tertiary, #F0EDE5); color: var(--prizma-text-primary, #1A1A22); }
+    .brief-sort-arrow { opacity: .5; font-size: 10px; }
+    .brief-sort-btn[data-brief-dir="asc"]  .brief-sort-arrow::before { content: "↑"; opacity: 1; }
+    .brief-sort-btn[data-brief-dir="desc"] .brief-sort-arrow::before { content: "↓"; opacity: 1; }
+    .brief-sort-btn[data-brief-dir="asc"],
+    .brief-sort-btn[data-brief-dir="desc"] {
+      background: var(--prizma-information-bg, rgba(31,107,150,.10));
+      color: var(--prizma-information, #1F6B96);
+      font-weight: 600;
+    }
+    .brief-sort-btn[data-brief-dir="asc"] .brief-sort-arrow,
+    .brief-sort-btn[data-brief-dir="desc"] .brief-sort-arrow { opacity: 1; }
 
-    .brief-row { cursor: pointer; position: relative; }
-    .brief-row[aria-expanded="true"] { background: var(--prizma-bg-tertiary, #F0EDE5); }
-    .brief-row .ts2-chev { transition: transform .15s ease; }
-    .brief-row.brief-row-expanded .ts2-chev { transform: rotate(90deg); }
-    /* «N в пути» — первый счётчик ряда. WIP видно в развёрнутой карточке,
-       в самой строке загромождает. */
+    /* ── Row сотрудника ─────────────────────────────────── */
+    .brief-row { cursor: pointer; position: relative; transition: background .15s; }
+    .brief-row:hover { background: var(--prizma-bg-tertiary, #F0EDE5); }
+    .brief-row[aria-expanded="true"] {
+      background: var(--prizma-bg-tertiary, #F0EDE5);
+      box-shadow: inset 3px 0 0 var(--prizma-information, #1F6B96);
+    }
+    .brief-row .ts2-chev {
+      transition: transform .15s ease;
+      color: var(--prizma-text-tertiary, #999);
+    }
+    .brief-row.brief-row-expanded .ts2-chev { transform: rotate(90deg); color: var(--prizma-information, #1F6B96); }
+    /* «N в пути» — первый счётчик ряда. */
     .brief-row .ts2-counters > :first-child { display: none !important; }
+    /* «вчера —» / «сегодня —» — пустые заглушки выглядят как ошибка
+       данных. Глушим dash до едва различимого. */
+    .brief-row .ts2-strip-empty-y { display: none !important; }
+    .brief-row .ts2-strip-empty { opacity: .55; font-style: italic; font-size: 12px; }
+    .brief-row .ts2-strip-label { opacity: .55; }
+    /* Источник-чипы (B 2 / J 0 …) — деэмфазируем нулевые. */
+    .brief-row .ts2-row-src-chip-num { font-feature-settings: "tnum" 1; }
+    /* Тонкая разделительная линия между строками. */
+    .brief-people-flat > .brief-row + .brief-row,
+    .brief-people-flat > .brief-detail + .brief-row { border-top: 1px solid var(--prizma-border, rgba(0,0,0,.06)); }
 
-    .brief-detail { margin: 4px 0 12px; padding: 4px 12px 12px; border-left: 3px solid var(--prizma-information, #6EC1E4); background: var(--prizma-bg-elevated, #fff); border-radius: 0 8px 8px 0; }
+    /* ── Detail (развёрнутый блок) ──────────────────────── */
+    .brief-detail {
+      margin: 0 0 14px;
+      padding: 8px 16px 18px;
+      border-left: 3px solid var(--prizma-information, #1F6B96);
+      background: var(--prizma-bg-elevated, #fff);
+      border-radius: 0 8px 8px 0;
+    }
     .brief-detail[hidden] { display: none; }
     .brief-panel-inline,
-    .ts2-panel.ts2-panel-modal.brief-panel-inline { position: static !important; transform: none !important; box-shadow: none !important; max-width: none !important; width: auto !important; height: auto !important; max-height: none !important; padding: 8px 0 !important; overflow: visible !important; background: transparent !important; border: none !important; }
+    .ts2-panel.ts2-panel-modal.brief-panel-inline {
+      position: static !important; transform: none !important;
+      box-shadow: none !important;
+      max-width: none !important; width: auto !important; height: auto !important; max-height: none !important;
+      padding: 0 !important; overflow: visible !important;
+      background: transparent !important; border: none !important;
+    }
     .brief-panel-inline .ts2-panel-head { padding-top: 0; }
 
-    .brief-today-block { display: block; margin: 4px 0; }
-    .brief-today-list { margin: 4px 0 0; padding-left: 18px; list-style: disc; }
-    .brief-today-item { margin: 2px 0; line-height: 1.5; }
-    .brief-today-item .ts2-issue-link { font-weight: 600; }
-    .brief-today-status { color: var(--prizma-text-secondary, #555); font-size: 12px; }
-    .brief-today-item-meta { color: var(--prizma-text-secondary, #555); list-style: none; margin-left: -18px; }
-    .brief-today-item-meta::before { content: "·"; margin-right: 6px; opacity: .6; }
+    /* Внутри панели — секции «дышат» равномерно. */
+    .brief-detail .ts2-panel-section,
+    .brief-detail .ts2-panel-section-tight {
+      padding: 12px 0 !important;
+      border-top: 1px solid var(--prizma-border, rgba(0,0,0,.06)) !important;
+      background: transparent !important;
+    }
+    .brief-detail .ts2-panel-section:first-child,
+    .brief-detail .ts2-narrative-section:first-child { border-top: none !important; padding-top: 4px !important; }
+    .brief-detail .ts2-panel-section-title {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase;
+      color: var(--prizma-text-tertiary, #5A5A64);
+      margin-bottom: 8px;
+    }
+    .brief-detail .ts2-panel-section-hint {
+      font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none;
+      color: var(--prizma-text-tertiary, #999); font-style: italic;
+    }
 
+    /* ── Narrative «Сводка за 24ч» — плоско, без коробки ── */
+    .brief-detail .ts2-narrative-section { padding-top: 4px !important; }
+    .brief-detail .ts2-narrative-list { margin: 0; padding: 0; list-style: none; }
+    .brief-detail .ts2-narrative-item { padding: 4px 0; }
+    .brief-detail .ts2-narrative-label {
+      display: inline-block; min-width: 78px;
+      font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--prizma-text-tertiary, #5A5A64);
+      vertical-align: top;
+    }
+    .brief-detail .ts2-narrative-text { font-size: 13px; line-height: 1.55; }
+
+    /* «Сегодня:» — список задач */
+    .brief-today-block { display: block; padding: 6px 0 4px; }
+    .brief-today-list { margin: 4px 0 0 0; padding-left: 18px; list-style: disc; }
+    .brief-today-item { margin: 3px 0; line-height: 1.55; font-size: 13px; }
+    .brief-today-item .ts2-issue-link { font-weight: 600; }
+    .brief-today-status { color: var(--prizma-text-tertiary, #5A5A64); font-size: 12px; }
+    .brief-today-item-meta {
+      color: var(--prizma-text-tertiary, #5A5A64);
+      list-style: none; margin-left: -18px; padding-left: 0;
+      font-size: 12px;
+    }
+    .brief-today-item-meta::before {
+      content: "·"; display: inline-block; width: 12px; opacity: .5;
+    }
+
+    /* ── Activity bar (counters) ────────────────────────── */
+    .brief-detail .ts2-activity-bar { gap: 4px !important; max-width: 560px; }
+    .brief-detail .ts2-activity-seg {
+      box-shadow: none !important;
+      background: var(--prizma-bg-tertiary, #F0EDE5);
+      border: 1px solid var(--prizma-border, rgba(0,0,0,.06));
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-feature-settings: "tnum" 1;
+    }
+    .brief-detail .ts2-activity-seg-lab { font-size: 10px; opacity: .7; }
+    .brief-detail .ts2-activity-seg-num { font-weight: 700; font-size: 14px; }
+
+    /* ── Heatmap — узкие ряды, тише пустые клетки ──────── */
+    .brief-detail .ts2-heatmap { padding: 4px 0; }
+    .brief-detail .ts2-hcell { opacity: .06 !important; }
+    .brief-detail .ts2-hcell[title*="0 событий"] { opacity: .04 !important; }
+    .brief-detail .ts2-hrow-label {
+      font-size: 11px; font-weight: 700;
+      color: var(--prizma-text-tertiary, #5A5A64);
+    }
+    .brief-detail .ts2-hrow-total {
+      font-size: 11px; color: var(--prizma-text-tertiary, #5A5A64);
+      font-feature-settings: "tnum" 1;
+    }
+    .brief-detail .ts2-haxis-tick {
+      font-size: 10px; color: var(--prizma-text-tertiary, #999);
+    }
+    .brief-detail .ts2-haxis-tick-now { color: var(--prizma-information, #1F6B96); font-weight: 600; }
+
+    /* ── Filter pills — в брифе декоративные, не кликабельные */
+    .brief-detail .ts2-panel-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+    .brief-detail .ts2-filter-pill {
+      cursor: default !important; pointer-events: none;
+      opacity: .82;
+      padding: 3px 8px;
+      border: 1px solid var(--prizma-border, rgba(0,0,0,.08));
+      border-radius: 12px;
+      background: var(--prizma-bg-tertiary, #F0EDE5);
+      font-size: 11px;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .brief-detail .ts2-filter-pill-key { font-weight: 700; font-size: 10px; }
+    .brief-detail .ts2-filter-pill-num { font-feature-settings: "tnum" 1; opacity: .8; }
+
+    /* ── Empty event feed ───────────────────────────────── */
+    .brief-detail .ts2-empty-text {
+      font-size: 12px; color: var(--prizma-text-tertiary, #5A5A64);
+      font-style: italic; padding: 4px 0;
+    }
+
+    /* ── Source chips в row (B 2 / J 0 …) — рельефнее ──── */
+    .brief-row .ts2-row-src-chip {
+      background: var(--prizma-bg-tertiary, #F0EDE5);
+      border-color: var(--prizma-border, rgba(0,0,0,.08));
+    }
+
+    /* Footer-подпись внизу брифа */
+    .brief-footer {
+      margin-top: 32px; padding-top: 16px;
+      border-top: 1px solid var(--prizma-border, rgba(0,0,0,.06));
+      font-size: 11px; color: var(--prizma-text-tertiary, #999);
+      line-height: 1.6;
+    }
   `;
   return `<!DOCTYPE html>
 <html lang="ru" data-theme="light">
