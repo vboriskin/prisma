@@ -216,6 +216,13 @@ export function renderSettingsModal(settings, opts = {}) {
           <input type="date" id="int-global-since-date" class="int-field-input int-field-input-narrow" value="${esc(s.sinceDate || '2025-01-01')}">
           <span class="int-field-hint">Применяется к Jira (updated &gt;= …) и Confluence (lastModified &gt;= …)</span>
         </div>
+        <div class="int-footer-row">
+          <label class="int-field-label-inline" for="int-global-scan-limit">Лимит issues на проект</label>
+          <select id="int-global-scan-limit" class="int-field-input int-field-input-narrow">
+            ${[200, 500, 1000, 1500, 2000].map(n => `<option value="${n}" ${(Number(s.jiraScanLimit) || 500) === n ? 'selected' : ''}>${n}</option>`).join('')}
+          </select>
+          <span class="int-field-hint">Default 500. Поднимайте при truncation-баннере (SMECIS, SBOFPLCORE и др. крупные проекты). Влияет на fetch latency.</span>
+        </div>
         <label class="int-field-label-checkbox int-global-tls">
           <input type="checkbox" id="int-global-insecure" ${s.allowInsecureTls ? 'checked' : ''}>
           Разрешить self-signed сертификаты (для всех интеграций)

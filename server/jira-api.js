@@ -69,6 +69,7 @@ const JIRA_DEFAULT_CONFIG = {
   jenkinsBaseUrl: '', jenkinsToken: '',
   jenkinsFolder: '',               // верхний folder для SBOF-команды (e.g. "sbof")
   activityWindowHours: 72,         // V17.2 I2c — окно активности (часов): default 3 рабочих дня
+  jiraScanLimit: 500,              // 2026-06-02 — cap на каждой query stage [200..2000]
   allowInsecureTls: false,         // global TLS flag
   sinceDate: '2025-01-01',         // cut-off for Jira/Confluence search
   staleDays: 3, noMovementDays: 2,
@@ -177,6 +178,13 @@ async function handleJiraApi(req, res, pathname) {
       // V17.2 I2c — activityWindowHours: clamp [1, 168].
       if (Number.isFinite(+body.activityWindowHours)) {
         patch.activityWindowHours = Math.min(168, Math.max(1, Math.round(+body.activityWindowHours)));
+      }
+      // 2026-06-02 — jiraScanLimit: clamp [200, 2000]. Применяется как cap
+      // на каждой query stage в jira-helpers.js (sprint/recent/inProgress/
+      // backlog). Default 500 (backward-compat); крупные команды поднимают
+      // до 1000-2000 при truncation-баннере в Сканнере.
+      if (Number.isFinite(+body.jiraScanLimit)) {
+        patch.jiraScanLimit = Math.min(2000, Math.max(200, Math.round(+body.jiraScanLimit)));
       }
       // Auto-derive `areas` from jiraProjectKeys (so JiraPulse keeps working)
       if (typeof body.jiraProjectKeys === 'string') {

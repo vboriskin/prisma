@@ -40,6 +40,12 @@ const DEFAULTS = {
   //   72h = 3 рабочих дня, default из плана.
   activityWindowHours:  72,
 
+  // 2026-06-02 — лимит issues на проект для Jira-fetch (per query stage).
+  // 500 — backward-compat default (был hardcoded в jira-helpers.js). На
+  // больших командах (SMECIS 896 sprint-issues) поднимать до 1000-2000.
+  // Server clamp'ит до [200, 2000].
+  jiraScanLimit:        500,
+
   allowInsecureTls:   false, // global — applies to all integrations
   sinceDate:          '2025-01-01', // cut-off date for Jira / Confluence
   lastSync:           null,
@@ -84,6 +90,9 @@ export function loadSettings() {
 
     activityWindowHours: Number(raw.activityWindowHours) || 72,
 
+    // 2026-06-02 — scan limit с clamp [200, 2000].
+    jiraScanLimit:      Math.min(2000, Math.max(200, Number(raw.jiraScanLimit) || 500)),
+
     allowInsecureTls:   !!raw.allowInsecureTls,
     sinceDate:          raw.sinceDate || '2025-01-01',
     lastSync:           raw.lastSync,
@@ -126,6 +135,11 @@ export function saveSettings(patch) {
   if ('activityWindowHours' in patch) {
     const n = Number(patch.activityWindowHours);
     if (Number.isFinite(n) && n > 0) next.activityWindowHours = Math.min(168, Math.max(1, Math.round(n)));
+  }
+  // 2026-06-02 — jiraScanLimit: clamp [200, 2000].
+  if ('jiraScanLimit' in patch) {
+    const n = Number(patch.jiraScanLimit);
+    if (Number.isFinite(n) && n > 0) next.jiraScanLimit = Math.min(2000, Math.max(200, Math.round(n)));
   }
   if (patch.lastSync !== undefined) next.lastSync = patch.lastSync;
   // QA A16.6 — guard от QuotaExceededError. На больших проектах

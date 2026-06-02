@@ -1144,11 +1144,14 @@ function _renderHistoryGapsChip(history) {
 */
 function _renderTruncationBanner(model) {
   if (!model?.spaces) return '';
+  // 2026-06-02 — порог cap определяется текущим model.jiraScanLimit (default 500).
+  // Триггер: если массив достиг scanLimit — значит обрезан server'ом.
+  const scanLimit = Math.min(2000, Math.max(200, Number(model.jiraScanLimit) || 500));
   const capped = [];
   for (const [pk, sp] of Object.entries(model.spaces)) {
     const issuesN = (sp?.issues || []).length;
     const sprintN = (sp?.sprintIssues || []).length;
-    if (issuesN >= 500 || sprintN >= 500) {
+    if (issuesN >= scanLimit || sprintN >= scanLimit) {
       capped.push({ pk, issuesN, sprintN });
     }
   }
@@ -1173,14 +1176,17 @@ function _renderTruncationBanner(model) {
   const lines = [];
   if (capped.length) {
     const cappedLines = capped.map(c => {
-      const issuesHit = c.issuesN >= 500;
-      const sprintHit = c.sprintN >= 500;
+      const issuesHit = c.issuesN >= scanLimit;
+      const sprintHit = c.sprintN >= scanLimit;
       const parts = [];
       if (issuesHit) parts.push(`${c.issuesN}+ issues`);
       if (sprintHit) parts.push(`${c.sprintN}+ sprint`);
       return `${c.pk}: ${parts.join(' / ')}`;
     });
-    lines.push(`Cap 500 на сервере: ${cappedLines.join(' · ')}`);
+    const limitHint = scanLimit < 2000
+      ? `Текущий лимит ${scanLimit}. Поднимите в Настройках → Интеграции → «Лимит issues на проект» (до 2000)`
+      : `Достигнут максимум 2000. Уменьшите scope или sinceDate`;
+    lines.push(`Cap на сервере: ${cappedLines.join(' · ')}. ${limitHint}`);
   }
   if (winMismatch) {
     lines.push(`Окно активности ${winHours}ч, но heatmap и dot-strip рендерят 72ч — события 72-${winHours}ч назад видны только в детальной ленте сотрудника`);

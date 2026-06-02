@@ -135,12 +135,23 @@ async function jiraBuildAreaReport(cfg, area) {
     : ['In Progress', 'In Development', 'Code Review'];
   const jqlInProgress = inProgressStatuses.map(s => `status="${String(s).replace(/"/g, '\\"')}"`).join(' OR ');
 
+  // 2026-06-02 — scan limit per-stage из конфига (UI «Лимит issues на проект»).
+  // Default 500 backward-compat. inProgress/sprint используют полный лимит;
+  // backlog cap пропорционально меньше (40% от лимита, но не меньше 200) —
+  // бэклог редко требуется full-scan, чаще раздувает payload устаревшими
+  // задачами. Diag-fix D — для backlog добавляем sliding window
+  // `updated >= -180d`: древние задачи из бэклога (>6 мес без апдейта)
+  // обычно zombie scope, не нужны в daily Scanner; убирает 40-60% payload
+  // на крупных проектах типа SMECIS без потери актуальных задач.
+  const scanLimit = Math.min(2000, Math.max(200, Math.round(Number(cfg.jiraScanLimit) || 500)));
+  const backlogCap = Math.max(200, Math.round(scanLimit * 0.4));
+  const recentCap  = Math.max(300, Math.round(scanLimit * 0.8));
   const queries = [
-    { name: 'sprint',     jql: `project="${pk}" AND sprint in openSprints()`,                                        fields: SPRINT_FIELDS, expand: JIRA_DEFAULT_EXPAND.slice(),                          cap: 500, budgetMs: 75000 },
+    { name: 'sprint',     jql: `project="${pk}" AND sprint in openSprints()`,                                        fields: SPRINT_FIELDS, expand: JIRA_DEFAULT_EXPAND.slice(),                          cap: scanLimit, budgetMs: 75000 },
     // V21 Z2 — Differential JQL: при тёплом cache берём только delta, потом union.
-    { name: 'recent',     jql: recentJql,                                                                              fields: ALL_FIELDS,    expand: JIRA_DEFAULT_EXPAND.concat(['changelog']),            cap: 400, budgetMs: 75000 },
-    { name: 'inProgress', jql: `project="${pk}" AND (${jqlInProgress})`,                                              fields: ALL_FIELDS,    expand: JIRA_DEFAULT_EXPAND.slice(),                          cap: 500, budgetMs: 60000 },
-    { name: 'backlog',    jql: `project="${pk}" AND statusCategory != Done AND (sprint is EMPTY OR sprint not in openSprints())`, fields: ALL_FIELDS, expand: JIRA_DEFAULT_EXPAND.slice(), cap: 200, budgetMs: 60000 },
+    { name: 'recent',     jql: recentJql,                                                                              fields: ALL_FIELDS,    expand: JIRA_DEFAULT_EXPAND.concat(['changelog']),            cap: recentCap,  budgetMs: 75000 },
+    { name: 'inProgress', jql: `project="${pk}" AND (${jqlInProgress})`,                                              fields: ALL_FIELDS,    expand: JIRA_DEFAULT_EXPAND.slice(),                          cap: scanLimit, budgetMs: 60000 },
+    { name: 'backlog',    jql: `project="${pk}" AND statusCategory != Done AND updated >= -180d AND (sprint is EMPTY OR sprint not in openSprints())`, fields: ALL_FIELDS, expand: JIRA_DEFAULT_EXPAND.slice(), cap: backlogCap, budgetMs: 60000 },
   ];
 
   // Timed allSettled — record per-stage ms + status so the diagnostic panel

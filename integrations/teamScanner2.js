@@ -1827,6 +1827,7 @@ export const TeamScanner2 = {
       const raw = loadSettingsRaw() || {};
       m.activityWindowHours = Number(raw.activityWindowHours) || 0;
       m.sinceDate = String(raw.sinceDate || '');
+      m.jiraScanLimit = Math.min(2000, Math.max(200, Number(raw.jiraScanLimit) || 500));
     } catch (_) { /* defensive */ }
     // V18.1 P7-S4.1 — multi-team view (Dmitry blocker). В режиме multi
     // — render table сводок по командам вместо per-person rows.

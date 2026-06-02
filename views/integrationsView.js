@@ -4,7 +4,7 @@
    Orchestrates the Integrations tab: sub-tab nav + settings modal.
    ============================================================ */
 
-import { loadSettingsForUI, saveSettings } from '../integrations/integrationsStore.js';
+import { loadSettings, loadSettingsForUI, saveSettings } from '../integrations/integrationsStore.js';
 import { verifyJira, verifyBitbucket, verifyConfluence } from '../integrations/integrationsSync.js';
 import { renderSettingsModal } from '../integrations/integrationsRenderer.js';
 import { TeamScanner2 } from '../integrations/teamScanner2.js';
@@ -183,9 +183,26 @@ function bindSettingsModal() {
 
   // helper — reads global TLS checkbox (shared across tabs)
   const getTls = () => !!(modal.querySelector('#int-global-insecure')?.checked);
+  // 2026-06-02 — getScanLimit: читаем select, clamp [200, 2000].
+  const getScanLimit = () => {
+    const v = Number(modal.querySelector('#int-global-scan-limit')?.value || 500);
+    return Math.min(2000, Math.max(200, Math.round(v) || 500));
+  };
   const getSince = () => {
-    const v = modal.querySelector('#int-global-since-date')?.value?.trim();
-    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '2025-01-01';
+    const raw = modal.querySelector('#int-global-since-date')?.value?.trim() || '';
+    // 2026-06-02 fix — старый код возвращал hardcoded '2025-01-01' при любом
+    // невалидном значении (включая пустую строку). Симптом «меняю, сбрасывается
+    // на 01.01.2025» приходил из SberBrowser/Chromium 37 — старый
+    // <input type="date"> иногда не padding'ит месяц/день (2026-4-1 не matches),
+    // плюс при clear через × возвращает empty. Теперь: (а) принимаем без
+    // padding'а и нормализуем, (б) при невалидном — возвращаем текущее
+    // сохранённое значение (не default), чтобы не CLOBBER'нуть user-set
+    // настройку.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    const m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+    try { return loadSettings().sinceDate || '2025-01-01'; }
+    catch (_) { return '2025-01-01'; }
   };
 
   // V17.2 I3 — централизованный POST для server-config с await + ошибкой.
@@ -229,7 +246,7 @@ function bindSettingsModal() {
       const tok = modal.querySelector('#int-jira-token')?.value?.trim();
       const patch = {
         jiraProjectKeys: modal.querySelector('#int-jira-project-keys')?.value?.trim() || '',
-        allowInsecureTls: getTls(), sinceDate: getSince(),
+        allowInsecureTls: getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit(),
       };
       if (url) patch.jiraBaseUrl = url;       // empty → не пишем (защита от случайной очистки)
       if (tok) patch.jiraToken   = tok;
@@ -290,7 +307,7 @@ function bindSettingsModal() {
       const tok = modal.querySelector('#int-sigma-token')?.value?.trim();
       const patch = {
         sigmaGoalEpicKeys: modal.querySelector('#int-sigma-goal-epic-keys')?.value?.trim() || '',
-        allowInsecureTls:  getTls(), sinceDate: getSince(),
+        allowInsecureTls:  getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit(),
       };
       if (url) patch.sigmaJiraBaseUrl = url;
       if (tok) patch.sigmaJiraToken   = tok;
@@ -356,7 +373,7 @@ function bindSettingsModal() {
       const tok = modal.querySelector('#int-bb-token')?.value?.trim();
       const patch = {
         bitbucketProjectKeys: modal.querySelector('#int-bb-project-keys')?.value?.trim() || '',
-        allowInsecureTls: getTls(), sinceDate: getSince(),
+        allowInsecureTls: getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit(),
       };
       if (url) patch.bitbucketBaseUrl = url;
       if (tok) patch.bitbucketToken   = tok;
@@ -425,7 +442,7 @@ function bindSettingsModal() {
   modal.querySelector('#int-bb-verify')?.addEventListener('click', async () => {
     const bbUrl = modal.querySelector('#int-bb-url')?.value?.trim() || '';
     const bbTok = modal.querySelector('#int-bb-token')?.value?.trim();
-    const serverPatch = { allowInsecureTls: getTls(), sinceDate: getSince() };
+    const serverPatch = { allowInsecureTls: getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit() };
     if (bbUrl) serverPatch.bitbucketBaseUrl = bbUrl;
     if (bbTok) serverPatch.bitbucketToken   = bbTok;
     await postServerConfig(serverPatch);
@@ -502,7 +519,7 @@ function bindSettingsModal() {
   modal.querySelector('#int-cf-verify')?.addEventListener('click', async () => {
     const cfUrl = modal.querySelector('#int-cf-url')?.value?.trim() || '';
     const cfTok = modal.querySelector('#int-cf-token')?.value?.trim();
-    const serverPatch = { allowInsecureTls: getTls(), sinceDate: getSince() };
+    const serverPatch = { allowInsecureTls: getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit() };
     if (cfUrl) serverPatch.confluenceBaseUrl = cfUrl;
     if (cfTok) serverPatch.confluenceToken   = cfTok;
     await postServerConfig(serverPatch);
@@ -562,7 +579,7 @@ function bindSettingsModal() {
       const folder = modal.querySelector('#int-jenkins-folder')?.value?.trim() || '';
       const patch = {
         jenkinsFolder: folder,
-        allowInsecureTls: getTls(), sinceDate: getSince(),
+        allowInsecureTls: getTls(), sinceDate: getSince(), jiraScanLimit: getScanLimit(),
       };
       if (url) patch.jenkinsBaseUrl = url;
       if (tok) patch.jenkinsToken   = tok;
