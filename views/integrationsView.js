@@ -253,14 +253,14 @@ function bindSettingsModal() {
       saveSettings(patch);
       const serverPatch = {
         jiraProjectKeys: patch.jiraProjectKeys,
-        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate,
+        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate, jiraScanLimit: patch.jiraScanLimit,
       };
       if (url) serverPatch.jiraBaseUrl = url;
       if (tok) serverPatch.jiraToken   = tok;
       const r = await postServerConfig(serverPatch);
       if (r.ok) {
-        window.showToast?.('Настройки Jira сохранены', 'success');
-        window.HistoryLog?.settings?.('jira_save', `Jira настройки сохранены (${url||'без endpoint'})`);
+        window.showToast?.(`Jira сохранено · дата ${patch.sinceDate}, лимит ${patch.jiraScanLimit}`, 'success', 3500);
+        window.HistoryLog?.settings?.('jira_save', `Jira настройки сохранены (${url||'без endpoint'}, since=${patch.sinceDate}, scanLimit=${patch.jiraScanLimit})`);
         close();
       } else {
         // P11.15 ToV — без HTTP-кодов в toast'е.
@@ -314,7 +314,7 @@ function bindSettingsModal() {
       saveSettings(patch);
       const serverPatch = {
         sigmaGoalEpicKeys: patch.sigmaGoalEpicKeys,
-        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate,
+        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate, jiraScanLimit: patch.jiraScanLimit,
       };
       if (url) serverPatch.sigmaJiraBaseUrl = url;
       if (tok) serverPatch.sigmaJiraToken   = tok;
@@ -380,7 +380,7 @@ function bindSettingsModal() {
       saveSettings(patch);
       const serverPatch = {
         bitbucketProjectKeys: patch.bitbucketProjectKeys,
-        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate,
+        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate, jiraScanLimit: patch.jiraScanLimit,
       };
       if (url) serverPatch.bitbucketBaseUrl = url;
       if (tok) serverPatch.bitbucketToken   = tok;
@@ -489,6 +489,7 @@ function bindSettingsModal() {
       const patch = {
         allowInsecureTls: getTls(),
         sinceDate: getSince(),
+        jiraScanLimit: getScanLimit(),
         confluenceSpaceKeys: spaceKeys,    // empty string overwrite OK — это явное «искать везде»
         activityWindowHours: winHours,
       };
@@ -498,6 +499,7 @@ function bindSettingsModal() {
       const serverPatch = {
         allowInsecureTls: patch.allowInsecureTls,
         sinceDate: patch.sinceDate,
+        jiraScanLimit: patch.jiraScanLimit,
         confluenceSpaceKeys: spaceKeys,
         activityWindowHours: winHours,
       };
@@ -586,7 +588,7 @@ function bindSettingsModal() {
       saveSettings(patch);
       const serverPatch = {
         jenkinsFolder: folder,
-        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate,
+        allowInsecureTls: patch.allowInsecureTls, sinceDate: patch.sinceDate, jiraScanLimit: patch.jiraScanLimit,
       };
       if (url) serverPatch.jenkinsBaseUrl = url;
       if (tok) serverPatch.jenkinsToken   = tok;

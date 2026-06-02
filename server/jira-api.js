@@ -122,6 +122,7 @@ function jiraSanitizeConfig(cfg) {
     activityWindowHours: Number.isFinite(+cfg.activityWindowHours) ? Math.min(168, Math.max(1, +cfg.activityWindowHours)) : 72,
     allowInsecureTls:    !!cfg.allowInsecureTls,
     sinceDate:           cfg.sinceDate || '2025-01-01',
+    jiraScanLimit:       Number.isFinite(+cfg.jiraScanLimit) ? Math.min(2000, Math.max(200, Math.round(+cfg.jiraScanLimit))) : 500,
     staleDays:           cfg.staleDays??3,
     noMovementDays:      cfg.noMovementDays??2,
     hasJiraToken:        !!cfg.jiraToken,
