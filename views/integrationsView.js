@@ -660,6 +660,65 @@ function bindSettingsModal() {
     }
   });
 
+  // ── 2026-06-02: Общая кнопка «Сохранить всё» в footer'е ──────
+  // Дёргает все 5 tab-save handler'ов параллельно. Не блокируется отсутствием
+  // полей: если у table нет endpoint/токена — её patch просто пустой
+  // (saveSettings merge, не replace).
+  modal.querySelector('#int-saveall')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = 'Сохраняем…';
+    const since  = getSince();
+    const limit  = getScanLimit();
+    const tls    = getTls();
+    // Один универсальный patch для localStorage: global-поля + все 5 интеграций.
+    const readVal = (sel) => modal.querySelector(sel)?.value?.trim() || '';
+    const patch = {
+      allowInsecureTls: tls, sinceDate: since, jiraScanLimit: limit,
+      jiraProjectKeys:        readVal('#int-jira-project-keys'),
+      sigmaGoalEpicKeys:      readVal('#int-sigma-goal-epic-keys'),
+      bitbucketProjectKeys:   readVal('#int-bb-project-keys'),
+      confluenceSpaceKeys:    readVal('#int-cf-space-keys'),
+      jenkinsFolder:          readVal('#int-jenkins-folder'),
+    };
+    // activityWindowHours — из preset/custom в CF tab (общая настройка).
+    try {
+      const presetRadio = modal.querySelector('input[name="int-cf-window-preset"]:checked');
+      const presetVal = presetRadio?.value || '72';
+      let win = presetVal === 'custom' ? Number(modal.querySelector('#int-cf-window-hours')?.value) : Number(presetVal);
+      if (!Number.isFinite(win) || win < 1) win = 72;
+      if (win > 168) win = 168;
+      patch.activityWindowHours = win;
+    } catch (_) {}
+    // URLs/tokens — пишем только если не-пустые (защита от случайной очистки).
+    const writeIf = (k, sel) => { const v = readVal(sel); if (v) patch[k] = v; };
+    writeIf('jiraBaseUrl',       '#int-jira-url');
+    writeIf('jiraToken',         '#int-jira-token');
+    writeIf('sigmaJiraBaseUrl',  '#int-sigma-url');
+    writeIf('sigmaJiraToken',    '#int-sigma-token');
+    writeIf('bitbucketBaseUrl',  '#int-bb-url');
+    writeIf('bitbucketToken',    '#int-bb-token');
+    writeIf('confluenceBaseUrl', '#int-cf-url');
+    writeIf('confluenceToken',   '#int-cf-token');
+    writeIf('jenkinsBaseUrl',    '#int-jenkins-url');
+    writeIf('jenkinsToken',      '#int-jenkins-token');
+    saveSettings(patch);
+    // serverPatch = всё кроме токенов клиента (токены идут только в свои save).
+    const serverPatch = { ...patch };
+    const r = await postServerConfig(serverPatch);
+    btn.textContent = origText;
+    btn.disabled = false;
+    if (r.ok) {
+      window.showToast?.(`Сохранено · дата ${since}, лимит ${limit}, окно ${patch.activityWindowHours}ч`, 'success', 3500);
+      window.HistoryLog?.settings?.('integrations_save_all',
+        `Все настройки интеграций сохранены (since=${since}, scanLimit=${limit}, win=${patch.activityWindowHours}h)`);
+      close();
+    } else {
+      window.showToast?.(`Не сохранено · ${_humanHttp(r, 'Интеграции')}`, 'error', 4000);
+    }
+  });
+
   // ── P11.15: token-input show/hide toggle ───────────────────
   // Renderer уже задаёт type="password" для всех 4 token-полей
   // (#int-jira-token / #int-sigma-token / #int-bb-token / #int-cf-token).

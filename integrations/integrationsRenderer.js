@@ -227,6 +227,10 @@ export function renderSettingsModal(settings, opts = {}) {
           <input type="checkbox" id="int-global-insecure" ${s.allowInsecureTls ? 'checked' : ''}>
           Разрешить self-signed сертификаты (для всех интеграций)
         </label>
+        <div class="int-footer-actions">
+          <button class="int-btn int-btn-primary int-btn-saveall" id="int-saveall" type="button" title="Сохранить настройки всех интеграций сразу">Сохранить всё</button>
+          <span class="int-saveall-hint">Сохраняет настройки всех табов (Jira, Sigma, Bitbucket, Confluence, Jenkins) + общие поля</span>
+        </div>
       </div>
     ` + closeWrap + ``;
 }

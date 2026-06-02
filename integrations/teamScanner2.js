@@ -136,7 +136,19 @@ import {
   generatePlanHypothesis as _llmGeneratePlanHypothesis,
   readLLMConfig as _llmReadConfig,
   hasLLMCredentials as _llmHasCredentials,
+  enrichRationaleWithLLM as _llmEnrichRationale,
+  llmAttributeOrphans as _llmAttributeOrphans,
 } from './teamScanner2AssistantLLM.js';
+import {
+  buildPlanToday as _rulesBuildPlan,
+  buildFactYesterday as _rulesBuildFact,
+  build72hSummary as _rulesBuild72h,
+} from './teamScanner2AssistantRules.js';
+import {
+  renderPlanHTML as _renderPlanHTML,
+  renderFactHTML as _renderFactHTML,
+  renderSummary72hHTML as _render72hHTML,
+} from './teamScanner2AssistantRender.js';
 // V21 π5 — demo-fixture (10 участников × 2 команды × sprint goal × risks).
 // TECH 17.9 — динамический импорт: 937 LOC fixture не нужны если пользователь
 // никогда не открывает demo-режим. Раньше eager static-import — fixture
@@ -2946,36 +2958,102 @@ export const TeamScanner2 = {
     const ctrl = new AbortController();
     this._assistantInflight.set(key, ctrl);
     const cfg = _llmReadConfig();
-    if (!_llmHasCredentials(cfg)) {
-      const noToken = {
-        ok: false, error: 'LLM не настроен',
-        html: `<div class="ts2-assistant-error">LLM не настроен: Настройки → LLM → введите token или clientId+clientSecret.</div>`,
-      };
-      const fake = { summary: noToken, plan: noToken, ts: Date.now() };
-      this._assistantCache.set(key, fake);
-      this._fillAssistantBlocks(section, fake);
+    const llmAvailable = _llmHasCredentials(cfg);
+    // 2026-06-02 — гибридный пайплайн: сначала детерминистичные правила
+    // (синхронно, instant render), потом LLM-обогащение (асинхронно).
+    // 1. Сразу строим plan/fact из rule-engine — это даёт юзеру осмысленный
+    //    HTML за <50ms, ещё до того как LLM ответит.
+    // 2. Затем параллельно:
+    //    - LLM enrichment для rationale (добавит «дополнительно» в каждый
+    //      «Почему?» блок)
+    //    - LLM attribution для orphan'ов (попробует сопоставить с задачами)
+    //    - Старые промпт-нарративы (для совместимости + signals)
+    const tasks = [];
+    const existing = this._assistantCache.get(key) || { ts: Date.now() };
+    // Sprint scope для plan
+    let sprintScope = [];
+    try {
+      const projects = Array.isArray(p.projects) ? p.projects : [];
+      for (const pk of projects) {
+        const list = model?.spaces?.[pk]?.sprintIssues || [];
+        for (const it of list) {
+          const aName = String(it.assignee || '').toLowerCase();
+          if (aName && aName === String(p.label || '').toLowerCase()) sprintScope.push(it);
+        }
+      }
+    } catch (_) {}
+    const rulesOpts = { sprintScope, ema14: {}, now: Date.now() };
+    let planArtifact = null, factArtifact = null, summary72hArtifact = null;
+    try {
+      planArtifact      = _rulesBuildPlan(p, model, rulesOpts);
+      factArtifact      = _rulesBuildFact(p, model, rulesOpts);
+      summary72hArtifact = _rulesBuild72h(p, model, rulesOpts);
+    } catch (e) {
+      try { console.warn('[scanner2.assistant] rules failed:', e); } catch (_) {}
+    }
+    // Сразу рендерим rules-only (LLM-extras появятся через ~3-5 секунд).
+    if (planArtifact) {
+      const html = _renderPlanHTML(planArtifact);
+      existing.plan = { ok: true, html, _artifact: planArtifact };
+      if (!only || only === 'plan') this._renderAssistantBlock(section, 'plan', existing.plan);
+    }
+    if (summary72hArtifact) {
+      const html = _render72hHTML(summary72hArtifact);
+      existing.summary = { ok: true, html, _artifact: summary72hArtifact };
+      if (!only || only === 'summary') this._renderAssistantBlock(section, 'summary', existing.summary);
+    }
+
+    // Если LLM нет — закругляемся: rules-only вид уже отрендерен,
+    // отдельный warn-баннер не показываем (rules-вид self-sufficient).
+    if (!llmAvailable) {
+      existing.ts = Date.now();
+      this._assistantCache.set(key, existing);
       body.dataset.assistantLoading = '0';
       body.dataset.assistantLoaded = '1';
       this._assistantInflight.delete(key);
+      try { telemetryEmit('scanner2.assistant_fetched', { rulesOnly: true }); } catch (_) {}
       return;
     }
-    // Параллель — каждая Promise самостоятельно отрисовывает свой блок.
-    const tasks = [];
-    const existing = this._assistantCache.get(key) || { ts: Date.now() };
-    if (!only || only === 'summary') {
-      tasks.push(_llmGenerateSummary(p, model, { signal: ctrl.signal, cfg }).then(r => {
+
+    // Параллель LLM-fetch'и: enrich rationale + attribute orphans.
+    if ((!only || only === 'plan') && planArtifact) {
+      tasks.push(_llmEnrichRationale(p, planArtifact, 'plan', { signal: ctrl.signal, cfg }).then(updated => {
         if (ctrl.signal.aborted) return;
-        existing.summary = r;
-        this._renderAssistantBlock(section, 'summary', r);
-      }));
+        existing.plan = { ok: true, html: _renderPlanHTML(updated), _artifact: updated };
+        this._renderAssistantBlock(section, 'plan', existing.plan);
+      }).catch(() => {}));
     }
-    if (!only || only === 'plan') {
-      tasks.push(_llmGeneratePlanHypothesis(p, model, { signal: ctrl.signal, cfg }).then(r => {
+    if ((!only || only === 'summary') && summary72hArtifact) {
+      // enrichRationale на factArtifact.tasks (jiraTasks)
+      const factAsTaskList = { tasks: summary72hArtifact.fact.jiraTasks };
+      const planAsTaskList = { tasks: summary72hArtifact.plan.tasks };
+      const enrichTasks = Promise.allSettled([
+        _llmEnrichRationale(p, factAsTaskList, 'fact', { signal: ctrl.signal, cfg }),
+        _llmEnrichRationale(p, planAsTaskList, 'plan', { signal: ctrl.signal, cfg }),
+        _llmAttributeOrphans(summary72hArtifact.fact.orphans, summary72hArtifact.fact.jiraTasks, { signal: ctrl.signal, cfg }),
+      ]).then(([rFact, rPlan, rOrph]) => {
         if (ctrl.signal.aborted) return;
-        existing.plan = r;
-        this._renderAssistantBlock(section, 'plan', r);
-      }));
+        // Apply orphan-rescue: move rescued items into byKey
+        if (rOrph.status === 'fulfilled' && rOrph.value?.rescued?.length) {
+          const stillOrphan = rOrph.value.stillOrphan || [];
+          for (const a of rOrph.value.rescued) {
+            const k = a._llmAttributedTo;
+            const existingTask = summary72hArtifact.fact.jiraTasks.find(t => t.key === k);
+            if (existingTask) {
+              existingTask.activities.push({
+                kind: a.kind, text: a.title || a.text || '', at: a.at, _src: a._src,
+                rationale: [`Сопоставлено LLM с задачей ${k} (уверенность ${Math.round(a._llmConfidence * 100)}%)`, a._llmReason || ''].filter(Boolean),
+              });
+            }
+          }
+          summary72hArtifact.fact.orphans = stillOrphan;
+        }
+        existing.summary = { ok: true, html: _render72hHTML(summary72hArtifact), _artifact: summary72hArtifact };
+        this._renderAssistantBlock(section, 'summary', existing.summary);
+      }).catch(() => {});
+      tasks.push(enrichTasks);
     }
+
     Promise.allSettled(tasks).then(() => {
       if (ctrl.signal.aborted) return;
       existing.ts = Date.now();

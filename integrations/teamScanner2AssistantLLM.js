@@ -484,3 +484,155 @@ function _esc(v) {
 function _escInline(s) {
   return _esc(s);
 }
+
+/* ════════════════════════════════════════════════════════════
+   ENRICHMENT (rules + LLM hybrid)
+   --
+   Эти 2 функции работают поверх rule-engine output'а из
+   teamScanner2AssistantRules.js. LLM дополняет, но не заменяет.
+
+   enrichRationaleWithLLM(person, rulesArtifact, kind)
+     Берёт уже посчитанные rules.tasks[i].rationale и просит LLM
+     добавить дополнительные causally-grounded причины
+     (без галлюцинаций). Ответ кладётся в task.rationaleLLM[].
+
+   llmAttributeOrphans(orphans, jiraTasks)
+     Берёт «несопоставленные» активности (commit/PR/event без
+     JIRA-key в title/branch) и просит LLM по семантике сопоставить
+     с одной из жирных задач. confidence < 0.7 → остаётся orphan.
+   ════════════════════════════════════════════════════════════ */
+
+const RATIONALE_SYSTEM_PROMPT = `Ты дополняешь набор причин «почему задача попала в план/факт» в инструменте Призма. На входе — JSON со списком задач, у каждой уже есть массив базовых причин (rationale), посчитанных детерминистично нашим rule-engine. Твоя работа — добавить 1-2 ДОПОЛНИТЕЛЬНЫЕ причины на задачу, опираясь только на данные payload.
+
+Жёсткие правила:
+1. Не противоречь существующим причинам в rationale[]. Добавляй ТОЛЬКО комплементарное.
+2. Не выдумывай факты: каждая твоя причина обоснована конкретным полем payload (status, summary, lastTouch, comments).
+3. Если для задачи добавить нечего — не добавляй (пустой extras[] лучше выдумки).
+4. По-русски. Без оценочных слов. Без markdown. Длина каждой причины ≤ 90 символов.
+5. Возвращай строго JSON формата { "extras": [{ "key": "PRJ-123", "rationale": ["причина 1", "причина 2"] }, ...] }. Никакого окружающего текста.
+6. HR/medical защита — не цитируй содержимое из comments если оно похоже на болезни/семью/конфликты.`;
+
+const ATTRIB_SYSTEM_PROMPT = `Ты сопоставляешь «осиротевшие» активности (commit/PR/comment без явного упоминания JIRA-ключа) с известными задачами сотрудника. На входе — список orphan'ов (с title и repo) и список jiraTasks (с key и summary). Цель: для каждого orphan выбрать наиболее семантически близкую задачу или вернуть null.
+
+Жёсткие правила:
+1. Сопоставляй ТОЛЬКО если в title есть прямое смысловое пересечение с summary (общие термины/функционал/имена компонентов).
+2. Не сопоставляй по общим словам («fix», «update», «refactor», «test», «docs» — это не сигнал).
+3. confidence: 0.0-1.0. ≥ 0.7 = уверен, иначе оставь null.
+4. Возвращай строго JSON: { "matches": [{ "orphanIdx": 0, "matchedKey": "PRJ-456", "confidence": 0.85, "reason": "оба упоминают auth refactor" }, ...] }. orphan'ы без match — просто не упоминай.
+5. Никакого окружающего текста, только JSON.`;
+
+/**
+ * Дополняет rationale[] каждой задачи в rulesArtifact LLM-причинами.
+ * Мутирует input: добавляет task.rationaleLLM = ['...', '...'].
+ * Безопасный fallback: если LLM упал/без credentials → возвращает input как есть.
+ *
+ * @param {object} person  — p (с email/jiraAccountId)
+ * @param {object} rulesArtifact — { tasks: [{ key, rationale, ... }, ...] }
+ * @param {string} kind — 'plan' | 'fact'
+ * @returns {Promise<object>} — same rulesArtifact, augmented
+ */
+export async function enrichRationaleWithLLM(person, rulesArtifact, kind = 'plan', opts = {}) {
+  if (!rulesArtifact || !Array.isArray(rulesArtifact.tasks) || rulesArtifact.tasks.length === 0) {
+    return rulesArtifact;
+  }
+  const cfg = opts.cfg || readLLMConfig();
+  if (!hasLLMCredentials(cfg)) return rulesArtifact;
+
+  const payload = {
+    kind,
+    name: person.label || person.key || '',
+    tasks: rulesArtifact.tasks.slice(0, 10).map(t => ({
+      key: t.key, summary: t.title || t.summary || '',
+      status: t.status || '', priority: t.priority || '',
+      rationale: t.rationale || [],
+      lastTouchHoursAgo: t._lastTouchHoursAgo,
+    })),
+  };
+  const res = await _callLLM(cfg, RATIONALE_SYSTEM_PROMPT, JSON.stringify(payload), {
+    ...opts, maxTokens: 600, temperature: 0.2,
+  });
+  if (!res.ok) return rulesArtifact;
+
+  // Parse extras
+  let extrasByKey = {};
+  try {
+    const cleaned = String(res.text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (parsed && Array.isArray(parsed.extras)) {
+      for (const ex of parsed.extras) {
+        if (ex.key && Array.isArray(ex.rationale)) {
+          extrasByKey[String(ex.key)] = ex.rationale.filter(s => typeof s === 'string' && s.trim());
+        }
+      }
+    }
+  } catch (_) {
+    return rulesArtifact;     // LLM вернул не-JSON — игнорируем тихо
+  }
+  for (const t of rulesArtifact.tasks) {
+    const ex = extrasByKey[t.key];
+    if (ex && ex.length) t.rationaleLLM = ex.slice(0, 3);
+  }
+  return rulesArtifact;
+}
+
+/**
+ * Пытается сопоставить orphan-активности с известными jira-задачами через LLM.
+ * Активности с confidence ≥ 0.7 переносятся в byKey, ниже — остаются в orphans.
+ *
+ * @param {Array} orphans — [{ kind, title, text, _src, ... }, ...]
+ * @param {Array} jiraTasks — [{ key, summary }, ...]
+ * @returns {Promise<{ rescued: Array, stillOrphan: Array }>}
+ */
+export async function llmAttributeOrphans(orphans, jiraTasks, opts = {}) {
+  if (!Array.isArray(orphans) || orphans.length === 0 || !Array.isArray(jiraTasks) || jiraTasks.length === 0) {
+    return { rescued: [], stillOrphan: orphans || [] };
+  }
+  const cfg = opts.cfg || readLLMConfig();
+  if (!hasLLMCredentials(cfg)) return { rescued: [], stillOrphan: orphans };
+
+  // Ограничим payload — берем top-20 orphan'ов и top-15 задач
+  const candidates = orphans.slice(0, 20).map((o, idx) => ({
+    idx, kind: o.kind, title: String(o.title || '').slice(0, 120),
+    repo: o.repo || '', src: o._src || '',
+  }));
+  const knownTasks = jiraTasks.slice(0, 15).map(t => ({
+    key: t.key, summary: String(t.summary || t.title || '').slice(0, 100),
+  }));
+  const payload = { orphans: candidates, jiraTasks: knownTasks };
+  const res = await _callLLM(cfg, ATTRIB_SYSTEM_PROMPT, JSON.stringify(payload), {
+    ...opts, maxTokens: 700, temperature: 0.1,
+  });
+  if (!res.ok) return { rescued: [], stillOrphan: orphans };
+
+  let matches = [];
+  try {
+    const cleaned = String(res.text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (parsed && Array.isArray(parsed.matches)) matches = parsed.matches;
+  } catch (_) {
+    return { rescued: [], stillOrphan: orphans };
+  }
+
+  const rescuedByIdx = new Map();
+  for (const m of matches) {
+    if (typeof m.orphanIdx !== 'number') continue;
+    if (Number(m.confidence) < 0.7) continue;
+    if (!m.matchedKey) continue;
+    rescuedByIdx.set(m.orphanIdx, {
+      matchedKey: String(m.matchedKey),
+      confidence: Number(m.confidence),
+      reason: String(m.reason || '').slice(0, 200),
+    });
+  }
+  const rescued = [];
+  const stillOrphan = [];
+  orphans.forEach((o, idx) => {
+    const m = rescuedByIdx.get(idx);
+    if (m) {
+      rescued.push({ ...o, _llmAttributedTo: m.matchedKey, _llmConfidence: m.confidence, _llmReason: m.reason });
+    } else {
+      stillOrphan.push(o);
+    }
+  });
+  return { rescued, stillOrphan };
+}
