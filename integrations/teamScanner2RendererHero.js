@@ -1020,15 +1020,18 @@ export function renderTeamGlance(model, ctx = {}) {
   // контенту и часто давал false-positive на инсталляциях типа Сбер DC где
   // `/wiki/rest/...` редиректит 302, но `/rest/...` работает). В Чёрном
   // дашборде баннер остаётся (renderConfluenceSsoBanner экспорт сохранён).
+  // 2026-06-02 audit fix #5 — action queue поднят ВЫШЕ tabBar (всегда виден,
+  // даже на «Глубже»/«Графики»). До этого он был похоронен в today-pane —
+  // тимлид со 115-чел командой на «Глубже» не видел primary action signal.
   return `
     <div class="ts2-glance">
       ${identityBanner}
       ${storyLine}
       ${heroBlock}
+      ${renderActionQueue(model)}
       ${_renderScannerTabBar()}
       <div class="ts2-today-pane">
         ${renderDailyBrief(model, ctx.history || [])}
-        ${renderActionQueue(model)}
         ${operationsSection}
         ${trendsSection}
       </div>
@@ -1045,39 +1048,66 @@ export function renderTeamGlance(model, ctx = {}) {
 function _renderIdentityCoverageBanner(model) {
   if (!model) return '';
   const parts = Array.isArray(model.participants) ? model.participants : [];
-  // Берём команду через model.totalEmployeeCount если есть, иначе оцениваем
-  // через participants. Реальный teamSize живёт в state.employees, но без
-  // import'а здесь — используем proxy.
   const teamSize = parts.length;
-  if (teamSize < 30) return '';  // мелкие команды — coverage colebеется
-  // Считаем сколько участников имеют атрибутированный BB/CF.
-  let bbCount = 0;
-  let cfCount = 0;
+  if (teamSize < 20) return '';  // на маленьких командах coverage шумит
+  // 2026-06-02 audit fix #4 — расширили: identity-mapping coverage из
+  // state.employees (true source of truth), не только activity-proxy.
+  // На реальном проде (115 чел.) из diag: bbLogin 64% / cfId 30% / jkName 15%
+  // — три критически дырявые мапы; банер должен бить в лицо до того, как
+  // тимлид примет «у Феди 0 коммитов» за факт.
+  const empByEmail = new Map();
+  const empByJira  = new Map();
+  for (const e of (state.employees || [])) {
+    if (e?.email)          empByEmail.set(String(e.email).toLowerCase(), e);
+    if (e?.jiraAccountId)  empByJira.set(e.jiraAccountId, e);
+  }
+  let missingBb = 0, missingCf = 0, missingJk = 0, matched = 0;
+  for (const p of parts) {
+    const emp = empByEmail.get(String(p.email || '').toLowerCase())
+             || empByJira.get(p.jiraAccountId);
+    if (!emp) continue;
+    matched++;
+    if (!emp.bitbucketLogin)      missingBb++;
+    if (!emp.confluenceAccountId) missingCf++;
+    if (!emp.jenkinsUserName)     missingJk++;
+  }
+  // Считаем процент НЕ настроенных в команде (из всех participants).
+  const bbMissPct = Math.round(missingBb / teamSize * 100);
+  const cfMissPct = Math.round(missingCf / teamSize * 100);
+  const jkMissPct = Math.round(missingJk / teamSize * 100);
+  // Activity-proxy (legacy): сколько ВООБЩЕ имеют BB/CF активность.
+  let bbCount = 0, cfCount = 0;
   for (const p of parts) {
     if (p.bbItems && p.bbItems.length) bbCount++;
     if (p.cfItems && p.cfItems.length) cfCount++;
   }
-  // Используем coverage из diagnostic если есть (более точно).
-  // Если нет — оцениваем через items (грубо: «есть ли вообще BB/CF активность»).
-  const cfPct = Math.round(cfCount / teamSize * 100);
-  const bbPct = Math.round(bbCount / teamSize * 100);
-  const cfCritical = cfPct < 30;
-  const bbCritical = bbPct < 50;
-  if (!cfCritical && !bbCritical) return '';
+  const cfActPct = Math.round(cfCount / teamSize * 100);
+  const bbActPct = Math.round(bbCount / teamSize * 100);
+  // Trigger: ЛИБО identity-mapping дыра (>30% bb / >50% cf / >70% jk),
+  // ЛИБО activity-coverage критически низкий (legacy condition).
+  const idCritical  = bbMissPct >= 30 || cfMissPct >= 50 || jkMissPct >= 70;
+  const actCritical = cfActPct < 30 || bbActPct < 50;
+  if (!idCritical && !actCritical) return '';
   // Dismiss check.
   try {
     const dismissedAt = Number(localStorage.getItem('q2_id_banner_dismissed_at') || 0);
     if (dismissedAt > Date.now() - 7 * 24 * 60 * 60 * 1000) return '';
   } catch (_) { /* ignore */ }
   const issues = [];
-  if (cfCritical) issues.push(`Confluence: ${cfPct}% (${teamSize - cfCount} из ${teamSize} без cfAccountId)`);
-  if (bbCritical) issues.push(`Bitbucket: ${bbPct}% (${teamSize - bbCount} из ${teamSize} без bbLogin)`);
+  if (bbMissPct >= 30) issues.push(`Bitbucket: ${missingBb} из ${teamSize} без bbLogin`);
+  if (cfMissPct >= 50) issues.push(`Confluence: ${missingCf} из ${teamSize} без cfAccountId`);
+  if (jkMissPct >= 70) issues.push(`Jenkins: ${missingJk} из ${teamSize} без jenkinsUserName`);
+  if (!issues.length) {
+    // fallback на legacy activity-proxy если identity-mapping без критических
+    if (cfActPct < 30) issues.push(`Confluence-активность: ${cfActPct}%`);
+    if (bbActPct < 50) issues.push(`Bitbucket-активность: ${bbActPct}%`);
+  }
   return `
     <div class="ts2-sso-banner ts2-id-banner" role="status" aria-live="polite">
       <div class="ts2-sso-banner-icon" aria-hidden="true">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 16 })}</div>
       <div class="ts2-sso-banner-body">
-        <div class="ts2-sso-banner-title"><b>Identity coverage критически низкий</b> — Scanner показывает неполную картину.</div>
-        <div class="ts2-sso-banner-sub">${esc(issues.join(' · '))}. Запустите Auto-Resolve — bulk-lookup в API заполнит недостающие поля.</div>
+        <div class="ts2-sso-banner-title"><b>Identity-mapping дыры</b> — для части команды Scanner не получает данные из интеграций.</div>
+        <div class="ts2-sso-banner-sub">${esc(issues.join(' · '))}. Запустите Auto-Resolve — bulk-lookup в API заполнит недостающие поля. Без этого метрики (коммиты / правки / билды) у этих сотрудников показывают «0», что вводит в заблуждение.</div>
       </div>
       <button type="button" class="ts2-sso-banner-cta" id="ts2-glance-resolve-btn" title="Открыть Диагностику и запустить bulk Auto-Resolve">Запустить Auto-Resolve</button>
       <button type="button" class="ts2-sso-banner-dismiss" id="ts2-id-banner-dismiss" title="Скрыть на 7 дней" aria-label="Скрыть">×</button>
@@ -1354,7 +1384,25 @@ export function renderBurnupSparkline(burnup) {
  */
 function renderActionQueue(model) {
   const queue = buildActionQueue(model);
-  if (queue.length === 0) return '';
+  // 2026-06-02 audit fix #5 — позитивный fallback вместо пустоты.
+  // С queue.length === 0 раньше возвращали '' — тимлид не получал
+  // подтверждения «всё ок» и переходил к ручному просмотру всех 115
+  // человек. Теперь явное «Чисто» = разрешение НЕ читать roster
+  // полностью.
+  if (queue.length === 0) {
+    return `
+      <div class="ts2-action-queue ts2-action-queue-empty" role="region" aria-label="Очередь действий на сегодня — пусто">
+        <div class="ts2-action-queue-head">
+          <span class="ts2-action-queue-key">Кто отклонился от курса</span>
+          <span class="ts2-action-queue-hint">— автодиагностика по 5 правилам</span>
+        </div>
+        <div class="ts2-action-queue-clean">
+          ${Icons.get('check-circle', { cls: 'btn-icon', size: 16 })}
+          <span>Чисто. На радарах рисков нет — можно не читать roster построчно.</span>
+        </div>
+      </div>
+    `;
+  }
   // AUDIT_HOLISTIC AI3 — minimum example callsite. Пробрасываем
   // короткое rule-based summary в aria-label секции (screen-reader
   // получает «суть и приоритет» без чтения всех 5 строк подряд).

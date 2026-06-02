@@ -2540,6 +2540,21 @@ export const TeamScanner2 = {
     // вставляем/убираем panel через `_renderPanelOnly()` / `_closePanel()`.
     // Раньше пользователь видел «2 jerk'а экрана»: 1) полный rebuild
     // dashboard'а, 2) slide-in модалки. Теперь только slide-in.
+    // 2026-06-02 audit fix #3 — idle compact-chip-row → open panel like row click.
+    // chip — это button[data-key], симулирует row activate. Открываем idle
+    // <details> (если есть, чтобы row-element виден был), но это не критично.
+    root.querySelectorAll('.ts2-idle-chip[data-key]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const key = chip.dataset.key;
+        if (!key) return;
+        // Раскрываем idle-details чтобы row была в DOM (нужно для focus-restore).
+        const details = chip.closest('.ts2-group-idle')?.querySelector('.ts2-idle-details');
+        if (details && !details.open) details.open = true;
+        // Имитируем row-click для существующего жизненного цикла.
+        const row = root.querySelector(`.ts2-row[data-key="${CSS.escape(key)}"]`);
+        if (row) row.click();
+      });
+    });
     root.querySelectorAll('.ts2-row[data-key]').forEach(el => {
       const activate = (e) => {
         if (e.target.closest('a, button')) return;

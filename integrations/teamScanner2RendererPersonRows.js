@@ -18,6 +18,7 @@ import {
 } from './teamScanner2RendererCommon.js';
 import { classifyPerson } from './teamScanner2Classifier.js';
 import { buildYesterdayGroupMap } from './teamScanner2Insights.js';
+import { state } from '../state.js';
 
 // V18.3 A2 — Zephyr split на Created (Zc) и Executed (Ze).
 // Pilot finding (Ilia QA): семантически разные — план vs прогон.
@@ -74,7 +75,23 @@ export function renderPersonRows(model, ctx = {}) {
     if (aT !== bT) return bT - aT;
     return (b.timelineYesterday || []).length - (a.timelineYesterday || []).length;
   };
-  groups.stop.sort(sortFn);
+  // 2026-06-02 audit fix #1 — stop сортируется по maxDwellHours desc,
+  // не по timelineToday. У stop по определению today=0 (классификатор
+  // ставит stop при dwell ≥24ч ИЛИ wip=0+today=0), поэтому sortFn по
+  // today давал случайный порядок. На реальном проде (115 чел., 51 stop)
+  // тимлид утром получал 51 человека без приоритизации. Sort по dwell
+  // даёт «худшие сверху» сразу.
+  const stopSortFn = (a, b) => {
+    const aD = Math.max(0, ...((a.blockers || []).map(bl => Number(bl.dwellHours) || 0)));
+    const bD = Math.max(0, ...((b.blockers || []).map(bl => Number(bl.dwellHours) || 0)));
+    if (aD !== bD) return bD - aD;
+    // tie-break: больше блокеров → выше; затем алфавит
+    const aN = (a.blockers || []).length;
+    const bN = (b.blockers || []).length;
+    if (aN !== bN) return bN - aN;
+    return String(a.label || '').localeCompare(String(b.label || ''), 'ru');
+  };
+  groups.stop.sort(stopSortFn);
   groups.watch.sort(sortFn);
   groups.moving.sort(sortFn);
   groups.idle.sort(sortFn);
@@ -109,10 +126,30 @@ export function renderPersonRows(model, ctx = {}) {
     pr:  _median(_prArr),
     hours: _median(_hrArr),
   };
+  // 2026-06-02 audit fix #6 — identity-mapping check per-participant.
+  // Source-chip различает «не настроен» (id-mapping пуст в state.employees)
+  // от «настроен, но 0 событий за 72ч». Lookup один раз для всех строк.
+  const empByEmail = new Map();
+  const empByJira  = new Map();
+  for (const e of (state.employees || [])) {
+    if (e?.email)         empByEmail.set(String(e.email).toLowerCase(), e);
+    if (e?.jiraAccountId) empByJira.set(e.jiraAccountId, e);
+  }
+  const identityByKey = new Map();
+  for (const p of parts) {
+    const emp = empByEmail.get(String(p.email || '').toLowerCase())
+             || empByJira.get(p.jiraAccountId);
+    identityByKey.set(p.key, {
+      bbMapped: !!emp?.bitbucketLogin,
+      cfMapped: !!emp?.confluenceAccountId,
+      jkMapped: !!emp?.jenkinsUserName,
+    });
+  }
   const metricsMaps = {
     crv: model?.scannerV2?.codeReviewVelocity || {},
     prT: model?.scannerV2?.prThroughput || {},
     teamMedians,
+    identityByKey,
   };
   // V20 S8 #3 + S8.5 #6 — триаж-pill теперь срабатывает по count ≥ 5 OR maxDwell ≥ 48ч.
   // Pилот feedback: «4 stop с одним 96ч — pill спрячется, пропущу самый болезненный кейс».
@@ -133,12 +170,38 @@ export function renderPersonRows(model, ctx = {}) {
         <span class="ts2-group-count" title="${esc(meta.desc)}">${arr.length}</span>
       </div>`;
     if (key === 'idle') {
-      // Сворачиваемая, по умолчанию закрыта — снимает шум с главного экрана.
+      // 2026-06-02 audit fix #3 — idle перестаёт быть «спрятанной за details».
+      // На реальном проде (115 чел.) 39 idle = 34% команды; collapsed details
+      // означал «утром тимлид о них не вспомнит». Теперь — visible
+      // compact-chip-row из имён (с last-activity hint), а full-rows под
+      // collapsible details для drill-down.
+      const chips = arr.map(p => {
+        const lastEvent = [
+          ...(p.timelineYesterday || []),
+          ...(p.timelinePrev || []),
+        ]
+          .map(e => Number.isFinite(Date.parse(e?.at)) ? Date.parse(e.at) : 0)
+          .reduce((m, t) => Math.max(m, t), 0);
+        const now = Date.now();
+        let hint = 'нет следов';
+        if (lastEvent > 0) {
+          const days = Math.floor((now - lastEvent) / 86400000);
+          hint = days <= 1 ? 'вчера' : (days < 7 ? `${days}д назад` : `>${Math.floor(days/7)}нед`);
+        }
+        return `<button type="button" class="ts2-idle-chip" data-key="${esc(p.key)}" title="Последняя активность: ${esc(hint)}">
+          <span class="ts2-idle-chip-name">${esc(p.label || '—')}</span>
+          <span class="ts2-idle-chip-hint">${esc(hint)}</span>
+        </button>`;
+      }).join('');
       return `
-        <details class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
-          <summary class="ts2-group-summary">${head}</summary>
-          <div class="ts2-rows-inner">${rows}</div>
-        </details>`;
+        <div class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
+          ${head}
+          <div class="ts2-idle-chips" role="list" aria-label="Сотрудники без активности — клик для деталей">${chips}</div>
+          <details class="ts2-idle-details">
+            <summary class="ts2-idle-details-toggle">Развернуть полные строки (${arr.length})</summary>
+            <div class="ts2-rows-inner">${rows}</div>
+          </details>
+        </div>`;
     }
     return `
       <div class="ts2-group ts2-group-${key}" data-group-anchor="${key}">
@@ -219,14 +282,35 @@ function renderRow(p, isExpanded, metricsMaps = {}, yesterdayGroups, currentGrou
   const jErr = p?.jenkinsError ? String(p.jenkinsError) : '';
   // Sprint B (Birman) — улучшенный tooltip с расшифровкой однобуквенных src
   const SRC_FULL = { b: 'Bitbucket: коммиты / PR / комментарии', c: 'Confluence: правки страниц', z: 'Zephyr: тесты / прогоны', j: 'Jenkins: сборки' };
-  const srcChip = (label, n, cls, titleOverride) => n > 0
-    ? `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${titleOverride || `${SRC_FULL[cls] || label} за 72ч: ${n} событий`}"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`
-    : '';
+  // 2026-06-02 audit fix #6 — chip различает «не настроен mapping» (dashed
+  // border + «—», title объясняет) от «настроен, 0 событий за 72ч» (hidden,
+  // как было). Раньше отсутствие mapping'а показывалось как «нет данных» =
+  // false-negative для тимлида («у Феди 0 билдов» — а Jenkins-login просто
+  // пуст). На реальном проде diag показал bbLogin 64% / cfId 30% / jkName 15%
+  // coverage — без визуального сигнала «не настроен» 36-85% команды выглядит
+  // как «не работает».
+  const identity = (metricsMaps.identityByKey instanceof Map)
+    ? metricsMaps.identityByKey.get(p.key)
+    : null;
+  const srcChip = (label, n, cls, isMapped, titleOverride) => {
+    if (n > 0) {
+      return `<span class="ts2-row-src-chip ts2-row-src-${cls}" title="${titleOverride || `${SRC_FULL[cls] || label} за 72ч: ${n} событий`}"><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num">${n}</span></span>`;
+    }
+    if (isMapped === false) {
+      // identity-mapping явно не настроен — показываем dashed-chip
+      return `<span class="ts2-row-src-chip ts2-row-src-${cls} ts2-row-src-unmapped" title="${SRC_FULL[cls] || label} — учётная запись сотрудника не сопоставлена. Запустите Auto-Resolve в Диагностике или заполните вручную в реестре."><span class="ts2-row-src-chip-key">${cls.toUpperCase()}</span><span class="ts2-row-src-chip-num" aria-label="не сопоставлен">—</span></span>`;
+    }
+    return '';
+  };
   const jChipRow = jErr
     ? `<span class="ts2-row-src-chip ts2-row-src-j ts2-row-src-warn" title="Jenkins недоступен: ${esc(jErr)}"><span class="ts2-row-src-chip-key">J</span><span class="ts2-row-src-chip-num" aria-label="недоступен">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 10 })}</span></span>`
-    : srcChip('Jenkins', jN, 'j', `Jenkins билдов за 48ч: ${jN}${p.jenkinsFailures48h ? ` · failures: ${p.jenkinsFailures48h}` : ''}`);
-  const srcChips = (bbN || cfN || zN || jN || jErr)
-    ? `<span class="ts2-row-src-chips">${srcChip('Bitbucket', bbN, 'b')}${srcChip('Confluence', cfN, 'c')}${srcChip('Zephyr', zN, 'z')}${jChipRow}</span>`
+    : srcChip('Jenkins', jN, 'j', identity ? identity.jkMapped : undefined,
+        `Jenkins билдов за 48ч: ${jN}${p.jenkinsFailures48h ? ` · failures: ${p.jenkinsFailures48h}` : ''}`);
+  const bbChip = srcChip('Bitbucket', bbN, 'b', identity ? identity.bbMapped : undefined);
+  const cfChip = srcChip('Confluence', cfN, 'c', identity ? identity.cfMapped : undefined);
+  const zChip  = srcChip('Zephyr', zN, 'z', undefined); // zephyr per-employee mapping нет — пропускаем
+  const srcChips = (bbChip || cfChip || zChip || jChipRow || jErr)
+    ? `<span class="ts2-row-src-chips">${bbChip}${cfChip}${zChip}${jChipRow}</span>`
     : '';
 
   // P3 signals: switch-score → ↻N badge if non-trivial; max blocker dwell → ▌Nh
@@ -281,9 +365,13 @@ function renderRow(p, isExpanded, metricsMaps = {}, yesterdayGroups, currentGrou
       if (currRank < prevRank) { arrowIcon = Icons.get('arrow-down-right', { cls: 'btn-icon', size: 10 }); cls += ' ts2-row-diff-down'; groupDropped = true; }
     }
     const groupRu = { stop: 'стоп', watch: 'наблюдение', moving: 'движется', idle: 'тихо' };
-    // Phase 3 E3 — `is-pulse-attention` на дрейфующих чипах: 3 пульса × 1600ms
-    // = ~5 секунд внимания. Брендбук §9 #3.
-    if (groupDropped) cls += ' is-pulse-attention';
+    // 2026-06-02 audit fix #2 — pulse-attention выпилен. На реальном проде
+    // регрессии за ночь массовые (51 stop vs 27 вчера = ~24 пульса одновременно),
+    // 3 × 1600ms = 5 секунд дёргания × 24 строки = cognitive panic + vestibular
+    // trigger. Оставляем только статичный border ts2-row-diff-down (red) как
+    // differentiator. См. Phase 3 E3 (исходное обоснование) — там pulse был
+    // придуман для редких регрессий, не для daily-scale.
+    // (Раньше: if (groupDropped) cls += ' is-pulse-attention';)
     diffBadge = `<span class="${cls}" title="Вчера: ${groupRu[prevGroup] || prevGroup} → Сегодня: ${groupRu[currentGroup] || currentGroup}">${arrowIcon} ${esc(groupRu[prevGroup] || prevGroup)}</span>`;
   }
   const badges = (diffBadge || srcChips || switchBadge || dwellBadge || crvChip || prChip)

@@ -1323,7 +1323,7 @@ export function computeSprintGoalSlope(history) {
  */
 export function computeZScore(series) {
   if (!Array.isArray(series) || series.length < 4) {
-    return { mean: 0, std: 0, today: 0, z: 0, anomalous: false };
+    return { mean: 0, std: 0, today: 0, z: 0, anomalous: false, confidence: 'none' };
   }
   const today = series[series.length - 1];
   const past = series.slice(0, -1);
@@ -1331,12 +1331,26 @@ export function computeZScore(series) {
   const variance = past.reduce((s, x) => s + (x - mean) ** 2, 0) / past.length;
   const std = Math.sqrt(variance);
   const z = std > 0 ? (today - mean) / std : 0;
+  // 2026-06-02 audit fix #8 — threshold-калибровка под короткую историю.
+  // На проде diag z=1.98 при threshold=2 — реальный +24 stop за ночь
+  // пропущен. С 4-7 точками std нестабилен, поэтому threshold смягчаем
+  // до 1.5σ для «pre-warning». С ≥8 точками — классические 2σ.
+  // confidence: high (≥8 pts), medium (5-7 pts), low (4 pts).
+  const n = series.length;
+  let threshold = 2;
+  let confidence = 'high';
+  if (n < 8) {
+    threshold = 1.5;
+    confidence = n >= 6 ? 'medium' : 'low';
+  }
   return {
     mean: Math.round(mean * 100) / 100,
     std:  Math.round(std * 100) / 100,
     today,
     z:    Math.round(z * 100) / 100,
-    anomalous: Math.abs(z) > 2,
+    anomalous: Math.abs(z) > threshold,
+    threshold,
+    confidence,
   };
 }
 
@@ -1358,13 +1372,36 @@ export function computeEmaWoW(series, alpha = 0.3) {
   // Причина: тесты и downstream-логика ожидают численные значения.
   // Renderer проверяет флаг `insufficientHistory` для показа '—' вместо
   // ложных дельт (см. teamScanner2Renderer.js:5582-5583).
-  if (!Array.isArray(series) || series.length < 8) {
+  // 2026-06-02 audit fix #8 — cutoff снижен с 8 до 5 для команд только
+  // ставящих Scanner. На проде diag history=4 → insufficientHistory:true
+  // отключал WoW для всех. Теперь от 5 точек уже считаем тренд (без WoW,
+  // wow требует 8+), и явный confidence для UI.
+  const nPts = Array.isArray(series) ? series.length : 0;
+  if (nPts < 5) {
     return {
       emaToday: series?.[series.length - 1] ?? 0,
       emaLastWeek: 0,
       wowDelta: 0,
       insufficientHistory: true,
-      pointsAvailable: series?.length ?? 0,
+      confidence: 'none',
+      pointsAvailable: nPts,
+    };
+  }
+  if (nPts < 8) {
+    // Считаем EMA для тренда, но WoW не доступен — confidence: low.
+    const emaShort = [];
+    emaShort[0] = series[0];
+    for (let i = 1; i < series.length; i++) {
+      emaShort[i] = alpha * series[i] + (1 - alpha) * emaShort[i - 1];
+    }
+    const emaTodayShort = Math.round(emaShort[emaShort.length - 1] * 100) / 100;
+    return {
+      emaToday: emaTodayShort,
+      emaLastWeek: 0,
+      wowDelta: 0,
+      insufficientHistory: true,   // оставляем флаг для существующих UI-проверок
+      confidence: 'low',
+      pointsAvailable: nPts,
     };
   }
   const ema = [];

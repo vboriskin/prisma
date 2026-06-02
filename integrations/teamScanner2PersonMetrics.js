@@ -44,11 +44,20 @@ export function computeProductivityScore(p) {
   const reviewsDone  = Number(b.prReviews48h)       || 0;
   const testsCreated = Number(b.testsCreated48h)    || 0;
   const testsExecuted= Number(b.testsExecuted48h)   || 0;
-  // closedToday — issues, перешедшие в terminal status сегодня. Пытаемся
-  // достать из timelineToday (transition к Done). Fallback: 0.
-  const closedToday = (p?.timelineToday || []).filter(e =>
-    e?.kind === 'transition' && /done|закрыт|готов|resolved/i.test(e?.text || '')
-  ).length;
+  // closedToday — issues, перешедшие в terminal status сегодня.
+  // 2026-06-02 audit fix #7 — приоритетно используем event.kind === 'closed'
+  // (выставляется в portfolioPulseModel._changelogItemToEvent при
+  // isTerminalStatus(to)). Это работает на русских/английских/exotic
+  // статусах и не ловит false-positive «Готов к QA».
+  // Fallback на regex по text — для legacy событий или если pulse не
+  // прокинул `kind:'closed'` (defensive).
+  const TERM_FALLBACK_RX = /^(перевели в |→ |status: )?\s*(done|closed|resolved|готово|закрыт|закрыто|выполнен|выполнено|завершен|завершено|решен|решено)/i;
+  const closedToday = (p?.timelineToday || []).filter(e => {
+    if (!e) return false;
+    if (e.kind === 'closed') return true;
+    if (e.kind !== 'transition') return false;
+    return TERM_FALLBACK_RX.test(e.text || '');
+  }).length;
   const score = Math.round(
     commits * 1.0 + prs * 3.0 + conf * 1.5
     + reviewsDone * 2.0 + testsCreated * 2.0 + testsExecuted * 1.0

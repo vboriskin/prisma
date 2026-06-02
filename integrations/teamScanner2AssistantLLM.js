@@ -309,8 +309,14 @@ function _buildPlanPayload(p, model) {
     if (sprintScope.length >= 12) break;
   }
   // closedYesterdayByMe — события за вчера со status→Done.
+  // 2026-06-02 audit fix #7 — приоритетно event.kind === 'closed' (выставляется
+  // в portfolioPulseModel при isTerminalStatus(to)). Fallback на text-regex
+  // расширен русскими статусами. Раньше regex /done|closed|resolved/ давал
+  // ~0% match на RU-only Jira (на реальном проде статусы «Готово/Закрыто/
+  // Решено» не ловились).
+  const TERM_FALLBACK_RX = /\b(done|closed|resolved|готово|закрыт|закрыто|выполнен|выполнено|завершен|завершено|решен|решено|снят|снято)/i;
   const closedYesterday = (p.timelineYesterday || [])
-    .filter(e => /done|closed|resolved/i.test(e?.text || '') || /status/i.test(e?.kind || ''))
+    .filter(e => e?.kind === 'closed' || TERM_FALLBACK_RX.test(e?.text || ''))
     .slice(0, 8)
     .map(_slimEvent);
   // pr-as-reviewer — пытаемся вытащить из bb.review events.
