@@ -14289,6 +14289,77 @@ body.theme-dark #modal-gantt-add-epic .ae-wt-list {
   color: var(--text-2);
 }
 .ts2-action-queue-hint { font-size: 11px; color: var(--text-3); }
+/* 2026-06-02 diag-fix D12/D14 — Jenkins/Zephyr health chip в team-glance */
+.ts2-glance-jenkins-health {
+  display: inline-flex; align-items: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px; font-weight: 600;
+  font-feature-settings: "tnum" 1;
+  cursor: help;
+}
+.ts2-glance-jenkins-health-on-course {
+  background: var(--prizma-on-course-bg, rgba(127, 232, 181, 0.12));
+  color: var(--prizma-on-course, #0F8A5F);
+}
+.ts2-glance-jenkins-health-drift {
+  background: var(--prizma-drift-bg, rgba(255, 179, 71, 0.12));
+  color: var(--prizma-drift, #B5670A);
+}
+.ts2-glance-jenkins-health-off-course {
+  background: var(--prizma-off-course-bg, rgba(255, 107, 107, 0.12));
+  color: var(--prizma-off-course, #C13838);
+}
+
+/* 2026-06-02 diag-fix D8 — Presets-hint над stop-группой */
+.ts2-presets-hint {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 0 8px;
+  padding: 8px 12px;
+  background: var(--prizma-information-bg, rgba(31, 107, 150, 0.10));
+  border: 1px solid var(--prizma-information, #1F6B96);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.ts2-presets-hint-icon { color: var(--prizma-information, #1F6B96); flex-shrink: 0; }
+.ts2-presets-hint-text { flex: 1; line-height: 1.4; }
+.ts2-presets-hint-text b { color: var(--prizma-text-primary, var(--text-1)); }
+.ts2-presets-hint-cta {
+  padding: 4px 10px;
+  border: 1px solid var(--prizma-information, #1F6B96);
+  background: transparent;
+  color: var(--prizma-information, #1F6B96);
+  border-radius: 6px;
+  font-size: 11px; font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts2-presets-hint-cta:hover { background: var(--prizma-information, #1F6B96); color: #fff; }
+
+/* 2026-06-02 diag-fix D5 — History gaps chip в топбаре */
+.ts2-history-gaps-chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; margin-left: 8px;
+  font-size: 11px; font-weight: 500;
+  font-feature-settings: "tnum" 1;
+  background: var(--prizma-drift-bg, rgba(245, 158, 11, 0.12));
+  color: var(--prizma-drift, #B5670A);
+  border: 1px dashed var(--prizma-drift, #B5670A);
+  border-radius: 10px;
+  cursor: help;
+}
+
+/* 2026-06-02 diag-fix D3 — ETA chip на refresh-кнопке */
+.ts2-refresh-eta {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px; font-weight: 600;
+  font-feature-settings: "tnum" 1;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  opacity: .85;
+}
+
 /* 2026-06-02 audit fix #5 — позитивный empty-state */
 .ts2-action-queue-empty .ts2-action-queue-clean {
   display: flex; align-items: center; gap: 8px;

@@ -1265,7 +1265,14 @@ export const TeamScanner2 = {
             (e?.status === 301 || e?.status === 302) &&
             !String(e?.type || '').startsWith('probe-')
           ).length;
-          const has302 = nonProbe302 > 0;
+          // 2026-06-02 diag-fix D13 — relative threshold вместо absolute > 0.
+          // Старый порог: 1 редирект из 24 → suspectedSso=true (false-positive
+          // на чистых production deploy). Новый: либо ≥3 редиректа подряд,
+          // либо ≥10% от non-probe запросов. На проде diag: 0/24 — корректно
+          // не срабатывает; раньше срабатывало бы и на 1/24 = 4%.
+          const nonProbeTotal = t.filter(e => !String(e?.type || '').startsWith('probe-')).length;
+          const relRedirectRatio = nonProbeTotal > 0 ? (nonProbe302 / nonProbeTotal) : 0;
+          const has302 = nonProbe302 >= 3 || relRedirectRatio >= 0.10;
           // 2026-05-11 — check both `items` AND `authors`. Старая проверка
           // на `raw.confluence.items` давала false-positive: items может быть
           // пустым (data структурирована per-author), а authors содержать
@@ -1562,6 +1569,24 @@ export const TeamScanner2 = {
       // момент когда orchestrator получил данные, а не когда сервер их
       // собрал. Используется в _isCacheStale() и в stale-banner UI.
       this._model._fetchedAtMs = Date.now();
+      // 2026-06-02 diag-fix D11 — TZ-skew at fetch time. Сервер ставит
+      // model.fetchedAt в момент завершения fetch'а; разница с Date.now()
+      // на этот момент — это network latency + clock drift (порядка 10-20с
+      // network + drift). Если позже delta >5 мин, это уже cache-age. Поэтому
+      // ловим snapshot ТОЛЬКО в момент свежего fetch'а; diag читает его
+      // вместо live-вычисления.
+      try {
+        const serverTs = Date.parse(this._model.fetchedAt);
+        if (Number.isFinite(serverTs)) {
+          const drift = this._model._fetchedAtMs - serverTs;
+          this._model._tzSkewAtFetch = {
+            measuredAt: this._model._fetchedAtMs,
+            driftMs: drift,
+            browserTzOffsetMin: (new Date()).getTimezoneOffset(),
+            serverTs: this._model.fetchedAt,
+          };
+        }
+      } catch (_) { /* defensive */ }
       // D3: фиксируем config-fingerprint вместе с моделью.
       this._model._configFp = this._configFingerprint();
       // V22 C1 — surface cfTriedSummary прямо в model.diagnostics, чтобы
@@ -1796,6 +1821,13 @@ export const TeamScanner2 = {
     // V19 C2 — multi-day history для sparkline (PO ask «какие новости?»).
     const { projectKeys } = this._readConfig();
     const history = (this._activeView !== 'multi') ? loadHistory(projectKeys, 14) : [];
+    // 2026-06-02 diag-fix D6/D7 — засеваем activityWindowHours и sinceDate
+    // в model для banner-detection (window mismatch + broad sinceDate).
+    try {
+      const raw = loadSettingsRaw() || {};
+      m.activityWindowHours = Number(raw.activityWindowHours) || 0;
+      m.sinceDate = String(raw.sinceDate || '');
+    } catch (_) { /* defensive */ }
     // V18.1 P7-S4.1 — multi-team view (Dmitry blocker). В режиме multi
     // — render table сводок по командам вместо per-person rows.
     // V18.3 A5b — pk-filter применяется к team-view (single).
@@ -1846,7 +1878,7 @@ export const TeamScanner2 = {
       ? renderMultiTeamView(m)
       : `
         ${renderTeamGlance(filteredModel, { prev, pkFilter: this._activePkFilter, history, anomalies, sprintGoalSlope })}
-        ${renderPersonRows(filteredModel, { expandedKey: this._expandedKey, prev })}`;
+        ${renderPersonRows(filteredModel, { expandedKey: this._expandedKey, prev, teamThresholds: buildTeamThresholdsMap() })}`;
     // V20 S10.1 — текущее состояние toggle и сколько `[X]`-юзеров
     // отфильтровано (для подсказки в menu-item).
     let showBlocked = false;
@@ -1872,7 +1904,7 @@ export const TeamScanner2 = {
     }
     const html = `
       <div class="ts2-root${this._demoMode ? ' ts2-root-demo' : ''}">
-        ${renderTopBar(m, { prev, activeView: this._activeView, cacheAgeMs, isStale, sprintGoalSlope, knownIssuesCount, showBlocked, deactivatedCount, activeSprintOnly, sprintFilter, velocityCompareOn, isDemo: this._demoMode })}
+        ${renderTopBar(m, { prev, activeView: this._activeView, cacheAgeMs, isStale, sprintGoalSlope, knownIssuesCount, showBlocked, deactivatedCount, activeSprintOnly, sprintFilter, velocityCompareOn, isDemo: this._demoMode, lastFetchLatencyMs: this._lastFetchLatencyMs, history })}
         ${renderTeamSwitcher(m, { activeView: this._activeView, activePkFilter: this._activePkFilter, sprintFilter, searchQuery: this._searchQuery || '' })}
         ${bodyHtml}
       </div>
@@ -2151,6 +2183,17 @@ export const TeamScanner2 = {
                  || overlay.querySelector('#ts2-diag-resolve-btn');
         if (btn) btn.click();
       }, 80);
+    });
+    // 2026-06-02 diag-fix D8 — presets-hint CTA: открыть «Настройка команд».
+    root.querySelector('#ts2-presets-hint-btn')?.addEventListener('click', () => {
+      try { this._openConfigModal(); }
+      catch (e) { console.warn('[scanner2] presets-hint open config failed:', e); }
+    });
+    // 2026-06-02 diag-fix D4 — dismiss truncation banner на 7 дней.
+    root.querySelector('#ts2-trunc-banner-dismiss')?.addEventListener('click', (e) => {
+      try { localStorage.setItem('q2_trunc_banner_dismissed_at', String(Date.now())); }
+      catch (_) { /* ignore */ }
+      e.currentTarget.closest('.ts2-trunc-banner')?.remove();
     });
     // 2026-05-17 (D2/D3 fix) — dismiss identity-coverage banner на 7 дней.
     root.querySelector('#ts2-id-banner-dismiss')?.addEventListener('click', (e) => {

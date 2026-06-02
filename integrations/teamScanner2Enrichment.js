@@ -313,7 +313,17 @@ export function enrichForScanner2(model, rawReports = null, opts = {}) {
       }
       // 2) Pattern detection прямо по participant.key (legacy storage fix).
       if (_detectServiceAccountByKey(p.key) || _detectServiceAccountByKey(p.jiraAccountId)) {
-        filteredOutBots.push({ key: p.key, label: p.label, source: 'pattern' });
+        // 2026-06-02 diag-fix D9 — флажок noDisplayName: помечаем случаи
+        // когда label === key (нет реального display name в Jira). Для
+        // безопасных аудитов: если pattern match И есть real display name
+        // (label !== key), это с большей вероятностью service-account
+        // legitimate; если label === key, это «слепое» pattern-match без
+        // подтверждения через display name (может быть false-positive
+        // на реальных людях с шаблонным логином). На проде diag 8 из 12
+        // ботов имели label === key, что ок для типичных service-account
+        // имён cab-sa-* / sbt-* / svc-*. Маркер выводится в diag-modal.
+        const noDisplayName = !p.label || String(p.label).trim() === String(p.key).trim();
+        filteredOutBots.push({ key: p.key, label: p.label, source: 'pattern', noDisplayName });
         return false;
       }
       return true;

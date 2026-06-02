@@ -156,9 +156,23 @@ export function renderPersonRows(model, ctx = {}) {
   const maxAnyDwell = Math.max(0, ...stopTriage.map(t => t.maxDwell));
   const showTriage = stopTriage.length > 0 && (groups.stop.length >= 5 || maxAnyDwell >= 48);
   // V21 — блок «Топ N в Стопе сегодня» удалён по запросу пользователя.
-  // Stop-группа уже первая в renderGroup-порядке + ▌Nh dwell-badge на row,
-  // pill дублировал. (Раньше: showTriage → triagePillHtml; код удалён.)
-  const triagePillHtml = '';
+  // 2026-06-02 diag-fix D8 — реюз места: hint «Кастомизируйте пороги» когда
+  // (а) большая stop-группа (≥5) И (б) per-team thresholds не настроены
+  // (perTeam empty на проде). Pre-set'ы есть в teamScanner2Config, но
+  // discoverability=0 — этот hint открывает их.
+  let triagePillHtml = '';
+  const hasPerTeamThresholds = !!(ctx?.teamThresholds && Object.keys(ctx.teamThresholds).length > 0);
+  if (showTriage && !hasPerTeamThresholds) {
+    triagePillHtml = `<div class="ts2-presets-hint" role="note">
+      <span class="ts2-presets-hint-icon" aria-hidden="true">${Icons.get('settings', { cls: 'btn-icon', size: 12 })}</span>
+      <span class="ts2-presets-hint-text">
+        <b>${groups.stop.length} stop без приоритизации</b> — настройте пороги под команду
+        (CR ≥ 8ч / QA ≥ 16ч / IP ≥ 48ч сейчас глобальные).
+      </span>
+      <button type="button" class="ts2-presets-hint-cta" id="ts2-presets-hint-btn"
+              title="Открыть «Настройка команд» в kebab-меню">Открыть настройки</button>
+    </div>`;
+  }
   const renderGroup = (key) => {
     const arr = groups[key];
     if (!arr.length) return '';

@@ -767,6 +767,26 @@ export function computeTzSkew(model) {
   }
   const serverTs = Date.parse(model.fetchedAt);
   if (!Number.isFinite(serverTs)) return { available: false };
+  // 2026-06-02 diag-fix D11 — если есть snapshot замера в момент fetch'а
+  // (model._tzSkewAtFetch), используем его. Раньше computeTzSkew почти всегда
+  // возвращал unmeasurable, потому что diag-modal открывают после cache stale.
+  const snap = model._tzSkewAtFetch;
+  if (snap && Number.isFinite(snap.measuredAt) && Number.isFinite(snap.driftMs)) {
+    const measureAgeMs = Date.now() - snap.measuredAt;
+    return {
+      available: true,
+      fromSnapshot: true,
+      measureAgeMs,
+      serverTs:           model.fetchedAt,
+      browserNow:         new Date().toISOString(),
+      cacheAgeMs:         Date.now() - serverTs,
+      skewSeconds:        Math.round(snap.driftMs / 1000),
+      driftMs:            snap.driftMs,
+      browserTzOffsetMin: snap.browserTzOffsetMin,
+      browserTzLabel:     _formatTzOffset(snap.browserTzOffsetMin),
+      note: `Замерено в момент fetch'а (${Math.round(measureAgeMs / 60000)} мин назад); включает network latency + clock drift`,
+    };
+  }
   const browserNow = Date.now();
   const ageMs = browserNow - serverTs;
   const browserOffsetMin = (new Date()).getTimezoneOffset();

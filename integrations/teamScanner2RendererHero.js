@@ -65,6 +65,10 @@ export function renderTopBar(model, ctx = {}) {
   const prevSprint = ctx.prev?.sprintGoal;
   const sprintSlope = ctx.sprintGoalSlope || null;
   const sprintGauge = sg && sg.aggregateTotal > 0 ? renderSprintGauge(sg, prevSprint, sprintSlope) : '';
+  // 2026-06-02 diag-fix D5 — history-gaps chip. На проде diag: 4 точки за 7 дней,
+  // EMA/WoW disabled, anomaly threshold не калиброван. Показываем «История 4/7»
+  // с tooltip пропущенных дат — тимлид сразу видит почему trend-метки серые.
+  const historyChip = _renderHistoryGapsChip(ctx.history || []);
   // V21 π5 — banner для demo-режима. Показывает что данные синтетические,
   // даёт CTA «Выйти из демо». Banner всегда виден поверх sprint-gauge,
   // чтобы пользователь не путал demo с реальной картиной.
@@ -87,11 +91,26 @@ export function renderTopBar(model, ctx = {}) {
              chip когда применим, sprintGauge остаётся главным left-elem. */ ''}
         ${(model?.isDemo || ctx.isDemo) ? '<span class="ts2-demo-tag">DEMO</span>' : ''}
         ${sprintGauge}
+        ${historyChip}
       </div>
       <div class="ts2-topbar-meta">
         <button class="ts2-btn ts2-btn-ghost ts2-diag-btn-with-badge" id="ts2-diag-btn" type="button" title="Диагностика: почему по BB / Conf / Jira нет данных + JSON-экспорт для разработчика" aria-label="Диагностика">${Icons.get('clipboard', { cls: 'btn-icon', size: 14 })} Диагностика${ctx.knownIssuesCount > 0 ? `<span class="ts2-diag-btn-badge" title="${ctx.knownIssuesCount} известных проблем требуют внимания">${ctx.knownIssuesCount}</span>` : ''}</button>
         <button class="ts2-btn ts2-btn-ghost ts2-btn-print" id="ts2-print-btn" type="button" title="Сохранить как PDF (откроется print-dialog → выберите Save as PDF)" aria-label="Сохранить как PDF" onclick="window._ts2PrintScanner && window._ts2PrintScanner()">${Icons.get('printer', { cls: 'btn-icon', size: 14 })}</button>
-        <button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="Перезагрузить данные с серверов">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 14 })} Обновить</button>
+        ${(() => {
+          // 2026-06-02 diag-fix D3 — ETA hint на refresh-кнопке. На проде
+          // (115 чел., 6 PK) fetchLatencyMs ~205 сек = 3.4 мин. Тимлид жмёт
+          // «Обновить» и думает «зависло». Показываем последнее измеренное
+          // время в title (hover) + рядом маленький chip с ETA.
+          const lastMs = Number(ctx.lastFetchLatencyMs) || 0;
+          const expSec = lastMs > 0 ? Math.round(lastMs / 1000) : 0;
+          const etaTitle = expSec > 30
+            ? `Перезагрузить данные с серверов. Последний fetch занял ~${expSec} сек (зависит от размера команды и числа источников).`
+            : 'Перезагрузить данные с серверов';
+          const etaChip = expSec >= 60
+            ? `<span class="ts2-refresh-eta" title="${esc(etaTitle)}">~${Math.round(expSec / 60)} мин</span>`
+            : '';
+          return `<button class="ts2-btn ts2-btn-primary" id="ts2-refresh-btn" type="button" title="${esc(etaTitle)}">${Icons.get('rotate-cw', { cls: 'btn-icon', size: 14 })} Обновить${etaChip}</button>`;
+        })()}
         <div class="ts2-kebab-wrap">
           <button class="ts2-btn ts2-btn-ghost ts2-kebab-btn" id="ts2-kebab-btn" type="button"
                   title="Дополнительные действия" aria-label="Меню" aria-haspopup="menu" aria-expanded="false">⋯</button>
@@ -724,7 +743,18 @@ export function renderTeamGlance(model, ctx = {}) {
     const totalIssues = (risks?.totalOrphans || 0) + (model?.scannerV2?.assignedIssuesCount || 0);
     const denom = totalIssues > orphans ? `/${totalIssues}` : '';
     const pct = totalIssues > 0 ? ` (${Math.round(orphans / totalIssues * 100)}%)` : '';
-    riskBlocks.push(`<span class="ts2-glance-risk" title="Задачи в scope без исполнителя. Чем больше — тем больше работы без owner'а"><span class="ts2-glance-num-stop">${orphans}</span><span class="ts2-glance-num-denom">${denom}</span>${dOrphans} без исполнителя${pct}</span>`);
+    // 2026-06-02 diag-fix D10 — split sprint vs backlog. На проде 1481 orphans
+    // выглядит как «1481 потерянных задач», но totalRealOrphans уже вычислен в
+    // computeRiskSummary (только in-sprint OR fresh+high-priority). Реальная
+    // проблема обычно ~30-80, остальное — бэклог. Выводим primary число
+    // = realOrphans, totalOrphans переезжает в tooltip как контекст.
+    const realOrphans = Number(risks?.totalRealOrphans) || 0;
+    const backlogOrphans = Math.max(0, orphans - realOrphans);
+    const primaryN = realOrphans > 0 ? realOrphans : orphans;
+    const tipExtra = realOrphans > 0
+      ? `Требуют внимания: ${realOrphans} (в активном спринте или свежие + high-priority). В бэклоге: ${backlogOrphans} (накопленный технический долг, не daily-actionable).`
+      : `Включает бэклог (${backlogOrphans} задач). Real Orphans фильтр не сработал.`;
+    riskBlocks.push(`<span class="ts2-glance-risk" title="Задачи в scope без исполнителя. ${esc(tipExtra)}"><span class="ts2-glance-num-stop">${primaryN}</span><span class="ts2-glance-num-denom">${denom}</span>${dOrphans} без исполнителя${pct}</span>`);
   }
   if (oos > 0) {
     const pct = Math.round(oosRatio * 100);
@@ -799,6 +829,32 @@ export function renderTeamGlance(model, ctx = {}) {
   const mttrBadge = mttr.mttrHours != null && mttr.count >= 3
     ? `<span class="ts2-glance-mttr" title="Среднее время жизни блокера (mean time to resolution): ${mttr.count} штук. Текущая аппроксимация — mean(dwellHours) на open.">Блокеры висят: ~${fmtDuration(mttr.mttrHours)}</span>`
     : '';
+  // 2026-06-02 diag-fix D12 — Jenkins build-health chip.
+  // На проде 24/81 = 30% failure rate за 7д — амбер/red.
+  const jBuilds7d = Number(model?.jenkins?.builds7d) || 0;
+  const jFails7d  = Number(model?.jenkins?.failures7d) || 0;
+  const jFailRate = jBuilds7d > 0 ? (jFails7d / jBuilds7d) : 0;
+  const jFailPct = Math.round(jFailRate * 100);
+  let jBuildHealthBadge = '';
+  if (jBuilds7d >= 10) {
+    let tone = 'on-course';
+    if (jFailRate > 0.20) tone = 'off-course';
+    else if (jFailRate > 0.10) tone = 'drift';
+    jBuildHealthBadge = `<span class="ts2-glance-jenkins-health ts2-glance-jenkins-health-${tone}" title="Jenkins за 7 дней: ${jFails7d} fail из ${jBuilds7d} ({${jFailPct}%}). Норма ≤10%, 10-20% — warning, >20% — critical. Источник: model.jenkins.">Build fail rate: ${jFailPct}%</span>`;
+  }
+  // 2026-06-02 diag-fix D14 — Zephyr coverage chip.
+  // Если authorsCount гораздо ниже teamSize — атрибуция Zephyr-авторов
+  // сломана (часто QA не сматчены). На проде diag: zephyr.authorsCount=9
+  // при teamSize=115 = 7.8%. Для нормальной команды QA-share обычно 5-20%.
+  const teamSizeNow = (model?.participants || []).length;
+  const zAuth = Number(model?.zephyr?.authorsCount) || 0;
+  const zCfg  = !!model?.zephyr?.configured;
+  let zCoverageBadge = '';
+  if (zCfg && teamSizeNow >= 20 && zAuth > 0 && (zAuth / teamSizeNow) < 0.05) {
+    zCoverageBadge = `<span class="ts2-glance-jenkins-health ts2-glance-jenkins-health-drift" title="Zephyr: ${zAuth} атрибутированных авторов на команду ${teamSizeNow}. Меньше 5% — возможно identity-mapping QA-команды сломан (имена в Zephyr ≠ имена в Jira).">Zephyr: ${zAuth}/${teamSizeNow} атр.</span>`;
+  } else if (zCfg && teamSizeNow >= 20 && zAuth === 0) {
+    zCoverageBadge = `<span class="ts2-glance-jenkins-health ts2-glance-jenkins-health-off-course" title="Zephyr настроен, но 0 атрибутированных авторов. Скорее всего, identity-mapping QA не настроен или Zephyr-сканер не получает данные.">Zephyr: 0 атр.</span>`;
+  }
   // V20 S8 #4 — slope из ctx (передаётся orchestrator'ом из history).
   const slope = ctx.sprintGoalSlope;
   const slopeMini = (slope && slope.trend !== 'no-data')
@@ -870,7 +926,7 @@ export function renderTeamGlance(model, ctx = {}) {
       ${groupLine}
     </div>
     ${(() => {
-      const velocityRow = (crvBadge || prBadge || slopeMini || prCycleBadge || crQueueBadge || mttrBadge) ? `<div class="ts2-glance-line ts2-glance-velocity-row">
+      const velocityRow = (crvBadge || prBadge || slopeMini || prCycleBadge || crQueueBadge || mttrBadge || jBuildHealthBadge || zCoverageBadge) ? `<div class="ts2-glance-line ts2-glance-velocity-row">
         <span class="ts2-glance-velocity-label">Команда:</span>
         ${slopeMini}
         ${slopeMini && crvBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
@@ -883,6 +939,10 @@ export function renderTeamGlance(model, ctx = {}) {
         ${crQueueBadge}
         ${(crQueueBadge || prCycleBadge) && mttrBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
         ${mttrBadge}
+        ${(mttrBadge || crQueueBadge) && jBuildHealthBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
+        ${jBuildHealthBadge}
+        ${(jBuildHealthBadge || mttrBadge) && zCoverageBadge ? '<span class="ts2-glance-sep">·</span>' : ''}
+        ${zCoverageBadge}
       </div>` : '';
       const healthHero = renderTeamHealthHero(model, ctx.history || []);
       // PR-CO — Health-блок пристёгнут справа к строке «Команда: ↗ · CR · PR · …».
@@ -1016,6 +1076,7 @@ export function renderTeamGlance(model, ctx = {}) {
   // Scanner показывает ~15% реальной картины. Banner можно скрыть на
   // 7 дней через × — флаг в localStorage `q2_id_banner_dismissed_at`.
   const identityBanner = _renderIdentityCoverageBanner(model);
+  const truncationBanner = _renderTruncationBanner(model);
   // 2026-05-11 — SSO-redirect баннер убран из Сканнера (банер мешал основному
   // контенту и часто давал false-positive на инсталляциях типа Сбер DC где
   // `/wiki/rest/...` редиректит 302, но `/rest/...` работает). В Чёрном
@@ -1026,6 +1087,7 @@ export function renderTeamGlance(model, ctx = {}) {
   return `
     <div class="ts2-glance">
       ${identityBanner}
+      ${truncationBanner}
       ${storyLine}
       ${heroBlock}
       ${renderActionQueue(model)}
@@ -1045,16 +1107,113 @@ export function renderTeamGlance(model, ctx = {}) {
    открывает Diagnostic-modal и запускает Auto-Resolve (handler сидит на
    `#ts2-glance-resolve-btn` в teamScanner2.js L2107). Dismiss × сохраняет
    timestamp в localStorage на 7 дней — чтобы не спамить тимлида. */
+/* 2026-06-02 diag-fix D5 — History gaps chip.
+   Считаем сколько daily-snapshot'ов покрыто vs ожидаемое число дней
+   (latest - earliest + 1). При gaps ≥1 показываем chip в шапке. */
+function _renderHistoryGapsChip(history) {
+  if (!Array.isArray(history) || history.length < 2) return '';
+  const days = history.map(h => h?.day).filter(Boolean).sort();
+  if (days.length < 2) return '';
+  const earliestMs = Date.parse(days[0] + 'T00:00:00Z');
+  const latestMs   = Date.parse(days[days.length - 1] + 'T00:00:00Z');
+  if (!Number.isFinite(earliestMs) || !Number.isFinite(latestMs)) return '';
+  const expectedDays = Math.round((latestMs - earliestMs) / (24 * 60 * 60 * 1000)) + 1;
+  const haveDays = days.length;
+  if (haveDays >= expectedDays) return '';
+  const missingDays = expectedDays - haveDays;
+  // Compute missing dates
+  const dayset = new Set(days);
+  const missingList = [];
+  for (let ms = earliestMs; ms <= latestMs; ms += 24 * 60 * 60 * 1000) {
+    const d = new Date(ms).toISOString().slice(0, 10);
+    if (!dayset.has(d)) missingList.push(d);
+  }
+  const tipPart = missingList.length <= 4
+    ? missingList.join(', ')
+    : missingList.slice(0, 3).join(', ') + ` …и ещё ${missingList.length - 3}`;
+  return `<span class="ts2-history-gaps-chip" title="История ${haveDays} из ${expectedDays} дней. Пропущено: ${esc(tipPart)}. EMA / WoW / anomaly-detection требуют ≥8 точек для full confidence — пропуски снижают надёжность.">${haveDays}/${expectedDays} дн.</span>`;
+}
+
+/* 2026-06-02 diag-fix D4+D6+D7 — Server caps truncation + window mismatch.
+   D4: серверный cap 500 issues / sprint / PR.
+   D6: config.activityWindowHours может быть >72ч, но heatmap/dot-strip
+       рендерится строго 72ч — события старше 72ч есть в payload, но
+       не видны в визуализации (только в детальной ленте).
+   D7: sinceDate > 365 дней назад — broad scope раздувает payload и
+       упирается в server caps (косвенно).
+*/
+function _renderTruncationBanner(model) {
+  if (!model?.spaces) return '';
+  const capped = [];
+  for (const [pk, sp] of Object.entries(model.spaces)) {
+    const issuesN = (sp?.issues || []).length;
+    const sprintN = (sp?.sprintIssues || []).length;
+    if (issuesN >= 500 || sprintN >= 500) {
+      capped.push({ pk, issuesN, sprintN });
+    }
+  }
+  // D6/D7 extra signals: activityWindowHours и sinceDate из state/settings.
+  const winHours = Number(model.activityWindowHours) || 0;
+  const winMismatch = winHours > 96;   // 96ч = 4 дня, дальше 72ч-vis нерелевантна
+  // D7 — sinceDate проверяем через config (доступно из integrationsStore;
+  // для baseline сейчас читаем из state — если отсутствует, не показываем)
+  const sinceDateStr = model.sinceDate || '';
+  let sinceDateOld = false;
+  if (sinceDateStr) {
+    const sinceMs = Date.parse(sinceDateStr);
+    if (Number.isFinite(sinceMs) && Date.now() - sinceMs > 365 * 24 * 60 * 60 * 1000) {
+      sinceDateOld = true;
+    }
+  }
+  if (!capped.length && !winMismatch && !sinceDateOld) return '';
+  try {
+    const dismissedAt = Number(localStorage.getItem('q2_trunc_banner_dismissed_at') || 0);
+    if (dismissedAt > Date.now() - 7 * 24 * 60 * 60 * 1000) return '';
+  } catch (_) { /* ignore */ }
+  const lines = [];
+  if (capped.length) {
+    const cappedLines = capped.map(c => {
+      const issuesHit = c.issuesN >= 500;
+      const sprintHit = c.sprintN >= 500;
+      const parts = [];
+      if (issuesHit) parts.push(`${c.issuesN}+ issues`);
+      if (sprintHit) parts.push(`${c.sprintN}+ sprint`);
+      return `${c.pk}: ${parts.join(' / ')}`;
+    });
+    lines.push(`Cap 500 на сервере: ${cappedLines.join(' · ')}`);
+  }
+  if (winMismatch) {
+    lines.push(`Окно активности ${winHours}ч, но heatmap и dot-strip рендерят 72ч — события 72-${winHours}ч назад видны только в детальной ленте сотрудника`);
+  }
+  if (sinceDateOld) {
+    lines.push(`sinceDate в настройках = ${esc(sinceDateStr)} (>1 года назад) — раздувает payload и провоцирует упор в caps`);
+  }
+  const title = capped.length
+    ? 'Данные обрезаны server-side cap-ом (500)'
+    : (winMismatch ? 'Окно активности шире чем визуализация' : 'Очень широкий sinceDate в настройках');
+  return `
+    <div class="ts2-sso-banner ts2-trunc-banner" role="status" aria-live="polite">
+      <div class="ts2-sso-banner-icon" aria-hidden="true">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 16 })}</div>
+      <div class="ts2-sso-banner-body">
+        <div class="ts2-sso-banner-title"><b>${esc(title)}</b></div>
+        <div class="ts2-sso-banner-sub">${lines.map(l => esc(l)).join(' · ')}. Уменьшите проектный scope или сдвиньте sinceDate ближе в Настройках → Интеграции.</div>
+      </div>
+      <button type="button" class="ts2-sso-banner-dismiss" id="ts2-trunc-banner-dismiss" title="Скрыть на 7 дней" aria-label="Скрыть">×</button>
+    </div>
+  `;
+}
+
 function _renderIdentityCoverageBanner(model) {
   if (!model) return '';
   const parts = Array.isArray(model.participants) ? model.participants : [];
   const teamSize = parts.length;
   if (teamSize < 20) return '';  // на маленьких командах coverage шумит
-  // 2026-06-02 audit fix #4 — расширили: identity-mapping coverage из
-  // state.employees (true source of truth), не только activity-proxy.
-  // На реальном проде (115 чел.) из diag: bbLogin 64% / cfId 30% / jkName 15%
-  // — три критически дырявые мапы; банер должен бить в лицо до того, как
-  // тимлид примет «у Феди 0 коммитов» за факт.
+  // 2026-06-02 audit fix #4 + diag-fixes D1/D2 — расширено: identity-mapping
+  // coverage + blockedExcluded + unmatchedRegistryCount.
+  // На проде (115 чел.) из diag: bbLogin 64% / cfId 30% / jkName 15% mapping;
+  // blockedExcluded=59 (51% реестра — deactivated Jira-аккаунты); unmatchedRegistryCount=31
+  // (в реестре, но identity-resolve не нашёл в Jira). Раньше banner ловил только
+  // mapping, теперь — все три класса проблем data-quality.
   const empByEmail = new Map();
   const empByJira  = new Map();
   for (const e of (state.employees || [])) {
@@ -1071,11 +1230,10 @@ function _renderIdentityCoverageBanner(model) {
     if (!emp.confluenceAccountId) missingCf++;
     if (!emp.jenkinsUserName)     missingJk++;
   }
-  // Считаем процент НЕ настроенных в команде (из всех participants).
   const bbMissPct = Math.round(missingBb / teamSize * 100);
   const cfMissPct = Math.round(missingCf / teamSize * 100);
   const jkMissPct = Math.round(missingJk / teamSize * 100);
-  // Activity-proxy (legacy): сколько ВООБЩЕ имеют BB/CF активность.
+  // Activity-proxy (legacy)
   let bbCount = 0, cfCount = 0;
   for (const p of parts) {
     if (p.bbItems && p.bbItems.length) bbCount++;
@@ -1083,11 +1241,30 @@ function _renderIdentityCoverageBanner(model) {
   }
   const cfActPct = Math.round(cfCount / teamSize * 100);
   const bbActPct = Math.round(bbCount / teamSize * 100);
-  // Trigger: ЛИБО identity-mapping дыра (>30% bb / >50% cf / >70% jk),
-  // ЛИБО activity-coverage критически низкий (legacy condition).
-  const idCritical  = bbMissPct >= 30 || cfMissPct >= 50 || jkMissPct >= 70;
-  const actCritical = cfActPct < 30 || bbActPct < 50;
-  if (!idCritical && !actCritical) return '';
+  // D1 — blocked Employees (deactivated Jira-аккаунты), model.deactivatedFilteredOut
+  // — это participants отфильтрованные по [X] suffix или ghost-flag.
+  const blockedCount = Array.isArray(model.deactivatedFilteredOut) ? model.deactivatedFilteredOut.length : 0;
+  const blockedPctOfRegistry = (state.employees?.length > 0)
+    ? Math.round(blockedCount / state.employees.length * 100)
+    : 0;
+  // D2 — unmatched registry: сотрудники из state.employees, которые НЕ попали
+  // в roster (т.е. identity-resolve не нашёл их Jira-аккаунт). Считаем
+  // intersect: эмплои с jiraAccountId, который НЕ есть среди participants.
+  const partsByJiraId = new Set(parts.map(p => p?.jiraAccountId).filter(Boolean));
+  const partsByEmail  = new Set(parts.map(p => String(p?.email || '').toLowerCase()).filter(Boolean));
+  let unmatchedRegistryCount = 0;
+  for (const e of (state.employees || [])) {
+    if (!e?.jiraAccountId && !e?.email) continue;
+    const matchedByJira  = e.jiraAccountId && partsByJiraId.has(e.jiraAccountId);
+    const matchedByEmail = e.email && partsByEmail.has(String(e.email).toLowerCase());
+    if (!matchedByJira && !matchedByEmail) unmatchedRegistryCount++;
+  }
+  // Trigger conditions
+  const idCritical       = bbMissPct >= 30 || cfMissPct >= 50 || jkMissPct >= 70;
+  const actCritical      = cfActPct < 30 || bbActPct < 50;
+  const blockedCritical  = blockedPctOfRegistry >= 30;
+  const unmatchedCritical = unmatchedRegistryCount >= 10 || (state.employees?.length > 0 && unmatchedRegistryCount / state.employees.length >= 0.10);
+  if (!idCritical && !actCritical && !blockedCritical && !unmatchedCritical) return '';
   // Dismiss check.
   try {
     const dismissedAt = Number(localStorage.getItem('q2_id_banner_dismissed_at') || 0);
@@ -1097,19 +1274,26 @@ function _renderIdentityCoverageBanner(model) {
   if (bbMissPct >= 30) issues.push(`Bitbucket: ${missingBb} из ${teamSize} без bbLogin`);
   if (cfMissPct >= 50) issues.push(`Confluence: ${missingCf} из ${teamSize} без cfAccountId`);
   if (jkMissPct >= 70) issues.push(`Jenkins: ${missingJk} из ${teamSize} без jenkinsUserName`);
+  if (blockedCritical) issues.push(`Деактивированных в реестре: ${blockedCount} (${blockedPctOfRegistry}%)`);
+  if (unmatchedCritical) issues.push(`В реестре, но не найдены в Jira: ${unmatchedRegistryCount}`);
   if (!issues.length) {
-    // fallback на legacy activity-proxy если identity-mapping без критических
     if (cfActPct < 30) issues.push(`Confluence-активность: ${cfActPct}%`);
     if (bbActPct < 50) issues.push(`Bitbucket-активность: ${bbActPct}%`);
   }
+  const title = (blockedCritical || unmatchedCritical)
+    ? 'Реестр сотрудников требует уборки'
+    : 'Identity-mapping дыры';
+  const explain = (blockedCritical && !idCritical)
+    ? 'Большая часть записей в реестре — устаревшие (уволившиеся / переведённые). Они зря тратят quota intgrations API и шумят в фильтрах.'
+    : 'Для части команды Scanner не получает данные из интеграций. Метрики (коммиты / правки / билды) у этих сотрудников показывают «0», что вводит в заблуждение.';
   return `
     <div class="ts2-sso-banner ts2-id-banner" role="status" aria-live="polite">
       <div class="ts2-sso-banner-icon" aria-hidden="true">${Icons.get('alert-triangle', { cls: 'btn-icon', size: 16 })}</div>
       <div class="ts2-sso-banner-body">
-        <div class="ts2-sso-banner-title"><b>Identity-mapping дыры</b> — для части команды Scanner не получает данные из интеграций.</div>
-        <div class="ts2-sso-banner-sub">${esc(issues.join(' · '))}. Запустите Auto-Resolve — bulk-lookup в API заполнит недостающие поля. Без этого метрики (коммиты / правки / билды) у этих сотрудников показывают «0», что вводит в заблуждение.</div>
+        <div class="ts2-sso-banner-title"><b>${esc(title)}</b></div>
+        <div class="ts2-sso-banner-sub">${esc(issues.join(' · '))}. ${esc(explain)}</div>
       </div>
-      <button type="button" class="ts2-sso-banner-cta" id="ts2-glance-resolve-btn" title="Открыть Диагностику и запустить bulk Auto-Resolve">Запустить Auto-Resolve</button>
+      <button type="button" class="ts2-sso-banner-cta" id="ts2-glance-resolve-btn" title="Открыть Диагностику и запустить bulk Auto-Resolve">Открыть Диагностику</button>
       <button type="button" class="ts2-sso-banner-dismiss" id="ts2-id-banner-dismiss" title="Скрыть на 7 дней" aria-label="Скрыть">×</button>
     </div>
   `;
