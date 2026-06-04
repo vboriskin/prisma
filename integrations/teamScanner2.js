@@ -138,6 +138,7 @@ import {
   hasLLMCredentials as _llmHasCredentials,
   enrichRationaleWithLLM as _llmEnrichRationale,
   llmAttributeOrphans as _llmAttributeOrphans,
+  generateDailyNarrative as _llmGenerateNarrative,
 } from './teamScanner2AssistantLLM.js';
 import {
   buildPlanToday as _rulesBuildPlan,
@@ -2991,20 +2992,38 @@ export const TeamScanner2 = {
     } catch (e) {
       try { console.warn('[scanner2.assistant] rules failed:', e); } catch (_) {}
     }
-    // Сразу рендерим rules-only (LLM-extras появятся через ~3-5 секунд).
-    if (planArtifact) {
-      const html = _renderPlanHTML(planArtifact);
-      existing.plan = { ok: true, html, _artifact: planArtifact };
-      if (!only || only === 'plan') this._renderAssistantBlock(section, 'plan', existing.plan);
+    // narrativeState — LLM-сводки для шапок «Что делал вчера» / «Что делает сегодня».
+    // Изначально '__loading__' пока LLM не ответит. Если LLM нет — пустые.
+    const narrativeState = { fact: '', plan: '' };
+    const renderAll = () => {
+      if (planArtifact) {
+        existing.plan = {
+          ok: true,
+          html: _renderPlanHTML(planArtifact, { narrativeHTML: narrativeState.plan }),
+          _artifact: planArtifact,
+        };
+        if (!only || only === 'plan') this._renderAssistantBlock(section, 'plan', existing.plan);
+      }
+      if (summary72hArtifact) {
+        existing.summary = {
+          ok: true,
+          html: _render72hHTML(summary72hArtifact, {
+            factNarrativeHTML: narrativeState.fact,
+            planNarrativeHTML: narrativeState.plan,
+          }),
+          _artifact: summary72hArtifact,
+        };
+        if (!only || only === 'summary') this._renderAssistantBlock(section, 'summary', existing.summary);
+      }
+    };
+    // Если LLM доступен — показываем skeleton'ы в narrative-блоках сразу.
+    if (llmAvailable) {
+      narrativeState.fact = '__loading__';
+      narrativeState.plan = '__loading__';
     }
-    if (summary72hArtifact) {
-      const html = _render72hHTML(summary72hArtifact);
-      existing.summary = { ok: true, html, _artifact: summary72hArtifact };
-      if (!only || only === 'summary') this._renderAssistantBlock(section, 'summary', existing.summary);
-    }
+    renderAll();
 
-    // Если LLM нет — закругляемся: rules-only вид уже отрендерен,
-    // отдельный warn-баннер не показываем (rules-вид self-sufficient).
+    // Если LLM нет — закругляемся: rules-only вид уже отрендерен, narrative пуст.
     if (!llmAvailable) {
       existing.ts = Date.now();
       this._assistantCache.set(key, existing);
@@ -3015,43 +3034,45 @@ export const TeamScanner2 = {
       return;
     }
 
-    // Параллель LLM-fetch'и: enrich rationale + attribute orphans.
+    // Параллель LLM-fetch'и: narrative для fact и plan + attribute orphans.
     if ((!only || only === 'plan') && planArtifact) {
-      tasks.push(_llmEnrichRationale(p, planArtifact, 'plan', { signal: ctrl.signal, cfg }).then(updated => {
+      tasks.push(_llmGenerateNarrative(p, planArtifact, 'plan', { signal: ctrl.signal, cfg }).then(r => {
         if (ctrl.signal.aborted) return;
-        existing.plan = { ok: true, html: _renderPlanHTML(updated), _artifact: updated };
-        this._renderAssistantBlock(section, 'plan', existing.plan);
-      }).catch(() => {}));
+        narrativeState.plan = r?.ok ? r.html : '__unavailable__';
+        renderAll();
+      }).catch(() => { narrativeState.plan = '__unavailable__'; renderAll(); }));
     }
     if ((!only || only === 'summary') && summary72hArtifact) {
-      // enrichRationale на factArtifact.tasks (jiraTasks)
-      const factAsTaskList = { tasks: summary72hArtifact.fact.jiraTasks };
-      const planAsTaskList = { tasks: summary72hArtifact.plan.tasks };
-      const enrichTasks = Promise.allSettled([
-        _llmEnrichRationale(p, factAsTaskList, 'fact', { signal: ctrl.signal, cfg }),
-        _llmEnrichRationale(p, planAsTaskList, 'plan', { signal: ctrl.signal, cfg }),
-        _llmAttributeOrphans(summary72hArtifact.fact.orphans, summary72hArtifact.fact.jiraTasks, { signal: ctrl.signal, cfg }),
-      ]).then(([rFact, rPlan, rOrph]) => {
+      // fact-narrative
+      tasks.push(_llmGenerateNarrative(p, summary72hArtifact.fact, 'fact', { signal: ctrl.signal, cfg }).then(r => {
         if (ctrl.signal.aborted) return;
-        // Apply orphan-rescue: move rescued items into byKey
-        if (rOrph.status === 'fulfilled' && rOrph.value?.rescued?.length) {
-          const stillOrphan = rOrph.value.stillOrphan || [];
-          for (const a of rOrph.value.rescued) {
+        narrativeState.fact = r?.ok ? r.html : '__unavailable__';
+        renderAll();
+      }).catch(() => { narrativeState.fact = '__unavailable__'; renderAll(); }));
+      // plan-narrative (внутри 72h)
+      tasks.push(_llmGenerateNarrative(p, summary72hArtifact.plan, 'plan', { signal: ctrl.signal, cfg }).then(r => {
+        if (ctrl.signal.aborted) return;
+        narrativeState.plan = r?.ok ? r.html : '__unavailable__';
+        renderAll();
+      }).catch(() => { narrativeState.plan = '__unavailable__'; renderAll(); }));
+      // orphan-attribution: rescued активности уезжают внутрь задач
+      tasks.push(_llmAttributeOrphans(summary72hArtifact.fact.orphans, summary72hArtifact.fact.jiraTasks, { signal: ctrl.signal, cfg }).then(r => {
+        if (ctrl.signal.aborted) return;
+        if (r?.rescued?.length) {
+          for (const a of r.rescued) {
             const k = a._llmAttributedTo;
-            const existingTask = summary72hArtifact.fact.jiraTasks.find(t => t.key === k);
-            if (existingTask) {
-              existingTask.activities.push({
+            const t = summary72hArtifact.fact.jiraTasks.find(x => x.key === k);
+            if (t) {
+              t.activities.push({
                 kind: a.kind, text: a.title || a.text || '', at: a.at, _src: a._src,
-                rationale: [`Сопоставлено LLM с задачей ${k} (уверенность ${Math.round(a._llmConfidence * 100)}%)`, a._llmReason || ''].filter(Boolean),
+                _llmAttributedTo: k, _llmConfidence: a._llmConfidence, _llmReason: a._llmReason,
               });
             }
           }
-          summary72hArtifact.fact.orphans = stillOrphan;
+          summary72hArtifact.fact.orphans = r.stillOrphan || [];
+          renderAll();
         }
-        existing.summary = { ok: true, html: _render72hHTML(summary72hArtifact), _artifact: summary72hArtifact };
-        this._renderAssistantBlock(section, 'summary', existing.summary);
-      }).catch(() => {});
-      tasks.push(enrichTasks);
+      }).catch(() => {}));
     }
 
     Promise.allSettled(tasks).then(() => {
@@ -4151,7 +4172,7 @@ export const TeamScanner2 = {
    * audience-mode, анонимизацией, print-стилями и copy-MD для чата.
    * Реализует рекомендации экспертной панели (workflow brief-html-utility-audit).
    */
-  _exportBriefV2() {
+  async _exportBriefV2() {
     if (!this._model) {
       this._announce('Нет данных — сначала обновите Сканнер.');
       return;
@@ -4160,14 +4181,116 @@ export const TeamScanner2 = {
       this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
       return;
     }
+    const filteredModel = (this._activePkFilter && this._activeView === 'team')
+      ? this._applyPkFilter(this._model, this._activePkFilter)
+      : this._model;
+    const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
+    const userEmail = (typeof window !== 'undefined' && window.userEmail) ? window.userEmail : '';
+    const people = filteredModel.participants || [];
+    const cfg = _llmReadConfig();
+    const concurrency = Math.min(10, Math.max(1, Number(cfg.briefConcurrency) || 5));
+    const llmAvailable = _llmHasCredentials(cfg);
+
+    // ── Открываем progress-модалку ──
+    const progress = this._openBriefProgressModal({ teamLabel, people, concurrency });
+
+    // assistantByKey накапливаем здесь — потом передаём в exporter
+    const assistantByKey = new Map();
+    const ctrl = new AbortController();
+    progress.onCancel(() => { ctrl.abort(); });
+
+    // ── Параллельный воркер-пул ──
+    const queue = people.slice();
+    let activeJobs = 0;
+    let completed = 0;
+    const total = people.length;
+    let canceled = false;
+
+    const runOne = async (p) => {
+      if (ctrl.signal.aborted) return;
+      const startMs = Date.now();
+      progress.setRunning(p.key);
+      try {
+        // Sprint scope для plan
+        let sprintScope = [];
+        try {
+          const projects = Array.isArray(p.projects) ? p.projects : [];
+          for (const pk of projects) {
+            const list = filteredModel?.spaces?.[pk]?.sprintIssues || [];
+            for (const it of list) {
+              const aName = String(it.assignee || '').toLowerCase();
+              if (aName && aName === String(p.label || '').toLowerCase()) sprintScope.push(it);
+            }
+          }
+        } catch (_) {}
+        const rulesOpts = { sprintScope, ema14: {}, now: Date.now() };
+        const summary72h = _rulesBuild72h(p, filteredModel, rulesOpts);
+
+        let factNarrativeHTML = '';
+        let planNarrativeHTML = '';
+        if (llmAvailable) {
+          const [factR, planR, orphR] = await Promise.allSettled([
+            _llmGenerateNarrative(p, summary72h.fact, 'fact', { signal: ctrl.signal, cfg }),
+            _llmGenerateNarrative(p, summary72h.plan, 'plan', { signal: ctrl.signal, cfg }),
+            _llmAttributeOrphans(summary72h.fact.orphans, summary72h.fact.jiraTasks, { signal: ctrl.signal, cfg }),
+          ]);
+          if (ctrl.signal.aborted) return;
+          factNarrativeHTML = (factR.status === 'fulfilled' && factR.value?.ok) ? factR.value.html : '__unavailable__';
+          planNarrativeHTML = (planR.status === 'fulfilled' && planR.value?.ok) ? planR.value.html : '__unavailable__';
+          if (orphR.status === 'fulfilled' && orphR.value?.rescued?.length) {
+            const rescued = orphR.value.rescued;
+            for (const a of rescued) {
+              const k = a._llmAttributedTo;
+              const t = summary72h.fact.jiraTasks.find(x => x.key === k);
+              if (t) t.activities.push({
+                kind: a.kind, text: a.title || a.text || '', at: a.at, _src: a._src,
+                _llmAttributedTo: k, _llmConfidence: a._llmConfidence, _llmReason: a._llmReason,
+              });
+            }
+            summary72h.fact.orphans = orphR.value.stillOrphan || [];
+          }
+        }
+        const html = _render72hHTML(summary72h, { factNarrativeHTML, planNarrativeHTML });
+        assistantByKey.set(p.key, html);
+        progress.setDone(p.key, Date.now() - startMs);
+      } catch (e) {
+        // Per-person failure → отметим в модалке, в HTML появится «Сводка недоступна»
+        progress.setFailed(p.key, e?.message || 'failed');
+      } finally {
+        completed++;
+        progress.setCount(completed, total);
+      }
+    };
+
+    await new Promise((resolve) => {
+      const next = () => {
+        if (canceled) return;
+        while (activeJobs < concurrency && queue.length) {
+          const p = queue.shift();
+          activeJobs++;
+          runOne(p).finally(() => {
+            activeJobs--;
+            if (queue.length || activeJobs > 0) next();
+            else resolve();
+          });
+        }
+        if (!queue.length && activeJobs === 0) resolve();
+      };
+      progress.onCancel(() => { canceled = true; resolve(); });
+      next();
+    });
+
+    if (ctrl.signal.aborted) {
+      progress.close();
+      this._announce('Выгрузка брифа 2.0 отменена.');
+      return;
+    }
+
+    progress.setFinishing();
     try {
-      const filteredModel = (this._activePkFilter && this._activeView === 'team')
-        ? this._applyPkFilter(this._model, this._activePkFilter)
-        : this._model;
-      const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
-      const userEmail = (typeof window !== 'undefined' && window.userEmail) ? window.userEmail : '';
       exportTeamBriefV2(filteredModel, {
         teamLabel,
+        assistantByKey,
         context: {
           history: this._historyOverride || null,
           prev: this._prevSnapshot || null,
@@ -4180,7 +4303,80 @@ export const TeamScanner2 = {
       console.warn('[scanner2] brief v2 export failed:', e);
       this._announce('Не удалось создать бриф v2.0: ' + (e?.message || 'неизвестная ошибка'));
     }
+    setTimeout(() => progress.close(), 1200);
   },
+
+  /** Прогресс-модалка для бриф 2.0 export. */
+  _openBriefProgressModal({ teamLabel, people, concurrency }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'ts2-brief-progress-overlay';
+    const rows = people.map(p => `
+      <li class="ts2-bp-row" data-key="${this._escAttr(p.key)}">
+        <span class="ts2-bp-icon" data-icon>·</span>
+        <span class="ts2-bp-name">${this._escText(p.label || p.key)}</span>
+        <span class="ts2-bp-status" data-status>в очереди</span>
+      </li>
+    `).join('');
+    overlay.innerHTML = `
+      <div class="ts2-brief-progress-modal" role="dialog" aria-modal="true">
+        <div class="ts2-bp-head">
+          <h2 class="ts2-bp-title">Готовим бриф 2.0</h2>
+          <div class="ts2-bp-meta">Команда «${this._escText(teamLabel)}» · ${people.length} ${this._pluralPeople(people.length)} · параллельность ${concurrency}</div>
+        </div>
+        <div class="ts2-bp-progress">
+          <div class="ts2-bp-bar"><div class="ts2-bp-bar-fill" style="width:0%" data-bar></div></div>
+          <div class="ts2-bp-counter" data-counter>0 / ${people.length}</div>
+        </div>
+        <ul class="ts2-bp-list">${rows}</ul>
+        <div class="ts2-bp-actions">
+          <button class="ts2-btn ts2-btn-ghost" type="button" data-cancel>Отменить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const root = overlay.querySelector('.ts2-brief-progress-modal');
+    const cancelBtn = overlay.querySelector('[data-cancel]');
+    const cancelHandlers = [];
+    cancelBtn?.addEventListener('click', () => {
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = 'Отменяется…';
+      for (const fn of cancelHandlers) try { fn(); } catch (_) {}
+    });
+
+    const setRow = (key, statusText, iconText, cls) => {
+      const li = overlay.querySelector(`li[data-key="${CSS.escape(key)}"]`);
+      if (!li) return;
+      const st = li.querySelector('[data-status]');
+      const ic = li.querySelector('[data-icon]');
+      if (st) st.textContent = statusText;
+      if (ic) ic.textContent = iconText;
+      li.classList.remove('is-running', 'is-done', 'is-failed');
+      if (cls) li.classList.add(cls);
+    };
+
+    return {
+      setRunning: (key) => setRow(key, 'генерация сводки…', '⟳', 'is-running'),
+      setDone:    (key, ms) => setRow(key, `${(ms/1000).toFixed(1)}с`, '✓', 'is-done'),
+      setFailed:  (key, err) => setRow(key, `ошибка: ${err.slice(0, 40)}`, '✕', 'is-failed'),
+      setCount: (done, total) => {
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const bar = overlay.querySelector('[data-bar]');
+        const cnt = overlay.querySelector('[data-counter]');
+        if (bar) bar.style.width = pct + '%';
+        if (cnt) cnt.textContent = `${done} / ${total}  ${pct}%`;
+      },
+      setFinishing: () => {
+        const cnt = overlay.querySelector('[data-counter]');
+        if (cnt) cnt.textContent = 'Готово. Скачиваем…';
+        if (cancelBtn) cancelBtn.disabled = true;
+      },
+      onCancel: (fn) => { cancelHandlers.push(fn); },
+      close: () => { try { overlay.remove(); } catch (_) {} },
+    };
+  },
+
+  _escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;'); },
+  _escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); },
+  _pluralPeople(n) { const t = n % 10, h = n % 100; if (t === 1 && h !== 11) return 'сотрудник'; if (t >= 2 && t <= 4 && (h < 12 || h > 14)) return 'сотрудника'; return 'сотрудников'; },
 
   /**
    * V18.3 A1 — пересчитать enrichment с новой config'ой. Поскольку

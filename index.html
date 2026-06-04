@@ -1805,6 +1805,10 @@
         <span>Лимит JSON payload (bytes)</span>
         <input id="llm-payload-limit" class="filter-input" type="number" min="512" max="5000000" step="128">
       </label>
+      <label class="llm-field">
+        <span>Параллельность брифа 2.0</span>
+        <input id="llm-brief-concurrency" class="filter-input" type="number" min="1" max="10" step="1" title="Сколько LLM-сводок генерировать одновременно при выгрузке брифа 2.0 (1-10, default 5)">
+      </label>
       <label class="llm-field llm-field-wide">
         <span>Custom payload (JSON или текст)</span>
         <textarea id="llm-custom-payload" class="assistant-input llm-textarea" rows="5" placeholder="{ &quot;focus&quot;: &quot;...&quot; }"></textarea>

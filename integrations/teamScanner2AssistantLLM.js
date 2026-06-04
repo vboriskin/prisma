@@ -63,6 +63,7 @@ export function readLLMConfig() {
         clientId:     settings.clientId     || '',
         clientSecret: settings.clientSecret || '',
         token,
+        briefConcurrency: Math.min(10, Math.max(1, Math.round(Number(settings.briefConcurrency) || 5))),
       };
     }
   } catch (_) { /* fall through */ }
@@ -501,6 +502,80 @@ function _escInline(s) {
      JIRA-key в title/branch) и просит LLM по семантике сопоставить
      с одной из жирных задач. confidence < 0.7 → остаётся orphan.
    ════════════════════════════════════════════════════════════ */
+
+const NARRATIVE_FACT_SYSTEM_PROMPT = `Ты пишешь короткую сводку «что сотрудник делал вчера» в инструменте Призма. Получишь structured JSON с задачами, активностями и ключевыми числами. Твоя задача — сделать 2-4 предложения standup-style, которые тимлид может зачитать как готовый статус.
+
+Жёсткие правила:
+1. По-русски, прошедшее время (закрыл, перевёл, оставил коммент).
+2. Без оценочных слов (продуктивно/мало/много/хорошо/плохо). Только факты.
+3. Каждое утверждение должно опираться на конкретный элемент payload (key, summary, count, source).
+4. Упоминай задачи по «KEY — Название» (длинное тире). Повторно — только KEY.
+5. Длина: 2-4 предложения, общая ≤ 400 символов. Никаких маркированных списков, никаких заголовков.
+6. HR/medical/семья/больничный — не цитируй содержимое комментариев. Пиши нейтрально «комментарий в KEY».
+7. Если payload пуст или активностей нет — пиши одной строкой: «По данным интеграций вчера активности не зафиксировано.»
+8. Возвращай ТОЛЬКО текст сводки, никакого markdown/JSON.`;
+
+const NARRATIVE_PLAN_SYSTEM_PROMPT = `Ты пишешь короткую сводку «что сотрудник делает сегодня» в инструменте Призма. Получишь structured JSON с задачами в WIP / спринте, блокерами и метриками. Твоя задача — 2-4 предложения standup-style.
+
+Жёсткие правила:
+1. По-русски, настоящее время (работает над, в фокусе, в очереди).
+2. НЕ предсказывай, не выдумывай задач. Только то, что есть в payload.tasks.
+3. Никаких общих фраз: «нужно завершить», «приоритетно», «важно» — это не данные.
+4. Источник = поля payload: status, lastTouchHoursAgo, duedate, priority, sprint.
+5. Упоминай задачи по «KEY — Название» (длинное тире). Повторно — только KEY.
+6. Длина: 2-4 предложения, общая ≤ 400 символов. Без списков, без заголовков.
+7. Если задач в фокусе нет — одной строкой: «Активных задач в работе нет.»
+8. HR/medical защита — не цитируй медицинское/семейное.
+9. Возвращай ТОЛЬКО текст, никакого markdown/JSON.`;
+
+/**
+ * 2-4 предложения standup-style на основе rules-artefact'а.
+ * Используется в шапке «Что делал вчера» / «Что делает сегодня».
+ *
+ * @param {object} person — p (для name)
+ * @param {object} artefact — buildFactYesterday() или buildPlanToday() output
+ * @param {'fact'|'plan'} kind
+ * @returns {Promise<{ok: boolean, html?: string, error?: string}>}
+ */
+export async function generateDailyNarrative(person, artefact, kind = 'fact', opts = {}) {
+  const cfg = opts.cfg || readLLMConfig();
+  if (!hasLLMCredentials(cfg)) return { ok: false, error: 'no-credentials' };
+  if (!artefact) return { ok: false, error: 'no-artefact' };
+
+  let payload;
+  if (kind === 'fact') {
+    const tasks = (artefact.jiraTasks || []).slice(0, 8).map(t => ({
+      key: t.key, summary: t.title || '',
+      activities: (t.activities || []).slice(0, 6).map(a => ({
+        kind: a.kind, src: a._src, text: String(a.text || '').slice(0, 100),
+      })),
+    }));
+    payload = {
+      name: person.label || person.key || '',
+      jiraTasks: tasks,
+      orphansCount: (artefact.orphans || []).length,
+      volume: artefact.volume?.raw || {},
+    };
+  } else {
+    const tasks = (artefact.tasks || []).slice(0, 8).map(t => ({
+      key: t.key, summary: t.title || t.summary || '',
+      status: t.status || '', priority: t.priority || '',
+      duedate: t.duedate || '', source: t._source || '',
+      lastTouchHoursAgo: t._lastTouchHoursAgo,
+    }));
+    payload = {
+      name: person.label || person.key || '',
+      tasks,
+    };
+  }
+  const sys = kind === 'fact' ? NARRATIVE_FACT_SYSTEM_PROMPT : NARRATIVE_PLAN_SYSTEM_PROMPT;
+  const res = await _callLLM(cfg, sys, JSON.stringify(payload), {
+    ...opts, maxTokens: 400, temperature: 0.3,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  const html = `<p>${_escInline(res.text)}</p>`;
+  return { ok: true, html, raw: res.text };
+}
 
 const RATIONALE_SYSTEM_PROMPT = `Ты дополняешь набор причин «почему задача попала в план/факт» в инструменте Призма. На входе — JSON со списком задач, у каждой уже есть массив базовых причин (rationale), посчитанных детерминистично нашим rule-engine. Твоя работа — добавить 1-2 ДОПОЛНИТЕЛЬНЫЕ причины на задачу, опираясь только на данные payload.
 

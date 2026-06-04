@@ -111,6 +111,9 @@ function getLLMDefaultSettings() {
     // sessionStorage / memory — пользователь может явно перейти в localStorage
     // галкой «Хранить токен в localStorage» (с TTL ≤ 24h, см. ниже).
     tokenSessionOnly: true, customPayload: '',
+    // 2026-06-03 — параллельность LLM-запросов в массовых пайплайнах
+    // (бриф 2.0 по команде из N сотрудников). Default 5, clamp [1, 10].
+    briefConcurrency: 5,
   };
 }
 
@@ -848,6 +851,8 @@ export const LLMAssistant = {
     // П4-MS Wave 1: default 'summary' → 'dashboard'.
     s.contextMode = document.getElementById('llm-context-mode').value || 'dashboard';
     s.rowLimit = Math.max(1, Number(document.getElementById('llm-row-limit').value) || 80);
+    // 2026-06-03 — параллельность для бриф-2.0 batch'а.
+    s.briefConcurrency = Math.min(10, Math.max(1, Math.round(Number(document.getElementById('llm-brief-concurrency')?.value) || 5)));
     s.payloadLimitBytes = Math.max(1024, Number(document.getElementById('llm-payload-limit').value) || 120000);
     s.customPayload = document.getElementById('llm-custom-payload').value || '';
     s.saveToLocal = !!document.getElementById('llm-save-local')?.checked;
@@ -910,6 +915,7 @@ export const LLMAssistant = {
     setVal('llm-system-prompt', s.systemPrompt || DEFAULT_LLM_SYSTEM_PROMPT);
     setVal('llm-context-mode', s.contextMode); setVal('llm-row-limit', s.rowLimit);
     setVal('llm-payload-limit', s.payloadLimitBytes); setVal('llm-custom-payload', s.customPayload || '');
+    setVal('llm-brief-concurrency', s.briefConcurrency || 5);
     const tokenInput = document.getElementById('llm-token');
     if (tokenInput) tokenInput.value = s.token || state.llm.sessionToken || '';
     const saveLocal = document.getElementById('llm-save-local');

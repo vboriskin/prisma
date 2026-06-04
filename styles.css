@@ -17061,6 +17061,88 @@ body.theme-dark .ts2-pm-chip-popover {
 .ts2-asst-orphans li { font-size: 11px; line-height: 1.55; color: var(--text-1); padding: 2px 0; }
 .ts2-asst-llm-link { font-size: 10px; padding: 1px 6px; border-radius: 6px; background: var(--prizma-insight-bg, rgba(176,132,204,.12)); color: var(--prizma-insight, #B084CC); margin-left: 6px; font-weight: 600; }
 
+/* 2026-06-03 — Brief 2.0 progress-modal. */
+.ts2-brief-progress-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0, 0, 0, .5);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.ts2-brief-progress-modal {
+  background: var(--card); color: var(--text-1);
+  border-radius: 12px; box-shadow: 0 12px 48px rgba(0,0,0,.3);
+  width: min(560px, 92vw); max-height: 80vh; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.ts2-bp-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--border, rgba(0,0,0,.08)); }
+.ts2-bp-title { margin: 0; font-size: 16px; font-weight: 700; }
+.ts2-bp-meta { margin-top: 4px; font-size: 12px; color: var(--text-2); }
+.ts2-bp-progress { padding: 14px 22px 6px; }
+.ts2-bp-bar { height: 6px; background: var(--prizma-bg-tertiary, rgba(0,0,0,.08)); border-radius: 3px; overflow: hidden; }
+.ts2-bp-bar-fill { height: 100%; background: var(--prizma-information, #2A6FB3); transition: width .25s ease; }
+.ts2-bp-counter { margin-top: 6px; font-size: 12px; color: var(--text-2); font-family: ui-monospace, SFMono-Regular, monospace; }
+.ts2-bp-list { margin: 0; padding: 8px 22px 14px; max-height: 360px; overflow-y: auto; list-style: none; }
+.ts2-bp-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; font-size: 13px; }
+.ts2-bp-icon { font-family: ui-monospace; font-size: 14px; width: 18px; text-align: center; color: var(--text-3); }
+.ts2-bp-row.is-running .ts2-bp-icon { color: var(--prizma-information, #2A6FB3); animation: ts2-bp-spin 1s linear infinite; }
+.ts2-bp-row.is-done .ts2-bp-icon { color: var(--prizma-on-course, #2C8C5F); }
+.ts2-bp-row.is-failed .ts2-bp-icon { color: var(--prizma-off-course, #C13838); }
+.ts2-bp-name { flex: 1; color: var(--text-1); }
+.ts2-bp-status { font-size: 11px; color: var(--text-3); font-family: ui-monospace; }
+.ts2-bp-row.is-done .ts2-bp-status { color: var(--prizma-on-course); }
+.ts2-bp-row.is-failed .ts2-bp-status { color: var(--prizma-off-course); }
+.ts2-bp-actions { padding: 12px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+@keyframes ts2-bp-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+/* 2026-06-03 — narrative-блок «Сводка ассистента» сверху Вчера/Сегодня. */
+.ts2-asst-narrative {
+  padding: 10px 14px; margin-bottom: 10px;
+  background: var(--card); border-radius: 8px;
+  border-left: 3px solid var(--prizma-insight, #B084CC);
+  font-size: 13px; line-height: 1.55; color: var(--text-1);
+}
+.ts2-asst-narrative p { margin: 4px 0; }
+.ts2-asst-narrative-loading { padding: 8px 14px; }
+.ts2-asst-narrative-unavailable {
+  font-style: italic; color: var(--text-3);
+  border-left-color: var(--prizma-drift, #F59E0B);
+}
+
+/* Timeline-визуализация активностей под Jira-задачей — стиль Лента 72ч. */
+.ts2-asst-timeline { margin: 8px 0 4px; padding-left: 14px; border-left: 2px solid var(--border, rgba(0,0,0,.08)); }
+.ts2-asst-tl-bucket { margin-bottom: 8px; }
+.ts2-asst-tl-day {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--text-3); padding: 2px 0; font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.ts2-asst-tl-list { margin: 0; padding: 0; list-style: none; }
+.ts2-asst-tl-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 3px 0; font-size: 12px; line-height: 1.55;
+  border-bottom: 1px dashed var(--border, rgba(0,0,0,.05));
+}
+.ts2-asst-tl-item:last-child { border-bottom: 0; }
+.ts2-asst-tl-time {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px; color: var(--text-3);
+  font-feature-settings: "tnum"; min-width: 38px;
+}
+.ts2-asst-tl-src {
+  font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 5px;
+  background: var(--prizma-bg-tertiary, rgba(0,0,0,.04)); text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.ts2-asst-tl-src-jira { color: var(--prizma-information, #2A6FB3); }
+.ts2-asst-tl-src-bb   { color: #5A2A8C; }
+.ts2-asst-tl-src-cf   { color: #2C8C5F; }
+.ts2-asst-tl-kind { font-size: 11px; color: var(--text-2); font-weight: 600; }
+.ts2-asst-tl-llm {
+  font-size: 10px; padding: 0 5px; border-radius: 5px;
+  background: var(--prizma-insight-bg, rgba(176,132,204,.12));
+  color: var(--prizma-insight, #B084CC); font-weight: 600;
+}
+.ts2-asst-tl-text { flex: 1; color: var(--text-1); }
+
 /* V18.1 P7-S3.2 — collapsible details для blockers shelf */
 .ts2-blockers-details { background: var(--card); }
 .ts2-blockers-summary-toggle {

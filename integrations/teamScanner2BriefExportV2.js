@@ -77,47 +77,38 @@ export function exportTeamBriefV2(model, opts = {}) {
   const teamLabel = opts.teamLabel || (model.projectKeys || []).join(', ') || 'команда';
   const generatedAt = new Date();
   const ctx = _buildContext(model, opts);
+  // Карта pre-rendered HTML «Сводка ассистента» для каждого сотрудника.
+  // Передаётся вызывающим кодом после параллельных LLM-вызовов.
+  // Если ключ отсутствует — рисуется «Сводка недоступна».
+  const assistantByKey = opts.assistantByKey instanceof Map
+    ? opts.assistantByKey
+    : new Map();
 
-  const headerHtml      = _buildHeader(model, teamLabel, generatedAt, ctx);
-  const toolbarHtml     = _buildToolbar();
-  const statusHtml      = _buildStatusSentence(model, ctx);
-  const diffHtml        = _buildDiffLine(model, ctx);
-  const attentionHtml   = _buildAttentionQueue(model, ctx);
-  const blockersHtml    = _buildBlockersSection(model, ctx);
-  const kpiHtml         = _buildKPIBand(model, ctx);
-  const idleHtml        = _buildIdleSection(model, ctx);
-  const prQueueHtml     = _buildPRReviewQueue(model, ctx);
-  const rosterHtml      = _buildRoster(model, ctx);
-  const footerHtml      = _buildFooter(model, teamLabel, generatedAt, ctx);
+  const dateStr = generatedAt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const peopleN = model.participants.length;
+  const headerHtml = `
+    <header class="briefv2-header briefv2-header-slim">
+      <div class="briefv2-header-row">
+        <h1 class="briefv2-title">Бриф · ${_esc(teamLabel)}</h1>
+        <button class="briefv2-theme-toggle" id="briefv2-theme-toggle" type="button" title="Переключить тему">Тема</button>
+      </div>
+      <div class="briefv2-meta-line">
+        <span>${_esc(dateStr)}</span>
+        <span> · </span>
+        <span>${peopleN} ${_plural(peopleN, ['сотрудник','сотрудника','сотрудников'])}</span>
+      </div>
+    </header>`;
 
-  const peopleData = _buildPersonDataset(model, ctx);
-  const dailyBriefMd = _composeDailyBriefMd(model, ctx);
+  const rosterHtml = _buildSlimRoster(model, ctx, assistantByKey);
 
   const bodyHtml = `
-    <div class="briefv2-shell ts2-root" data-audience="lead" data-anonymize="0">
+    <div class="briefv2-shell ts2-root" data-theme="dark">
       ${headerHtml}
-      ${toolbarHtml}
       <main class="briefv2-main">
-        <section class="briefv2-tldr" aria-label="Главное">
-          ${statusHtml}
-          ${diffHtml}
-          ${attentionHtml}
-          ${blockersHtml}
-        </section>
-        ${kpiHtml}
-        ${idleHtml}
-        ${prQueueHtml}
-        <section class="briefv2-roster" id="briefv2-roster" aria-label="Сотрудники">
-          <div class="briefv2-section-head">
-            <h2 class="briefv2-section-title">Сотрудники</h2>
-            <span class="briefv2-section-hint">${model.participants.length} ${_plural(model.participants.length, ['человек','человека','человек'])} · нажмите строку, чтобы раскрыть карточку</span>
-          </div>
+        <section class="briefv2-roster briefv2-roster-slim" aria-label="Сотрудники">
           ${rosterHtml}
         </section>
       </main>
-      ${footerHtml}
-      <script type="application/json" id="briefv2-people-data">${_jsonScriptSafe(peopleData)}</script>
-      <script type="text/plain" id="briefv2-daily-md">${_esc(dailyBriefMd)}</script>
     </div>
   `;
 
@@ -126,17 +117,216 @@ export function exportTeamBriefV2(model, opts = {}) {
     title: `Бриф команды ${teamLabel}`,
     css,
     bodyHtml,
-    inlineJs: _briefInlineJs(),
+    inlineJs: _briefInlineJsSlim(),
   });
   const filename = `team-brief-v2-${_slug(teamLabel)}-${_dateStamp(generatedAt)}.html`;
   _downloadFile(documentHtml, filename);
   try {
     telemetryEmit('scanner2.brief_export_v2', {
       teamLabel,
-      peopleCount: model.participants.length,
+      peopleCount: peopleN,
       sizeBytes: documentHtml.length,
+      assistantCount: assistantByKey.size,
     });
   } catch (_) { /* best effort */ }
+}
+
+/* ── Slim roster (2026-06-03 redesign) ─────────────────────
+   Только список ФИО → раскрывашка. Внутри:
+   Сегодня · Вчера · События 72ч · Активность по источникам · Сводка ассистента.
+*/
+
+function _buildSlimRoster(model, ctx, assistantByKey) {
+  const blocks = [];
+  for (const p of model.participants) {
+    blocks.push(_buildSlimPersonBlock(p, model, ctx, assistantByKey.get(p.key)));
+  }
+  return blocks.join('');
+}
+
+function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
+  const name = _esc(p.label || p.key);
+  const todaySection      = _renderTodaySection(p);
+  const yesterdaySection  = _renderYesterdaySection(p);
+  const eventsSection     = _renderEventsSection(p);
+  const heatmapSection    = _renderHeatmapSection(p);
+  const assistantSection  = `
+    <section class="briefv2-section briefv2-assistant">
+      <h3 class="briefv2-section-title">Сводка ассистента</h3>
+      <div class="briefv2-assistant-mount">
+        ${assistantHtml || `<div class="ts2-assistant-error">Сводка недоступна — LLM не ответил или не настроен.</div>`}
+      </div>
+    </section>`;
+
+  return `
+    <article class="briefv2-person" data-key="${_esc(p.key)}">
+      <button class="briefv2-person-row" type="button" data-toggle-person="${_esc(p.key)}" aria-expanded="false">
+        <span class="briefv2-person-name">${name}</span>
+        <span class="briefv2-person-chev" aria-hidden="true">▾</span>
+      </button>
+      <div class="briefv2-person-detail" hidden>
+        ${todaySection}
+        ${yesterdaySection}
+        ${eventsSection}
+        ${heatmapSection}
+        ${assistantSection}
+      </div>
+    </article>`;
+}
+
+function _renderTodaySection(p) {
+  const items = (p.timelineToday || []).slice(0, 30);
+  if (!items.length) {
+    return `
+      <section class="briefv2-section">
+        <h3 class="briefv2-section-title">Сегодня</h3>
+        <div class="briefv2-empty">Нет событий за сегодня.</div>
+      </section>`;
+  }
+  // Объединяем по ключу задачи
+  const byKey = new Map();
+  for (const e of items) {
+    const k = e?.issue?.key || '';
+    if (!k) continue;
+    if (!byKey.has(k)) byKey.set(k, { key: k, summary: e.issue?.summary || '', count: 0 });
+    byKey.get(k).count++;
+  }
+  const li = Array.from(byKey.values()).map(t =>
+    `<li><span class="briefv2-task-key">${_esc(t.key)}</span> <span class="briefv2-task-title">${_esc(t.summary || '(без названия)')}</span> <span class="briefv2-task-meta">${t.count}</span></li>`
+  ).join('');
+  return `
+    <section class="briefv2-section">
+      <h3 class="briefv2-section-title">Сегодня</h3>
+      <ul class="briefv2-task-list">${li}</ul>
+    </section>`;
+}
+
+function _renderYesterdaySection(p) {
+  const items = (p.timelineYesterday || []).slice(0, 30);
+  if (!items.length) {
+    return `
+      <section class="briefv2-section">
+        <h3 class="briefv2-section-title">Вчера</h3>
+        <div class="briefv2-empty">Нет событий за вчера.</div>
+      </section>`;
+  }
+  const byKey = new Map();
+  for (const e of items) {
+    const k = e?.issue?.key || '';
+    if (!k) continue;
+    if (!byKey.has(k)) byKey.set(k, { key: k, summary: e.issue?.summary || '', count: 0 });
+    byKey.get(k).count++;
+  }
+  const li = Array.from(byKey.values()).map(t =>
+    `<li><span class="briefv2-task-key">${_esc(t.key)}</span> <span class="briefv2-task-title">${_esc(t.summary || '(без названия)')}</span> <span class="briefv2-task-meta">${t.count}</span></li>`
+  ).join('');
+  return `
+    <section class="briefv2-section">
+      <h3 class="briefv2-section-title">Вчера</h3>
+      <ul class="briefv2-task-list">${li}</ul>
+    </section>`;
+}
+
+function _renderEventsSection(p) {
+  // Используем готовый renderEventsFeed через DOMParser — берём кусок с .ts2-events-section
+  // или собираем простой timeline из p.timeline72h.
+  const tl = Array.isArray(p.timeline72h) ? p.timeline72h : [];
+  if (!tl.length) {
+    return `
+      <section class="briefv2-section">
+        <h3 class="briefv2-section-title">События за 72 часа</h3>
+        <div class="briefv2-empty">Нет событий за 72 часа.</div>
+      </section>`;
+  }
+  const items = tl.slice(0, 50).map(e => {
+    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+    const src = e?.src || 'jira';
+    const issueKey = e?.issue?.key ? _esc(e.issue.key) : '';
+    const text = String(e.text || '').slice(0, 140);
+    return `
+      <li class="briefv2-evt">
+        <span class="briefv2-evt-time">${_esc(at)}</span>
+        <span class="briefv2-evt-src briefv2-evt-src-${_esc(src)}">${_esc(src)}</span>
+        ${issueKey ? `<span class="briefv2-evt-key">${issueKey}</span>` : ''}
+        <span class="briefv2-evt-text">${_esc(text)}</span>
+      </li>`;
+  }).join('');
+  return `
+    <section class="briefv2-section">
+      <h3 class="briefv2-section-title">События за 72 часа <span class="briefv2-section-hint">· ${tl.length}</span></h3>
+      <ul class="briefv2-evt-list">${items}</ul>
+    </section>`;
+}
+
+function _renderHeatmapSection(p) {
+  // Reuse renderHeatmap72x4 from main renderer via DOMParser to extract HTML.
+  // Но из BriefExportV2 он не импортирован. Импортирую заранее в shim'е.
+  if (typeof DOMParser === 'undefined') {
+    return `
+      <section class="briefv2-section">
+        <h3 class="briefv2-section-title">Активность по источникам</h3>
+        <div class="briefv2-empty">Heatmap недоступен (no DOMParser).</div>
+      </section>`;
+  }
+  try {
+    // Грязно но работает: рендерим полный detail, выдёргиваем heatmap-секцию по содержимому
+    const full = renderEmployeeDetailPanel({ participants: [p] }, p.key, { filters: { j: true, b: true, c: true, zc: true, ze: true } });
+    const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body>${full}</body>`, 'text/html');
+    // Heatmap занимает один .ts2-panel-section c заголовком «Heatmap 72×4»
+    const sections = Array.from(doc.querySelectorAll('.ts2-panel-section'));
+    let heatNode = null;
+    for (const s of sections) {
+      const title = s.querySelector('.ts2-panel-section-title');
+      if (title && /Heatmap/i.test(title.textContent || '')) { heatNode = s; break; }
+    }
+    if (!heatNode) {
+      return `<section class="briefv2-section"><h3 class="briefv2-section-title">Активность по источникам</h3><div class="briefv2-empty">Нет данных heatmap.</div></section>`;
+    }
+    return `
+      <section class="briefv2-section briefv2-heatmap-wrap">
+        <h3 class="briefv2-section-title">Активность по источникам</h3>
+        ${heatNode.outerHTML}
+      </section>`;
+  } catch (_) {
+    return `<section class="briefv2-section"><h3 class="briefv2-section-title">Активность по источникам</h3><div class="briefv2-empty">Ошибка рендеринга heatmap.</div></section>`;
+  }
+}
+
+/** Slim inline JS — только theme toggle + person expand. */
+function _briefInlineJsSlim() {
+  return `
+    (function(){
+      'use strict';
+      var root = document.querySelector('.briefv2-shell');
+      if (!root) return;
+      // Theme toggle: dark ↔ light, persist in localStorage.
+      var THEME_KEY = 'briefv2.theme';
+      try {
+        var saved = localStorage.getItem(THEME_KEY);
+        if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+      } catch (_) {}
+      var ttBtn = document.getElementById('briefv2-theme-toggle');
+      if (ttBtn) ttBtn.addEventListener('click', function(){
+        var cur = root.dataset.theme || 'dark';
+        var next = cur === 'dark' ? 'light' : 'dark';
+        root.dataset.theme = next;
+        try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
+      });
+      // Person toggles
+      document.querySelectorAll('[data-toggle-person]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var article = btn.closest('.briefv2-person');
+          if (!article) return;
+          var detail = article.querySelector('.briefv2-person-detail');
+          if (!detail) return;
+          var open = !detail.hidden;
+          detail.hidden = open;
+          btn.setAttribute('aria-expanded', String(!open));
+          article.classList.toggle('is-open', !open);
+        });
+      });
+    })();
+  `;
 }
 
 /* ── Context bundle: history, prev snapshot, settings, etc ─── */
@@ -1153,6 +1343,76 @@ function _ownCss() {
       .briefv2-shell { max-width: none !important; padding: 0 !important; }
       @page { margin: 16mm 14mm; }
       .briefv2-detail .ts2-hcell { opacity: 1 !important; background: currentColor !important; }
+    }
+
+    /* ── 2026-06-03 Slim Brief V2 (roster-only redesign) ───────── */
+    .briefv2-header-slim { padding: 14px 0; border-bottom: 1px solid var(--prizma-border, rgba(0,0,0,.08)); margin-bottom: 16px; }
+    .briefv2-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .briefv2-title { margin: 0; font-size: 18px; font-weight: 700; color: var(--prizma-text-primary, #333); }
+    .briefv2-meta-line { margin-top: 4px; font-size: 12px; color: var(--prizma-text-secondary, #666); }
+    .briefv2-theme-toggle {
+      padding: 6px 14px; border: 1px solid var(--prizma-border, rgba(0,0,0,.12));
+      background: transparent; border-radius: 6px; cursor: pointer; font-size: 12px; color: inherit;
+    }
+    .briefv2-theme-toggle:hover { background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); }
+
+    .briefv2-roster-slim { display: flex; flex-direction: column; gap: 6px; }
+    .briefv2-person {
+      border: 1px solid var(--prizma-border, rgba(0,0,0,.08));
+      border-radius: 8px; overflow: hidden;
+      background: var(--prizma-bg-card, var(--card, #fff));
+    }
+    .briefv2-person-row {
+      width: 100%; display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border: 0; background: transparent; cursor: pointer;
+      font-size: 14px; font-weight: 500; color: inherit; text-align: left;
+    }
+    .briefv2-person-row:hover { background: var(--prizma-bg-tertiary, rgba(0,0,0,.04)); }
+    .briefv2-person.is-open .briefv2-person-row { border-bottom: 1px solid var(--prizma-border, rgba(0,0,0,.06)); }
+    .briefv2-person-chev { color: var(--prizma-text-secondary, #888); transition: transform .15s ease; }
+    .briefv2-person.is-open .briefv2-person-chev { transform: rotate(180deg); }
+    .briefv2-person-detail { padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 18px; }
+    .briefv2-person-detail[hidden] { display: none; }
+
+    .briefv2-section { display: flex; flex-direction: column; gap: 6px; }
+    .briefv2-section-title { font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--prizma-text-secondary, #777); margin: 0; }
+    .briefv2-section-hint { font-size: 10px; font-weight: 500; color: var(--prizma-text-tertiary, #999); text-transform: none; letter-spacing: 0; }
+    .briefv2-empty { font-size: 12px; color: var(--prizma-text-tertiary, #999); font-style: italic; padding: 4px 0; }
+
+    .briefv2-task-list { margin: 0; padding-left: 20px; list-style: none; }
+    .briefv2-task-list li { padding: 3px 0; font-size: 13px; line-height: 1.5; display: flex; align-items: baseline; gap: 8px; }
+    .briefv2-task-key { font-family: ui-monospace, SFMono-Regular, monospace; font-weight: 700; color: var(--prizma-information, #2A6FB3); font-size: 11px; }
+    .briefv2-task-title { color: var(--prizma-text-primary, #333); flex: 1; }
+    .briefv2-task-meta { font-size: 11px; color: var(--prizma-text-tertiary, #999); }
+
+    .briefv2-evt-list { margin: 0; padding: 0; list-style: none; }
+    .briefv2-evt {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 4px 0; font-size: 12px; line-height: 1.5;
+      border-bottom: 1px dashed var(--prizma-border, rgba(0,0,0,.05));
+    }
+    .briefv2-evt:last-child { border-bottom: 0; }
+    .briefv2-evt-time { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: var(--prizma-text-tertiary, #999); min-width: 80px; }
+    .briefv2-evt-src {
+      font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 5px;
+      background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); text-transform: uppercase;
+    }
+    .briefv2-evt-src-jira { color: var(--prizma-information, #2A6FB3); }
+    .briefv2-evt-src-bb { color: #5A2A8C; }
+    .briefv2-evt-src-cf { color: #2C8C5F; }
+    .briefv2-evt-key { font-family: ui-monospace; font-weight: 700; font-size: 11px; color: var(--prizma-information, #2A6FB3); }
+    .briefv2-evt-text { flex: 1; color: var(--prizma-text-primary, #333); }
+
+    .briefv2-heatmap-wrap .ts2-panel-section-title { display: none; }
+    .briefv2-heatmap-wrap .ts2-panel-section { padding: 0; }
+
+    .briefv2-assistant-mount { font-size: 13px; }
+
+    [data-theme="dark"] .briefv2-shell {
+      background: #1a1d23; color: #e4e7ec;
+      --prizma-text-primary: #e4e7ec; --prizma-text-secondary: #a0a8b8; --prizma-text-tertiary: #6e7686;
+      --prizma-bg-card: #25292f; --prizma-bg-tertiary: rgba(255,255,255,.05);
+      --prizma-border: rgba(255,255,255,.1);
     }
   `;
 }
