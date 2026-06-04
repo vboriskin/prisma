@@ -130,6 +130,7 @@ import {
 import { exportTeamBrief } from './teamScanner2BriefExport.js';
 // Бриф v2.0 — decision artefact с TL;DR / attention queue / KPI band / etc.
 import { exportTeamBriefV2 } from './teamScanner2BriefExportV2.js';
+import { exportTeamBriefV3 } from './teamScanner2BriefExportV3.js';
 // LLM-ассистент: «Сводка ассистента» секция в модалке сотрудника.
 import {
   generateSummary as _llmGenerateSummary,
@@ -2472,6 +2473,9 @@ export const TeamScanner2 = {
     root.querySelector('#ts2-brief-export-v2-btn')?.addEventListener('click', () => {
       this._exportBriefV2();
     });
+    root.querySelector('#ts2-brief-export-v3-btn')?.addEventListener('click', () => {
+      this._exportBriefV3();
+    });
     // V20 S1.5 — stale-banner refresh button (cache > 5min).
     root.querySelector('#ts2-stale-refresh')?.addEventListener('click', () => {
       telemetryEmit('scanner2.stale_refresh_click', { ageMs: this._cacheAgeMs() });
@@ -4302,6 +4306,165 @@ export const TeamScanner2 = {
     } catch (e) {
       console.warn('[scanner2] brief v2 export failed:', e);
       this._announce('Не удалось создать бриф v2.0: ' + (e?.message || 'неизвестная ошибка'));
+    }
+    setTimeout(() => progress.close(), 1200);
+  },
+
+  /**
+   * Бриф v3.0 — третья итерация выгрузки на основе аудита 7 экспертов
+   * (2026-06-04). См. docs/audits/brief-v3-plan-2026-06-04.md.
+   *
+   * Главные отличия от V2:
+   *  • Risk badges (BLK/STL/WIP/DONE/CTX) + status-dot + data-quality pill
+   *    в свёрнутой строке сотрудника
+   *  • Attention strip (top-3 «Кому помочь» из buildActionQueue)
+   *  • KPI-полоса в шапке (Стоп/Блокеры/Burnout/Закрыто/Снимок)
+   *  • Identity-banner если есть unmatched
+   *  • Sort chips (По риску/По алфавиту/По активности) + Filter chips
+   *  • Блокеры — отдельный блок в верху раскрывашки
+   *  • Deterministic fallback вместо «Сводка недоступна»
+   *  • Markdown copy (вся команда + per-person)
+   *  • Print CSS + Заметка тимлида (contenteditable)
+   *
+   * Pipeline идентичен V2: parallel LLM с concurrency-лимитом + progress
+   * modal + per-person fallback на failure.
+   */
+  async _exportBriefV3() {
+    if (!this._model) {
+      this._announce('Нет данных — сначала обновите Сканнер.');
+      return;
+    }
+    if (this._activeView === 'multi') {
+      this._announce('Бриф выгружается для одной команды. Выберите команду в переключателе.');
+      return;
+    }
+    const filteredModel = (this._activePkFilter && this._activeView === 'team')
+      ? this._applyPkFilter(this._model, this._activePkFilter)
+      : this._model;
+    const teamLabel = this._activePkFilter || (filteredModel.projectKeys || []).join(', ') || 'команда';
+    const userEmail = (typeof window !== 'undefined' && window.userEmail) ? window.userEmail : '';
+    const people = filteredModel.participants || [];
+    const cfg = _llmReadConfig();
+    const concurrency = Math.min(10, Math.max(1, Number(cfg.briefConcurrency) || 5));
+    const llmAvailable = _llmHasCredentials(cfg);
+
+    const progress = this._openBriefProgressModal({ teamLabel, people, concurrency });
+    const assistantByKey = new Map();
+    const llmStatusByKey = new Map();
+    const ctrl = new AbortController();
+    progress.onCancel(() => { ctrl.abort(); });
+
+    const queue = people.slice();
+    let activeJobs = 0;
+    let completed = 0;
+    const total = people.length;
+    let canceled = false;
+
+    const runOne = async (p) => {
+      if (ctrl.signal.aborted) return;
+      const startMs = Date.now();
+      progress.setRunning(p.key);
+      try {
+        let sprintScope = [];
+        try {
+          const projects = Array.isArray(p.projects) ? p.projects : [];
+          for (const pk of projects) {
+            const list = filteredModel?.spaces?.[pk]?.sprintIssues || [];
+            for (const it of list) {
+              const aName = String(it.assignee || '').toLowerCase();
+              if (aName && aName === String(p.label || '').toLowerCase()) sprintScope.push(it);
+            }
+          }
+        } catch (_) {}
+        const rulesOpts = { sprintScope, ema14: {}, now: Date.now() };
+        const summary72h = _rulesBuild72h(p, filteredModel, rulesOpts);
+
+        let factNarrativeHTML = '';
+        let planNarrativeHTML = '';
+        let llmSucceeded = false;
+        if (llmAvailable) {
+          const [factR, planR, orphR] = await Promise.allSettled([
+            _llmGenerateNarrative(p, summary72h.fact, 'fact', { signal: ctrl.signal, cfg }),
+            _llmGenerateNarrative(p, summary72h.plan, 'plan', { signal: ctrl.signal, cfg }),
+            _llmAttributeOrphans(summary72h.fact.orphans, summary72h.fact.jiraTasks, { signal: ctrl.signal, cfg }),
+          ]);
+          if (ctrl.signal.aborted) return;
+          const factOk = factR.status === 'fulfilled' && factR.value?.ok;
+          const planOk = planR.status === 'fulfilled' && planR.value?.ok;
+          factNarrativeHTML = factOk ? factR.value.html : '__unavailable__';
+          planNarrativeHTML = planOk ? planR.value.html : '__unavailable__';
+          llmSucceeded = factOk || planOk;
+          if (orphR.status === 'fulfilled' && orphR.value?.rescued?.length) {
+            for (const a of orphR.value.rescued) {
+              const k = a._llmAttributedTo;
+              const t = summary72h.fact.jiraTasks.find(x => x.key === k);
+              if (t) t.activities.push({
+                kind: a.kind, text: a.title || a.text || '', at: a.at, _src: a._src,
+                _llmAttributedTo: k, _llmConfidence: a._llmConfidence, _llmReason: a._llmReason,
+              });
+            }
+            summary72h.fact.orphans = orphR.value.stillOrphan || [];
+          }
+        }
+        if (llmSucceeded) {
+          const html = _render72hHTML(summary72h, { factNarrativeHTML, planNarrativeHTML });
+          assistantByKey.set(p.key, html);
+          llmStatusByKey.set(p.key, 'ok');
+        } else {
+          llmStatusByKey.set(p.key, llmAvailable ? 'failed' : 'skipped');
+        }
+        progress.setDone(p.key, Date.now() - startMs);
+      } catch (e) {
+        llmStatusByKey.set(p.key, 'failed');
+        progress.setFailed(p.key, e?.message || 'failed');
+      } finally {
+        completed++;
+        progress.setCount(completed, total);
+      }
+    };
+
+    await new Promise((resolve) => {
+      const next = () => {
+        if (canceled) return;
+        while (activeJobs < concurrency && queue.length) {
+          const p = queue.shift();
+          activeJobs++;
+          runOne(p).finally(() => {
+            activeJobs--;
+            if (queue.length || activeJobs > 0) next();
+            else resolve();
+          });
+        }
+        if (!queue.length && activeJobs === 0) resolve();
+      };
+      progress.onCancel(() => { canceled = true; resolve(); });
+      next();
+    });
+
+    if (ctrl.signal.aborted) {
+      progress.close();
+      this._announce('Выгрузка брифа 3.0 отменена.');
+      return;
+    }
+
+    progress.setFinishing();
+    try {
+      exportTeamBriefV3(filteredModel, {
+        teamLabel,
+        assistantByKey,
+        llmStatusByKey,
+        context: {
+          history: this._historyOverride || null,
+          prev: this._prevSnapshot || null,
+          employees: appState.employees || [],
+          userEmail,
+          fetchedAtMs: filteredModel.fetchedAtMs || Date.now(),
+        },
+      });
+      this._announce(`Бриф v3.0 команды ${teamLabel} сохранён.`);
+    } catch (e) {
+      console.warn('[scanner2] brief v3 export failed:', e);
+      this._announce('Не удалось создать бриф v3.0: ' + (e?.message || 'неизвестная ошибка'));
     }
     setTimeout(() => progress.close(), 1200);
   },
