@@ -171,9 +171,9 @@ function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
       </button>
       <div class="briefv2-person-detail" hidden>
         ${narrativeSection}
+        ${assistantSection}
         ${eventsSection}
         ${heatmapSection}
-        ${assistantSection}
       </div>
     </article>`;
 }
@@ -197,10 +197,10 @@ function _extractPanelSections(p, model) {
       narrativeNode.querySelectorAll('.ts2-narrative-copy, .ts2-narrative-stale').forEach(n => n.remove());
     }
 
-    // Events section: ts2-events-section (details — раскрываем по умолчанию через open)
+    // Events section: ts2-events-section — collapsed by default (user feedback 2026-06-04).
     let eventsNode = doc.querySelector('.ts2-events-section');
     if (eventsNode) {
-      eventsNode.setAttribute('open', '');
+      eventsNode.removeAttribute('open');
       eventsNode.querySelectorAll('button, .ts2-narrative-copy').forEach(n => n.remove());
     }
 
