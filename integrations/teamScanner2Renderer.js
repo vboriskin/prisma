@@ -1765,6 +1765,12 @@ function renderEventLine(e, idx) {
   // настоящие <a href>. Без этого инструмент только смотрит, не работает.
   if (src === 'jira') {
     const issueKey = e?.issue?.key ? jiraIssueLink(e.issue.key) : '';
+    // 2026-06-04 — показываем название задачи сразу рядом с ключом,
+    // чтобы тимлид не угадывал по KEY о чём вообще задача.
+    const summary = String(e?.issue?.summary || e?.issue?.fields?.summary || '').trim();
+    const summaryHtml = summary
+      ? ` <span class="ts2-recent-issue-title">${esc(summary.length > 80 ? summary.slice(0, 80) + '…' : summary)}</span>`
+      : '';
     const action = _jiraActionLabel(e);
     const actionHtml = `<span class="ts2-recent-action ts2-recent-action-${esc(action.severity)}" title="${esc(action.kind)}">${esc(action.label)}</span>`;
     const fieldName = e.field || e.fieldName || '';
@@ -1772,14 +1778,14 @@ function renderEventLine(e, idx) {
     const fieldBadge = (isFieldChange && fieldName)
       ? `<span class="ts2-recent-attr-badge" title="Поле Jira">Поле «${esc(fieldName)}»</span>`
       : '';
-    // Preview справа — только если есть e.text и он не дублирует action.label.
+    // Preview справа — только если есть e.text и он не дублирует action.label / summary.
     const rawText = String(e.text || '').trim();
-    const isDup = rawText && (rawText.toLowerCase() === action.label.toLowerCase());
+    const isDup = rawText && (rawText.toLowerCase() === action.label.toLowerCase() || rawText.toLowerCase() === summary.toLowerCase());
     const previewText = (rawText && !isDup) ? rawText.slice(0, 60) + (rawText.length > 60 ? '…' : '') : '';
     const preview = previewText
       ? ` <span class="ts2-recent-text">${linkifyIssueKeys(esc(previewText))}</span>`
       : '';
-    body = `${actionHtml} ${issueKey}${fieldBadge ? ' ' + fieldBadge : ''}${preview}`;
+    body = `${actionHtml} ${issueKey}${summaryHtml}${fieldBadge ? ' ' + fieldBadge : ''}${preview}`;
     // Click-to-expand: показываем from→to diff если есть.
     if (isFieldChange && (e.from || e.to)) {
       const fromS = String(e.from || '').slice(0, 200);

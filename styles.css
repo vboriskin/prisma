@@ -16899,6 +16899,8 @@ body.theme-dark .ts2-pm-chip-popover {
   font-size: 11px; color: var(--text-4, #94a3b8); min-width: 84px;
 }
 .ts2-recent-text { color: var(--text-3); }
+/* 2026-06-04 — название jira-задачи рядом с ключом в events feed */
+.ts2-recent-issue-title { color: var(--text-2); font-weight: 500; }
 
 /* V18.1 P3 — detail-grid (3 секции) + blockers-list */
 .ts2-detail-grid {

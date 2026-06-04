@@ -146,11 +146,16 @@ function _buildSlimRoster(model, ctx, assistantByKey) {
 
 function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
   const name = _esc(p.label || p.key);
-  const todaySection      = _renderTodaySection(p);
-  const yesterdaySection  = _renderYesterdaySection(p);
-  const eventsSection     = _renderEventsSection(p);
-  const heatmapSection    = _renderHeatmapSection(p);
-  const assistantSection  = `
+  // 2026-06-04 — используем рендереры основного приложения 1-в-1
+  // (renderPersonNarrative для Сегодня/Вчера, renderEventsFeed для 72ч,
+  //  renderHeatmap72x4 для активности по источникам). Извлекаем нужные
+  //  секции через DOMParser из полной панели + стрипаем интерактивные
+  //  controls (кнопки копирования, фильтры — они не работают в standalone).
+  const extracted = _extractPanelSections(p, model);
+  const narrativeSection = extracted.narrative;       // Сегодня: / Вчера: / Confluence: …
+  const eventsSection    = extracted.events;          // События за 72 часа
+  const heatmapSection   = extracted.heatmap;         // Heatmap 72×4
+  const assistantSection = `
     <section class="briefv2-section briefv2-assistant">
       <h3 class="briefv2-section-title">Сводка ассистента</h3>
       <div class="briefv2-assistant-mount">
@@ -165,8 +170,7 @@ function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
         <span class="briefv2-person-chev" aria-hidden="true">▾</span>
       </button>
       <div class="briefv2-person-detail" hidden>
-        ${todaySection}
-        ${yesterdaySection}
+        ${narrativeSection}
         ${eventsSection}
         ${heatmapSection}
         ${assistantSection}
@@ -174,121 +178,57 @@ function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
     </article>`;
 }
 
-function _renderTodaySection(p) {
-  const items = (p.timelineToday || []).slice(0, 30);
-  if (!items.length) {
-    return `
-      <section class="briefv2-section">
-        <h3 class="briefv2-section-title">Сегодня</h3>
-        <div class="briefv2-empty">Нет событий за сегодня.</div>
-      </section>`;
-  }
-  // Объединяем по ключу задачи
-  const byKey = new Map();
-  for (const e of items) {
-    const k = e?.issue?.key || '';
-    if (!k) continue;
-    if (!byKey.has(k)) byKey.set(k, { key: k, summary: e.issue?.summary || '', count: 0 });
-    byKey.get(k).count++;
-  }
-  const li = Array.from(byKey.values()).map(t =>
-    `<li><span class="briefv2-task-key">${_esc(t.key)}</span> <span class="briefv2-task-title">${_esc(t.summary || '(без названия)')}</span> <span class="briefv2-task-meta">${t.count}</span></li>`
-  ).join('');
-  return `
-    <section class="briefv2-section">
-      <h3 class="briefv2-section-title">Сегодня</h3>
-      <ul class="briefv2-task-list">${li}</ul>
-    </section>`;
-}
-
-function _renderYesterdaySection(p) {
-  const items = (p.timelineYesterday || []).slice(0, 30);
-  if (!items.length) {
-    return `
-      <section class="briefv2-section">
-        <h3 class="briefv2-section-title">Вчера</h3>
-        <div class="briefv2-empty">Нет событий за вчера.</div>
-      </section>`;
-  }
-  const byKey = new Map();
-  for (const e of items) {
-    const k = e?.issue?.key || '';
-    if (!k) continue;
-    if (!byKey.has(k)) byKey.set(k, { key: k, summary: e.issue?.summary || '', count: 0 });
-    byKey.get(k).count++;
-  }
-  const li = Array.from(byKey.values()).map(t =>
-    `<li><span class="briefv2-task-key">${_esc(t.key)}</span> <span class="briefv2-task-title">${_esc(t.summary || '(без названия)')}</span> <span class="briefv2-task-meta">${t.count}</span></li>`
-  ).join('');
-  return `
-    <section class="briefv2-section">
-      <h3 class="briefv2-section-title">Вчера</h3>
-      <ul class="briefv2-task-list">${li}</ul>
-    </section>`;
-}
-
-function _renderEventsSection(p) {
-  // Используем готовый renderEventsFeed через DOMParser — берём кусок с .ts2-events-section
-  // или собираем простой timeline из p.timeline72h.
-  const tl = Array.isArray(p.timeline72h) ? p.timeline72h : [];
-  if (!tl.length) {
-    return `
-      <section class="briefv2-section">
-        <h3 class="briefv2-section-title">События за 72 часа</h3>
-        <div class="briefv2-empty">Нет событий за 72 часа.</div>
-      </section>`;
-  }
-  const items = tl.slice(0, 50).map(e => {
-    const at = e?.at ? new Date(e.at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
-    const src = e?.src || 'jira';
-    const issueKey = e?.issue?.key ? _esc(e.issue.key) : '';
-    const text = String(e.text || '').slice(0, 140);
-    return `
-      <li class="briefv2-evt">
-        <span class="briefv2-evt-time">${_esc(at)}</span>
-        <span class="briefv2-evt-src briefv2-evt-src-${_esc(src)}">${_esc(src)}</span>
-        ${issueKey ? `<span class="briefv2-evt-key">${issueKey}</span>` : ''}
-        <span class="briefv2-evt-text">${_esc(text)}</span>
-      </li>`;
-  }).join('');
-  return `
-    <section class="briefv2-section">
-      <h3 class="briefv2-section-title">События за 72 часа <span class="briefv2-section-hint">· ${tl.length}</span></h3>
-      <ul class="briefv2-evt-list">${items}</ul>
-    </section>`;
-}
-
-function _renderHeatmapSection(p) {
-  // Reuse renderHeatmap72x4 from main renderer via DOMParser to extract HTML.
-  // Но из BriefExportV2 он не импортирован. Импортирую заранее в shim'е.
-  if (typeof DOMParser === 'undefined') {
-    return `
-      <section class="briefv2-section">
-        <h3 class="briefv2-section-title">Активность по источникам</h3>
-        <div class="briefv2-empty">Heatmap недоступен (no DOMParser).</div>
-      </section>`;
-  }
+/**
+ * Извлекает HTML секций narrative / events / heatmap из renderEmployeeDetailPanel.
+ * Возвращает { narrative, events, heatmap } — каждая = готовая HTML-секция (или fallback).
+ * Стрипает interactive (copy-buttons, filters, retry-buttons) — они не работают в standalone HTML.
+ */
+function _extractPanelSections(p, model) {
+  const fallback = { narrative: '', events: '', heatmap: '' };
+  if (typeof DOMParser === 'undefined') return fallback;
   try {
-    // Грязно но работает: рендерим полный detail, выдёргиваем heatmap-секцию по содержимому
-    const full = renderEmployeeDetailPanel({ participants: [p] }, p.key, { filters: { j: true, b: true, c: true, zc: true, ze: true } });
+    const full = renderEmployeeDetailPanel({ participants: [p], ...model, spaces: model?.spaces, scannerV2: model?.scannerV2 }, p.key, { filters: { j: true, b: true, c: true, zc: true, ze: true } });
     const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body>${full}</body>`, 'text/html');
-    // Heatmap занимает один .ts2-panel-section c заголовком «Heatmap 72×4»
-    const sections = Array.from(doc.querySelectorAll('.ts2-panel-section'));
+
+    // Narrative section: ts2-narrative-section
+    let narrativeNode = doc.querySelector('.ts2-narrative-section');
+    if (narrativeNode) {
+      // Удаляем интерактивные controls
+      narrativeNode.querySelectorAll('.ts2-narrative-copy, .ts2-narrative-stale').forEach(n => n.remove());
+    }
+
+    // Events section: ts2-events-section (details — раскрываем по умолчанию через open)
+    let eventsNode = doc.querySelector('.ts2-events-section');
+    if (eventsNode) {
+      eventsNode.setAttribute('open', '');
+      eventsNode.querySelectorAll('button, .ts2-narrative-copy').forEach(n => n.remove());
+    }
+
+    // Heatmap section: первая .ts2-panel-section с заголовком «Heatmap»
     let heatNode = null;
+    const sections = Array.from(doc.querySelectorAll('.ts2-panel-section'));
     for (const s of sections) {
       const title = s.querySelector('.ts2-panel-section-title');
       if (title && /Heatmap/i.test(title.textContent || '')) { heatNode = s; break; }
     }
-    if (!heatNode) {
-      return `<section class="briefv2-section"><h3 class="briefv2-section-title">Активность по источникам</h3><div class="briefv2-empty">Нет данных heatmap.</div></section>`;
+    if (heatNode) {
+      heatNode.querySelectorAll('button').forEach(n => n.remove());
     }
-    return `
-      <section class="briefv2-section briefv2-heatmap-wrap">
-        <h3 class="briefv2-section-title">Активность по источникам</h3>
-        ${heatNode.outerHTML}
-      </section>`;
-  } catch (_) {
-    return `<section class="briefv2-section"><h3 class="briefv2-section-title">Активность по источникам</h3><div class="briefv2-empty">Ошибка рендеринга heatmap.</div></section>`;
+
+    return {
+      narrative: narrativeNode
+        ? `<section class="briefv2-section">${narrativeNode.outerHTML}</section>`
+        : `<section class="briefv2-section"><h3 class="briefv2-section-title">Сводка</h3><div class="briefv2-empty">Нет нарратива.</div></section>`,
+      events: eventsNode
+        ? `<section class="briefv2-section briefv2-events-wrap">${eventsNode.outerHTML}</section>`
+        : `<section class="briefv2-section"><h3 class="briefv2-section-title">События за 72 часа</h3><div class="briefv2-empty">Нет событий.</div></section>`,
+      heatmap: heatNode
+        ? `<section class="briefv2-section briefv2-heatmap-wrap"><h3 class="briefv2-section-title">Активность по источникам</h3>${heatNode.outerHTML}</section>`
+        : `<section class="briefv2-section"><h3 class="briefv2-section-title">Активность по источникам</h3><div class="briefv2-empty">Heatmap недоступен.</div></section>`,
+    };
+  } catch (e) {
+    try { console.warn('[briefv2] extract panel sections failed:', e); } catch (_) {}
+    return fallback;
   }
 }
 
