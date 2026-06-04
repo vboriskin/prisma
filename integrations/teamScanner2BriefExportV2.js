@@ -102,7 +102,7 @@ export function exportTeamBriefV2(model, opts = {}) {
   const rosterHtml = _buildSlimRoster(model, ctx, assistantByKey);
 
   const bodyHtml = `
-    <div class="briefv2-shell ts2-root" data-theme="dark">
+    <div class="briefv2-shell ts2-root">
       ${headerHtml}
       <main class="briefv2-main">
         <section class="briefv2-roster briefv2-roster-slim" aria-label="Сотрудники">
@@ -237,19 +237,19 @@ function _briefInlineJsSlim() {
   return `
     (function(){
       'use strict';
-      var root = document.querySelector('.briefv2-shell');
-      if (!root) return;
-      // Theme toggle: dark ↔ light, persist in localStorage.
+      // Theme toggle: dark ↔ light на <html data-theme>, чтобы глобальные
+      // [data-theme] селекторы из основного приложения корректно работали.
+      var htmlEl = document.documentElement;
       var THEME_KEY = 'briefv2.theme';
       try {
         var saved = localStorage.getItem(THEME_KEY);
-        if (saved === 'light' || saved === 'dark') root.dataset.theme = saved;
+        if (saved === 'light' || saved === 'dark') htmlEl.setAttribute('data-theme', saved);
       } catch (_) {}
       var ttBtn = document.getElementById('briefv2-theme-toggle');
       if (ttBtn) ttBtn.addEventListener('click', function(){
-        var cur = root.dataset.theme || 'dark';
+        var cur = htmlEl.getAttribute('data-theme') || 'light';
         var next = cur === 'dark' ? 'light' : 'dark';
-        root.dataset.theme = next;
+        htmlEl.setAttribute('data-theme', next);
         try { localStorage.setItem(THEME_KEY, next); } catch (_) {}
       });
       // Person toggles
@@ -1004,8 +1004,16 @@ function _isRootSelector(sel) {
 
 function _assembleHtmlDocument({ title, css, bodyHtml, inlineJs }) {
   const own = _ownCss();
+  // 2026-06-04 — наследуем тему из основного приложения. Если document не
+  // доступен (server-side) — fallback на light.
+  const initialTheme = (() => {
+    try {
+      const t = (typeof document !== 'undefined') && document.documentElement.getAttribute('data-theme');
+      return (t === 'dark' || t === 'light') ? t : 'light';
+    } catch (_) { return 'light'; }
+  })();
   return `<!DOCTYPE html>
-<html lang="ru" data-theme="light">
+<html lang="ru" data-theme="${initialTheme}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1338,8 +1346,8 @@ function _ownCss() {
       background: var(--prizma-bg-tertiary, rgba(0,0,0,.05)); text-transform: uppercase;
     }
     .briefv2-evt-src-jira { color: var(--prizma-information, #2A6FB3); }
-    .briefv2-evt-src-bb { color: #5A2A8C; }
-    .briefv2-evt-src-cf { color: #2C8C5F; }
+    .briefv2-evt-src-bb { color: var(--prizma-insight, #B084CC); }
+    .briefv2-evt-src-cf { color: var(--prizma-on-course, #2C8C5F); }
     .briefv2-evt-key { font-family: ui-monospace; font-weight: 700; font-size: 11px; color: var(--prizma-information, #2A6FB3); }
     .briefv2-evt-text { flex: 1; color: var(--prizma-text-primary, #333); }
 
@@ -1348,11 +1356,20 @@ function _ownCss() {
 
     .briefv2-assistant-mount { font-size: 13px; }
 
-    [data-theme="dark"] .briefv2-shell {
-      background: #1a1d23; color: #e4e7ec;
-      --prizma-text-primary: #e4e7ec; --prizma-text-secondary: #a0a8b8; --prizma-text-tertiary: #6e7686;
-      --prizma-bg-card: #25292f; --prizma-bg-tertiary: rgba(255,255,255,.05);
-      --prizma-border: rgba(255,255,255,.1);
+    /* 2026-06-04 — theme fix: body и shell используют theme-aware токены,
+       чтобы при переключении [data-theme] на <html> весь slim brief
+       перекрашивался корректно (как embedded .ts2-* секции, так и наши
+       .briefv2-* блоки). Раньше body был unstyled → в dark-теме браузер
+       подставлял дефолтный белый фон под dark .ts2-content внутри.
+       Глобальные prizma-tokens определены в основном CSS приложения
+       и наследуются — здесь только связываем их с body / shell. */
+    html, body {
+      background: var(--prizma-bg, var(--bg, #fff));
+      color: var(--prizma-text-primary, var(--text-1, #111));
+    }
+    .briefv2-shell {
+      background: var(--prizma-bg, var(--bg, transparent));
+      color: var(--prizma-text-primary, var(--text-1, inherit));
     }
   `;
 }
