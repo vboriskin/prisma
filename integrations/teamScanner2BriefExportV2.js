@@ -146,18 +146,19 @@ function _buildSlimRoster(model, ctx, assistantByKey) {
 
 function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
   const name = _esc(p.label || p.key);
-  // 2026-06-04 — используем рендереры основного приложения 1-в-1
-  // (renderPersonNarrative для Сегодня/Вчера, renderEventsFeed для 72ч,
-  //  renderHeatmap72x4 для активности по источникам). Извлекаем нужные
-  //  секции через DOMParser из полной панели + стрипаем интерактивные
-  //  controls (кнопки копирования, фильтры — они не работают в standalone).
+  // 2026-06-04 — Раскрывашка сотрудника состоит из:
+  //   1. Assistant section (Что делал вчера / делает сегодня + Подробнее)
+  //   2. События за 72 часа (свёрнуто, raw timeline из основного app)
+  //   3. Активность по источникам (heatmap)
+  // Блок «Сводка за последние 24 часа» (renderPersonNarrative) удалён —
+  // его задачи теперь живут в Assistant'е под details «Подробнее».
+  // H3 «Сводка ассистента» тоже удалён — заголовки секций «ЧТО ДЕЛАЛ
+  // ВЧЕРА» / «ЧТО ДЕЛАЕТ СЕГОДНЯ» уже есть в самом assistant-HTML.
   const extracted = _extractPanelSections(p, model);
-  const narrativeSection = extracted.narrative;       // Сегодня: / Вчера: / Confluence: …
-  const eventsSection    = extracted.events;          // События за 72 часа
+  const eventsSection    = extracted.events;          // События за 72 часа (свёрнуто)
   const heatmapSection   = extracted.heatmap;         // Heatmap 72×4
   const assistantSection = `
     <section class="briefv2-section briefv2-assistant">
-      <h3 class="briefv2-section-title">Сводка ассистента</h3>
       <div class="briefv2-assistant-mount">
         ${assistantHtml || `<div class="ts2-assistant-error">Сводка недоступна — LLM не ответил или не настроен.</div>`}
       </div>
@@ -170,7 +171,6 @@ function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
         <span class="briefv2-person-chev" aria-hidden="true">▾</span>
       </button>
       <div class="briefv2-person-detail" hidden>
-        ${narrativeSection}
         ${assistantSection}
         ${eventsSection}
         ${heatmapSection}
@@ -184,18 +184,11 @@ function _buildSlimPersonBlock(p, model, ctx, assistantHtml) {
  * Стрипает interactive (copy-buttons, filters, retry-buttons) — они не работают в standalone HTML.
  */
 function _extractPanelSections(p, model) {
-  const fallback = { narrative: '', events: '', heatmap: '' };
+  const fallback = { events: '', heatmap: '' };
   if (typeof DOMParser === 'undefined') return fallback;
   try {
     const full = renderEmployeeDetailPanel({ participants: [p], ...model, spaces: model?.spaces, scannerV2: model?.scannerV2 }, p.key, { filters: { j: true, b: true, c: true, zc: true, ze: true } });
     const doc = new DOMParser().parseFromString(`<!DOCTYPE html><body>${full}</body>`, 'text/html');
-
-    // Narrative section: ts2-narrative-section
-    let narrativeNode = doc.querySelector('.ts2-narrative-section');
-    if (narrativeNode) {
-      // Удаляем интерактивные controls
-      narrativeNode.querySelectorAll('.ts2-narrative-copy, .ts2-narrative-stale').forEach(n => n.remove());
-    }
 
     // Events section: ts2-events-section — collapsed by default (user feedback 2026-06-04).
     let eventsNode = doc.querySelector('.ts2-events-section');
@@ -216,9 +209,6 @@ function _extractPanelSections(p, model) {
     }
 
     return {
-      narrative: narrativeNode
-        ? `<section class="briefv2-section">${narrativeNode.outerHTML}</section>`
-        : `<section class="briefv2-section"><h3 class="briefv2-section-title">Сводка</h3><div class="briefv2-empty">Нет нарратива.</div></section>`,
       events: eventsNode
         ? `<section class="briefv2-section briefv2-events-wrap">${eventsNode.outerHTML}</section>`
         : `<section class="briefv2-section"><h3 class="briefv2-section-title">События за 72 часа</h3><div class="briefv2-empty">Нет событий.</div></section>`,

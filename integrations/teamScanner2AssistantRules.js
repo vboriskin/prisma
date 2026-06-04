@@ -69,6 +69,18 @@ function _parseTs(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** 2026-06-04 — терминальный статус Jira (Done/Closed/Resolved + RU-варианты). */
+const TERM_STATUS_RX = /\b(done|closed|resolved|готово|закрыт|закрыто|выполнен|выполнено|завершен|завершено|решен|решено|снят|снято)/i;
+function _isTerminalStatus(status) {
+  return TERM_STATUS_RX.test(String(status || ''));
+}
+
+/** 2026-06-04 — sub-task / technical-task / spike → дочерний issuetype для родителя. */
+function _isChildIssueType(type) {
+  const t = String(type || '').toLowerCase();
+  return /sub.?task|technical.?task|подзадач/.test(t);
+}
+
 /* ── Jira-key extraction & attribution ────────────────────── */
 
 export function extractJiraKeysFromText(text) {
@@ -329,11 +341,22 @@ export function buildPlanToday(p, model, opts = {}) {
 
   // markup
   const lastTouchByKey = _indexLastTouch(p);
+  // 2026-06-04 — фильтр терминальных статусов: задача в Done/Closed/Resolved
+  // показывается только если есть активность вчера/сегодня по её ключу.
+  // Если активности нет — это «старьё», не релевантно стендапу.
   const tasks = [];
   for (const t of map.values()) {
+    const isTerm = _isTerminalStatus(t.status);
+    const hasRecentActivity = !!lastTouchByKey[t.key];
+    if (isTerm && !hasRecentActivity) continue;   // скрываем старые закрытые
     const lastTouchAt = lastTouchByKey[t.key] || 0;
     const lastH = lastTouchAt ? Math.round((Date.now() - lastTouchAt) / 3600_000 * 10) / 10 : undefined;
     const enriched = { ...t, _isAssigned: true, _lastTouchHoursAgo: lastH };
+    // 2026-06-04 — Sub-task / Technical task: подтягиваем родителя.
+    // slimIssue выдаёт type/typeKey/parentKey/parentSum (см. portfolioPulseUtils.js).
+    if (_isChildIssueType(t.type) && t.parentKey) {
+      enriched.parent = { key: t.parentKey, summary: t.parentSum || '' };
+    }
     enriched.rationale = _planRationale(enriched);
     tasks.push(enriched);
   }
@@ -453,7 +476,7 @@ export function buildFactYesterday(p, model, opts = {}) {
     if (acts.some(a => a._src === 'jira')) factRationale.push('Есть Jira-события (комменты/транзишены)');
     if (acts.some(a => a.kind === 'closed')) factRationale.push('Задача закрыта вчера — кандидат на «перевыполнение»');
 
-    jiraTasks.push({
+    const out = {
       key, title: task.summary || task.title || '',
       status: task.status || '',
       activities: acts.map(a => ({
@@ -465,7 +488,12 @@ export function buildFactYesterday(p, model, opts = {}) {
       })),
       rationale: factRationale,
       outsideWip: !!task._outsideWip,
-    });
+    };
+    // 2026-06-04 — sub-task / technical-task: parent
+    if (_isChildIssueType(task.type) && task.parentKey) {
+      out.parent = { key: task.parentKey, summary: task.parentSum || '' };
+    }
+    jiraTasks.push(out);
   }
   jiraTasks.sort((a, b) => b.activities.length - a.activities.length);
 

@@ -105,6 +105,37 @@ function _timelineHTML(activities) {
   return `<div class="ts2-asst-timeline">${buckets}</div>`;
 }
 
+/**
+ * Карточка одной задачи — общая для plan и fact.
+ * Опции:
+ *   withTimeline: показывать ли блок timeline-событий (используется в fact)
+ *   isFact: вид для блока «Что делал вчера» (счётчик активностей)
+ *
+ * Поддержка sub-task / technical-task: t.parent = { key, summary } —
+ * рисуется отдельной строкой под названием задачи.
+ */
+function _renderTaskCard(t, opts = {}) {
+  if (!t) return '';
+  const status = t.status ? `<span class="ts2-asst-task-meta">${_esc(t.status)}</span>` : '';
+  const outsideWipBadge = t.outsideWip ? `<span class="ts2-asst-outside-wip">не в WIP</span>` : '';
+  const cnt = (t.activities || []).length;
+  const cntMeta = opts.isFact ? `<span class="ts2-asst-task-meta">${cnt} актив.</span>` : '';
+  const parentLine = (t.parent && t.parent.key)
+    ? `<div class="ts2-asst-task-parent">↳ родитель <span class="ts2-asst-task-key">${_esc(t.parent.key)}</span> <span class="ts2-asst-task-parent-title">${_esc(t.parent.summary || '')}</span></div>`
+    : '';
+  return `
+    <div class="ts2-asst-task${opts.isFact ? ' ts2-asst-fact-task' : ''}">
+      <div class="ts2-asst-task-head">
+        <span class="ts2-asst-task-key">${_esc(t.key)}</span>
+        <span class="ts2-asst-task-title">${_esc(t.title || t.summary || '(без названия)')}</span>
+        ${outsideWipBadge}${status}${cntMeta}
+      </div>
+      ${parentLine}
+      ${_rationaleHTML(t.rationale, t.rationaleLLM)}
+      ${opts.withTimeline ? _timelineHTML(t.activities) : ''}
+    </div>`;
+}
+
 /** LLM narrative-блок «Сводка ассистента» сверху секции. */
 function _narrativeHTML(narrativeHTML, opts = {}) {
   if (!narrativeHTML) return '';
@@ -123,21 +154,8 @@ export function renderPlanHTML(plan, opts = {}) {
   if (!plan) return `<div class="ts2-assistant-error">Нет данных для плана.</div>`;
   const tasks = (plan.tasks || []).slice(0, 12);
   const tasksHTML = tasks.length
-    ? tasks.map(t => {
-        const status = t.status ? `<span class="ts2-asst-task-meta">${_esc(t.status)}</span>` : '';
-        const src = t._source === 'wip' ? 'WIP' : (t._source === 'sprint' ? 'спринт' : '');
-        const srcChip = src ? `<span class="ts2-asst-src-chip">${_esc(src)}</span>` : '';
-        return `
-          <div class="ts2-asst-task">
-            <div class="ts2-asst-task-head">
-              <span class="ts2-asst-task-key">${_esc(t.key)}</span>
-              <span class="ts2-asst-task-title">${_esc(t.title || t.summary || '(без названия)')}</span>
-              ${srcChip}${status}
-            </div>
-            ${_rationaleHTML(t.rationale, t.rationaleLLM)}
-          </div>`;
-      }).join('')
-    : `<div class="ts2-asst-empty">Нет активных задач в WIP / спринте.</div>`;
+    ? tasks.map(t => _renderTaskCard(t, { withTimeline: false })).join('')
+    : `<div class="ts2-asst-empty">Нет активных задач в работе или в спринте.</div>`;
 
   return `
     <div class="ts2-asst-block">
@@ -153,21 +171,7 @@ export function renderFactHTML(fact, opts = {}) {
 
   const tasks = (fact.jiraTasks || []).slice(0, 15);
   const tasksHTML = tasks.length
-    ? tasks.map(t => {
-        const outsideWipBadge = t.outsideWip ? `<span class="ts2-asst-outside-wip">не в WIP</span>` : '';
-        const cnt = (t.activities || []).length;
-        return `
-          <div class="ts2-asst-task ts2-asst-fact-task">
-            <div class="ts2-asst-task-head">
-              <span class="ts2-asst-task-key">${_esc(t.key)}</span>
-              <span class="ts2-asst-task-title">${_esc(t.title || '(без названия)')}</span>
-              ${outsideWipBadge}
-              <span class="ts2-asst-task-meta">${cnt} актив.</span>
-            </div>
-            ${_rationaleHTML(t.rationale, t.rationaleLLM)}
-            ${_timelineHTML(t.activities)}
-          </div>`;
-      }).join('')
+    ? tasks.map(t => _renderTaskCard(t, { withTimeline: true, isFact: true })).join('')
     : `<div class="ts2-asst-empty">Привязанных к Jira активностей за вчера нет.</div>`;
 
   const orphans = (fact.orphans || []).slice(0, 30);
@@ -193,23 +197,72 @@ export function renderFactHTML(fact, opts = {}) {
     </div>`;
 }
 
-/* ── Summary 72h (Вчера + Сегодня) ────────────────────────── */
+/* ── Summary 72h (Вчера + Сегодня) ──────────────────────────
+   Структура (2026-06-04):
+     ── ЧТО ДЕЛАЛ ВЧЕРА  (Сгенерировано GigaChat) ──
+     [LLM narrative]
+     > Подробнее ▾  (свёрнуто) → задачи + timeline + orphans
+     ── ЧТО ДЕЛАЕТ СЕГОДНЯ  (Сгенерировано GigaChat) ──
+     [LLM narrative]
+     > Подробнее ▾  (свёрнуто) → задачи + rationale
+*/
 
 export function renderSummary72hHTML(summary72h, opts = {}) {
   if (!summary72h) return `<div class="ts2-assistant-error">Нет данных.</div>`;
-  const factOpts = { narrativeHTML: opts.factNarrativeHTML };
-  const planOpts = { narrativeHTML: opts.planNarrativeHTML };
-  const factHTML = renderFactHTML(summary72h.fact, factOpts);
-  const planHTML = renderPlanHTML(summary72h.plan, planOpts);
+  const factNarrative = _narrativeHTML(opts.factNarrativeHTML);
+  const planNarrative = _narrativeHTML(opts.planNarrativeHTML);
+  const factDetailsHTML = _renderFactDetails(summary72h.fact);
+  const planDetailsHTML = _renderPlanDetails(summary72h.plan);
+
   return `
     <div class="ts2-asst-72h">
-      <div class="ts2-asst-72h-section">
-        <div class="ts2-asst-72h-title">Что делал вчера</div>
-        ${factHTML}
-      </div>
-      <div class="ts2-asst-72h-section">
-        <div class="ts2-asst-72h-title">Что делает сегодня</div>
-        ${planHTML}
-      </div>
+      <section class="ts2-asst-72h-section">
+        <h3 class="ts2-asst-72h-title">Что делал вчера <span class="ts2-asst-72h-llm-tag">(Сгенерировано GigaChat)</span></h3>
+        ${factNarrative}
+        <details class="ts2-asst-details">
+          <summary>Подробнее</summary>
+          <div class="ts2-asst-details-body">${factDetailsHTML}</div>
+        </details>
+      </section>
+      <section class="ts2-asst-72h-section">
+        <h3 class="ts2-asst-72h-title">Что делает сегодня <span class="ts2-asst-72h-llm-tag">(Сгенерировано GigaChat)</span></h3>
+        ${planNarrative}
+        <details class="ts2-asst-details">
+          <summary>Подробнее</summary>
+          <div class="ts2-asst-details-body">${planDetailsHTML}</div>
+        </details>
+      </section>
     </div>`;
+}
+
+function _renderFactDetails(fact) {
+  if (!fact) return `<div class="ts2-asst-empty">Нет данных за вчера.</div>`;
+  const tasks = (fact.jiraTasks || []).slice(0, 15);
+  const tasksHTML = tasks.length
+    ? tasks.map(t => _renderTaskCard(t, { withTimeline: true, isFact: true })).join('')
+    : `<div class="ts2-asst-empty">Привязанных к Jira активностей за вчера нет.</div>`;
+  const orphans = (fact.orphans || []).slice(0, 30);
+  const orphansHTML = orphans.length ? `
+    <details class="ts2-asst-orphans">
+      <summary>Активности без привязки к задачам (${orphans.length})</summary>
+      <div class="ts2-asst-orphans-hint">Не нашли JIRA-XX в заголовке, ветке/репо и поле issueKey.</div>
+      <ul>
+        ${orphans.map(o => `
+          <li>
+            <span class="ts2-asst-tl-src ts2-asst-tl-src-${_esc(o._src)}">${_esc(o._src || '—')}</span>
+            <span class="ts2-asst-tl-time">${_esc(_shortAt(o.at))}</span>
+            <span class="ts2-asst-tl-text">${_esc((o.title || o.text || '').slice(0, 200))}</span>
+          </li>`).join('')}
+      </ul>
+    </details>` : '';
+  return `<div class="ts2-asst-tasks">${tasksHTML}</div>${orphansHTML}`;
+}
+
+function _renderPlanDetails(plan) {
+  if (!plan) return `<div class="ts2-asst-empty">Нет данных для плана.</div>`;
+  const tasks = (plan.tasks || []).slice(0, 12);
+  const tasksHTML = tasks.length
+    ? tasks.map(t => _renderTaskCard(t, { withTimeline: false })).join('')
+    : `<div class="ts2-asst-empty">Нет активных задач в работе или в спринте.</div>`;
+  return `<div class="ts2-asst-tasks">${tasksHTML}</div>`;
 }

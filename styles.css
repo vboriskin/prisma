@@ -16977,7 +16977,21 @@ body.theme-dark .ts2-pm-chip-popover {
 .ts2-asst-72h, .ts2-asst-block { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
 .ts2-asst-72h-section { padding: 6px 0; border-top: 1px dashed var(--border, rgba(0,0,0,0.08)); }
 .ts2-asst-72h-section:first-of-type { border-top: 0; }
-.ts2-asst-72h-title { font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--text-2); margin: 6px 0 4px; }
+.ts2-asst-72h-title { font-size: 11px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--text-2); margin: 6px 0 4px; display: flex; align-items: baseline; gap: 8px; }
+.ts2-asst-72h-llm-tag { font-size: 9.5px; font-weight: 600; color: var(--prizma-insight, #B084CC); text-transform: none; letter-spacing: .2px; }
+/* «Подробнее» details под narrative */
+.ts2-asst-details { margin-top: 8px; }
+.ts2-asst-details > summary {
+  font-size: 12px; font-weight: 600; color: var(--text-2); cursor: pointer;
+  padding: 4px 0; list-style: none;
+}
+.ts2-asst-details > summary::-webkit-details-marker { display: none; }
+.ts2-asst-details > summary::before { content: '▾'; margin-right: 5px; color: var(--text-3); display: inline-block; transition: transform .15s; }
+.ts2-asst-details:not([open]) > summary::before { transform: rotate(-90deg); }
+.ts2-asst-details-body { padding-top: 6px; }
+/* родитель sub-task / technical-task */
+.ts2-asst-task-parent { padding: 2px 0 4px 16px; font-size: 11px; color: var(--text-3); }
+.ts2-asst-task-parent-title { color: var(--text-2); }
 
 .ts2-asst-verdict {
   display: flex; flex-direction: column; gap: 4px;
